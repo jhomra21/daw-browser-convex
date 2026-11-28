@@ -3,7 +3,9 @@ import type { ChannelLayout, MixerTrackFx, ResolvedMixerGraph } from './types'
 
 export const getSourceChannelLayout = (channelCounts: readonly number[] | undefined): ChannelLayout | undefined => {
   if (!channelCounts || channelCounts.length === 0) return
+
   if (channelCounts.some((count) => count !== 1 && count !== 2)) return
+
   return channelCounts.every((count) => count === 1) ? 'mono' : 'stereo'
 }
 
@@ -19,6 +21,7 @@ const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pi
 
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
+
   for (const instance of fx.instances) {
     if (instance.kind === 'eq' && instance.params.enabled && instance.params.channelMode === 'mono') {
       layout = 'mono'
@@ -28,6 +31,7 @@ const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixer
       layout = 'stereo'
     }
   }
+
   return layout
 }
 
@@ -37,9 +41,12 @@ const mergeLayouts = (layouts: readonly ChannelLayout[]): ChannelLayout =>
 export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedMixerGraph {
   const channelById = new Map(graph.channels.map((entry) => [entry.channel.id, entry]))
   const incoming = new Map<string, string[]>()
+
   for (const entry of graph.channels) {
     const targets = entry.sends.map((send) => send.targetId)
+
     if (entry.outputTargetId) targets.push(entry.outputTargetId)
+
     for (const targetId of targets) {
       assert(channelById.has(targetId), `Missing channel layout target ${targetId}`)
       const sources = incoming.get(targetId) ?? []
@@ -49,15 +56,19 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
   }
 
   type ResolvedChannelLayout = { input: ChannelLayout; output: ChannelLayout }
+
   const resolved = new Map<string, ResolvedChannelLayout>()
   const visiting = new Set<string>()
+
   const visit = (channelId: string): ResolvedChannelLayout => {
     const existing = resolved.get(channelId)
+
     if (existing) return existing
     assert(!visiting.has(channelId), `Cyclic mixer routing at ${channelId}`)
     visiting.add(channelId)
     const entry = assertDefined(channelById.get(channelId), `Missing mixer channel ${channelId}`)
     const upstream = (incoming.get(channelId) ?? []).map((sourceId) => visit(sourceId).output)
+
     // Source assets retain their decoded channel count, but every ordinary
     // track enters the mixer as a stereo bus. Explicit mono effects can still
     // collapse the bus later in the chain.
@@ -66,21 +77,27 @@ export function propagateMixerGraphLayouts(graph: ResolvedMixerGraph): ResolvedM
       : entry.channel.role === 'track'
         ? 'stereo'
         : entry.sourceLayout ?? 'stereo'
+
     const output = propagateEffects(input, entry.fx ?? { instances: [] })
     const result = { input, output }
     resolved.set(channelId, result)
     visiting.delete(channelId)
+
     return result
   }
 
   const channels = graph.channels.map((entry) => {
     const layout = visit(entry.channel.id)
+
     return { ...entry, inputLayout: layout.input, outputLayout: layout.output }
   })
+
   const masterInputs = channels
     .filter((entry) => !entry.outputTargetId)
     .map((entry) => entry.outputLayout)
+
   const masterInputLayout = mergeLayouts(masterInputs.length > 0 ? masterInputs : ['stereo'])
+
   return {
     channels,
     master: {

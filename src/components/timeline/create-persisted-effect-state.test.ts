@@ -1,8 +1,10 @@
 const fixtureApply = <Params,>(apply: (target: string, params: Params) => void | EngineDisposition | Promise<void | EngineDisposition>) =>
   async (target: string, params: Params): Promise<EngineDisposition> => (await apply(target, params)) ?? "applied";
+
 const fixtureSave = <Params,>(save: (target: string, params: Params, context: { projectId?: string; userId?: string; projectGeneration?: number }) => void | ParameterSaveResult | Promise<void | ParameterSaveResult>) =>
   async (target: string, params: Params, context: { projectId?: string; userId?: string; projectGeneration?: number }): Promise<ParameterSaveResult> =>
     (await save(target, params, context)) ?? { kind: "committed-unordered" };
+
 import { expect, spyOn, test } from "bun:test";
 import "fake-indexeddb/auto";
 import { createDefaultUtilityParams } from "@daw-browser/shared";
@@ -22,21 +24,27 @@ test("INDEPENDENT native row reconcile and reinstall publish once", async () => 
   const [engine, setEngine] = createSignal(new AudioEngine());
   const joins: number[] = [], applies: number[] = [];
   let dispose = () => {};
+
   const state = createRoot(end => {
     dispose = end;
+
     return createPersistedEffectState<undefined, number>({
       targetId: () => undefined, scopeId: () => "p", row: () => undefined,
       readQueryParams: () => undefined, createInitialParams: () => 0, serializeParams: String,
       createPersistContext: () => ({ projectId: "p" }),
       audioEngine: engine, usesLegacyAudioEngine: () => false,
-      applyToEngine: (_id, value) => { applies.push(value); return "applied"; },
+      applyToEngine: (_id, value) => { applies.push(value);
+
+ return "applied"; },
       registerDelivery: (_id, value) => {
         joins.push(value);
+
         return { receipt: { key: String(value), serial: joins.length }, settled: Promise.resolve({ state: "unavailable" }) };
       },
       persistParams: () => ({ kind: "committed-unordered" }),
     });
   });
+
   try {
     state.syncRemoteForTarget("t", 1);
     await state.flushPending();
@@ -51,19 +59,24 @@ test("INDEPENDENT native row reconcile and reinstall publish once", async () => 
 test("H5 reinstall-before-row acknowledges already-installed observation", async () => {
   const applies: number[] = [], rows: number[] = [];
   let dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
-      apply: (_target, value) => { applies.push(value); return "applied"; },
+      apply: (_target, value) => { applies.push(value);
+
+ return "applied"; },
       rowApplied: (_target, value) => { rows.push(value); },
       persist: async () => ({ kind: "committed-unordered" }),
       history: () => {}, allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause; },
     });
   });
+
   try {
     owner.external("t", 1);
     await owner.flushPending();
@@ -79,19 +92,24 @@ test("H5 reinstall-before-row acknowledges already-installed observation", async
 test("an equal repeated initial row observation does not cancel its queued installation", async () => {
   const applies: number[] = [], rows: number[] = [];
   let dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
-      apply: (_target, value) => { applies.push(value); return "applied"; },
+      apply: (_target, value) => { applies.push(value);
+
+ return "applied"; },
       rowApplied: (_target, value) => { rows.push(value); },
       persist: async () => ({ kind: "committed-unordered" }),
       history: () => {}, allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause; },
     });
   });
+
   try {
     owner.external("t", 1, 1);
     owner.external("t", 1, 1);
@@ -109,8 +127,10 @@ const createRowOwner = (hooks: {
   entered?: () => void;
 }) => {
   let dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: hooks.scope ?? (() => ({ projectId: "p", generation: 0 })),
@@ -120,6 +140,7 @@ const createRowOwner = (hooks: {
         hooks.applies.push(value);
         hooks.entered?.();
         await hooks.hold;
+
         return "applied";
       },
       rowApplied: (_target, value) => { hooks.rows.push(value); },
@@ -127,12 +148,14 @@ const createRowOwner = (hooks: {
       history: () => {}, allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause; },
     });
   });
+
   return { owner, dispose };
 };
 
 test("a changed row observation supersedes the queued installation of the earlier one", async () => {
   const applies: number[] = [], rows: number[] = [];
   const { owner, dispose } = createRowOwner({ applies, rows });
+
   try {
     owner.external("t", 1, 1);
     owner.external("t", 2, 2);
@@ -146,6 +169,7 @@ test("an equal row observation during a held apply keeps its acknowledgement", a
   const entered = Promise.withResolvers<void>(), held = Promise.withResolvers<void>();
   const applies: number[] = [], rows: number[] = [];
   const { owner, dispose } = createRowOwner({ applies, rows, hold: held.promise, entered: entered.resolve });
+
   try {
     owner.external("t", 1, 1);
     await entered.promise;
@@ -161,6 +185,7 @@ test("a scope replacement drops the queued installation of an observation from t
   const [scope, setScope] = createSignal({ projectId: "p", generation: 0 });
   const applies: number[] = [], rows: number[] = [];
   const { owner, dispose } = createRowOwner({ scope, applies, rows });
+
   try {
     owner.external("t", 1, 1);
     setScope({ projectId: "q", generation: 0 });
@@ -173,6 +198,7 @@ test("a scope replacement drops the queued installation of an observation from t
 test("a row removed and added again installs the new observation once", async () => {
   const applies: number[] = [], rows: number[] = [];
   const { owner, dispose } = createRowOwner({ applies, rows });
+
   try {
     owner.external("t", 1, 1);
     owner.external("t", undefined);
@@ -187,18 +213,23 @@ test("an equal repeated sampled-instrument row still announces readiness", async
   const [engine] = createSignal(new AudioEngine());
   const applies: number[] = [], announced: number[] = [];
   let dispose = () => {};
+
   const state = createRoot(end => {
     dispose = end;
+
     return createPersistedEffectState<undefined, number>({
       targetId: () => undefined, scopeId: () => "p", row: () => undefined,
       readQueryParams: () => undefined, createInitialParams: () => 0, serializeParams: String,
       createPersistContext: () => ({ projectId: "p" }),
       audioEngine: engine, usesLegacyAudioEngine: () => false,
-      applyToEngine: (_id, value) => { applies.push(value); return "applied"; },
+      applyToEngine: (_id, value) => { applies.push(value);
+
+ return "applied"; },
       announce: (_id, value) => { announced.push(value); },
       persistParams: () => ({ kind: "committed-unordered" }),
     });
   });
+
   try {
     state.syncRemoteForTarget("t", 1);
     state.syncRemoteForTarget("t", 1);
@@ -213,18 +244,25 @@ test("an equal repeated sampled-instrument row still announces readiness", async
 test("H5 control preview cancel and reinstall restores committed content", async () => {
   const applies: number[] = [], saves: number[] = [];
   let installed = -1, dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
       exists: () => true, canWrite: () => true, equal: (_target, a, b) => a === b,
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
-      apply: (_target, value) => { applies.push(value); installed = value; return "applied"; },
-      persist: async record => { saves.push(record.latest); return { kind: "committed-unordered" }; },
+      apply: (_target, value) => { applies.push(value); installed = value;
+
+ return "applied"; },
+      persist: async record => { saves.push(record.latest);
+
+ return { kind: "committed-unordered" }; },
       history: () => {}, allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause; },
     });
   });
+
   try {
     owner.external("t", 1);
     await owner.settle("t");
@@ -250,8 +288,10 @@ test("H5 control busy old-engine lane still installs on replacement", async () =
   const entered = Promise.withResolvers<void>(), held = Promise.withResolvers<void>();
   const applies: Array<{ engine: AudioEngine; value: number }> = [];
   let dispose = () => {};
+
   const state = createRoot(end => {
     dispose = end;
+
     return createPersistedEffectState<undefined, number>({
       targetId: () => undefined, scopeId: () => "p", row: () => undefined,
       readQueryParams: () => undefined, createInitialParams: () => 0, serializeParams: String,
@@ -260,12 +300,15 @@ test("H5 control busy old-engine lane still installs on replacement", async () =
       applyToEngine: async (_target, value): Promise<EngineDisposition> => {
         const destination = engine();
         applies.push({ engine: destination, value });
+
         if (destination === oldEngine) { entered.resolve(); await held.promise; }
+
         return "applied";
       },
       persistParams: () => ({ kind: "committed-unordered" }),
     });
   });
+
   try {
     state.syncRemoteForTarget("t", 1);
     await entered.promise;
@@ -280,8 +323,10 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
   let installed: number | undefined;
   const errors: unknown[] = [];
   let dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
@@ -289,14 +334,17 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
       apply: (_target, value) => {
         installed = undefined;
+
         if (value === 2) throw new Error("partly destructive apply");
         installed = value;
+
         return "applied";
       },
       persist: async () => ({ kind: "committed-unordered" }),
       history: () => {}, allocateEdit: () => undefined, onError: (_stage, cause) => { errors.push(cause); },
     });
   });
+
   try {
     owner.external("t", 1);
     await owner.flushPending();
@@ -313,8 +361,10 @@ test("H6 thrown apply leaves no installation knowledge for the previous value", 
 test("a failed repair reaches the next flush without a second user notice", async () => {
   const errors: Array<{ stage: string; cause: unknown }> = [];
   let dispose = () => {};
+
   const owner = createRoot(end => {
     dispose = end;
+
     return createParameterGestureOwner<string, number>({
       admission: effectAdmission,
       key: target => target, scope: () => ({ projectId: "p", generation: 0 }),
@@ -322,6 +372,7 @@ test("a failed repair reaches the next flush without a second user notice", asyn
       initial: () => 1, committed: () => 1, rowsReachEngine: () => true,
       apply: (_target, value) => {
         if (value === 2 || value === 1) throw new Error(`apply ${value} failed`);
+
         return "applied";
       },
       persist: async () => ({ kind: "committed-unordered" }),
@@ -329,13 +380,16 @@ test("a failed repair reaches the next flush without a second user notice", asyn
       onError: (stage, cause) => { errors.push({ stage, cause }); },
     });
   });
+
   try {
     owner.set("t", 2);
     let failure;
+
     try { await owner.flushPending(); } catch (error) { failure = error; }
 
     expect(errors.map(error => error.stage)).toEqual(["apply"]);
     expect(failure).toBeInstanceOf(ParameterReleaseFailedError);
+
     if (!(failure instanceof ParameterReleaseFailedError)) return;
     expect(failure.records.map(record => [record.stage, record.cause])).toEqual([
       ["apply", new Error("apply 2 failed")], ["repair", new Error("apply 1 failed")]]);
@@ -349,31 +403,40 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
   globalThis.fetch = Object.assign(async () => online
     ? Response.json({ status: "applied", effectId: "row", revision: 5 })
     : new Response("offline", { status: 503 }), { preconnect: originalFetch.preconnect });
+
   const admission = await outbox.publishDurableEffectsOperation({
     projectId, userId, operation: { kind: "effects.setUtilityParams", payload: {
       trackId: "track", instanceId: "utility", params: { version: 1, state: createDefaultUtilityParams() },
     } },
   });
+
   const captured = Promise.withResolvers<void>(), held = Promise.withResolvers<void>();
   const read = outbox.readSharedOutboxOperation;
   let first = true;
+
   // Hold delivery of a real completed IDB pending snapshot, not the transaction
   // or the writer. The foreign flush and wake use the shipped outbox unchanged.
   const reader = spyOn(outbox, "readSharedOutboxOperation").mockImplementation(async (...args) => {
     const result = await read(...args);
+
     if (first && result.status === "pending") {
       first = false;
       captured.resolve();
       await held.promise;
     }
+
     return result;
   });
+
   let dispose = () => {};
+
   try {
     if (admission.kind !== "admitted") throw new Error("Expected actual outbox admission");
     const history: number[] = [];
+
     const owner = createRoot(end => {
       dispose = end;
+
       return createParameterGestureOwner<string, number>({
         admission: effectAdmission,
         key: value => value, scope: () => ({ projectId, userId, generation: 0 }),
@@ -383,6 +446,7 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
         allocateEdit: () => undefined, onError: (_stage, cause) => { throw cause; },
       });
     });
+
     owner.external("track", 0, 1);
     owner.set("track", 1);
     await captured.promise;
@@ -405,20 +469,26 @@ test("3B1 r2 preserves a settlement wake during a pending durable read", async (
 test("3B1 registration is synchronous, receipts do not gate saves, and drain reports unanswered work", async () => {
   await createRoot(async (dispose) => {
     let answer = (_outcome: ProcessorDeliveryOutcome) => {};
+
     const registration: DeliveryRegistration = {
       receipt: { key: "track:instrument", serial: 1 },
       settled: new Promise((resolve) => { answer = resolve; }),
     };
+
     const events: string[] = [];
+
     const state = createPersistedEffectState<number | undefined, number>({
       targetId: () => "track", row: () => 0, readQueryParams: (value) => value,
       createInitialParams: () => 0, serializeParams: String,
       applyToEngine: fixtureApply(() => "applied"),
       registerDelivery: (_target, value) => value === 0 ? undefined : (events.push("register"), registration),
-      persistParams: fixtureSave(() => { events.push("save"); return { kind: "committed", through: 5 }; }),
+      persistParams: fixtureSave(() => { events.push("save");
+
+ return { kind: "committed", through: 5 }; }),
       history: () => { events.push("history"); },
       announce: async () => { events.push("handoff"); },
     });
+
     await drain();
     state.setForTarget("track", 1);
     const report = await state.flushPending();
@@ -437,12 +507,14 @@ test("3B1 positive equal stamps consume coalesced echoes and bind a newer foreig
     let finish = (_result: { kind: "committed"; through: number }) => {};
     const pending = new Promise<{ kind: "committed"; through: number }>((resolve) => { finish = resolve; });
     const history: string[] = [];
+
     const state = createPersistedEffectState<number | undefined, number>({
       targetId: () => "track", row: () => 0, readQueryParams: (value) => value,
       createInitialParams: () => 0, serializeParams: String, applyToEngine: fixtureApply(() => "applied"),
       persistParams: fixtureSave((_target, value) => value === 1 ? pending : { kind: "committed", through: 7 }),
       history: (_target, from, to) => { history.push(`${from}->${to}`); },
     });
+
     await drain();
     state.setForTarget("track", 1);
     await drain();
@@ -464,12 +536,14 @@ test("3B1 native terminal settlement does not block persistence", async () => {
     let release = (_result: ProcessorDeliveryOutcome) => {};
     const pending = new Promise<ProcessorDeliveryOutcome>((resolve) => { release = resolve; });
     const saved: number[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track", row: () => undefined, readQueryParams: () => undefined,
       createInitialParams: () => undefined, serializeParams: String, applyToEngine: fixtureApply(() => undefined),
       registerDelivery: () => ({ receipt: { key: "track", serial: 1 }, settled: pending }),
       persistParams: fixtureSave((_target, value) => { saved.push(value); }),
     });
+
     state.setForTarget("track", 1);
     await drain();
     expect(saved).toEqual([1]);
@@ -485,12 +559,14 @@ test("3B1 structural announce is included in the deterministic drain", async () 
     let release = () => {};
     const handoff = new Promise<void>((resolve) => { release = resolve; });
     let handoffDone = false;
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track", row: () => undefined, readQueryParams: () => undefined,
       createInitialParams: () => undefined, serializeParams: String, applyToEngine: fixtureApply(() => undefined),
       persistParams: fixtureSave(() => undefined),
       announce: () => handoff.then(() => { handoffDone = true; }),
     });
+
     state.setForTarget("track", 1);
     let drained = false;
     const pending = state.flushPending().then(() => { drained = true; });
@@ -511,6 +587,7 @@ test("inserts explicit params from a loaded missing row", async () => {
     const [row] = createSignal<number | undefined>(undefined);
     const [loaded] = createSignal(true);
     const persisted: number[] = [];
+
     const state = createPersistedEffectState<number | undefined, number>({
       targetId: () => "track-1",
       row,
@@ -537,9 +614,11 @@ test("waits for engine application before persisting a parameter commit", async 
     const applied: number[] = [];
     const persisted: number[] = [];
     let releaseApply = () => {};
+
     const applyPending = new Promise<void>((resolve) => {
       releaseApply = resolve;
     });
+
     const state = createPersistedEffectState<number | undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -571,8 +650,10 @@ test("waits for engine application before persisting a parameter commit", async 
 test("announces a released instrument change once, after it reached the engine, and not again for its row echo", async () => {
   await createRoot(async (dispose) => {
     type Instrument = { kind: "synth" | "sampler"; instanceId: string; value: number };
+
     const [row, setRow] = createSignal<Instrument | undefined>({ kind: "synth", instanceId: "instrument:1", value: 0 });
     const events: string[] = [];
+
     const state = createPersistedEffectState<Instrument | undefined, Instrument>({
       targetId: () => "track-1",
       row,
@@ -583,6 +664,7 @@ test("announces a released instrument change once, after it reached the engine, 
       persistParams: fixtureSave(() => Promise.resolve()),
       announce: (_targetId, next) => { events.push(`announce:${next.kind}:${next.instanceId}:${next.value}`); },
     });
+
     await drain();
     events.length = 0;
 
@@ -605,6 +687,7 @@ test("applies and announces a remote instrument identity change once", async () 
   await createRoot(async (dispose) => {
     const applied: string[] = [];
     const announced: string[] = [];
+
     const state = createPersistedEffectState<undefined, { kind: string; instanceId: string }>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -631,6 +714,7 @@ test("a release whose engine apply is rejected is reported and not persisted", a
     const failure = new Error("apply failed");
     const persisted: number[] = [];
     const reported: unknown[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -655,6 +739,7 @@ test("coalesces a remote update that arrives during an apply and suppresses stal
     const releases = new Map<number, () => void>();
     const applied: number[] = [];
     const completed: number[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -691,6 +776,7 @@ test("coalesces multiple remote updates to the latest state", async () => {
   await createRoot(async (dispose) => {
     const releases = new Map<number, () => void>();
     const applied: number[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -723,6 +809,7 @@ test("does not retry an unchanged remote apply after failure", async () => {
   await createRoot(async (dispose) => {
     let attempts = 0;
     let errors = 0;
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -731,6 +818,7 @@ test("does not retry an unchanged remote apply after failure", async () => {
       serializeParams: String,
       applyToEngine: fixtureApply(() => {
         attempts += 1;
+
         return Promise.reject(new Error("apply failed"));
       }),
       persistParams: fixtureSave(() => {}),
@@ -751,6 +839,7 @@ test("does not retry an unchanged remote apply after failure", async () => {
 test("does not report an aborted local engine apply as an effect error", async () => {
   await createRoot(async (dispose) => {
     const errors: unknown[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -775,6 +864,7 @@ test("continues to report non-abort engine apply failures", async () => {
   await createRoot(async (dispose) => {
     const failure = new Error("effect apply failed");
     const errors: unknown[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -798,6 +888,7 @@ test("replays a newer remote state after the older apply fails", async () => {
     const applied: number[] = [];
     const completed: number[] = [];
     let errors = 0;
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -806,6 +897,7 @@ test("replays a newer remote state after the older apply fails", async () => {
       serializeParams: String,
       applyToEngine: fixtureApply((_targetId, next) => {
         applied.push(next);
+
         return next === 1 ? Promise.reject(new Error("apply failed")) : Promise.resolve();
       }),
       persistParams: fixtureSave(() => {}),
@@ -831,6 +923,7 @@ test("flushPending drains a remote replay created after its initial snapshot", a
   await createRoot(async (dispose) => {
     const releases = new Map<number, () => void>();
     const applied: number[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -848,6 +941,7 @@ test("flushPending drains a remote replay created after its initial snapshot", a
     await drain();
     state.syncRemoteForTarget("track-1", 2);
     let flushed = false;
+
     const pendingFlush = state.flushPending().then(() => {
       flushed = true;
     });
@@ -870,6 +964,7 @@ test("flushPending follows a superseded apply registered after the flush starts"
     const firstApply = deferred();
     const replacement = deferred();
     const otherTarget = deferred();
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -878,6 +973,7 @@ test("flushPending follows a superseded apply registered after the flush starts"
       serializeParams: String,
       applyToEngine: fixtureApply((targetId, value) => {
         if (targetId === "track-b") return otherTarget.promise;
+
         return value === 1 ? firstApply.promise.then(() => supersededBy(replacement.promise)) : replacement.promise;
       }),
       persistParams: fixtureSave(() => {}),
@@ -900,6 +996,7 @@ test("flushPending follows a sampler replacement started outside persisted apply
   await createRoot(async (dispose) => {
     const compileApply = deferred();
     const externalSync = deferred();
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -923,6 +1020,7 @@ test("flushPending reports failure from an undo-started Drum Rack replacement", 
   await createRoot(async (dispose) => {
     const compileApply = deferred();
     const undoSync = deferred();
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -947,6 +1045,7 @@ test("flushPending rejects when a superseding apply fails", async () => {
   await createRoot(async (dispose) => {
     const firstApply = deferred();
     const replacement = deferred();
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -975,6 +1074,7 @@ test("concurrent flushes both reject when a superseding apply fails", async () =
   await createRoot(async (dispose) => {
     const firstApply = deferred();
     const replacement = deferred();
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -1007,6 +1107,7 @@ test("concurrent flushes both reject when a superseding apply fails", async () =
 test("flushPending follows chained supersessions to the latest apply", async () => {
   await createRoot(async (dispose) => {
     const applies = [deferred(), deferred(), deferred()];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-a",
       row: () => undefined,
@@ -1016,9 +1117,11 @@ test("flushPending follows chained supersessions to the latest apply", async () 
       applyToEngine: fixtureApply((_targetId, value) => settle(value - 1)),
       persistParams: fixtureSave(() => {}),
     });
+
     // Apply n settles after apply n + 1 does, the way a replaced sync follows its replacement.
     const settle = (index: number): Promise<EngineDisposition | undefined> => {
       const applied = applies[index]?.promise ?? Promise.resolve();
+
       return index < applies.length - 1 ? applied.then(() => supersededBy(settle(index + 1))) : applied.then(() => undefined);
     };
 
@@ -1042,6 +1145,7 @@ test("serializes a local update after a pending remote apply and keeps it author
     const releases = new Map<number, () => void>();
     const applied: number[] = [];
     const announced: number[] = [];
+
     const state = createPersistedEffectState<undefined, number>({
       targetId: () => "track-1",
       row: () => undefined,
@@ -1093,17 +1197,21 @@ const supersededBy = (replacement: Promise<unknown>): Promise<EngineDisposition>
 const deferred = () => {
   let resolve = () => {};
   let reject = (_cause: Error) => {};
+
   const promise = new Promise<void>((resolvePromise, rejectPromise) => {
     resolve = resolvePromise;
     reject = rejectPromise;
   });
+
   return { promise, resolve, reject };
 };
 
 const settled = async (promise: Promise<unknown>) => {
   let outcome = "pending";
   void promise.then(() => { outcome = "resolved"; }, (cause: unknown) => { outcome = `rejected:${String(cause)}`; });
+
   for (let i = 0; i < 20; i++)    await drain();
+
   return outcome;
 };
 
@@ -1122,6 +1230,7 @@ const createProjectWriteState = (projectId: () => string | undefined, writes: {
     createPersistContext: () => ({ projectId: projectId() }),
     onPersistError: (cause, context) => writes.errors.push({ cause, projectId: context?.projectId }),
   });
+
   return {
     ...state,
     flushPending: (projectId?: string) => projectId
@@ -1192,10 +1301,12 @@ const releaseWithApply = async (applyToEngine: (targetId: string, value: number)
       history: (_targetId, _previous, next) => { history.push(next); },
       announce: (_targetId, next) => { announced.push(next); },
     });
+
     state.setForTarget("track-1", 1);
     await state.flushPending();
     dispose();
   });
+
   return { persisted, history, announced };
 };
 
@@ -1211,6 +1322,7 @@ test("a release whose apply was aborted is not described as installed", async ()
 
 test("after the engine did not install a value, an equal request to the previously delivered value is sent again", async () => {
   const audio = createFxTestAudio();
+
   const runtime = createLiveMixerRuntime({
     ensureAudio: () => {},
     getAudioContext: () => audio.context,
@@ -1223,10 +1335,12 @@ test("after the engine did not install a value, an equal request to the previous
     getFaultGeneration: () => 0,
     workletBudget: createCountingBudget().budget,
   });
+
   try {
     await createRoot(async (dispose) => {
       const calls: number[] = [];
       let external: Promise<EngineDisposition> = Promise.resolve("skipped");
+
       const state = createPersistedEffectState<undefined, number>({
         targetId: () => "track-1",
         row: () => undefined,
@@ -1236,11 +1350,14 @@ test("after the engine did not install a value, an equal request to the previous
         applyToEngine: fixtureApply((_targetId, value) => {
           calls.push(value);
           const work = runtime.setTrackFxInstances("track-1", [compressorInstance(value)]);
+
           if (value === -10) external = runtime.setTrackFxInstances("track-1", [compressorInstance(-6)]);
+
           return work;
         }),
         persistParams: fixtureSave(() => {}),
       });
+
       state.setForTarget("track-1", -24);
       await state.flushPending();
       state.setForTarget("track-1", -10);
@@ -1266,6 +1383,7 @@ for (const [outcome, entries] of [["dropped", 0], ["superseded", 0], ["applied",
       const persisted: number[] = [];
       const history: number[] = [];
       const announced: number[] = [];
+
       const state = createPersistedEffectState<number | undefined, number>({
         targetId: () => "track-1",
         row: () => undefined,

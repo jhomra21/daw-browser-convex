@@ -24,6 +24,7 @@ test("opt-in diagnostics trace records bounded stages and distinguishes timeout 
 
 test("validation trace exposes only schema paths, not private values", () => {
   const result = z.object({ counts: z.object({ tracks: z.number() }) }).safeParse({ counts: { tracks: "secret" } })
+
   if (result.success) throw new Error("Expected invalid fixture")
   expect(diagnosticValidationPaths(result.error)).toEqual("counts.tracks")
 })

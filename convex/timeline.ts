@@ -32,6 +32,7 @@ const readFullTimelineView = async (
       .withIndex("by_room", q => q.eq("projectId", projectId))
       .collect(),
   ]);
+
   const project = await requireProjectRow(ctx, projectId);
 
   return {

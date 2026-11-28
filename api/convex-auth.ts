@@ -46,12 +46,15 @@ const issuanceContext = (c: ApiContext): ConvexAuthIssuanceContext => ({
 const readIssuer = (context: ConvexAuthIssuanceContext) => {
   const { env } = context
   const baseUrl = env.CONVEX_AUTH_ISSUER ?? (env.BETTER_AUTH_URL ? `${env.BETTER_AUTH_URL}/api/convex-auth` : null)
+
   return baseUrl ?? `${new URL(context.requestUrl).origin}/api/convex-auth`
 }
 
 const readPrivateJwk = (context: ConvexAuthIssuanceContext) => {
   const raw = context.env.CONVEX_AUTH_PRIVATE_JWK
+
   if (!raw) throw new Error('Convex auth private key is not configured.')
+
   return JSON.parse(raw)
 }
 
@@ -59,6 +62,7 @@ const validateActorClaim = (value: string, name: string) => {
   if (value.length === 0 || value.length > 256) {
     throw new Error(`${name} must be a string between 1 and 256 characters.`)
   }
+
   return value
 }
 
@@ -69,12 +73,14 @@ const validateActorAttribution = (actor: ConvexControlActorAttribution) => ({
 
 const readJwks = async (c: ApiContext) => {
   const privateJwk = readPrivateJwk(issuanceContext(c))
+
   const publicJwk = {
     kty: privateJwk.kty,
     crv: privateJwk.crv,
     x: privateJwk.x,
     y: privateJwk.y,
   }
+
   return { keys: [{ ...publicJwk, kid: keyId, alg: algorithm, use: 'sig' }] }
 }
 
@@ -86,6 +92,7 @@ export const issueConvexAuthToken = async (
   const actor = options?.actor === undefined ? undefined : validateActorAttribution(options.actor)
   const now = Math.floor(Date.now() / 1000)
   const privateKey = await importJWK(readPrivateJwk(context), algorithm)
+
   return await new SignJWT({
     email: user.email,
     name: user.name,
@@ -111,6 +118,7 @@ const createConvexClientWithAuth = async (
   const { ConvexHttpClient } = await import('convex/browser')
   const convex = new ConvexHttpClient(c.env.VITE_CONVEX_URL)
   convex.setAuth(await issueConvexAuthToken(issuanceContext(c), user, options))
+
   return convex
 }
 
@@ -150,6 +158,7 @@ export function registerConvexAuthRoutes(app: App) {
       return c.json(await readJwks(c))
     } catch (error) {
       console.error('Convex JWKS error', error)
+
       return c.json({ error: 'Convex auth is not configured.' }, 500)
     }
   })
@@ -157,11 +166,14 @@ export function registerConvexAuthRoutes(app: App) {
   app.get('/api/convex-auth/token', async (c) => {
     try {
       const user = c.get('user')
+
       if (!user) return c.json({ token: null }, 401)
       const token = await issueConvexAuthToken(issuanceContext(c), user)
+
       return c.json({ token })
     } catch (error) {
       console.error('Convex token error', error)
+
       return c.json({ error: 'Failed to issue Convex auth token.' }, 500)
     }
   })

@@ -5,9 +5,11 @@ import { createTimelineExtensionHost } from "./timeline-extension-host";
 test("dispatches the browser shortcut through the kernel after synchronous fallback readiness", async () => {
   let toggles = 0;
   const kernel = createExtensionKernel();
+
   const host = createTimelineExtensionHost({
     browser: { toggle: () => { toggles += 1; } },
   }, kernel);
+
   const context = { editableTarget: false };
 
   expect(host.shortcuts.execute(
@@ -29,9 +31,11 @@ test("dispatches the browser shortcut through the kernel after synchronous fallb
 
 test("rejects editable targets, shifted chords, and commands after disposal", async () => {
   let toggles = 0;
+
   const host = createTimelineExtensionHost({
     browser: { toggle: () => { toggles += 1; } },
   });
+
   await host.activation;
 
   expect(host.shortcuts.execute(
@@ -54,12 +58,14 @@ test("rejects editable targets, shifted chords, and commands after disposal", as
 
 test("keeps the synchronous fallback safe when activation fails", async () => {
   let toggles = 0;
+
   const kernel = {
     ...createExtensionKernel(),
     activate: async () => {
       throw new Error("activation failed");
     },
   };
+
   const host = createTimelineExtensionHost({
     browser: { toggle: () => { toggles += 1; } },
   }, kernel);

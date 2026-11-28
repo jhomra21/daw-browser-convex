@@ -37,6 +37,7 @@ export const getPlayableMidiNotes = (notes: MidiNote[]): MidiNote[] => {
   for (let index = 0; index < notes.length; index += 1) {
     if (!isPlayableLegacyMidiNote(notes[index])) return notes.filter(isPlayableLegacyMidiNote)
   }
+
   return notes
 }
 
@@ -55,20 +56,26 @@ function getArpeggiatorCacheKey(params: ArpParams, clipDurationBeats: number) {
 function getArpeggiatedNotes(notes: MidiNote[], params: ArpParams, clipDurationBeats: number) {
   const key = getArpeggiatorCacheKey(params, clipDurationBeats)
   let cache = arpeggiatedNotesCache.get(notes)
+
   if (!cache) {
     cache = new Map<string, MidiNote[]>()
     arpeggiatedNotesCache.set(notes, cache)
   }
+
   const cached = cache.get(key)
+
   if (cached) return cached
   const next = applyArpeggiatorToNotes(notes, params, clipDurationBeats)
+
   if (cache.size >= MAX_ARPEGGIATOR_CACHE_ENTRIES) {
     for (const oldestKey of cache.keys()) {
       cache.delete(oldestKey)
       break
     }
   }
+
   cache.set(key, next)
+
   return next
 }
 
@@ -88,6 +95,7 @@ export function getScheduledMidiEvents(input: {
   const midiOffsetBeats = Math.max(0, input.clip.midiOffsetBeats ?? 0)
 
   let notesToSchedule = getPlayableMidiNotes(input.notes)
+
   if (input.arp?.enabled) {
     notesToSchedule = getPlayableMidiNotes(
       getArpeggiatedNotes(notesToSchedule, input.arp, clipDurationBeats),
@@ -95,10 +103,12 @@ export function getScheduledMidiEvents(input: {
   }
 
   const events: ScheduledMidiEvent[] = []
+
   for (const [index, note] of notesToSchedule.entries()) {
     const noteBeatRaw = note.beat || 0
     const trimmedBeats = Math.max(0, midiOffsetBeats - noteBeatRaw)
     const effectiveLength = Math.max(0, (note.length || 0) - trimmedBeats)
+
     if (effectiveLength <= 0) continue
 
     const noteBeatEff = Math.max(0, noteBeatRaw - midiOffsetBeats)
@@ -106,6 +116,7 @@ export function getScheduledMidiEvents(input: {
     const noteEndTimeline = noteStartTimeline + effectiveLength * secondsPerBeat
     const startSec = Math.max(noteStartTimeline, clipStart, input.rangeStartSec)
     const endSec = Math.min(noteEndTimeline, clipEnd)
+
     if (endSec <= startSec) continue
 
     events.push({
@@ -143,11 +154,15 @@ export function connectSourceWithClipGain(
 ) {
   const normalizedGain = normalizeClipGain(gain ?? 1)
   const normalizedFades = fade?.fades ?? normalizeClipFades(undefined, 0)
+
   if (normalizedGain === 1 && normalizedFades.fadeInSec === 0 && normalizedFades.fadeOutSec === 0) {
     source.connect(destination)
+
     return
   }
+
   const clipGain = context.createGain()
+
   if (!fade) {
     clipGain.gain.value = normalizedGain
   } else {
@@ -157,6 +172,7 @@ export function connectSourceWithClipGain(
       gain: normalizedGain,
     })
   }
+
   source.connect(clipGain)
   clipGain.connect(destination)
 }
@@ -186,23 +202,29 @@ export const getNormalizedClipFadeSchedulePlan = (input: {
   const fades = input.fades
   const start = Math.max(input.clipStartSec, input.timelineStartSec)
   const end = Math.min(input.clipStartSec + input.clipDurationSec, input.timelineEndSec)
+
   if (end <= start) return []
   const points = new Set([start, end])
   const fadeInStart = input.clipStartSec + fades.fadeInStartSec
   const fadeInEnd = input.clipStartSec + fades.fadeInSec
   const fadeOutStart = input.clipStartSec + input.clipDurationSec - fades.fadeOutSec
   const fadeOutEnd = input.clipStartSec + input.clipDurationSec - fades.fadeOutEndSec
+
   const sampleFade = (fadeStart: number, fadeEnd: number) => {
     const visibleStart = Math.max(start, fadeStart)
     const visibleEnd = Math.min(end, fadeEnd)
+
     if (visibleEnd <= visibleStart) return
     const samples = 16
+
     for (let index = 0; index <= samples; index += 1) {
       points.add(visibleStart + ((visibleEnd - visibleStart) * index) / samples)
     }
   }
+
   sampleFade(fadeInStart, fadeInEnd)
   sampleFade(fadeOutStart, fadeOutEnd)
+
   return Array.from(points).sort((left, right) => left - right).map((timelineSec) => ({
     time: input.contextStartTime + Math.max(0, timelineSec - input.timelineStartSec),
     gain: input.gain * normalizedFadeGainAtClipTime(
@@ -227,8 +249,10 @@ const scheduleClipFadeGain = (
 ) => {
   const plan = getNormalizedClipFadeSchedulePlan(input)
   const first = plan[0]
+
   if (!first) return
   parameter.setValueAtTime(first.gain, first.time)
+
   for (let index = 1; index < plan.length; index += 1) {
     const point = plan[index]
     parameter.linearRampToValueAtTime(point.gain, point.time)
@@ -247,13 +271,16 @@ export function getAudioBufferPlaybackParams<TBuffer>(input: {
 }) {
   const stretched = input.stretched ?? null
   const stretchedOffsetSec = stretched ? Math.max(0, input.map.timelineStartSec - stretched.timelineStartSec) : 0
+
   const stretchedDurationSec = stretched
     ? Math.min(input.map.timelineDurationSec, Math.max(0, stretched.bufferDurationSec - stretchedOffsetSec))
     : null
+
   const durationSec = getAudioBufferPlaybackDurationSec({
     map: input.map,
     stretchedDurationSec,
   })
+
   return {
     buffer: stretched?.buffer ?? input.sourceBuffer,
     offsetSec: stretched ? stretched.sourceStartSec + stretchedOffsetSec : input.map.sourceStartSec,

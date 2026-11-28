@@ -13,6 +13,7 @@ const clamp = (value: number, min: number, max: number) =>
 
 export function normalizeMixerVolume(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_MIXER_VOLUME
+
   return Math.round(clamp(value, 0, MAX_MIXER_VOLUME) * 100) / 100
 }
 
@@ -22,6 +23,7 @@ export function normalizeMasterVolume(value: number): number {
 
 export function mixerVolumeToDb(value: number): number {
   if (!Number.isFinite(value) || value <= 0) return Number.NEGATIVE_INFINITY
+
   return 20 * Math.log10(value)
 }
 
@@ -29,15 +31,19 @@ export function formatMixerVolumeDb(value: number): string {
   const normalized = Number.isFinite(value)
     ? clamp(value, 0, MAX_MIXER_VOLUME)
     : 0
+
   if (normalized === 0) return '-inf'
   const db = mixerVolumeToDb(normalized)
   const formatted = db.toFixed(1)
+
   return db > 0 ? `+${formatted}` : formatted
 }
 
 export function mixerVolumeToSliderPosition(value: number): number {
   const db = mixerVolumeToDb(value)
+
   if (!Number.isFinite(db)) return 0
+
   return clamp(
     (db - MIXER_VOLUME_MIN_DB) / (MIXER_VOLUME_MAX_DB - MIXER_VOLUME_MIN_DB),
     0,
@@ -51,9 +57,12 @@ export function mixerSliderPositionToVolume(position: number): number {
     0,
     1,
   )
+
   if (normalizedPosition === 0) return 0
+
   const db =
     MIXER_VOLUME_MIN_DB +
     normalizedPosition * (MIXER_VOLUME_MAX_DB - MIXER_VOLUME_MIN_DB)
+
   return normalizeMixerVolume(linearFromDb(db))
 }

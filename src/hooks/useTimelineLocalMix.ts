@@ -28,6 +28,7 @@ type UseTimelineLocalMixReturn = {
 function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: LocalMixPatch): LocalMixMap {
   const previousEntry = current[trackId] ?? {}
   const nextEntry = { ...previousEntry, ...patch }
+
   const isEmpty = nextEntry.volume === undefined
     && nextEntry.muted === undefined
     && nextEntry.soloed === undefined
@@ -38,6 +39,7 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
     if (!(trackId in current)) return current
     const next = { ...current }
     delete next[trackId]
+
     return next
   }
 
@@ -59,6 +61,7 @@ function mergeLocalMixPatch(current: LocalMixMap, trackId: Track['id'], patch: L
 
 const loadLocalTrackState = (projectId: string): LocalMixMap => {
   if (isLocalId('project', projectId)) return {}
+
   return loadLocalMixMap(projectId)
 }
 
@@ -69,6 +72,7 @@ const saveLocalTrackState = (projectId: string, value: LocalMixMap) => {
 
 const loadProjectTrackState = async (projectId: string): Promise<LocalMixMap | undefined> => {
   if (!isLocalId('project', projectId)) return undefined
+
   return await loadLocalProjectState<LocalMixMap>(projectId, 'localMix')
 }
 

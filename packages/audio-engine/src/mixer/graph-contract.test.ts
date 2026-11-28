@@ -60,6 +60,7 @@ describe('mixer routing plan', () => {
         { id: 'other', kind: 'audio', name: 'Other', clips: [], volume: 1 },
       ]),
     })
+
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     const solo = snapshot.nodes.find((node) => node.id === 'solo')
     const other = snapshot.nodes.find((node) => node.id === 'other')
@@ -84,8 +85,10 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const node = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
       .nodes.find((entry) => entry.id === 'delay-track')
+
     expect(node?.processorOrder[0]?.parameterTargets).toEqual([
       { id: 'delay.timeMs', target: 5 },
       { id: 'delay.feedback', target: 6 },
@@ -97,6 +100,7 @@ describe('mixer routing plan', () => {
 
   test('projects the complete synth state through the portable session compiler', () => {
     const synthParams = createDefaultSynthParams()
+
     const graph = resolveMixerGraph({
       channels: createMixerChannels([
         { id: 'synth', kind: 'instrument', name: 'Synth', clips: [], volume: 1 },
@@ -126,6 +130,7 @@ describe('mixer routing plan', () => {
     expect(node?.kind).toBe('instrument')
     const instrument = node?.instrument
     expect(instrument?.kind).toBe('synth')
+
     if (!instrument || instrument.kind !== 'synth') throw new Error('Synth state was not projected.')
     expect(instrument.ampReleaseMs).toBe(60_000)
     expect(instrument.oscillators).toHaveLength(2)
@@ -148,6 +153,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const snapshot = createPortableGraphSnapshot({
       graph,
       revision: 4,
@@ -183,8 +189,10 @@ describe('mixer routing plan', () => {
       { id: 'source', kind: 'audio', name: 'Source', clips: [], volume: 1 },
       { id: 'target', kind: 'audio', name: 'Target', clips: [], volume: 1 },
     ])
+
     const route = { sourceTrackId: 'source', targetTrackId: 'target', effectInstanceId: 'target-effect' }
     const gate = createDefaultGateParams()
+
     const gateGraph = resolveMixerGraph({
       channels,
       trackFx: {
@@ -193,6 +201,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     expect(() => createPortableGraphSnapshot({
       graph: gateGraph,
       revision: 1,
@@ -212,6 +221,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     expect(() => createPortableGraphSnapshot({
       graph: limiterGraph,
       revision: 1,
@@ -231,6 +241,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     expect(createPortableGraphSnapshot({
       graph: filteredGateGraph,
       revision: 1,
@@ -244,12 +255,16 @@ describe('mixer routing plan', () => {
 
   test('matches the routing timing authority across deterministic acyclic projections', () => {
     let state = 0x9e3779b9
+
     const next = () => {
       state = (state * 1664525 + 1013904223) >>> 0
+
       return state
     }
+
     for (let iteration = 1; iteration <= 10_000; iteration += 1) {
       const channelCount = 2 + next() % 5
+
       const channels = createMixerChannels(Array.from({ length: channelCount }, (_, index) => ({
         id: `channel-${index}`,
         kind: 'audio',
@@ -261,9 +276,11 @@ describe('mixer routing plan', () => {
           ? [{ targetId: `channel-${next() % index}`, amount: 0.5, tap: next() % 2 === 0 ? 'pre-fx' : 'post-fader' }]
           : [],
       })))
+
       const graph = resolveMixerGraph({ channels })
       const snapshot = createPortableGraphSnapshot({ graph, revision: iteration, sampleRate: 48_000 })
       const timing = resolveMixerTiming(graph, 48_000)
+
       for (const edge of snapshot.edges) {
         expect(edge.pdcDelayFrames).toBe(timing.routeDelayFrames.get(edge.id) ?? 0)
       }
@@ -281,6 +298,7 @@ describe('mixer routing plan', () => {
       ]),
       trackFx: { slow: { instances: [{ id: 'limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }] } },
     })
+
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     const lookahead = snapshot.nodes.find((node) => node.id === 'slow')?.latencyFrames ?? 0
     expect(lookahead).toBeGreaterThan(0)
@@ -304,6 +322,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     expect(snapshot.nodes[0]?.processorOrder.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength])).toEqual([
       ['saturator', 2, 32],
@@ -345,11 +364,13 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processors = createPortableGraphSnapshot({
       graph,
       revision: 1,
       sampleRate: 48_000,
     }).nodes[0]?.processorOrder
+
     expect(processors?.map((processor) => [
       processor.kind,
       processor.kindId,
@@ -403,6 +424,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder
     expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
       ['utility', 1, 40, 0, [
@@ -459,11 +481,13 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processor = createPortableGraphSnapshot({
       graph,
       revision: 1,
       sampleRate: 48_000,
     }).nodes[0]?.processorOrder[0]
+
     if (!processor) throw new Error('Expected portable Compressor state.')
     const state = new DataView(processor.state.buffer, processor.state.byteOffset, processor.state.byteLength)
     expect(processor.bypassed).toBe(true)
@@ -484,6 +508,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000, bpm: 120 }).nodes[0]?.processorOrder
     expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
       ['delay', 13, 32, 0, [
@@ -528,8 +553,10 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
       .nodes[0]?.processorOrder
+
     expect(processors?.map((processor) => processor.parameterTargets)).toEqual([
       [
         { id: 'autofilter.frequencyHz', target: 30 },
@@ -581,6 +608,7 @@ describe('mixer routing plan', () => {
 
     const master = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
       .nodes.find((node) => node.id === MASTER_ROUTE_TARGET)
+
     expect(master?.processorOrder).toHaveLength(17)
   })
 
@@ -593,6 +621,7 @@ describe('mixer routing plan', () => {
         },
       },
     })
+
     const processor = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder[0]
     expect(processor).toMatchObject({ kind: 'spectral', kindId: 15, latencyFrames: 512, tailFrames: 0 })
     expect(processor?.state.byteLength).toBe(60)

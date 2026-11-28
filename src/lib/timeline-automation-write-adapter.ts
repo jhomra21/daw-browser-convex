@@ -9,6 +9,7 @@ export const createTimelineAutomationWriteAdapter = (context: {
   setEnvelope: async (envelope: AutomationEnvelope) => {
     if (isLocalId('project', context.projectId)) {
       await setLocalAutomationEnvelope(context.projectId, envelope)
+
       return true
     }
 
@@ -37,6 +38,7 @@ export const createTimelineAutomationWriteAdapter = (context: {
   deleteEnvelope: async (envelope: AutomationEnvelope) => {
     if (isLocalId('project', context.projectId)) {
       await deleteLocalAutomationEnvelope(context.projectId, envelope.targetKey)
+
       return true
     }
 

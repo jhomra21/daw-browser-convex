@@ -15,15 +15,19 @@ const trimAutomaticTail = (
   if (tail.mode !== 'automatic') return rendered
   const sourceFrames = Math.ceil(sourceDurationSec * rendered.sampleRate)
   const endFrame = findAutomaticTailEndFrame(rendered, sourceFrames, tail, signal)
+
   if (endFrame >= rendered.length) return rendered
+
   const trimmed = new AudioBuffer({
     numberOfChannels: rendered.numberOfChannels,
     length: endFrame,
     sampleRate: rendered.sampleRate,
   })
+
   for (let channel = 0; channel < rendered.numberOfChannels; channel += 1) {
     trimmed.getChannelData(channel).set(rendered.getChannelData(channel).subarray(0, endFrame))
   }
+
   return trimmed
 }
 
@@ -34,6 +38,7 @@ export const processRenderedExport = (input: {
   signal: AbortSignal
 }): ProcessedRenderedExport => {
   const buffer = trimAutomaticTail(input.rendered, input.sourceDurationSec, input.render.tail, input.signal)
+
   return {
     buffer,
     analysis: applyExportNormalization(buffer, input.render.normalization, input.signal),

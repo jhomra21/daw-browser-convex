@@ -29,6 +29,7 @@ export const createCapturedEditorStatePersister = (persistState: PersistVstState
       });
       throw error;
     });
+
     if (!persisted) throw new Error(`The captured native VST editor processor "${payload.instanceId}" no longer exists.`);
   };
 
@@ -49,14 +50,17 @@ export const createExternalProcessorEditorRequests = (deps: {
 }) => {
   const [pending, setPending] = createSignal<ExternalProcessorEditorRequest>();
   let requestToken = 0;
+
   const isCurrent = (request: ExternalProcessorEditorRequest) =>
     request.projectId === deps.projectId() && request.projectGeneration === deps.mountedProjectGeneration();
+
   const clearIfPending = (request: ExternalProcessorEditorRequest) => {
     if (pending()?.requestToken === request.requestToken) setPending();
   };
 
   createEffect(() => {
     const request = pending();
+
     if (request && !isCurrent(request)) setPending();
   });
 
@@ -64,12 +68,14 @@ export const createExternalProcessorEditorRequests = (deps: {
     deps.openEffectsForTarget(processor.targetId);
     const intent = playbackIntent ?? deps.captureStructuralPlaybackIntent();
     const insertedProjectId = intent.projectId ?? deps.projectId();
+
     // The drop's project guards the insertion; the transport is the session's own when it adopts it.
     const insertionIntent: TimelineEditIntent = {
       projectId: intent.projectId,
       projectGeneration: intent.projectGeneration,
       externalProcessor: { projectId: insertedProjectId, processor },
     };
+
     const request: ExternalProcessorEditorRequest = {
       instanceId: processor.instanceId,
       projectId: insertedProjectId,
@@ -77,6 +83,7 @@ export const createExternalProcessorEditorRequests = (deps: {
       requestToken: ++requestToken,
       ready: false,
     };
+
     setPending(request);
     const nativePlaybackEnabled = deps.nativePlaybackEnabled();
     console.info("[native-vst3] external plugin inserted", {
@@ -84,22 +91,30 @@ export const createExternalProcessorEditorRequests = (deps: {
       targetId: processor.targetId,
       nativePlaybackEnabled,
     });
+
     try {
       await deps.syncPlaybackBackend(deps.renderTracks(), insertionIntent);
+
       // A plug-in that crashed while staged is shown failed on its device; there is no instance to read or edit.
       if (vstInstanceFailed(processor.instanceId)) throw new Error("The plug-in failed while it was staged.");
+
       // A browser session holds no instance of the plug-in, so there is no state to read and no editor to open.
       if (instanceLimit(processor.instanceId)) {
         clearIfPending(request);
+
         return;
       }
+
       if (processor.manifest.supportsState) {
         const capture = await deps.captureVstState(processor.instanceId);
+
         if (!capture?.ok) {
           throw new Error(`Native VST3 baseline state capture failed${capture?.error ? `: ${capture.error}` : "."}`);
         }
+
         await deps.persistState(insertedProjectId, processor.instanceId, capture);
       }
+
       console.info("[native-vst3] insertion reached playback", {
         instanceId: processor.instanceId,
         targetId: processor.targetId,
@@ -112,9 +127,12 @@ export const createExternalProcessorEditorRequests = (deps: {
         error: error instanceof Error ? error.message : String(error),
       });
       clearIfPending(request);
+
       return;
     }
+
     const current = pending();
+
     if (current?.requestToken === request.requestToken && isCurrent(current)) setPending({ ...current, ready: true });
   };
 
@@ -122,10 +140,12 @@ export const createExternalProcessorEditorRequests = (deps: {
     inserted,
     autoOpenInstanceId: () => {
       const request = pending();
+
       return request?.ready && isCurrent(request) ? request.instanceId : undefined;
     },
     autoOpenHandled: (instanceId: string) => {
       const request = pending();
+
       if (request?.ready && request.instanceId === instanceId) setPending();
     },
   };

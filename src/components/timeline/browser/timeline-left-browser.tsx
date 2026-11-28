@@ -44,6 +44,7 @@ const BrowserFolderRenameInput: Component<{
           event.preventDefault();
           props.onConfirm();
         }
+
         if (event.key === "Escape") {
           event.preventDefault();
           props.onCancel();
@@ -75,10 +76,13 @@ const BrowserTreeRows: Component<{
               const visible = () => props.searchActive || expanded();
               const toggle = () => props.onRowExpandedChange(folder().id, !expanded());
               const contextItems = () => props.folderContextItems?.(folder()) ?? [];
+
               const editing = () => {
                 const folderId = folder().folderId;
+
                 return Boolean(folderId && props.renameFolderInline?.folderId() === folderId);
               };
+
               const button = (
                 <button
                   type="button"
@@ -91,6 +95,7 @@ const BrowserTreeRows: Component<{
                   <span class="text-xs text-muted-foreground">{folder().leafCount}</span>
                 </button>
               );
+
               const editingRow = () => (
                 <div class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-muted-foreground">
                   <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
@@ -104,11 +109,13 @@ const BrowserTreeRows: Component<{
                   <span class="text-xs text-muted-foreground">{folder().leafCount}</span>
                 </div>
               );
+
               const normalRow = (
                 <Show when={contextItems().length > 0} fallback={button}>
                   <TimelineContextMenu items={contextItems}>{button}</TimelineContextMenu>
                 </Show>
               );
+
               return (
                 <>
                   {editing() ? editingRow() : normalRow}
@@ -163,6 +170,7 @@ const BrowserTree: Component<{
             const visible = () => props.searchActive || expanded();
             const toggle = () => props.onRowExpandedChange(rowId, !expanded());
             const contextItems = () => props.sectionContextItems?.(section) ?? [];
+
             const button = (
               <button
                 type="button"
@@ -175,6 +183,7 @@ const BrowserTree: Component<{
                 <span class="text-xs font-normal tracking-normal text-muted-foreground">{section.leafCount}</span>
               </button>
             );
+
             return (
               <section>
                 <Show when={contextItems().length > 0} fallback={button}>
@@ -219,13 +228,17 @@ const BrowserItemRow: Component<{
         onSelect: props.onClick,
       },
     ];
+
     const extraItems = props.extraContextItems?.() ?? [];
+
     if (extraItems.length > 0) {
       entries.push({ kind: "separator" });
       entries.push(...extraItems);
     }
+
     return entries;
   };
+
   const row = (
     <button
       type="button"
@@ -241,6 +254,7 @@ const BrowserItemRow: Component<{
       <span class="min-w-0 flex-1 truncate text-foreground group-hover:text-foreground">{props.item.label}</span>
     </button>
   );
+
   return <TimelineContextMenu items={items}>{row}</TimelineContextMenu>;
 };
 
@@ -249,6 +263,7 @@ const assetSectionContextItems = (
   section: BrowserSection,
 ): TimelineContextMenuItem[] => {
   if (section.id !== "project-samples") return [];
+
   return [{
     kind: "item",
     label: "New folder",
@@ -261,6 +276,7 @@ const assetFolderContextItems = (
   folder: BrowserFolderRow,
 ): TimelineContextMenuItem[] => {
   if (folder.source !== "project") return [];
+
   if (!folder.folderId) {
     return [{
       kind: "item",
@@ -268,7 +284,9 @@ const assetFolderContextItems = (
       onSelect: browser.assets.onCreateFolder,
     }];
   }
+
   const folderId = folder.folderId;
+
   return [
     { kind: "label", label: folder.label },
     {
@@ -297,6 +315,7 @@ const assetItemContextItems = (
   if (item.source !== "project") return [];
   const entries: TimelineContextMenuItem[] = [];
   const currentFolderId = browser.assets.sampleFolderId(item.id);
+
   for (const folder of browser.assets.folderOptions()) {
     if (folder.id === currentFolderId) continue;
     entries.push({
@@ -305,6 +324,7 @@ const assetItemContextItems = (
       onSelect: () => browser.assets.onMoveSampleToFolder(item.id, folder.id),
     });
   }
+
   if (currentFolderId) {
     entries.push({
       kind: "item",
@@ -312,13 +332,17 @@ const assetItemContextItems = (
       onSelect: () => browser.assets.onMoveSampleToFolder(item.id, undefined),
     });
   }
+
   return entries;
 };
 
 const deviceContextActionLabel = (activeTab: TimelineBrowserTab, item: BrowserItem) => {
   if (item.source === "external-catalog") return "Insert VST3 effect";
+
   if (item.category === "audio-effect-chain") return "Add chain";
+
   if (item.category === "instrument-preset") return "Add preset";
+
   return activeTab === "effects" ? "Add effect" : "Add instrument";
 };
 
@@ -332,6 +356,7 @@ const emptySpaceContextItems = (
       onSelect: browser.assets.onCreateFolder,
     }];
   }
+
   return [
     { kind: "label", label: timelineBrowserTabLabels[browser.activeTab] },
     { kind: "item", label: "No actions available", disabled: true },
@@ -340,6 +365,7 @@ const emptySpaceContextItems = (
 
 export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel }> = (props) => {
   let scrollRef: HTMLDivElement | undefined;
+
   const visibleDeviceTree = createMemo(() => {
     if (props.browser.activeTab === "effects") {
       return {
@@ -348,6 +374,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
         onAdd: props.browser.devices.onAddEffect,
       };
     }
+
     return {
       sections: props.browser.devices.instrumentSections(),
       emptyText: tabPlaceholder["midi-instruments"],
@@ -364,6 +391,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
   createEffect(on(() => props.browser.activeTab, restoreScrollTop));
   const activeTreeExpansion = () => props.browser.treeExpansionByTab[props.browser.activeTab];
   const searchActive = () => props.browser.searchQueryByTab[props.browser.activeTab].trim().length > 0;
+
   const setTreeRowExpanded = (rowId: string, expanded: boolean) =>
     props.browser.onTreeRowExpandedChange(props.browser.activeTab, rowId, expanded);
 
@@ -408,6 +436,7 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             if (event.key !== "Escape") return;
             event.preventDefault();
             event.stopPropagation();
+
             if (props.browser.searchQueryByTab[props.browser.activeTab]) {
               props.browser.onSearchQueryChange(props.browser.activeTab, "");
             } else {

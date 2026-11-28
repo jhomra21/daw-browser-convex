@@ -9,6 +9,7 @@ type DiagnosticEvent =
   | { readonly kind: "native-start-result"; readonly outcome: "succeeded" | "rejected" }
 
 export type RecordingStartDiagnosticEvent = DiagnosticEvent
+
 export const recordingStartDiagnosticEventSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("backend"), backend: z.enum(["native", "portable", "unknown"]) }).strict(),
   z.object({ kind: z.literal("configure-request") }).strict(),
@@ -28,6 +29,7 @@ export const recordingStartDiagnosticEventSchema = z.discriminatedUnion("kind", 
 ])
 
 const maximumEvents = 64
+
 const inputSchema = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("backend"), backend: z.string() }).passthrough(),
   z.object({ kind: z.literal("configure-request") }).passthrough(),
@@ -38,8 +40,10 @@ const inputSchema = z.discriminatedUnion("kind", [
     sampleRateHz: z.number().optional(), channelCount: z.number().optional(),
     spool: z.object({ state: z.number(), error: z.number(), systemError: z.number() }).passthrough().optional() }).passthrough(),
 ])
+
 const safeInteger = (value: number | undefined, minimum = 0, maximum = 1_000_000) => {
   const parsed = z.number().int().safe().min(minimum).max(maximum).safeParse(value)
+
   return parsed.success ? parsed.data : null
 }
 
@@ -48,10 +52,12 @@ export const createRecordingStartDiagnostic = (
   write: (event: RecordingStartDiagnosticEvent) => void,
 ) => {
   let count = 0
+
   const emit = (event: DiagnosticEvent) => {
     if (!enabled || count >= maximumEvents
       || (event.kind !== "native-start-blocked" && count >= maximumEvents - 1)) return
     count += 1
+
     // Diagnostic output must never veto configure or bypass the no-start guard.
     try { write(event) } catch { /* Output is best-effort; capture inhibition is not. */ }
   }
@@ -60,8 +66,10 @@ export const createRecordingStartDiagnostic = (
     observe(input: z.input<typeof inputSchema>) {
       if (!enabled || count >= maximumEvents) return
       const parsed = inputSchema.safeParse(input)
+
       if (!parsed.success) return
       const value = parsed.data
+
       if (value.kind === "backend") {
         const backend = value.backend === "native" || value.backend === "portable" ? value.backend : "unknown"
         emit({ kind: "backend", backend })
@@ -71,10 +79,12 @@ export const createRecordingStartDiagnostic = (
         const outcome = value.outcome === "ready" ? "ready" : "rejected"
         const elapsedMs = safeInteger(value.elapsedMs, 0, 60_000)
         const phase = value.phase === "request" || value.phase === "readiness" ? value.phase : undefined
+
         const category = value.category === "success" || value.category === "command-rejected"
           || value.category === "admission-failed" || value.category === "native-configure-failed"
           || value.category === "readiness-validation-failed" || value.category === "binding-changed"
           ? value.category : "threw"
+
         emit({
           kind: "configure-result", outcome, category,
           sampleRateHz: safeInteger(value.sampleRateHz, 1, 768_000),

@@ -15,6 +15,7 @@ describe('mixer timing resolution', () => {
         slow: { instances: [{ id: 'slow-compressor', kind: 'compressor', params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) }] },
       },
     })
+
     const timing = resolveMixerTiming(graph, 48_000)
     expect(timing.routeDelayFrames.get(mixerRouteKey('fast', MASTER_ROUTE_TARGET, 'output'))).toBe(480)
     expect(timing.routeDelayFrames.get(mixerRouteKey('slow', MASTER_ROUTE_TARGET, 'output'))).toBe(0)
@@ -31,6 +32,7 @@ describe('mixer timing resolution', () => {
         source: { instances: [{ id: 'source-compressor', kind: 'compressor', params: normalizeCompressorParams({ enabled: true, lookaheadMs: 10 }) }] },
       },
     })
+
     const timing = resolveMixerTiming(graph, 48_000)
     expect(timing.routeDelayFrames.get(mixerRouteKey('prefx-return', MASTER_ROUTE_TARGET, 'output'))).toBe(480)
     expect(timing.routeDelayFrames.get(mixerRouteKey('postfx-return', MASTER_ROUTE_TARGET, 'output'))).toBe(0)
@@ -58,6 +60,7 @@ describe('mixer timing resolution', () => {
         },
       },
     })
+
     const timing = resolveMixerTiming(graph, 48_000)
     expect(timing.routeDelayFrames.get(mixerRouteKey('source-pre', 'return', 'send', 'pre-fader'))).toBe(480)
     expect(timing.routeDelayFrames.get(mixerRouteKey('source-post', 'return', 'send', 'post-fader'))).toBe(0)

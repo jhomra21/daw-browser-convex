@@ -27,17 +27,20 @@ const wave = () => {
   view.setUint16(34, 16, true)
   writeAscii(bytes, 36, 'data')
   view.setUint32(40, frames * 2, true)
+
   return bytes
 }
 
 const dataUrl = (bytes: Uint8Array) => {
   const binary = Array.from(bytes, (byte) => String.fromCharCode(byte)).join('')
+
   return `data:audio/wav;base64,${btoa(binary)}`
 }
 
 const deferred = <Value>() => {
   let resolve: (value: Value) => void = () => {}
   const promise = new Promise<Value>((nextResolve) => { resolve = nextResolve })
+
   return { promise, resolve }
 }
 
@@ -45,7 +48,9 @@ const installFetch = (handler: () => Promise<Response>) => {
   const originalFetch = globalThis.fetch
   const fetchForTest: typeof fetch = async () => handler()
   fetchForTest.preconnect = () => {}
+
   globalThis.fetch = fetchForTest
+
   return () => {
     globalThis.fetch = originalFetch
   }
@@ -71,10 +76,12 @@ const clip = (input: {
 
 test('resolves a metadata-only cloud asset through its canonical project URL', async () => {
   const calls: string[] = []
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => 'project/cloud',
     resolveUrl: (value) => {
       calls.push(value)
+
       return dataUrl(wave())
     },
   })
@@ -87,13 +94,16 @@ test('resolves a metadata-only cloud asset through its canonical project URL', a
 
 test('deduplicates stable cloud source descriptor resolution', async () => {
   let resolves = 0
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => 'project/cloud',
     resolveUrl: () => {
       resolves += 1
+
       return dataUrl(wave())
     },
   })
+
   await resolver(clip({ sourceAssetKey: 'asset/stable' }))
   await resolver(clip({ sourceAssetKey: 'asset/stable' }))
   expect(resolves).toBe(1)
@@ -102,17 +112,21 @@ test('deduplicates stable cloud source descriptor resolution', async () => {
 test('isolates descriptor caches between resolver instances', async () => {
   let firstResolves = 0
   let secondResolves = 0
+
   const first = createAudioPcmSourceResolver({
     projectId: () => 'project/isolation',
     resolveUrl: () => {
       firstResolves += 1
+
       return dataUrl(wave())
     },
   })
+
   const second = createAudioPcmSourceResolver({
     projectId: () => 'project/isolation',
     resolveUrl: () => {
       secondResolves += 1
+
       return dataUrl(wave())
     },
   })
@@ -144,10 +158,12 @@ test('resolves a local asset from its local File without deriving a cloud URL', 
     updatedAt: 1,
   })
   const calls: string[] = []
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => project.id,
     resolveUrl: (value) => {
       calls.push(value)
+
       return value
     },
     readLocalAsset: async () => ({
@@ -179,10 +195,12 @@ test('deduplicates repeated local descriptor resolution with a stable session id
     updatedAt: 1,
   })
   let reads = 0
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => project.id,
     readLocalAsset: async () => {
       reads += 1
+
       return {
         status: 'ready',
         file: new File([wave()], 'sample.wav', { type: 'audio/wav' }),
@@ -202,6 +220,7 @@ test('deduplicates repeated local descriptor resolution with a stable session id
 test('isolates unverified local identities between projects with equal asset keys', async () => {
   const firstProject = await createLocalProject(`First identity project ${crypto.randomUUID()}`)
   const secondProject = await createLocalProject(`Second identity project ${crypto.randomUUID()}`)
+
   for (const projectId of [firstProject.id, secondProject.id]) {
     const db = await openLocalProjectDb(projectId)
     await db.put('assets', {
@@ -217,7 +236,9 @@ test('isolates unverified local identities between projects with equal asset key
       updatedAt: 1,
     })
   }
+
   let projectId = firstProject.id
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => projectId,
     readLocalAsset: async () => ({
@@ -254,6 +275,7 @@ test('admits a local content hash only after verifying the resolved File bytes',
     createdAt: 1,
     updatedAt: 1,
   })
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => project.id,
     readLocalAsset: async () => ({ status: 'ready', file }),
@@ -289,15 +311,18 @@ test('keeps ordinary and verified local descriptor cache entries separate', asyn
     updatedAt: 1,
   })
   let reads = 0
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => project.id,
     readLocalAsset: async () => {
       reads += 1
+
       return { status: 'ready', file }
     },
   })
 
   const ordinary = await resolver(clip({ sourceAssetKey: 'asset:cache-modes' }))
+
   const verified = await resolver(
     clip({ sourceAssetKey: 'asset:cache-modes' }),
     undefined,
@@ -316,6 +341,7 @@ test('does not alias different files that carry the same forged canonical hash',
   const secondBytes = wave()
   secondBytes[44] = 7
   const db = await openLocalProjectDb(project.id)
+
   for (const id of ['asset:forged-a', 'asset:forged-b']) {
     await db.put('assets', {
       id,
@@ -331,6 +357,7 @@ test('does not alias different files that carry the same forged canonical hash',
       updatedAt: 1,
     })
   }
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => project.id,
     readLocalAsset: async (_projectId, assetId) => ({
@@ -344,6 +371,7 @@ test('does not alias different files that carry the same forged canonical hash',
     undefined,
     { verifyContentHash: true },
   )
+
   const second = await resolver(
     clip({ sourceAssetKey: 'asset:forged-b' }),
     undefined,
@@ -357,13 +385,16 @@ test('does not alias different files that carry the same forged canonical hash',
 
 test('preserves the explicit URL for legacy URL-backed clips', async () => {
   const calls: string[] = []
+
   const resolver = createAudioPcmSourceResolver({
     projectId: () => 'project/cloud',
     resolveUrl: (value) => {
       calls.push(value)
+
       return dataUrl(wave())
     },
   })
+
   const sampleUrl = 'https://legacy.example/audio.wav'
 
   await resolver(clip({ sampleUrl }))
@@ -382,17 +413,21 @@ test('reports a missing project ID for a metadata-only cloud asset', async () =>
 
 test('keeps a shared descriptor resolution alive for a remaining subscriber', async () => {
   const gate = deferred<{ status: 'ready'; file: File }>()
+
   const restoreFetch = installFetch(async () => {
     const result = await gate.promise
+
     return new Response(await result.file.arrayBuffer(), {
       headers: { 'content-type': 'audio/wav' },
     })
   })
+
   try {
     const resolver = createAudioPcmSourceResolver({
       projectId: () => 'project/shared',
       resolveUrl: () => 'https://resolver.test/shared.wav',
     })
+
   const firstController = new AbortController()
   const secondController = new AbortController()
   const first = resolver(clip({ sampleUrl: 'shared://sample' }), firstController.signal)
@@ -413,20 +448,25 @@ test('keeps a shared descriptor resolution alive for a remaining subscriber', as
 test('replaces a shared resolution after its final subscriber aborts', async () => {
   const gates = [deferred<{ status: 'ready'; file: File }>(), deferred<{ status: 'ready'; file: File }>()]
   let reads = 0
+
   const restoreFetch = installFetch(async () => {
     const gate = gates[reads]
     reads += 1
+
     if (!gate) throw new Error('Unexpected extra source fetch.')
     const result = await gate.promise
+
     return new Response(await result.file.arrayBuffer(), {
       headers: { 'content-type': 'audio/wav' },
     })
   })
+
   try {
   const resolver = createAudioPcmSourceResolver({
     projectId: () => 'project/replace',
     resolveUrl: () => 'https://resolver.test/replace.wav',
   })
+
   const firstController = new AbortController()
   const first = resolver(clip({ sampleUrl: 'replace://sample' }), firstController.signal)
   await Promise.resolve()

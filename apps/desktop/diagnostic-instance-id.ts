@@ -3,5 +3,6 @@ export const readDiagnosticInstanceId = (frame: Buffer, offset: number, length: 
     || length > 256 || offset + length > frame.byteLength) {
     throw new RangeError("Invalid diagnostic instance identity bounds.")
   }
+
   return frame.toString("utf8", offset, offset + length)
 }

@@ -5,5 +5,6 @@ export const deleteProjectSample = async (
   const response = await fetch(`/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(assetKey)}`, {
     method: 'DELETE',
   })
+
   if (!response.ok) throw new Error('Sample delete failed.')
 }

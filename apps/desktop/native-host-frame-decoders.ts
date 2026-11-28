@@ -18,17 +18,22 @@ import type { NativeVstEditorStatus } from "./native-request-broker"
 export const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
   if (frame.byteLength < headerBytes + 256 || frame.byteLength > headerBytes + 512) return undefined
   const state = frame.readUInt32BE(headerBytes)
+
   if (state !== 0 && state !== 1 && state !== 2 && state !== 3) return undefined
   const present = frame.readUInt32BE(headerBytes + 88)
+
   if (present > 1) return undefined
   const epoch = frame.readUInt32BE(headerBytes + 100)
   const idBytes = frame.readUInt32BE(headerBytes + 112)
   const performanceOffset = headerBytes + 116 + idBytes
+
   if (idBytes > 256 || frame.byteLength !== performanceOffset + 140
     || (present === 0 && idBytes !== 0) || (present === 1 && idBytes === 0)) return undefined
   const acceptedPoints = frame.readUInt32BE(headerBytes + 92)
+
   if (present === 1 && (acceptedPoints === 0 || acceptedPoints > maxVst3WorkerEventsPerBlock
     || epoch === 0 || epoch !== frame.readUInt32BE(headerBytes + 16))) return undefined
+
   return {
     workerAutomation: present === 0 ? null : {
       instanceId: readDiagnosticInstanceId(frame, headerBytes + 116, idBytes),
@@ -81,14 +86,17 @@ export const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefi
     lastRejectedGraphRevision: frame.readUInt32BE(headerBytes + 84),
   }
 }
+
 export const decodeGraphRevisionStatus = (frame: Buffer): NativeGraphRevisionStatus | undefined => {
   if (frame.byteLength !== headerBytes + 64) return undefined
   const code = frame.readUInt32BE(headerBytes)
   const continuityCode = frame.readUInt32BE(headerBytes + 4)
+
   const continuity = continuityCode === 1 ? "accepted"
     : continuityCode === 2 ? "fallback"
     : continuityCode === 3 ? "rejected"
     : "not-evaluated"
+
   const status = code === 1 ? "prepared"
     : code === 2 ? "published"
     : code === 3 ? "retired"
@@ -103,7 +111,9 @@ export const decodeGraphRevisionStatus = (frame: Buffer): NativeGraphRevisionSta
     : code === 12 ? "rebase-required"
     : code === 13 ? "capture-target-locked"
     : undefined
+
   if (!status) return undefined
+
   return {
     status,
     requestedRevision: frame.readUInt32BE(headerBytes + 8),
@@ -119,15 +129,18 @@ export const decodeGraphRevisionStatus = (frame: Buffer): NativeGraphRevisionSta
     transportEpoch: frame.readUInt32BE(headerBytes + 60),
   }
 }
+
 export const decodeVstEditorStatus = (frame: Buffer): NativeVstEditorStatus | undefined => {
   if (frame.byteLength !== headerBytes + 24) return undefined
   const flags = frame.readUInt32BE(headerBytes)
+
   if (
     flags > 1
     || frame.readUInt32BE(headerBytes + 4) > 1
     || frame.readUInt32BE(headerBytes + 8) > 1
     || frame.readUInt32BE(headerBytes + 12) > 1
   ) return undefined
+
   return {
     success: flags === 1,
     owned: frame.readUInt32BE(headerBytes + 4) === 1,
@@ -137,16 +150,21 @@ export const decodeVstEditorStatus = (frame: Buffer): NativeVstEditorStatus | un
     height: frame.readUInt32BE(headerBytes + 20),
   }
 }
+
 export const decodeMeterBatch = (frame: Buffer): NativeHostMeterBatch | undefined => {
   const payload = frame.subarray(headerBytes)
+
   if (payload.byteLength < 20) return undefined
   const entryCount = payload.readUInt32BE(16)
+
   if (entryCount > maximumMeterEntries || payload.byteLength !== 20 + entryCount * 16) return undefined
   const entries: NativeHostMeterBatch["entries"][number][] = []
+
   for (let index = 0; index < entryCount; index += 1) {
     const offset = 20 + index * 16
     const leftRms = payload.readFloatBE(offset + 8)
     const rightRms = payload.readFloatBE(offset + 12)
+
     if (!Number.isFinite(leftRms) || !Number.isFinite(rightRms) || leftRms < 0 || rightRms < 0) return undefined
     entries.push({
       nodeId: payload.readBigUInt64BE(offset),
@@ -154,6 +172,7 @@ export const decodeMeterBatch = (frame: Buffer): NativeHostMeterBatch | undefine
       rightRms,
     })
   }
+
   return {
     graphRevision: payload.readUInt32BE(0),
     transportEpoch: payload.readUInt32BE(4),
@@ -161,8 +180,10 @@ export const decodeMeterBatch = (frame: Buffer): NativeHostMeterBatch | undefine
     entries,
   }
 }
+
 export const decodeSpectrumFrame = (frame: Buffer): NativeHostSpectrumFrame | undefined => {
   const payload = frame.subarray(headerBytes)
+
   if (payload.byteLength < 48) return undefined
   const graphRevision = payload.readUInt32BE(0)
   const transportEpoch = payload.readUInt32BE(4)
@@ -172,6 +193,7 @@ export const decodeSpectrumFrame = (frame: Buffer): NativeHostSpectrumFrame | un
   const fftSize = payload.readUInt32BE(28)
   const binCount = payload.readUInt32BE(32)
   const payloadBytes = payload.readUInt32BE(36)
+
   if (
     graphRevision === 0 || transportEpoch === 0 || sequence === 0n || nodeId === 0n
     || sampleRateHz === 0 || fftSize === 0 || fftSize > 16_384
@@ -179,22 +201,30 @@ export const decodeSpectrumFrame = (frame: Buffer): NativeHostSpectrumFrame | un
     || payloadBytes !== binCount * 4 || payload.byteLength !== 40 + payloadBytes
   ) return undefined
   const data = new Float32Array(binCount)
+
   for (let index = 0; index < binCount; index += 1) {
     const value = payload.readFloatBE(40 + index * 4)
+
     if (!Number.isFinite(value) || value < 0 || value > 1) return undefined
     data[index] = value
   }
+
   return { graphRevision, transportEpoch, sequence, nodeId, sampleRateHz, fftSize, binCount, data }
 }
+
 export const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | undefined => {
   const payload = frame.subarray(headerBytes)
+
   if (payload.byteLength !== nativeAudioHostScheduleProgressBytes) return undefined
   const revision = payload.readUInt32BE(0)
   const epoch = payload.readUInt32BE(4)
   const progressSequence = payload.readBigUInt64BE(8)
+
   if (revision === 0 || epoch === 0 || progressSequence === 0n) return undefined
   const flags = payload.readUInt32BE(64)
+
   if ((flags & ~3) !== 0) return undefined
+
   const progress: NativeScheduleProgress = {
     revision,
     epoch,
@@ -213,10 +243,13 @@ export const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | 
     admissionCapacityGeneration: payload.readBigUInt64BE(80),
     latencyCompletionGeneration: payload.readBigUInt64BE(88),
   }
+
   if (payload.readUInt32BE(108) !== 0) return undefined
   const resolvedToken = payload.readBigUInt64BE(96)
+
   if (resolvedToken !== 0n) {
     progress.processorPatchResolved = { token: resolvedToken.toString(), result: payload.readUInt32BE(104) }
   }
+
   return progress
 }

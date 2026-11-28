@@ -81,6 +81,7 @@ const createHarness = (
   const lifecycleListeners: Array<(lifecycle: DesktopAudioLifecycle) => void> = []
   const calls: string[] = []
   const startedInputDeviceIds: Array<string | undefined> = []
+
   const mediaTrack = Object.assign(Object.create(null), {
     readyState: "live",
     getSettings: () => ({ channelCount: 1, sampleRate: 48_000 }),
@@ -88,33 +89,41 @@ const createHarness = (
     removeEventListener: () => undefined,
     stop: () => calls.push("stream-stop"),
   })
+
   const stream: MediaStream = Object.assign(Object.create(null), {
     getTracks: () => [mediaTrack],
     getAudioTracks: () => [mediaTrack],
   })
+
   const context: AudioContext = Object.assign(Object.create(null), {
     currentTime: 0,
     sampleRate: 48_000,
   })
+
   const audioEngine = new AudioEngine()
   audioEngine.ensureAudio = () => undefined
   audioEngine.resume = async () => undefined
   audioEngine.getAudioContext = () => context
   audioEngine.subscribeRecordingStatus = () => () => true
   audioEngine.cancelRecordingCapture = () => calls.push("legacy-cancel")
+
   const emptyStorageDirectory = {
     getDirectoryHandle: async () => emptyStorageDirectory,
     entries: async function* () {},
   }
+
   const nativeController = {
     start: async (request: { inputDeviceId?: string }) => {
       calls.push("native-start")
       startedInputDeviceIds.push(request.inputDeviceId)
+
       if (nativeStartFails) throw new Error("native-start-failed")
+
       return { sampleRate: 48_000, channelCount: 1, startFrame: 0 }
     },
     stop: async () => {
       calls.push("native-stop")
+
       return { capturedFrames: 1 }
     },
     cancel: async () => {
@@ -123,13 +132,16 @@ const createHarness = (
     isActive: () => true,
     sampleRate: () => 48_000,
   }
+
   const portableController = {
     start: async () => {
       calls.push("portable-start")
+
       return { sampleRate: 48_000, channelCount: 1, startFrame: 0 }
     },
     stop: async () => {
       calls.push("portable-stop")
+
       return { capturedFrames: 1 }
     },
     cancel: async () => {
@@ -137,6 +149,7 @@ const createHarness = (
     },
     isActive: () => true,
   }
+
   const recordingLocks = {
     request: async (
       _name: string,
@@ -146,6 +159,7 @@ const createHarness = (
       await callback({ name: "recording-test", mode: "exclusive" })
     },
   }
+
   const navigatorValue = {
     platform: "test",
     userAgent: "test",
@@ -154,6 +168,7 @@ const createHarness = (
       getSupportedConstraints: () => ({}),
       getUserMedia: async () => {
         calls.push("get-user-media")
+
         return stream
       },
     },
@@ -162,6 +177,7 @@ const createHarness = (
     },
     locks: locksAvailable ? recordingLocks : undefined,
   }
+
   Object.defineProperty(globalThis, "window", {
     configurable: true,
     value: {
@@ -175,6 +191,7 @@ const createHarness = (
           getLifecycle: async () => initialLifecycle,
           onLifecycle: (listener: (lifecycle: DesktopAudioLifecycle) => void) => {
             lifecycleListeners.push(listener)
+
             return () => undefined
           },
         },
@@ -185,6 +202,7 @@ const createHarness = (
     configurable: true,
     value: navigatorValue,
   })
+
   const selection = {
     selectedTrackId: () => "",
     selectedClip: () => null,
@@ -203,6 +221,7 @@ const createHarness = (
     setSelectedTrackId: () => undefined,
     setSelectedFXTarget: () => undefined,
   }
+
   const recording = useTrackRecording({
     audioEngine,
     requiresNativeAudio,
@@ -246,6 +265,7 @@ const createHarness = (
     audioPreferences: behavior?.audioPreferences ?? audioPreferences,
     recordingPreferences,
   })
+
   return {
     recording,
     nativeController,
@@ -339,10 +359,12 @@ test("desktop native-only recording never falls back to browser capture", async 
 test.skipIf(isServer)("a device change during a take leaves the take on its devices and is noticed once, then the next take uses it", async () => {
   const [devices, setDevices] = createSignal({ nativeInputDeviceId: "coreaudio:mic-a", nativeOutputDeviceId: "coreaudio:out-a" })
   const notifications: string[] = []
+
   const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, true, false, true, undefined, {
     notify: (message) => notifications.push(message),
     audioPreferences: () => ({ ...audioPreferences(), ...devices() }),
   })
+
   await createRoot(async (dispose) => {
     await flushLifecycle()
     await expect(harness.recording.startRecording(track.id)).resolves.toMatchObject({ ok: true })
@@ -391,17 +413,23 @@ test("M1 WAV/asset/clip/queued/scope failures retain native source until confirm
     await writeFile(source, Uint8Array.of(1, 2, 3), { mode: 0o600 })
     const calls: string[] = []; const notifications: string[] = []
     let currentProject = projectKind === "local" ? "project:test" : "cloud-project"
+
     const createAsset = async () => {
       calls.push("asset")
+
       if (failure === "asset") throw new Error("asset failure")
       await writeFile(`${directory}/asset.wav`, Uint8Array.of(4, 5, 6))
+
       return savedAsset()
     }
+
     const createClip = async () => {
       calls.push("clip")
+
       if (failure === "queued") throw new SharedOutboxQueuedError("clips.create", "test-operation")
       throw new Error("clip failure")
     }
+
     const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
       acquireTrackLock: async () => ({ ok: true }),
       releaseTrackLock: async () => undefined,
@@ -410,32 +438,43 @@ test("M1 WAV/asset/clip/queued/scope failures retain native source until confirm
         byteLength: 8, createdAtMs: 1, finalizedAtMs: 2 }) },
       encodeWav: async () => {
         calls.push("wav")
+
         if (failure === "wav") throw new Error("wav failure")
+
         if (failure === "scope") currentProject = "project:switched"
+
         return { file: new File([new Uint8Array(8)], "take.wav"), fileName: "take.wav", mimeType: "audio/wav", remove: async () => {} }
       },
       createLocalAsset: createAsset,
       deleteLocalAsset: async () => { calls.push("asset-delete") },
       createLocalAudioClip: createClip,
-      createUploadedAudioClip: async () => { await createAsset(); return createClip() },
+      createUploadedAudioClip: async () => { await createAsset();
+
+ return createClip() },
     }
+
     const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization,
       { projectId: () => currentProject, userId: "test-user", notify: (message) => notifications.push(message) })
+
     harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
     const host = globalThis.window?.dawDesktop?.audioHost
     Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => { calls.push("release"); await rm(source) } },
     } } } })
+
     try {
       await createRoot(async (dispose) => {
         await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
         await harness.recording.stopRecording()
         expect(calls).not.toContain("release")
         expect(calls).toContain("wav")
+
         if (failure !== "wav" && failure !== "scope") expect(calls).toContain("asset")
+
         if (failure === "clip" || failure === "queued") expect(calls).toContain("clip")
         expect(await readFile(source)).toEqual(Buffer.from([1, 2, 3]))
         expect(notifications.some((message) => message.includes("native recording source remains retained"))).toBeTrue()
+
         if (failure === "queued" && projectKind === "shared") expect(notifications.some((message) => message.includes("queued"))).toBeTrue()
         dispose()
       })
@@ -450,32 +489,44 @@ test("M4 concurrent stop calls share one native Finish and one save; cleanup dur
     const gate = Promise.withResolvers<void>(); const entered = Promise.withResolvers<void>()
     let encoded = 0; let assets = 0; let clips = 0; let releases = 0; let rollbacks = 0
     const notifications: string[] = []
+
     const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
       storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
         format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 1,
         byteLength: 8, createdAtMs: 1, finalizedAtMs: 2 }) },
       encodeWav: async () => {
         encoded++; entered.resolve(); await gate.promise
+
         return { file: new File([new Uint8Array(8)], "take.wav"), fileName: "take.wav", mimeType: "audio/wav", remove: async () => {} }
       },
-      createLocalAsset: async () => { assets++; await writeFile(`${directory}/asset.wav`, Uint8Array.of(4, 5, 6)); return savedAsset() },
+      createLocalAsset: async () => { assets++; await writeFile(`${directory}/asset.wav`, Uint8Array.of(4, 5, 6));
+
+ return savedAsset() },
       createLocalAudioClip: async () => { clips++; await writeFile(`${directory}/clip.json`, JSON.stringify({ asset: "asset:saved" }));
+
         return { clipId: "clip:saved", clip: { name: "take", startSec: 0, duration: 1 / 48000, sourceAssetKey: "asset:saved" } } },
       deleteLocalAsset: async () => { rollbacks++ },
     }
+
     const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization,
       { notify: (message) => notifications.push(message) })
-    harness.nativeController.stop = async () => { harness.calls.push("native-stop"); return { capturedFrames: 1, nativeTake: nativeProof } }
+
+    harness.nativeController.stop = async () => { harness.calls.push("native-stop");
+
+ return { capturedFrames: 1, nativeTake: nativeProof } }
+
     const host = globalThis.window?.dawDesktop?.audioHost
     Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => {
         expect(await readFile(`${directory}/asset.wav`)).toEqual(Buffer.from([4, 5, 6]))
         expect(JSON.parse(await readFile(`${directory}/clip.json`, "utf8"))).toEqual({ asset: "asset:saved" })
         releases++
+
         if (cleanupFails) throw new Error("release unavailable")
         await rm(source)
       } },
     } } } })
+
     try {
       await createRoot(async (dispose) => {
         await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
@@ -486,6 +537,7 @@ test("M4 concurrent stop calls share one native Finish and one save; cleanup dur
         harness.emit({ state: "failed", powerGeneration: 2 }); await flushLifecycle()
         gate.resolve(); await Promise.all([first, second])
         expect(encoded).toBe(1); expect(assets).toBe(1); expect(clips).toBe(1); expect(releases).toBe(1); expect(rollbacks).toBe(0)
+
         if (cleanupFails) {
           expect(await readFile(source)).toEqual(Buffer.from([1, 2, 3]))
           expect(notifications.some((message) => message.includes("clip was saved"))).toBeTrue()
@@ -493,6 +545,7 @@ test("M4 concurrent stop calls share one native Finish and one save; cleanup dur
           await expect(readFile(source)).rejects.toThrow("ENOENT")
           expect(notifications.some((message) => message.includes("remains retained"))).toBeFalse()
         }
+
         expect(notifications.some((message) => message.includes("could not be saved"))).toBeFalse()
         await harness.recording.stopRecording(); expect(clips).toBe(1)
         dispose()
@@ -507,6 +560,7 @@ test("M1 exact zero native source releases without asset/clip creation or false 
   const source = `${directory}/native.pcm`; await writeFile(source, new Uint8Array(), { mode: 0o600 })
   const notifications: string[] = []; let releases = 0
   const proof = { ...nativeProof, acknowledgment: { ...nativeProof.acknowledgment, frames: 0, bytes: 0, blocks: 0 } }
+
   const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
     storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
       format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 0,
@@ -515,8 +569,10 @@ test("M1 exact zero native source releases without asset/clip creation or false 
     createLocalAsset: async () => { throw new Error("zero take must never create asset") },
     createLocalAudioClip: async () => { throw new Error("zero take must never create clip") },
   }
+
   const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization,
     { notify: (message) => notifications.push(message) })
+
   harness.nativeController.stop = async () => ({ capturedFrames: 0, nativeTake: proof })
   const host = globalThis.window?.dawDesktop?.audioHost
   Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
@@ -525,6 +581,7 @@ test("M1 exact zero native source releases without asset/clip creation or false 
       expect(await readFile(source)).toEqual(Buffer.alloc(0)); releases++; await rm(source)
     } },
   } } } })
+
   try {
     await createRoot(async (dispose) => {
       await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
@@ -544,6 +601,7 @@ test("a take whose target was removed is kept on a new track as one undoable ent
     const history: Array<{ type: string; data?: unknown }> = []
     const clipInputs: Array<{ trackId: string; startSec: number; skipHistory?: boolean; pushHistory?: boolean }> = []
     const saved = { clipId: "clip:saved", clip: { name: "take", startSec: 0, duration: 1 / 48000, sourceAssetKey: "asset:saved" } }
+
     const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
       storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
         format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 1,
@@ -552,22 +610,31 @@ test("a take whose target was removed is kept on a new track as one undoable ent
       acquireTrackLock: async () => ({ ok: true }),
       releaseTrackLock: async () => undefined,
       createLocalAsset: async () => savedAsset(),
-      createLocalAudioClip: async (input) => { clipInputs.push(input); return saved },
-      createUploadedAudioClip: async (input) => { clipInputs.push(input); return saved },
+      createLocalAudioClip: async (input) => { clipInputs.push(input);
+
+ return saved },
+      createUploadedAudioClip: async (input) => { clipInputs.push(input);
+
+ return saved },
     }
+
     const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization, {
       projectId: () => projectKind === "local" ? "project:test" : "cloud-project",
       userId: "test-user",
       tracks: () => current,
       notify: (message) => notifications.push(message),
       historyPush: (entry) => history.push(entry),
-      createTrackForRecording: async () => { current = [keptTrack]; return keptTrack },
+      createTrackForRecording: async () => { current = [keptTrack];
+
+ return keptTrack },
     })
+
     harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
     const host = globalThis.window?.dawDesktop?.audioHost
     Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => undefined },
     } } } })
+
     try {
       await createRoot(async (dispose) => {
         await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })
@@ -588,6 +655,7 @@ test("a take whose target was removed is kept on a new track as one undoable ent
 test("a take whose kept track cannot be created reports the real cause and logs the error", async () => {
   let current: Track[] = [track]
   const notifications: string[] = []
+
   const finalization: NonNullable<Parameters<typeof useTrackRecording>[0]["finalization"]> = {
     storage: { ...createRecordingTempStorage(), open: async (sessionId) => ({ version: 1, sessionId,
       format: "planar-float32-blocks", sampleRate: 48000, channelCount: 1, capturedFrames: 1,
@@ -596,12 +664,14 @@ test("a take whose kept track cannot be created reports the real cause and logs 
     acquireTrackLock: async () => ({ ok: true }),
     releaseTrackLock: async () => undefined,
   }
+
   const harness = createHarness({ state: "ready", powerGeneration: 1 }, true, false, false, true, finalization, {
     projectId: () => "project:test",
     tracks: () => current,
     notify: (message) => notifications.push(message),
     createTrackForRecording: async () => { throw new Error("storage quota exceeded") },
   })
+
   harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
   const host = globalThis.window?.dawDesktop?.audioHost
   Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
@@ -610,6 +680,7 @@ test("a take whose kept track cannot be created reports the real cause and logs 
   const errors: unknown[][] = []
   const originalError = console.error
   console.error = (...args: unknown[]) => { errors.push(args) }
+
   try {
     await createRoot(async (dispose) => {
       await flushLifecycle(); expect(await harness.recording.startRecording(track.id)).toMatchObject({ ok: true })

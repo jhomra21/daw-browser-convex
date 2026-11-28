@@ -35,6 +35,7 @@ test('cloud canonical handlers conform to the control operation contract', async
   const projectId = `cloud-conformance-${crypto.randomUUID()}`
   const convex = convexTest(schema, modules)
   await convex.withIdentity({ subject: owner }).mutation(api.projects.createOwnedRoom, { projectId })
+
   const trackId = await convex.run(async (ctx) => {
     const track = await ctx.db.insert('tracks', {
       projectId,
@@ -42,6 +43,7 @@ test('cloud canonical handlers conform to the control operation contract', async
       index: 0,
       kind: 'audio',
     })
+
     await ctx.db.insert('mixerChannels', {
       projectId,
       trackId: track,
@@ -50,8 +52,10 @@ test('cloud canonical handlers conform to the control operation contract', async
       sends: [],
     })
     await ctx.db.insert('ownerships', { projectId, ownerUserId: owner, trackId: track })
+
     return track
   })
+
   const gateway: ControlGateway = {
     query: <Query extends FunctionReference<'query'>>(
       reference: Query,
@@ -66,7 +70,9 @@ test('cloud canonical handlers conform to the control operation contract', async
       convex.withIdentity({ subject: owner }).mutation(reference, args)
     ),
   }
+
   const handlers = createCloudControlHandlers({ gateway })
+
   const invoke = async (
     operation: ControlOperationIdInput,
     input: ControlOperationInput,
@@ -83,6 +89,7 @@ test('cloud canonical handlers conform to the control operation contract', async
       throw normalizeControlError(error) ?? error
     }
   }
+
   await runControlConformance({
     invoke,
     projectId,

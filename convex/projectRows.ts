@@ -12,7 +12,9 @@ export function requireUnambiguousProjectOwnershipMarker(
   ownerships: ReadonlyArray<{ trackId?: unknown; clipId?: unknown }>,
 ) {
   const markers = ownerships.filter((ownership) => !ownership.trackId && !ownership.clipId);
+
   if (markers.length > 1) throw new Error("Project ownership marker is ambiguous.");
+
   return markers[0];
 }
 
@@ -31,7 +33,9 @@ export async function requireProjectRow(
   projectId: string,
 ) {
   const project = await getProjectRow(ctx, projectId);
+
   if (!project) throw new Error("Project not found.");
+
   return project;
 }
 
@@ -43,11 +47,13 @@ export async function withProjectEdit<Value>(
   const project = await requireProjectRow(ctx, projectId);
   const revision = project.revision + 1;
   let stamped = false;
+
   try {
     return await run({
       revision,
       stamp: () => {
         stamped = true;
+
         return revision;
       },
     });
@@ -63,23 +69,30 @@ export async function ensureOwnedProjectRow(
 ) {
   // Convex OCC serializes this query-before-insert uniqueness invariant.
   const project = await getProjectRow(ctx, projectId);
+
   if (project) {
     if (project.ownerUserId !== userId) throw new Error("Project already exists.");
+
     const ownerships = await ctx.db
       .query("ownerships")
       .withIndex("by_room_owner", (q) => q.eq("projectId", projectId).eq("ownerUserId", userId))
       .collect();
+
     const marker = requireUnambiguousProjectOwnershipMarker(ownerships);
+
     if (!marker) {
       await ctx.db.insert("ownerships", { projectId, ownerUserId: userId });
     }
+
     return { status: "exists" as const, project };
   }
 
   if (await hasActiveR2DeleteRows(ctx, projectId)) {
     throw new Error("Project storage cleanup is still pending.");
   }
+
   const now = Date.now();
+
   const projectIdRow = await ctx.db.insert("projects", {
     projectId,
     storageNamespace: crypto.randomUUID(),
@@ -95,9 +108,12 @@ export async function ensureOwnedProjectRow(
     loopStartSec: 0,
     loopEndSec: 8,
   });
+
   await ctx.db.insert("ownerships", { projectId, ownerUserId: userId });
   const created = await ctx.db.get(projectIdRow);
+
   if (!created) throw new Error("Project creation failed.");
+
   return { status: "created" as const, project: created };
 }
 
@@ -111,5 +127,6 @@ export async function advanceProjectRevision(
     revision: project.revision + 1,
     updatedAt,
   });
+
   return { revision: project.revision + 1, updatedAt };
 }

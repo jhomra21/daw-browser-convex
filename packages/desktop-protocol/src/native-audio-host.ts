@@ -1,15 +1,20 @@
 export const nativeAudioHostMagic = 0x44415748
+
 import { nativeExternalAttachmentPlanSchema, maxNativeExternalAttachments } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
 export const nativeAudioHostProtocolVersion = 30
 export const nativeRecordingSpoolImportVersion = 1
+
 export type NativeRecordingSpoolImportVersion = typeof nativeRecordingSpoolImportVersion
+
 export const nativeAudioHostArtifactId = "daw-audio-host-macos/v10"
+
 export type NativeAudioHostParkingLimits = {
   maximumParkedInstances: number
   parkedAgeMs: number
 }
+
 export const nativeKeepLatencyDivergentMixedBusDiagnostic = 3
 export const nativeAudioHostFrameHeaderBytes = 16
 export const nativeAudioHostMaximumPayloadBytes = 1_048_576
@@ -17,6 +22,7 @@ export const nativeAudioHostMaximumMeterEntries = 64
 export const nativeAudioHostMaximumSpectrumBins = 1024
 export const nativeAudioHostMaximumSpectrumPayloadBytes = 8_192
 export const nativeAudioHostMaximumProcessorStatePatchBytes = 512
+
 export const nativeAudioHostControlTypes = {
   hostHello: 1,
   hostCapabilities: 2,
@@ -90,6 +96,7 @@ export const nativeAudioHostMaximumAssetFrames = 262_144
 export const nativeAudioHostMaximumInstalledAssets = 64
 export const nativeAudioHostMappedAssetPageHeaderBytes = 16
 export const nativeAudioHostMaximumMappedAssetRanges = 4_096
+
 export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCount: number) => (
   Number.isSafeInteger(channelCount) && channelCount > 0
     ? Math.floor(
@@ -98,6 +105,7 @@ export const nativeAudioHostMaximumMappedAssetPageFramesForChannels = (channelCo
     )
     : 0
 )
+
 export const nativeAudioHostMaximumAssetFramesForChannels = (channelCount: number) => Math.min(
   nativeAudioHostMaximumAssetFrames,
   Number.isSafeInteger(channelCount) && channelCount > 0
@@ -107,6 +115,7 @@ export const nativeAudioHostMaximumAssetFramesForChannels = (channelCount: numbe
     )
     : 0,
 )
+
 export const nativeAudioHostMaximumVstStringBytes = 256
 export const nativeAudioHostMaximumVstPathBytes = 4_096
 export const nativeAudioHostVstAttachFingerprintBytes = 32
@@ -120,6 +129,7 @@ export const nativeAudioHostMaximumScheduleInstanceIdBytes = 256
 export const nativeAudioHostScheduleWindowHeaderBytes = 72
 export const nativeAudioHostScheduleProgressBytes = 112
 export const nativeAudioHostProcessorPatchStatusBytes = 20
+
 /**
  * The status word of a control ACK (`ControlAckStatus`, audio_host_macos.h). `unavailable` is a negative ACK that
  * says no audio session or core existed to take the request. ACK text is for people and is never classified.
@@ -127,6 +137,7 @@ export const nativeAudioHostProcessorPatchStatusBytes = 20
 export const nativeAudioHostAckStatus = { refused: 0, accepted: 1, unavailable: 2 } as const
 export const nativeAudioHostMaximumSampleRateHz = 384_000
 export const nativeAudioHostMaximumFramesPerBlock = 8_192
+
 /**
  * Prepared Stretch assets remain eagerly materialized before native export.
  * Keep their bounded working set separate from the duration-independent
@@ -148,6 +159,7 @@ const nativeOfflinePcmAssetSchema = z.object({
   contentHashPrefix: z.instanceof(Uint8Array).refine((value) => value.byteLength === 8).optional(),
 }).strict().superRefine((value, context) => {
   const byteLength = value.frameCount * value.channelCount * Float32Array.BYTES_PER_ELEMENT
+
   if (
     !Number.isSafeInteger(byteLength)
     || value.frameCount > nativeAudioHostMaximumAssetFramesForChannels(value.channelCount)
@@ -194,6 +206,7 @@ const nativeOfflineTransportSchema = z.object({
   if ((value.timeSignatureNumerator === undefined) !== (value.timeSignatureDenominator === undefined)) {
     context.addIssue({ code: "custom", path: ["timeSignatureNumerator"], message: "Time signature must be complete." })
   }
+
   if ((value.cycleStartSec === undefined) !== (value.cycleEndSec === undefined)
     || (value.cycleStartSec !== undefined && value.cycleEndSec !== undefined && value.cycleEndSec <= value.cycleStartSec)) {
     context.addIssue({ code: "custom", path: ["cycleStartSec"], message: "Cycle range is invalid." })
@@ -232,19 +245,25 @@ export const nativeOfflineRenderPlanSchema = z.object({
   if (value.blockFrames > value.totalFrames) {
     context.addIssue({ code: "custom", path: ["blockFrames"], message: "Block size exceeds the render length." })
   }
+
   if (value.transport.frame > value.totalFrames) {
     context.addIssue({ code: "custom", path: ["transport", "frame"], message: "Transport frame exceeds the render length." })
   }
+
   if (value.assets.length + (value.mappedAssets?.length ?? 0) > nativeAudioHostMaximumInstalledAssets) {
     context.addIssue({ code: "custom", path: ["mappedAssets"], message: "Total native asset count exceeds the installed asset limit." })
   }
+
   const attachmentIds = new Set(value.externalAttachments?.attachments.map((attachment) => attachment.instanceId) ?? [])
   const stateIds = new Set<string>()
+
   for (const [index, state] of (value.capturedVstStates ?? []).entries()) {
     if (stateIds.has(state.instanceId)) {
       context.addIssue({ code: "custom", path: ["capturedVstStates", index, "instanceId"], message: "Captured VST state IDs must be unique." })
     }
+
     stateIds.add(state.instanceId)
+
     if (!attachmentIds.has(state.instanceId)) {
       context.addIssue({ code: "custom", path: ["capturedVstStates", index, "instanceId"], message: "Captured VST state is not referenced by an attachment." })
     }

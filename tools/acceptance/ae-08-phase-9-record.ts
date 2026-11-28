@@ -13,6 +13,7 @@ type RecordContext = Pick<Phase5Context, "evaluate" | "snapshot">
 // The tone is played from the start of the burst, so the burst's edit lands inside it. A longer one makes the take a larger page-to-runner
 // transfer (about 1.5 MB per second of stereo float32, base64).
 export const toneSeconds = 4
+
 // RECORDING_TARGET_LOCKED_REASON (src/lib/track-recording-target.ts). The runner does not import the app's module graph for one string.
 export const recordingTargetLockedReason = "Finish recording to delete this track or change its routing."
 const changedTrackName = "Changed right"
@@ -25,6 +26,7 @@ const settled = (label: string, pressed: boolean) => `document.querySelector('bu
 export const armRecordTarget = async (context: Pick<Phase5Context, "evaluate">) => {
   const number = `(()=>{const label=[...document.querySelectorAll('button[aria-label]')].map(b=>b.getAttribute('aria-label')).find(l=>l?.endsWith(${JSON.stringify(`: ${changedTrackName}`)}));
     const found=/^Select track (\\d+):/.exec(label??'');if(!found)throw new Error('Record target selector missing');return found[1]})()`
+
   await context.evaluate(`(()=>{const b=document.querySelector('button[aria-label="Arm track '+${number}+' for recording"]');if(!b)throw new Error('Record arm unavailable');b.click();return true})()`)
   await waitForUi(context, "Record arm not pressed", `document.querySelector('button[aria-label="Disarm track '+${number}+' for recording"]')?.getAttribute('aria-pressed')==='true'`)
 }
@@ -34,6 +36,7 @@ export const startRecording = async (context: RecordContext) => {
   const before = new Set((await context.snapshot()).clips.map((clip) => clip.id))
   await context.evaluate(clickButton("Start recording"))
   await waitForUi(context, "Recording did not start", settled("Stop recording", true))
+
   return before
 }
 
@@ -59,13 +62,16 @@ export const finishRecording = async (context: RecordContext & Pick<Phase5Contex
   const taken = state.clips.filter((clip) => !input.before.has(clip.id))
   const [take] = taken
   const assetId = take?.source?.assetId
+
   if (taken.length !== 1 || assetId === undefined) throw new Error(`Expected one new take clip with an asset, found ${taken.length}`)
   const { base64 } = await context.read(takeScript(state.project.id, assetId), z.object({ base64: z.string() }))
+
   return verifyHandedOverTake(base64, input.file)
 }
 
 // The WAV the page handed over, kept as evidence, against the tone: sample for sample from the take's first non-silent frame.
 export const verifyHandedOverTake = async (base64: string, file: string) => {
   await writeFile(file, Buffer.from(base64, "base64"))
+
   return verifyTakeAgainstTone(await readWav(file), makeTone(toneSeconds))
 }

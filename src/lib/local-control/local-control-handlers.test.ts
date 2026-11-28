@@ -18,10 +18,12 @@ import {
 
 test('local canonical handlers conform to the control operation contract', async () => {
   const project = await createLocalProject(`Handler conformance ${crypto.randomUUID()}`)
+
   const handlers = createLocalControlHandlers({
     projectId: project.id,
     actor: { subject: 'local:conformance-user' },
   })
+
   const invoke = async (
     operation: ControlOperationIdInput,
     input: ControlOperationInput,
@@ -38,8 +40,10 @@ test('local canonical handlers conform to the control operation contract', async
       throw normalizeControlError(error) ?? error
     }
   }
+
   const initial = await invoke('control.snapshot', { projectId: project.id }, 'desktop')
   const track = canonicalProjectSnapshotSchema.parse(initial).tracks[0]
+
   if (!track) throw new Error('Expected the local fixture to contain a track.')
   await runControlConformance({
     invoke,

@@ -134,11 +134,13 @@ test("same-url overlapping outcomes remain fail-closed", () => {
     lifecycle.commitMainFrameNavigation("https://app.test/initial")
     lifecycle.beginMainFrameNavigation("https://app.test/same")
     lifecycle.beginMainFrameNavigation("https://app.test/same")
+
     for (const outcome of outcomes) {
       if (outcome === "commit") lifecycle.commitMainFrameNavigation("https://app.test/same")
       else lifecycle.failMainFrameNavigation("https://app.test/same")
       expect(lifecycle.acceptsPrivilegedRequests()).toBe(false)
     }
+
     expect(lifecycle.confirmMainFrameNavigation()).toBe(false)
     expect(lifecycle.acceptsPrivilegedRequests()).toBe(false)
   }
@@ -190,6 +192,7 @@ test("a direct navigation to a retired identity requires an independent recovery
 test("consecutive ambiguous batches retain every retired identity until recovery", () => {
   const lifecycle = createRendererLifecycleOwner()
   lifecycle.commitMainFrameNavigation("https://app.test/initial")
+
   for (const identity of ["https://app.test/a", "https://app.test/b"]) {
     lifecycle.beginMainFrameNavigation(identity)
     lifecycle.beginMainFrameNavigation(identity)
@@ -209,6 +212,7 @@ test("consecutive ambiguous batches retain every retired identity until recovery
 test("retired identity overflow stays bounded and fail-closed until crash", () => {
   const lifecycle = createRendererLifecycleOwner()
   lifecycle.commitMainFrameNavigation("https://app.test/initial")
+
   for (let index = 0; index <= 128; index += 1) {
     const identity = `https://app.test/ambiguous/${index}`
     lifecycle.beginMainFrameNavigation(identity)
@@ -225,6 +229,7 @@ test("retired identity overflow stays bounded and fail-closed until crash", () =
     expect(lifecycle.confirmMainFrameNavigation()).toBe(false)
     expect(lifecycle.acceptsPrivilegedRequests()).toBe(false)
   }
+
   lifecycle.invalidateAfterCrash()
   lifecycle.beginMainFrameNavigation("https://app.test/post-crash")
   lifecycle.commitMainFrameNavigation("https://app.test/post-crash")

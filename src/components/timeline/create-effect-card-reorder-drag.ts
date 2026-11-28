@@ -45,13 +45,17 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     for (let index = 0; index < cardRects.length; index++) {
       if (clientX < cardRects[index].centerX) return index;
     }
+
     return cardRects.length;
   };
 
   const indicatorXForTargetIndex = (targetIndex: number) => {
     if (cardRects.length === 0) return sourceLeft;
+
     if (targetIndex <= 0) return cardRects[0].left;
+
     if (targetIndex >= cardRects.length) return cardRects[cardRects.length - 1].right;
+
     return (cardRects[targetIndex - 1].right + cardRects[targetIndex].left) / 2;
   };
 
@@ -61,10 +65,12 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     sourceLeft = sourceRect.left;
     ghostSize = { width: sourceRect.width, height: sourceRect.height };
     const parent = sourceElement?.parentElement;
+
     if (parent) {
       const parentRect = parent.getBoundingClientRect();
       chainRect = { top: parentRect.top, height: parentRect.height };
       cardRects = [];
+
       for (const element of parent.children) {
         if (!(element instanceof HTMLElement) || !element.dataset.reorderKey || element.dataset.reorderKey === options.key) continue;
         const rect = element.getBoundingClientRect();
@@ -124,17 +130,21 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
   const handlePointerMove = (event: PointerEvent) => {
     if (event.pointerId !== pointerId || !pointerStart) return
     const position = { x: event.clientX, y: event.clientY }
+
     if (!dragActivated) {
       if (Math.hypot(position.x - pointerStart.x, position.y - pointerStart.y) < REORDER_ACTIVATION_THRESHOLD_PX) return
       activateDrag(position)
+
       return
     }
+
     updatePreview(position)
   }
 
   const finishPointer = (event: PointerEvent, cancelled: boolean) => {
     if (event.pointerId !== pointerId) return
     const position = { x: event.clientX, y: event.clientY }
+
     if (dragActivated) updatePreview(position)
     const order = options.orderedKeys()
     const currentIndex = order.indexOf(options.key)
@@ -142,6 +152,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     const canReorder = !cancelled && dragActivated && cardRects.length > 0
     removePointerListeners()
     clearPreview()
+
     if (currentIndex < 0 || !canReorder || targetIndex === currentIndex) return
     options.onReorder(options.key, targetIndex)
   }

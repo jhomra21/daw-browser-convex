@@ -129,8 +129,10 @@ export const isRecordingTempStorageSupported = (): boolean => (
 const classifyStorageFailure = (cause: unknown): RecordingTempStorageFailure => {
   if (cause instanceof DOMException) {
     if (cause.name === "QuotaExceededError") return "quota-exceeded"
+
     if (cause.name === "NotAllowedError" || cause.name === "SecurityError") return "permission-denied"
   }
+
   return "write-failed"
 }
 
@@ -143,6 +145,7 @@ const encodeText = (value: string): Uint8Array<ArrayBuffer> => {
   const encoded = new TextEncoder().encode(value)
   const bytes = new Uint8Array(new ArrayBuffer(encoded.byteLength))
   bytes.set(encoded)
+
   return bytes
 }
 
@@ -154,6 +157,7 @@ const encodeCreatedAt = (createdAtMs: number): Uint8Array<ArrayBuffer> =>
 
 const parseCreatedAt = (value: string): number | null => {
   const createdAtMs = Number(value)
+
   return Number.isSafeInteger(createdAtMs) && createdAtMs >= 0 ? createdAtMs : null
 }
 
@@ -161,15 +165,18 @@ const encodePlanarBlock = (channels: readonly Float32Array[], frameCount: number
   const bytes = new Uint8Array(new ArrayBuffer(
     BLOCK_HEADER_BYTES + channels.length * frameCount * Float32Array.BYTES_PER_ELEMENT,
   ))
+
   const view = new DataView(bytes.buffer)
   view.setUint32(0, frameCount, true)
   let offset = BLOCK_HEADER_BYTES
+
   for (const channel of channels) {
     for (const sample of channel) {
       view.setFloat32(offset, sample, true)
       offset += Float32Array.BYTES_PER_ELEMENT
     }
   }
+
   return bytes
 }
 
@@ -177,30 +184,40 @@ export const decodePlanarPcmBlocks = (bytes: Uint8Array, channelCount: number): 
   if (!Number.isInteger(channelCount) || channelCount < 1 || channelCount > 32) {
     throw new RecordingTempStorageError("invalid-block", "Recording channel count is invalid.")
   }
+
   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength)
   const blocks: PlanarPcmBlock[] = []
   let offset = 0
+
   while (offset < bytes.byteLength) {
     if (bytes.byteLength - offset < BLOCK_HEADER_BYTES) {
       throw new RecordingTempStorageError("invalid-block", "Recording block header is truncated.")
     }
+
     const frameCount = view.getUint32(offset, true)
     offset += BLOCK_HEADER_BYTES
     const payloadBytes = frameCount * channelCount * Float32Array.BYTES_PER_ELEMENT
+
     if (frameCount === 0 || !Number.isSafeInteger(payloadBytes) || bytes.byteLength - offset < payloadBytes) {
       throw new RecordingTempStorageError("invalid-block", "Recording block payload is invalid.")
     }
+
     const channels: Float32Array[] = []
+
     for (let channelIndex = 0; channelIndex < channelCount; channelIndex += 1) {
       const channel = new Float32Array(frameCount)
+
       for (let frameIndex = 0; frameIndex < frameCount; frameIndex += 1) {
         channel[frameIndex] = view.getFloat32(offset, true)
         offset += Float32Array.BYTES_PER_ELEMENT
       }
+
       channels.push(channel)
     }
+
     blocks.push({ frameCount, channels })
   }
+
   return blocks
 }
 
@@ -219,6 +236,7 @@ const recordingTempSessionDescriptorSchema = z.object({
 const parseDescriptor = (value: string): RecordingTempSessionDescriptor | null => {
   try {
     const descriptor = recordingTempSessionDescriptorSchema.safeParse(JSON.parse(value))
+
     return descriptor.success ? descriptor.data : null
   } catch {
     return null
@@ -232,12 +250,14 @@ const browserFilesystem: RecordingStorageFilesystem = {
 const browserLockManager: RecordingStorageLockManager = {
   request: (name, options, callback) => {
     const locks = globalThis.navigator?.locks
+
     if (!locks) {
       return Promise.reject(new RecordingTempStorageError(
         "unsupported",
         "Web Locks are required for recording session storage.",
       ))
     }
+
     return locks.request(name, options, async (lock) => (
       await callback(lock ? { name: lock.name, mode: "exclusive" } : undefined)
     ))
@@ -248,13 +268,17 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDi
   getDirectory: async (name, create) => wrapDirectory(await directory.getDirectoryHandle(name, { create })),
   getFile: async (name, create) => {
     const handle = await directory.getFileHandle(name, { create })
+
     return {
       createWritable: async () => {
         const createWritable = handle.createWritable
+
         if (!createWritable) {
           throw new DOMException("Origin-private file writes are unavailable.", "NotSupportedError")
         }
+
         const writable = await createWritable.call(handle)
+
         return {
           write: (data) => writable.write(data),
           close: () => writable.close(),
@@ -274,8 +298,10 @@ const wrapDirectory = (directory: FileSystemDirectoryHandle): RecordingStorageDi
 
 export const createRecordingTempStorage = (options: CreateRecordingTempStorageOptions = {}) => {
   const filesystem = options.filesystem ?? browserFilesystem
+
   const lockManager = options.lockManager
     ?? (options.filesystem === undefined ? browserLockManager : undefined)
+
   const maxBytes = options.maxBytes
   const now = options.now ?? Date.now
   const clock = options.clock ?? (() => performance.now())
@@ -283,6 +309,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
 
   const sessionsDirectory = async () => {
     const root = await filesystem.root()
+
     return root.getDirectory(RECORDING_DIRECTORY, true)
   }
 
@@ -291,6 +318,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     descriptor: RecordingTempSessionDescriptor,
   ) => {
     const writable = await (await directory.getFile(SESSION_METADATA_FILE, true)).createWritable()
+
     try {
       await writable.write(encodeDescriptor(descriptor))
       await writable.close()
@@ -302,6 +330,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
 
   const writeCreatedAt = async (directory: RecordingStorageDirectory, createdAtMs: number) => {
     const writable = await (await directory.getFile(SESSION_CREATED_AT_FILE, true)).createWritable()
+
     try {
       await writable.write(encodeCreatedAt(createdAtMs))
       await writable.close()
@@ -316,26 +345,33 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     let releaseHeldLock: () => void = () => undefined
     let resolveAcquired: () => void = () => undefined
     let rejectAcquired: (error: Error) => void = () => undefined
+
     const acquired = new Promise<void>((resolve, reject) => {
       resolveAcquired = resolve
       rejectAcquired = reject
     })
+
     const held = new Promise<void>((resolve) => {
       releaseHeldLock = resolve
     })
+
     const request = lockManager.request(lockName(sessionId), { mode: "exclusive" }, async (lock) => {
       if (!lock) {
         resolveAcquired()
+
         return
       }
+
       resolveAcquired()
       await held
     })
+
     void request.catch((error) => {
       rejectAcquired(error instanceof Error ? error : new Error("Could not acquire recording session lock."))
     })
     await acquired
     let released = false
+
     return async () => {
       if (released) return
       released = true
@@ -348,9 +384,11 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     if (!isSafeName(input.sessionId)) {
       throw new RecordingTempStorageError("invalid-session", "Recording session ID is invalid.")
     }
+
     if (!Number.isInteger(input.sampleRate) || input.sampleRate < 8000 || input.sampleRate > 384000) {
       throw new RecordingTempStorageError("invalid-session", "Recording sample rate is invalid.")
     }
+
     if (!Number.isInteger(input.channelCount) || input.channelCount < 1 || input.channelCount > 32) {
       throw new RecordingTempStorageError("invalid-session", "Recording channel count is invalid.")
     }
@@ -358,17 +396,20 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     if (ownedSessionIds.has(input.sessionId)) {
       throw new RecordingTempStorageError("session-exists", "Recording session ID already exists.")
     }
+
     ownedSessionIds.add(input.sessionId)
 
     const releaseLock = await acquireSessionLock(input.sessionId).catch((error) => {
       ownedSessionIds.delete(input.sessionId)
       throw storageFailure("Could not acquire recording session lock.", error)
     })
+
     const sessions = await sessionsDirectory().catch((error) => {
       ownedSessionIds.delete(input.sessionId)
       void releaseLock?.().catch(() => undefined)
       throw storageFailure("Could not access recording session storage.", error)
     })
+
     try {
       await sessions.getDirectory(input.sessionId, false)
       ownedSessionIds.delete(input.sessionId)
@@ -384,6 +425,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
 
     let directory: RecordingStorageDirectory
     let writable: RecordingStorageWritable
+
     try {
       directory = await sessions.getDirectory(input.sessionId, true)
       writable = await (await directory.getFile(PCM_FILE, true)).createWritable()
@@ -401,11 +443,13 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     let appendQueue = Promise.resolve()
     const headerWriteMs = { count: 0, total: 0, max: 0 }
     const channelWriteMs = { count: 0, total: 0, max: 0 }
+
     const timedWrite = async (
       bytes: Uint8Array<ArrayBuffer>,
       aggregate: typeof headerWriteMs,
     ) => {
       const startedAt = clock()
+
       try {
         await writable.write(bytes)
       } finally {
@@ -431,9 +475,11 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       })
     } catch (error) {
       await writable.abort().catch(() => undefined)
+
       if (ownedSessionIds.delete(input.sessionId)) {
         await sessions.remove(input.sessionId, true).catch(() => undefined)
       }
+
       await releaseLock?.().catch(() => undefined)
       throw error
     }
@@ -441,9 +487,11 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     const abortAndRemove = async () => {
       state = "aborted"
       await writable.abort().catch(() => undefined)
+
       if (ownedSessionIds.delete(input.sessionId)) {
         await sessions.remove(input.sessionId, true).catch(() => undefined)
       }
+
       await releaseLock?.().catch(() => undefined)
     }
 
@@ -455,17 +503,22 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         if (state !== "open") {
           throw new RecordingTempStorageError("write-failed", "Recording session is no longer writable.")
         }
+
         const blockBytes = BLOCK_HEADER_BYTES + frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT
         const nextByteLength = byteLength + blockBytes
+
         if (!Number.isInteger(frameCount) || frameCount <= 0) {
           throw new RecordingTempStorageError("invalid-block", "Recording block frame count is invalid.")
         }
+
         if (!Number.isSafeInteger(blockBytes) || !Number.isSafeInteger(nextByteLength)) {
           throw new RecordingTempStorageError("write-failed", "Recording byte accounting exceeded the supported filesystem number range.")
         }
+
         if (recordingStorageLimitExceeded(byteLength, blockBytes, maxBytes)) {
           throw new RecordingTempStorageError("capacity-exceeded", "Recording session exceeded its configured test storage bound.")
         }
+
         try {
           const header = new Uint8Array(BLOCK_HEADER_BYTES)
           new DataView(header.buffer).setUint32(0, frameCount, true)
@@ -474,18 +527,22 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         } catch (error) {
           throw storageFailure("Could not write recording audio.", error)
         }
+
         capturedFrames += frameCount
         byteLength = nextByteLength
       }).catch(async (error) => {
         if (state === "open") await abortAndRemove()
         throw error
       })
+
       appendQueue = operation.catch(() => undefined)
+
       return operation
     }
 
     const append = (channels: readonly Float32Array[]): Promise<void> => {
       const frameCount = channels[0]?.length ?? 0
+
       if (
         channels.length !== input.channelCount
         || frameCount === 0
@@ -493,6 +550,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       ) {
         return Promise.reject(new RecordingTempStorageError("invalid-block", "Recording block shape does not match the session."))
       }
+
       return appendEncodedBlock(frameCount, async () => {
         await timedWrite(encodePlanarBlock(channels, frameCount).subarray(BLOCK_HEADER_BYTES), channelWriteMs)
       })
@@ -501,6 +559,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     const appendPlanar = (buffer: ArrayBuffer, frameCount: number): Promise<void> => {
       const sampleBytes = frameCount * input.channelCount * Float32Array.BYTES_PER_ELEMENT
       const requiredBufferBytes = input.channelCount * RECORDER_BLOCK_FRAMES * Float32Array.BYTES_PER_ELEMENT
+
       if (
         !Number.isInteger(frameCount)
         || frameCount <= 0
@@ -510,6 +569,7 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
       ) {
         return Promise.reject(new RecordingTempStorageError("invalid-block", "Recording planar block shape is invalid."))
       }
+
       return appendEncodedBlock(frameCount, async () => {
         for (let channel = 0; channel < input.channelCount; channel += 1) {
           await timedWrite(new Uint8Array(
@@ -523,10 +583,13 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
 
     const finalize = async (): Promise<RecordingTempSessionDescriptor> => {
       await appendQueue
+
       if (finalizedDescriptor) return finalizedDescriptor
+
       if (state === "aborted") {
         throw new RecordingTempStorageError("write-failed", "Aborted recording session cannot be finalized.")
       }
+
       if (state === "open") {
         try {
           await writable.close()
@@ -534,8 +597,10 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
           await abortAndRemove()
           throw storageFailure("Could not finalize recording audio.", error)
         }
+
         state = "finalized"
       }
+
       const descriptor: RecordingTempSessionDescriptor = {
         version: 1,
         sessionId: input.sessionId,
@@ -547,23 +612,29 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         createdAtMs,
         finalizedAtMs: now()
       }
+
       try {
         await writeDescriptor(directory, descriptor)
       } catch (error) {
         if (ownedSessionIds.delete(input.sessionId)) {
           await sessions.remove(input.sessionId, true).catch(() => undefined)
         }
+
         await releaseLock?.().catch(() => undefined)
         throw error
       }
+
       finalizedDescriptor = descriptor
       await releaseLock?.().catch(() => undefined)
+
       return finalizedDescriptor
     }
 
     const abort = async (): Promise<void> => {
       await appendQueue
+
       if (state === "aborted") return
+
       if (state === "finalized") return
       await abortAndRemove()
     }
@@ -579,8 +650,10 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
 
   const open = async (sessionId: string): Promise<RecordingTempSessionDescriptor | null> => {
     if (!isSafeName(sessionId)) return null
+
     try {
       const directory = await (await sessionsDirectory()).getDirectory(sessionId, false)
+
       return parseDescriptor(await (await directory.getFile(SESSION_METADATA_FILE, false)).text())
     } catch {
       return null
@@ -591,11 +664,14 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
     const sessions = await sessionsDirectory()
     const cutoff = now() - STALE_AFTER_MS
     let removed = 0
+
     for await (const entry of sessions.entries()) {
       if (entry.kind !== "directory" || !isSafeName(entry.name)) continue
+
       const removeIfStale = async () => {
         const descriptor = await open(entry.name)
         let staleAtMs = descriptor?.finalizedAtMs ?? descriptor?.createdAtMs ?? null
+
         if (staleAtMs === null) {
           try {
             const directory = await sessions.getDirectory(entry.name, false)
@@ -604,10 +680,12 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
             staleAtMs = null
           }
         }
+
         if (staleAtMs === null || staleAtMs > cutoff) return
         await sessions.remove(entry.name, true)
         removed += 1
       }
+
       if (lockManager) {
         await lockManager.request(lockName(entry.name), { mode: "exclusive", ifAvailable: true }, async (lock) => {
           if (!lock) return
@@ -617,17 +695,21 @@ export const createRecordingTempStorage = (options: CreateRecordingTempStorageOp
         await removeIfStale()
       }
     }
+
     return removed
   }
 
   const remove = async (sessionId: string): Promise<void> => {
     if (!isSafeName(sessionId)) return
     const sessions = await sessionsDirectory()
+
     if (!lockManager) {
       await sessions.remove(sessionId, true)
       ownedSessionIds.delete(sessionId)
+
       return
     }
+
     await lockManager.request(lockName(sessionId), { mode: "exclusive", ifAvailable: true }, async (lock) => {
       if (!lock) return
       await sessions.remove(sessionId, true)

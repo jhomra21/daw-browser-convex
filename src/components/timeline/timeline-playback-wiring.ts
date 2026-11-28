@@ -8,12 +8,15 @@ import { SYNTH_KIND_ID } from "~/lib/processor-edit-semantics";
 import { addInstanceLimit } from "~/lib/desktop/vst-instance-failures";
 
 type CompileEffects = Pick<EffectsPanelExportSnapshot, "awaitInstrumentReadiness" | "snapshotEffectsProjection">;
+
 type InstrumentOverride = { targetId: Track["id"]; instrument: TrackInstrumentParams };
+
 type PlaybackBackendSync = (
   tracks: Track[],
   intent?: TimelineEditIntent,
   instrumentOverride?: InstrumentOverride,
 ) => Promise<void>;
+
 type PreparedSessions = {
   isNativePlaybackPrepared: () => boolean;
   isPortableBrowserPlaybackPrepared: () => boolean;
@@ -28,6 +31,7 @@ export const awaitCompileInstruments = async (
   context?.mark?.("compile-start");
   const readiness = await effects?.awaitInstrumentReadiness(context?.instrumentOverride);
   context?.mark?.("compile-instruments-ready");
+
   return readiness;
 };
 
@@ -46,7 +50,9 @@ export const createSyncPlaybackBackend = (deps: PreparedSessions & {
   if (!deps.isNativePlaybackPrepared() && !deps.isPortableBrowserPlaybackPrepared()) {
     return deps.rebuildPlaybackBackend(tracks, intent ?? deps.captureStructuralPlaybackIntent(), instrumentOverride);
   }
+
   const inserted = intent?.externalProcessor?.processor;
+
   // A browser session cannot host a VST3: it adopts the edit without it, and the device shows the limitation (E6).
   if (inserted && !deps.isNativePlaybackPrepared()) {
     addInstanceLimit(inserted.instanceId, "The browser engine does not host VST3 plug-ins yet.");
@@ -54,6 +60,7 @@ export const createSyncPlaybackBackend = (deps: PreparedSessions & {
       instanceId: inserted.instanceId,
     });
   }
+
   return deps.restartTimelineSchedule(tracks, { ...(intent ?? deps.captureStructuralPlaybackIntent()), instrumentOverride });
 };
 
@@ -70,21 +77,28 @@ export const createInstrumentPlaybackChange = (deps: PreparedSessions & {
 }) => {
   // Serialize graph decisions with live flushes so the newest notification wins.
   let tail = Promise.resolve();
+
   return (targetId: Track["id"], instrument: TrackInstrumentParams | undefined) => {
     const generation = deps.mountedProjectGeneration();
+
     return tail = tail.then(async () => {
       await deps.awaitPlaybackPreparation();
+
       if (generation !== deps.mountedProjectGeneration()) return;
       const previous = deps.preparedInstrument(targetId);
+
       // Equality is safe only at rest: a queued B must not supersede a newer A.
       if (!deps.isStructuralRebuildInProgress() && !deps.isPreparingPlayback()) {
         if (JSON.stringify(previous) === JSON.stringify(instrument)) return;
       }
+
       if (!deps.isPlaying() && !deps.isNativePlaybackPrepared() && !deps.isPortableBrowserPlaybackPrepared()
         && !deps.isStructuralRebuildInProgress()
         && !deps.isPreparingPlayback()) return;
+
       // A prepared browser session, playing or paused, adopts an instrument edit or replacement through the hook's follow.
       if (deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) return;
+
       // A playing native session carries an edit to the same instrument as a published configuration: the schedule
       // follow adopts it, so there is no graph to rebuild.
       if (deps.isPlaying() && previous && instrument && previous.kind === instrument.kind
@@ -103,20 +117,28 @@ export const createApplyPortableProcessor = (deps: PreparedSessions & {
   renderTracks: () => Track[];
 }) => async (edit: LiveProcessorEditIdentity) => {
   const control = deps.liveProcessorControl();
+
   if (!control) return undefined;
+
   const result = await control.flush({
     instanceId: edit.target.instanceId,
     values: Object.entries(edit.content.values ?? {}).map(([parameterId, value]) => ({ parameterId, value })),
     edit,
   });
+
   if (result.accepted) return "applied";
+
   if (result.reason === "cancelled" || result.reason === "stale") return "superseded";
+
   if (result.reason === "unavailable" || result.reason === "unprepared") return "dropped";
+
   if (result.reason !== "unsupported") throw new Error(result.error ?? "The portable processor update failed.");
+
   // A prepared browser session takes what it cannot take live through the schedule follow, which adopts it at a seam;
   // a Synth edit is carried by the release announce.
   if ((deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) || edit.target.kindId === SYNTH_KIND_ID) return undefined;
   await deps.syncPlaybackBackend(deps.renderTracks());
+
   return "applied";
 };
 
@@ -128,6 +150,7 @@ export const createMixedReorderCommitted = (deps: PreparedSessions & {
 }) => (playbackIntent: TimelineEditIntent | undefined) => {
   // A prepared browser session adopts the new effect order through the hook's follow.
   if (deps.isPortableBrowserPlaybackPrepared() && !deps.isNativePlaybackPrepared()) return;
+
   if (!deps.isPlaying() && !deps.isNativePlaybackPrepared()) return;
   void deps.syncPlaybackBackend(deps.renderTracks(), playbackIntent ?? deps.captureStructuralPlaybackIntent()).catch((cause: unknown) => {
     console.error("[Timeline] failed to apply an effect reorder to native playback", cause);

@@ -10,24 +10,29 @@ import {
 import { modulationWorklet } from '../worklet-manifest'
 
 type Kind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
+
 type ModulationState = ReturnType<typeof createDefaultChorusParams>
   | ReturnType<typeof createDefaultFlangerParams>
   | ReturnType<typeof createDefaultPhaserParams>
   | ReturnType<typeof createDefaultTremoloParams>
   | ReturnType<typeof createDefaultAutoPanParams>
   | ReturnType<typeof createDefaultEnsembleParams>
+
 type Port = {
   onmessage: ((event: { data: ModulationMessage }) => void) | null
   messages: ModulationMessage[]
   postMessage: (message: ModulationMessage) => void
   close: () => void
 }
+
 type Processor = {
   port: Port
   phase: number
   process: (inputs: Float32Array[][], outputs: Float32Array[][]) => boolean
 }
+
 type ProcessorConstructor = new (options: { processorOptions: { processorKind: Kind } }) => Processor
+
 type ModulationMessage =
   | { type: 'configure'; version: number; revision: number; processorKind: Kind; state: ModulationState }
   | { type: 'reset'; version: number }
@@ -41,11 +46,13 @@ const defaults = {
   autopan: createDefaultAutoPanParams,
   ensemble: createDefaultEnsembleParams,
 }
+
 const kinds: Kind[] = ['chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble']
 
 const loadProcessor = async (sampleRate: number, kind: Kind) => {
   const source = await Bun.file(new URL(`../../../../public/${modulationWorklet.modulePath}`, import.meta.url)).text()
   const registered = new Map<string, ProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: Port = {
       onmessage: null,
@@ -54,15 +61,18 @@ const loadProcessor = async (sampleRate: number, kind: Kind) => {
       close: () => {},
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: ProcessorConstructor) => registered.set(name, processor),
     sampleRate,
   )
   const Constructor = registered.get(modulationWorklet.processorName)
+
   if (!Constructor) throw new Error('Modulation processor did not register.')
   const processor = new Constructor({ processorOptions: { processorKind: kind } })
   processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, processorKind: kind, state: defaults[kind]() } })
+
   return processor
 }
 
@@ -73,6 +83,7 @@ const render = async (sampleRate: number, kind: Kind, state: ModulationState, fr
   const right = stereo ? Float32Array.from(left, (value) => -0.5 * value) : undefined
   const output = [new Float32Array(frames), new Float32Array(frames)]
   processor.process([[left, ...(right ? [right] : [])]], [output])
+
   return { processor, input: [left, right ?? left], output }
 }
 
@@ -107,6 +118,7 @@ describe('modulation static worklet', () => {
 
   test('cubic circular delays place integer extrema within one frame', async () => {
     const delayKinds: Kind[] = ['chorus', 'flanger', 'ensemble']
+
     for (const kind of delayKinds) {
       const base = defaults[kind]()
       const delayMs = kind === 'flanger' ? 2 : 20

@@ -34,8 +34,10 @@ export type MasterSidebarModel = {
 };
 
 const MASTER_ROW_HEIGHT = Math.round(LANE_HEIGHT / 2);
+
 export const masterRowHeight = (collapsed: boolean) =>
   collapsed ? MASTER_ROW_HEIGHT : LANE_HEIGHT;
+
 export const masterAreaHeight = (
   collapsed: boolean,
   automationVisible: boolean,
@@ -65,56 +67,72 @@ type MasterSidebarRowProps = {
 const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
   const master = () => props.master;
   const committedVolume = () => normalizeMasterVolume(master().volume);
+
   const displayMasterVolume = () =>
     props.automation.evaluatedValuesByTargetKey.get(
       automationTargetKey({ kind: "master" }, "volume"),
     ) ??
     committedVolume();
+
   const previewVolume = (volume: number) => {
     if (!master().canEditVolume) return;
     const nextVolume = normalizeMasterVolume(volume);
     master().onVolumePreview(nextVolume);
   };
+
   const commitVolume = (volume: number, previousVolume: number) => {
     if (!master().canEditVolume) return;
+
     if (volume === previousVolume || volume === committedVolume()) return;
     master().onVolumeChange(volume);
   };
+
   const cancelVolume = () => {
     master().onVolumePreview(committedVolume());
   };
+
   const toggleAutomationVisibility = () => {
     if (master().collapsed) {
       master().onToggleCollapsed();
+
       if (!props.automation.visible) props.automation.onToggleVisibility();
+
       return;
     }
+
     props.automation.onToggleVisibility();
   };
+
   const automationHeight = () => props.automation.heightPx;
   const baseRowHeight = () => masterRowHeight(master().collapsed);
+
   const rowHeight = () =>
     masterAreaHeight(
       master().collapsed,
       props.automation.visible,
       automationHeight(),
     );
+
   const volumeAutomated = () =>
     props.automation.automatedTargetKeys.has(
       automationTargetKey({ kind: "master" }, "volume"),
     );
+
   const volumeEnvelope = createMemo(() =>
     props.automation.selected.parameterId === "volume" &&
     props.automation.selected.effectInstanceId === undefined
       ? props.automation.selectedEnvelope
       : undefined,
   );
+
   const volumeRange = () =>
     volumeEnvelope()
       ? automationEnvelopeValueRange(volumeEnvelope(), { min: 0, max: 2 })
       : undefined;
+
   let automationResizeStartY = 0;
   let automationResizeStartHeight = 0;
+
   const automationResize = useDrag({
     onDragStart: (pos) => {
       automationResizeStartY = pos.y;
@@ -126,6 +144,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
       );
     },
   });
+
   const startAutomationResize = (event: PointerEvent) => {
     event.stopPropagation();
     automationResize.onPointerDown(event);
@@ -308,6 +327,7 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
               {(() => {
                 const left = Math.max(0, Math.min(1, props.levels.left));
                 const right = Math.max(0, Math.min(1, props.levels.right));
+
                 return (
                   <>
                     <div class="relative h-full w-1 overflow-hidden bg-black/75">

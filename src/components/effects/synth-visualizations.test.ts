@@ -28,6 +28,7 @@ describe('synth visualizations', () => {
       path.matchAll(/[ML](\d+\.\d+),(\d+\.\d+)/g),
       (match) => [Number(match[1]), Number(match[2])],
     )
+
     for (const envelope of [
       { attackSec: 0, decaySec: 0, sustain: 0, releaseSec: 0 },
       { attackSec: 60, decaySec: 60, sustain: 1, releaseSec: 60 },

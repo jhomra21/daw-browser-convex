@@ -9,7 +9,9 @@ import { createOptimisticTrack } from "~/lib/tracks";
 import type { Track } from "@daw-browser/timeline-core/types";
 
 type ClipMove = { clipId: string; trackId: Track["id"]; startSec: number };
+
 type ConvexClient = typeof convexClient;
+
 type ConvexApi = typeof convexApi;
 
 type Input = {
@@ -34,13 +36,17 @@ export const createClipDragPersistence = (input: Input) => {
     if (isLocalId("project", scope.projectId)) {
       await createLocalTimelineRepository(scope.projectId).deleteTrack(trackId);
       input.removeLocalTrack(trackId);
+
       return;
     }
+
     if (!scope.userId) return;
+
     const result = await input.convexClient.mutation(
       input.convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId }),
     );
+
     if (result?.status === "deleted") input.removeLocalTrack(trackId);
   };
 
@@ -51,18 +57,25 @@ export const createClipDragPersistence = (input: Input) => {
     const userId = input.userId();
     const index = input.placementTrackCount();
     const color = input.defaultTrackColor?.();
+
     if (isLocalId("project", projectId)) {
       const repository = createLocalTimelineRepository(projectId);
       const row = await repository.createTrack({ index, kind, color });
+
       if (!isCurrent()) {
         await repository.deleteTrack(row.id).catch(() => null);
+
         return null;
       }
+
       const track = toLocalTimelineTrack(row);
       input.insertLocalTrack(track, index);
+
       return track.id;
     }
+
     let inserted = false;
+
     const track = await createOptimisticTrack({
       projectId,
       insertLocalTrack: (track, trackIndex) => {
@@ -78,13 +91,16 @@ export const createClipDragPersistence = (input: Input) => {
       kind,
       color,
     });
+
     if (track && !inserted) {
       await input.convexClient.mutation(
         input.convexApi.tracks.remove,
         buildTrackDeleteMutationInput({ trackId: track.id }),
       ).catch(() => null);
+
       return null;
     }
+
     return track?.id ?? null;
   };
 
@@ -101,6 +117,7 @@ export const createClipDragPersistence = (input: Input) => {
         toTrackId: move.trackId,
       }),
     );
+
     return result?.status === "applied";
   };
 

@@ -10,8 +10,10 @@ export function createSynthWavePath(wave: SynthWave, width: number, height: numb
   const middle = height / 2
   const amplitude = (height - padding * 2) / 2
   const points: Array<[number, number]> = []
+
   for (let index = 0; index <= steps; index += 1) {
     const phase = index / steps
+
     const value = wave === 'sine'
       ? Math.sin(phase * Math.PI * 2)
       : wave === 'square'
@@ -19,11 +21,13 @@ export function createSynthWavePath(wave: SynthWave, width: number, height: numb
         : wave === 'sawtooth'
           ? phase * 2 - 1
           : 1 - 4 * Math.abs(phase - 0.5)
+
     points.push([
       padding + phase * (width - padding * 2),
       middle - value * amplitude,
     ])
   }
+
   return pathFromPoints(points)
 }
 
@@ -37,6 +41,7 @@ export function createSynthEnvelopePath(
   const total = Math.max(0.001, envelope.attackSec + envelope.decaySec + holdSec + envelope.releaseSec)
   const x = (time: number) => padding + time / total * (width - padding * 2)
   const y = (level: number) => padding + (1 - clamp(level, 0, 1)) * (height - padding * 2)
+
   return pathFromPoints([
     [x(0), y(0)],
     [x(envelope.attackSec), y(1)],
@@ -60,6 +65,7 @@ function filterMagnitude(
   const a0 = 1 + alpha
   const a1 = -2 * cosine
   const a2 = 1 - alpha
+
   const coefficients = mode === 'lowpass'
     ? [(1 - cosine) / 2, 1 - cosine, (1 - cosine) / 2]
     : mode === 'highpass'
@@ -67,16 +73,19 @@ function filterMagnitude(
       : mode === 'bandpass'
         ? [sine / 2, 0, -sine / 2]
         : [1, -2 * cosine, 1]
+
   const numerator = coefficients[0] ** 2
     + coefficients[1] ** 2
     + coefficients[2] ** 2
     + 2 * (coefficients[0] * coefficients[1] + coefficients[1] * coefficients[2]) * Math.cos(omega)
     + 2 * coefficients[0] * coefficients[2] * Math.cos(2 * omega)
+
   const denominator = a0 ** 2
     + a1 ** 2
     + a2 ** 2
     + 2 * (a0 * a1 + a1 * a2) * Math.cos(omega)
     + 2 * a0 * a2 * Math.cos(2 * omega)
+
   return Math.sqrt(Math.max(0, numerator) / Math.max(1e-12, denominator))
 }
 
@@ -94,6 +103,7 @@ export function createSynthFilterResponsePath(
   const logMin = Math.log(20)
   const logMax = Math.log(20_000)
   const points: Array<[number, number]> = []
+
   for (let index = 0; index <= steps; index += 1) {
     const fraction = index / steps
     const sampleFrequencyHz = Math.exp(logMin + (logMax - logMin) * fraction)
@@ -102,5 +112,6 @@ export function createSynthFilterResponsePath(
     const y = padding + (clamp(magnitudeDb, -48, 18) - 18) / -66 * (height - padding * 2)
     points.push([x, y])
   }
+
   return pathFromPoints(points)
 }

@@ -23,17 +23,20 @@ import type { EffectParamsCommitPayload } from '~/lib/undo/types'
 import { encodeNativeBuiltInStateCommit, mapNativeBuiltInParameterCommit } from './native-built-in-parameter-mapper'
 
 type StateEnvelope<State> = { version: 1; state: State }
+
 const envelope = <State>(state: State): StateEnvelope<State> => ({ version: 1, state })
 
 test('clamps live synth cutoff and resonance to native parameter ranges', () => {
   const params = createDefaultSynthParams()
   const from = { kind: 'synth', instanceId: 'synth-1', params } satisfies EffectParamsCommitPayload<'instrument'>['from']
+
   const payload = {
     targetId: 'track-1',
     effect: 'instrument',
     from,
     to: { ...from, params: { ...params, filter: { ...params.filter, frequencyHz: 0, q: 0 } } },
   } satisfies EffectParamsCommitPayload<'instrument'>
+
   expect(mapNativeBuiltInParameterCommit(payload, 120)?.values).toEqual([
     { parameterId: 'synth.filterCutoffHz', value: 20 },
     { parameterId: 'synth.filterResonance', value: 0.0001 },
@@ -43,8 +46,10 @@ test('clamps live synth cutoff and resonance to native parameter ranges', () => 
 test('maps a non-live synth edit to no live values and a changed instance or kind to nothing', () => {
   const params = createDefaultSynthParams()
   const from = { kind: 'synth', instanceId: 'synth-1', params } satisfies EffectParamsCommitPayload<'instrument'>['from']
+
   const edit = (to: EffectParamsCommitPayload<'instrument'>['to']) =>
     mapNativeBuiltInParameterCommit({ targetId: 'track-1', effect: 'instrument', from, to }, 120)?.values
+
   expect(edit({ ...from, params: { ...params, polyphony: 4 } })).toEqual([])
   expect(edit({ ...from, params: { ...params, retrigger: !params.retrigger } })).toEqual([])
   expect(edit({ ...from, params: { ...params, filter: { ...params.filter, mode: 'highpass' } } })).toEqual([])
@@ -53,12 +58,14 @@ test('maps a non-live synth edit to no live values and a changed instance or kin
 
 test('maps changed nested built-in values and filters unchanged fields', () => {
   const from = envelope(createDefaultAutoFilterParams())
+
   const to = envelope({
     ...from.state,
     frequencyHz: 2200,
     envelope: { ...from.state.envelope, attackMs: 25 },
     lfo: { ...from.state.lfo, stereoPhase: 0.25 },
   })
+
   const payload = {
     targetId: 'track-1',
     effect: 'autofilter',
@@ -66,6 +73,7 @@ test('maps changed nested built-in values and filters unchanged fields', () => {
     from,
     to,
   } satisfies EffectParamsCommitPayload<'autofilter'>
+
   expect(mapNativeBuiltInParameterCommit(payload, 120)).toEqual({
     instanceId: 'fx-1',
     values: [
@@ -93,6 +101,7 @@ test('maps every continuous target for every live built-in family', () => {
   const compressorFrom = createDefaultCompressorParams()
   const limiterFrom = createDefaultLimiterParams()
   const spectralFrom = createDefaultSpectralParams()
+
   const cases = [
     {
       name: 'utility',
@@ -307,6 +316,7 @@ test('rejects every structural change atomically across live built-in families',
   const compressor = createDefaultCompressorParams()
   const limiter = createDefaultLimiterParams()
   const spectral = createDefaultSpectralParams()
+
   const structuralCases = [
     {
       targetId: 'track-1', effect: 'utility', instanceId: 'utility-1',
@@ -373,12 +383,14 @@ test('rejects every structural change atomically across live built-in families',
       from: envelope(spectral), to: envelope({ ...spectral, fftSize: spectral.fftSize === 512 ? 1024 : 512, freeze: spectral.freeze + 0.1 }),
     } satisfies EffectParamsCommitPayload<'spectral'>,
   ]
+
   for (const payload of structuralCases) expect(mapNativeBuiltInParameterCommit(payload, 120)).toBeUndefined()
 })
 
 test('encodes a complete built-in state for same-core patching', () => {
   const from = envelope(createDefaultUtilityParams())
   const to = envelope({ ...from.state, polarity: 'invert', dcBlock: true } satisfies typeof from.state)
+
   const payload = {
     targetId: 'track-1',
     effect: 'utility',
@@ -386,6 +398,7 @@ test('encodes a complete built-in state for same-core patching', () => {
     from,
     to,
   } satisfies EffectParamsCommitPayload<'utility'>
+
   const result = encodeNativeBuiltInStateCommit(payload, 120)
   expect(result?.instanceId).toBe('fx-1')
   expect(result?.state.byteLength).toBe(40)
@@ -395,6 +408,7 @@ test('encodes a complete built-in state for same-core patching', () => {
 
 test('maps booleans and master effects', () => {
   const utility = createDefaultUtilityParams()
+
   const payload = {
     targetId: 'master',
     effect: 'master-utility',
@@ -402,12 +416,14 @@ test('maps booleans and master effects', () => {
     from: envelope(structuredClone(utility)),
     to: envelope({ ...structuredClone(utility), width: 0.5 }),
   } satisfies EffectParamsCommitPayload<'master-utility'>
+
   expect(mapNativeBuiltInParameterCommit(payload, 120)).toEqual({
     instanceId: 'master-fx',
     values: [{ parameterId: 'utility.width', value: 0.5 }],
   })
 
   const spectral = createDefaultSpectralParams()
+
   const spectralPayload = {
     targetId: 'master',
     effect: 'master-spectral',
@@ -415,6 +431,7 @@ test('maps booleans and master effects', () => {
     from: envelope(spectral),
     to: envelope({ ...spectral, freeze: 1 }),
   } satisfies EffectParamsCommitPayload<'master-spectral'>
+
   expect(mapNativeBuiltInParameterCommit(spectralPayload, 120)?.values).toEqual([
     { parameterId: 'spectral.freeze', value: 1 },
   ])
@@ -422,12 +439,14 @@ test('maps booleans and master effects', () => {
 
 test('rejects missing instances and mixed or unsupported changes', () => {
   const utility = createDefaultUtilityParams()
+
   const missingInstance = {
     targetId: 'track-1',
     effect: 'utility',
     from: envelope(utility),
     to: envelope({ ...utility, pan: 0.2 }),
   } satisfies EffectParamsCommitPayload<'utility'>
+
   expect(mapNativeBuiltInParameterCommit(missingInstance, 120)).toBeUndefined()
 
   const mixed = {
@@ -435,9 +454,11 @@ test('rejects missing instances and mixed or unsupported changes', () => {
     instanceId: 'fx-1',
     to: envelope({ ...utility, pan: 0.2, polarity: 'invert' }),
   } satisfies EffectParamsCommitPayload<'utility'>
+
   expect(mapNativeBuiltInParameterCommit(mixed, 120)).toBeUndefined()
 
   const compressor = createDefaultCompressorParams()
+
   const unsupported = {
     targetId: 'track-1',
     effect: 'compressor',
@@ -445,6 +466,7 @@ test('rejects missing instances and mixed or unsupported changes', () => {
     from: compressor,
     to: { ...compressor, thresholdDb: -12 },
   } satisfies EffectParamsCommitPayload<'compressor'>
+
   expect(mapNativeBuiltInParameterCommit(unsupported, 120)?.values).toEqual([
     { parameterId: 'compressor.thresholdDb', value: -12 },
   ])
@@ -453,6 +475,7 @@ test('rejects missing instances and mixed or unsupported changes', () => {
 test('resolves sync delay time using BPM and maps other supported delay fields', () => {
   const from = createDefaultDelayParams()
   const to: typeof from = { ...from, mode: 'sync', syncDivision: '1/4', feedback: 0.75 }
+
   const payload = {
     targetId: 'track-1',
     effect: 'delay',
@@ -460,6 +483,7 @@ test('resolves sync delay time using BPM and maps other supported delay fields',
     from,
     to,
   } satisfies EffectParamsCommitPayload<'delay'>
+
   expect(mapNativeBuiltInParameterCommit(payload, 100)).toEqual({
     instanceId: 'delay-1',
     values: [
@@ -471,6 +495,7 @@ test('resolves sync delay time using BPM and maps other supported delay fields',
 
 test('maps LoFi and Reverb targets while rejecting state-only fields', () => {
   const loFi = createDefaultLoFiParams()
+
   const loFiPayload = {
     targetId: 'track-1',
     effect: 'lofi',
@@ -478,12 +503,14 @@ test('maps LoFi and Reverb targets while rejecting state-only fields', () => {
     from: envelope(loFi),
     to: envelope({ ...loFi, jitter: 0.2, mix: 0.4 }),
   } satisfies EffectParamsCommitPayload<'lofi'>
+
   expect(mapNativeBuiltInParameterCommit(loFiPayload, 120)?.values).toEqual([
     { parameterId: 'lofi.jitter', value: 0.2 },
     { parameterId: 'lofi.mix', value: 0.4 },
   ])
 
   const reverb = createDefaultReverbParams()
+
   const reverbPayload = {
     targetId: 'track-1',
     effect: 'reverb',
@@ -491,6 +518,7 @@ test('maps LoFi and Reverb targets while rejecting state-only fields', () => {
     from: reverb,
     to: { ...reverb, decaySec: reverb.decaySec + 1, wet: 0.3 },
   } satisfies EffectParamsCommitPayload<'reverb'>
+
   expect(mapNativeBuiltInParameterCommit(reverbPayload, 120)?.values).toEqual([
     { parameterId: 'reverb.wet', value: 0.3 },
     { parameterId: 'reverb.decaySec', value: 3.2 },
@@ -499,12 +527,14 @@ test('maps LoFi and Reverb targets while rejecting state-only fields', () => {
 
 test('maps track and master EQ continuous band controls with stable band IDs', () => {
   const from = createDefaultEqParams()
+
   const to = {
     ...structuredClone(from),
     bands: from.bands.map((band, index) => index === 2
       ? { ...band, frequency: 1800, gainDb: 4, q: 1.5 }
       : structuredClone(band)),
   }
+
   const trackPayload = {
     targetId: 'track-1',
     effect: 'eq',
@@ -512,6 +542,7 @@ test('maps track and master EQ continuous band controls with stable band IDs', (
     from: structuredClone(from),
     to,
   } satisfies EffectParamsCommitPayload<'eq'>
+
   expect(mapNativeBuiltInParameterCommit(trackPayload, 120)).toEqual({
     instanceId: 'eq-1',
     values: [
@@ -528,6 +559,7 @@ test('maps track and master EQ continuous band controls with stable band IDs', (
     from: structuredClone(from),
     to: { ...structuredClone(from), bands: from.bands.map((band, index) => index === 7 ? { ...band, gainDb: -3 } : structuredClone(band)) },
   } satisfies EffectParamsCommitPayload<'master-eq'>
+
   expect(mapNativeBuiltInParameterCommit(masterPayload, 120)).toEqual({
     instanceId: 'master-eq-1',
     values: [{ parameterId: 'eq.b8.gainDb', value: -3 }],
@@ -536,6 +568,7 @@ test('maps track and master EQ continuous band controls with stable band IDs', (
 
 test('rejects unsupported EQ structural and mode changes atomically', () => {
   const from = createDefaultEqParams()
+
   const cases = [
     { ...structuredClone(from), enabled: false, bands: from.bands.map((band, index) => index === 0 ? { ...band, frequency: band.frequency + 100 } : structuredClone(band)) },
     { ...structuredClone(from), enabled: false },
@@ -545,6 +578,7 @@ test('rejects unsupported EQ structural and mode changes atomically', () => {
     { ...structuredClone(from), bands: [...structuredClone(from.bands)].reverse() },
     { ...structuredClone(from), bands: from.bands.slice(0, 7).map((band) => structuredClone(band)) },
   ]
+
   for (const to of cases) {
     const payload = {
       targetId: 'track-1',
@@ -553,12 +587,14 @@ test('rejects unsupported EQ structural and mode changes atomically', () => {
       from: structuredClone(from),
       to,
     } satisfies EffectParamsCommitPayload<'eq'>
+
     expect(mapNativeBuiltInParameterCommit(payload, 120)).toBeUndefined()
   }
 })
 
 test('maps all default EQ bands to stable frequency, gain, and Q targets', () => {
   const from = createDefaultEqParams()
+
   const to = {
     ...structuredClone(from),
     bands: from.bands.map((band, index) => ({
@@ -568,6 +604,7 @@ test('maps all default EQ bands to stable frequency, gain, and Q targets', () =>
       q: band.q + (index + 1) / 10,
     })),
   }
+
   const payload = {
     targetId: 'track-1',
     effect: 'eq',
@@ -575,10 +612,13 @@ test('maps all default EQ bands to stable frequency, gain, and Q targets', () =>
     from: structuredClone(from),
     to,
   } satisfies EffectParamsCommitPayload<'eq'>
+
   expect(mapNativeBuiltInParameterCommit(payload, 120)?.values).toEqual(
     from.bands.flatMap((band, index) => {
       const nextBand = to.bands[index]
+
       if (!nextBand) throw new Error(`Missing mapped EQ band ${index}.`)
+
       return [
         { parameterId: `eq.${band.id}.frequencyHz`, value: nextBand.frequency },
         { parameterId: `eq.${band.id}.gainDb`, value: nextBand.gainDb },
@@ -593,6 +633,7 @@ test('maps all default EQ bands to stable frequency, gain, and Q targets', () =>
       ? { ...band, gainDb: band.gainDb + 2 }
       : structuredClone(band)),
   }
+
   const masterPayload = {
     targetId: 'master',
     effect: 'master-eq',
@@ -600,7 +641,9 @@ test('maps all default EQ bands to stable frequency, gain, and Q targets', () =>
     from: structuredClone(from),
     to: masterTo,
   } satisfies EffectParamsCommitPayload<'master-eq'>
+
   const firstBand = masterTo.bands[0]
+
   if (!firstBand) throw new Error('Missing master EQ band.')
   expect(mapNativeBuiltInParameterCommit(masterPayload, 120)?.values).toEqual(
     [{ parameterId: `eq.${firstBand.id}.gainDb`, value: firstBand.gainDb }],

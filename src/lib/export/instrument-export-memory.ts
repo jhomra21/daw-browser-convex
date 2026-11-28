@@ -32,6 +32,7 @@ export const nativeInstrumentExportMemory: InstrumentExportMemoryPolicy = {
   leaseRegions: true,
   admit: (budget, jobs) => {
     if (!budget) throw new Error('Native export sample memory accounting is unavailable. Restart desktop audio and retry.')
+
     try {
       budget.lease(jobs.flatMap((job) => job.existing ? [{
         key: job.key, buffer: job.existing.buffer, bytes: job.bytes,
@@ -39,9 +40,11 @@ export const nativeInstrumentExportMemory: InstrumentExportMemoryPolicy = {
       // Separate child-host mappings from physical renderer PCM. Offline does
       // not lock memory; conservatively charge the same 16 KiB mapping pages.
       budget.set('native-export-page-staging', 2 * 1024 ** 2, () => undefined)
+
       for (const job of jobs) {
         budget.set(`native-export-mapping:${job.key}`, Math.ceil(job.bytes / 16_384) * 16_384, () => undefined)
       }
+
       budget.ensureCapacityFor(new Map(jobs.filter((job) => !job.existing).map((job) => [job.key, job.bytes])))
     } catch {
       throw new Error('Not enough sample memory to export. Shorten sample regions or remove unused samples, then retry. No export was completed.')

@@ -16,6 +16,7 @@ test('forwards a parsed restore-chain payload without transport-only fields', ()
       }],
     },
   })
+
   if (!operation || operation.kind !== 'effects.restoreChain') {
     throw new Error('Expected restore-chain operation to parse')
   }
@@ -55,6 +56,7 @@ test('forwards name and collapsed state when creating a track', () => {
       operationId: 'create-1',
     },
   })
+
   if (!operation || operation.kind !== 'tracks.create') {
     throw new Error('Expected track-create operation to parse')
   }
@@ -84,6 +86,7 @@ test('forwards a parsed fade operation to the clips.setFades mutation', () => {
       },
     },
   })
+
   if (!operation || operation.kind !== 'clips.setFades') {
     throw new Error('Expected clip-fades operation to parse')
   }
@@ -114,6 +117,7 @@ test('forwards a parsed durable MIDI operation to the server mutation', () => {
       midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 60 }] },
     },
   })
+
   if (!operation || operation.kind !== 'clips.setMidi') throw new Error('Expected MIDI operation to parse')
   expect(buildClipMidiMutationArgs('project-1', operation.payload)).toEqual({
     projectId: 'project-1',

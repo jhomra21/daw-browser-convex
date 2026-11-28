@@ -40,10 +40,13 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
 
   const retainError = (cause: unknown) => {
     const persistenceError = midiEditorPersistenceErrorSchema.safeParse(cause)
+
     if (persistenceError.success) {
       setError(persistenceError.data)
+
       return
     }
+
     setError({
       error: cause instanceof Error ? cause : new Error('Unable to save MIDI changes.'),
       retryable: true,
@@ -57,16 +60,20 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
   createEffect(() => {
     const projectId = options.projectId()
     const clipId = options.clipId()
+
     if (!projectId || (!isLocalId('project', projectId) && !options.userId())) {
       adapter?.dispose()
       adapter = undefined
+
       return
     }
+
     const current = createMidiEditorPersistence({
       projectId,
       clipId,
       onCommitted: (midi) => {
         setPendingVersion((version) => version + 1)
+
         if (isLocalId('project', projectId) && options.projectId() === projectId && options.clipId() === clipId) {
           options.onLocalMidiSaved?.(clipId, midi)
         }
@@ -74,6 +81,7 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
       onError: retainError,
       onSettled: () => setPendingVersion((version) => version + 1),
     })
+
     adapter?.dispose()
     adapter = current
     onCleanup(current.dispose)
@@ -84,8 +92,10 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
       clearTimeout(saveTimer)
       saveTimer = null
     }
+
     try {
       await adapter?.flush()
+
       if (!adapter?.error()) setError()
       setPendingVersion((version) => version + 1)
     } catch (reason) {
@@ -97,11 +107,14 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
   const saveSoon = (operation: MidiEditorOperation) => {
     if (!canPersist() || !adapter) {
       options.onCannotPersist?.()
+
       return
     }
+
     adapter.enqueue(operation)
     setError()
     setPendingVersion((version) => version + 1)
+
     if (saveTimer) clearTimeout(saveTimer)
     saveTimer = window.setTimeout(() => {
       void flush().catch(() => undefined)
@@ -126,6 +139,7 @@ export function useMidiEditorPersistence(options: MidiEditorPersistenceOptions) 
     reconcile: (midi: NormalizedLegacyMidiClip) => adapter?.reconcile(midi),
     project: (midi: NormalizedLegacyMidiClip) => {
       pendingVersion()
+
       return adapter?.project(midi) ?? midi
     },
   }

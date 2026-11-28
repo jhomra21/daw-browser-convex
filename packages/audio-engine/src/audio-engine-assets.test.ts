@@ -7,6 +7,7 @@ class FxInterceptingAudioEngine extends AudioEngine {
 
   override async setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
     this.calls.push({ trackId, instances })
+
     return 'applied'
   }
 }
@@ -23,6 +24,7 @@ describe('AudioEngine assets', () => {
 
   test('keeps asset registrations generation-safe', () => {
     const engine = new AudioEngine()
+
     const asset: AudioAssetRef = {
       version: audioCoreContractVersion,
       assetId: 'asset:one',
@@ -30,6 +32,7 @@ describe('AudioEngine assets', () => {
       sampleRateHz: 48_000,
       channelCount: 1,
     }
+
     const pcm = { frameCount: 2, planes: [new Float32Array([0, 1])] }
 
     const first = engine.registerAsset(asset, pcm, 1)
@@ -48,6 +51,7 @@ describe('AudioEngine assets', () => {
 
   test('rejects malformed planar PCM without allocating an asset slot', () => {
     const engine = new AudioEngine()
+
     const asset: AudioAssetRef = {
       version: audioCoreContractVersion,
       assetId: 'asset:invalid',

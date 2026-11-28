@@ -31,7 +31,9 @@ class TestAudioBuffer {
 
   getChannelData(channel: number) {
     const data = this.channels[channel]
+
     if (!data) throw new Error('Missing channel')
+
     return data
   }
 }
@@ -55,12 +57,14 @@ const createDirectoryState = (): MemoryDirectoryState => ({
 const copyBytes = (data: Uint8Array): Uint8Array<ArrayBuffer> => {
   const copy = new Uint8Array(new ArrayBuffer(data.byteLength))
   copy.set(data)
+
   return copy
 }
 
 const wrapMemoryFile = (state: MemoryFileState): NativeOfflinePcmSpoolFile => ({
   createWritable: async () => {
     let closed = false
+
     return {
       write: async (data) => {
         if (closed) throw new Error('Memory file is closed')
@@ -78,8 +82,10 @@ const wrapMemoryFile = (state: MemoryFileState): NativeOfflinePcmSpoolFile => ({
       state.readFailures -= 1
       throw new Error('Memory file read failed')
     }
+
     const bytes = state.bytes.subarray(startByte, endByte)
     state.maximumReadBytes = Math.max(state.maximumReadBytes, bytes.byteLength)
+
     return copyBytes(bytes).buffer
   },
 })
@@ -90,32 +96,43 @@ const wrapMemoryDirectory = (
 ): NativeOfflinePcmSpoolDirectory => ({
   getDirectory: async (name, create) => {
     const existing = state.directories.get(name)
+
     if (existing) return wrapMemoryDirectory(existing, failNextRemove)
+
     if (!create) throw new DOMException('Missing directory', 'NotFoundError')
     const created = createDirectoryState()
     state.directories.set(name, created)
+
     return wrapMemoryDirectory(created, failNextRemove)
   },
   getFile: async (name, create) => {
     const existing = state.files.get(name)
+
     if (existing) return wrapMemoryFile(existing)
+
     if (!create) throw new DOMException('Missing file', 'NotFoundError')
+
     const created: MemoryFileState = {
       bytes: new Uint8Array(new ArrayBuffer(0)),
       maximumReadBytes: 0,
       readFailures: 0,
     }
+
     state.files.set(name, created)
+
     return wrapMemoryFile(created)
   },
   remove: async (name) => {
     if (failNextRemove()) throw new Error('Memory directory removal failed')
+
     if (state.directories.delete(name)) return
+
     if (state.files.delete(name)) return
     throw new DOMException('Missing entry', 'NotFoundError')
   },
   entries: async function* () {
     for (const name of state.directories.keys()) yield { name, kind: 'directory' }
+
     for (const name of state.files.keys()) yield { name, kind: 'file' }
   },
 })
@@ -124,10 +141,12 @@ const createMemoryFilesystem = () => {
   const root = createDirectoryState()
   let removeFailures = 0
   const activeLocks = new Set<string>()
+
   const lockManager: NativeOfflinePcmSpoolLockManager = {
     request: async (name, options, callback) => {
       if (options.ifAvailable && activeLocks.has(name)) return await callback(undefined)
       activeLocks.add(name)
+
       try {
         return await callback({ name, mode: 'exclusive' })
       } finally {
@@ -135,13 +154,16 @@ const createMemoryFilesystem = () => {
       }
     },
   }
+
   const filesystem: NativeOfflinePcmSpoolFilesystem = {
     root: async () => wrapMemoryDirectory(root, () => {
       if (removeFailures === 0) return false
       removeFailures -= 1
+
       return true
     }),
   }
+
   return {
     filesystem,
     lockManager,
@@ -176,6 +198,7 @@ const seedSession = (
   })
   memory.root.directories.set('native-export-spools', memory.root.directories.get('native-export-spools') ?? createDirectoryState())
   const spoolDirectory = memory.root.directories.get('native-export-spools')
+
   if (!spoolDirectory) throw new Error('Missing spool directory')
   spoolDirectory.directories.set(sessionId, sessions)
 }
@@ -186,6 +209,7 @@ const seedSessionWithoutMetadata = (
 ) => {
   memory.root.directories.set('native-export-spools', memory.root.directories.get('native-export-spools') ?? createDirectoryState())
   const spoolDirectory = memory.root.directories.get('native-export-spools')
+
   if (!spoolDirectory) throw new Error('Missing spool directory')
   spoolDirectory.directories.set(sessionId, createDirectoryState())
 }
@@ -203,7 +227,9 @@ const chunk = (
 
 const collectReplay = async (source: AsyncIterable<AudioBuffer>) => {
   const output: AudioBuffer[] = []
+
   for await (const buffer of source) output.push(buffer)
+
   return output
 }
 
@@ -212,6 +238,7 @@ describe('native offline PCM spool', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const memory = createMemoryFilesystem()
     const spool = createSpool(memory, { replayFrames: 2 })
+
     const session = await spool.createSession({
       sessionId: 'render-a',
       sampleRate: 48_000,
@@ -237,6 +264,7 @@ describe('native offline PCM spool', () => {
 
   test('never allocates a replay AudioBuffer sized to total logical duration', async () => {
     let maximumLength = 0
+
     class BoundedAudioBuffer extends TestAudioBuffer {
       constructor(options: { numberOfChannels: number; length: number; sampleRate: number }) {
         if (options.length > 2) throw new Error('duration-sized AudioBuffer allocation')
@@ -244,8 +272,10 @@ describe('native offline PCM spool', () => {
         maximumLength = Math.max(maximumLength, options.length)
       }
     }
+
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: BoundedAudioBuffer })
     const memory = createMemoryFilesystem()
+
     const session = await createSpool(memory, { replayFrames: 2 }).createSession({
       sessionId: 'render-b',
       sampleRate: 48_000,
@@ -265,6 +295,7 @@ describe('native offline PCM spool', () => {
   test('partial replay reads only requested bounded byte ranges', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const memory = createMemoryFilesystem()
+
     const session = await createSpool(memory, { replayFrames: 2 }).createSession({
       sessionId: 'render-c',
       sampleRate: 48_000,
@@ -287,6 +318,7 @@ describe('native offline PCM spool', () => {
   test('rejects noncontiguous chunks and removes the abandoned session', async () => {
     const memory = createMemoryFilesystem()
     const spool = createSpool(memory)
+
     const session = await spool.createSession({
       sessionId: 'render-d',
       sampleRate: 48_000,
@@ -303,6 +335,7 @@ describe('native offline PCM spool', () => {
       channelCount: 2,
       totalFrames: 1,
     })
+
     await replacement.append(chunk(0, [0]))
     await replacement.finalize()
   })
@@ -310,6 +343,7 @@ describe('native offline PCM spool', () => {
   test('requires complete output before finalization and cleans the spool', async () => {
     const memory = createMemoryFilesystem()
     const spool = createSpool(memory)
+
     const session = await spool.createSession({
       sessionId: 'render-e',
       sampleRate: 48_000,
@@ -328,12 +362,14 @@ describe('native offline PCM spool', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const memory = createMemoryFilesystem()
     const spool = createSpool(memory, { replayFrames: 2 })
+
     const openSession = await spool.createSession({
       sessionId: 'render-f',
       sampleRate: 48_000,
       channelCount: 2,
       totalFrames: 2,
     })
+
     await openSession.abort()
     const spoolDirectory = memory.root.directories.get('native-export-spools')
     expect(spoolDirectory?.directories.has('render-f')).toBe(false)
@@ -344,6 +380,7 @@ describe('native offline PCM spool', () => {
       channelCount: 2,
       totalFrames: 2,
     })
+
     await finalized.append(chunk(0, [0, 0]))
     await finalized.finalize()
     const controller = new AbortController()
@@ -354,12 +391,14 @@ describe('native offline PCM spool', () => {
 
   test('retains removable state when cleanup fails and allows a later retry', async () => {
     const memory = createMemoryFilesystem()
+
     const session = await createSpool(memory).createSession({
       sessionId: 'render-h',
       sampleRate: 48_000,
       channelCount: 2,
       totalFrames: 1,
     })
+
     await session.append(chunk(0, [0]))
     await session.finalize()
 
@@ -375,13 +414,16 @@ describe('native offline PCM spool', () => {
   test('does not delete an old active foreign session', async () => {
     const memory = createMemoryFilesystem()
     const oldNow = Date.now() - nativeOfflinePcmSpoolRecoveryTtlMs - 1
+
     const active = createSpool(memory, { now: () => oldNow }).createSession({
       sessionId: 'foreign-active',
       sampleRate: 48_000,
       channelCount: 2,
       totalFrames: 1,
     })
+
     const activeSession = await active
+
     const replacement = await createSpool(memory, { now: () => Date.now() }).createSession({
       sessionId: 'replacement',
       sampleRate: 48_000,
@@ -416,6 +458,7 @@ describe('native offline PCM spool', () => {
   test('progresses recovery in bounded batches across export starts', async () => {
     const memory = createMemoryFilesystem()
     const now = 20_000_000
+
     for (const sessionId of ['old-a', 'old-b', 'old-c']) {
       seedSession(memory, sessionId, now - nativeOfflinePcmSpoolRecoveryTtlMs - 1)
     }
@@ -430,6 +473,7 @@ describe('native offline PCM spool', () => {
         channelCount: 2,
         totalFrames: 1,
       })
+
       await session.abort()
     }
 
@@ -442,6 +486,7 @@ describe('native offline PCM spool', () => {
   test('wraps bounded recovery after fresh entries to reach a later stale session', async () => {
     const memory = createMemoryFilesystem()
     const now = 25_000_000
+
     for (let index = 0; index < 8; index += 1) seedSession(memory, `fresh-${index}`, now)
     seedSession(memory, 'stale-ninth', now - nativeOfflinePcmSpoolRecoveryTtlMs - 1)
 
@@ -451,6 +496,7 @@ describe('native offline PCM spool', () => {
       channelCount: 2,
       totalFrames: 1,
     })
+
     await session.abort()
     const directories = memory.root.directories.get('native-export-spools')?.directories
     expect(directories?.has('stale-ninth')).toBe(true)
@@ -473,6 +519,7 @@ describe('native offline PCM spool', () => {
     seedSession(memory, 'unreadable', now)
     const spoolDirectory = memory.root.directories.get('native-export-spools')
     const unreadableMetadata = spoolDirectory?.directories.get('unreadable')?.files.get('metadata.json')
+
     if (!unreadableMetadata) throw new Error('Missing seeded metadata')
     unreadableMetadata.readFailures = 1
 
@@ -482,6 +529,7 @@ describe('native offline PCM spool', () => {
       channelCount: 2,
       totalFrames: 1,
     })
+
     await session.abort()
     expect(spoolDirectory?.directories.has('missing')).toBe(false)
     expect(spoolDirectory?.directories.has('malformed')).toBe(false)
@@ -501,6 +549,7 @@ describe('native offline PCM spool', () => {
       channelCount: 2,
       totalFrames: 1,
     })
+
     await session.abort()
     const directories = memory.root.directories.get('native-export-spools')?.directories
     expect(directories?.has('retryable')).toBe(true)
@@ -527,6 +576,7 @@ describe('native offline PCM spool', () => {
 
   test('fails closed when the lock manager is unsupported', async () => {
     const memory = createMemoryFilesystem()
+
     const unsupported: NativeOfflinePcmSpoolLockManager = {
       request: async () => {
         throw new NativeOfflinePcmSpoolError('unsupported', 'Web Locks are unavailable.')
@@ -548,14 +598,17 @@ describe('native offline PCM spool', () => {
 describe('native offline PCM spool replay start', () => {
   const seeded = async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+
     const session = await createSpool(createMemoryFilesystem(), { replayFrames: 2 }).createSession({
       sessionId: 'render-start',
       sampleRate: 48_000,
       channelCount: 2,
       totalFrames: 7,
     })
+
     await session.append(chunk(0, [0, 1, 2, 3, 4, 5, 6], [10, 11, 12, 13, 14, 15, 16]))
     await session.finalize()
+
     return session
   }
 
@@ -577,6 +630,7 @@ describe('native offline PCM spool replay start', () => {
 
   test('rejects a start frame that is negative, fractional, or not before the end frame', async () => {
     const session = await seeded()
+
     for (const options of [{ startFrame: -1 }, { startFrame: 1.5 }, { startFrame: 7 }, { startFrame: 4, endFrame: 4 }]) {
       await expect(collectReplay(session.replay(options))).rejects.toMatchObject({ failure: 'read-failed' })
     }

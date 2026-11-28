@@ -5,10 +5,12 @@ import { acquireLocalEntityWriteQueue } from '~/lib/local-write-queue'
 
 export const useProjectSaveStatus = (input: Accessor<ProjectSaveStatusInput>) => {
   const projectId = createMemo(() => input().projectId)
+
   const localWriteQueue = createMemo(() => {
     if (!isLocalId('project', projectId())) return undefined
     const { queue, release } = acquireLocalEntityWriteQueue(projectId())
     onCleanup(release)
+
     return queue
   })
 
@@ -16,5 +18,6 @@ export const useProjectSaveStatus = (input: Accessor<ProjectSaveStatusInput>) =>
     ...input(),
     localTimelineWriteStatus: localWriteQueue()?.getStatusAccessor()(),
   }))
+
   return status
 }

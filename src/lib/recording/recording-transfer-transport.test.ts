@@ -8,11 +8,13 @@ import type { RecordingMessageEndpoint } from '../../../packages/audio-engine/sr
 import { createRecordingTransferTransport } from './recording-transfer-transport'
 
 type WorkletMessage = Parameters<RecordingMessageEndpoint['postMessage']>[0]
+
 type WorkerMessage = WriterOutboundMessage | { malformed: boolean }
 
 const endpoint = (transferMessages = false) => {
   let handler = (_message: RecorderOutboundMessage | null) => {}
   const messages: WorkletMessage[] = []
+
   return {
     messages,
     postMessage: (message: WorkletMessage, transfer: readonly ArrayBuffer[] = []) => {
@@ -28,6 +30,7 @@ const endpoint = (transferMessages = false) => {
 const workerEndpoint = () => {
   let handler = (_message: WorkerMessage) => {}
   const messages: WriterInboundMessage[] = []
+
   return {
     messages,
     postMessage: (message: WriterInboundMessage, transfer: readonly ArrayBuffer[] = []) => {
@@ -46,6 +49,7 @@ describe('recording transfer transport', () => {
     const worker = workerEndpoint()
     let terminations = 0
     const queuedFrames: number[] = []
+
     const transport = createRecordingTransferTransport({
       generation: 2,
       sessionId: 'take',
@@ -57,6 +61,7 @@ describe('recording transfer transport', () => {
         terminations += 1
       } },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'old' })
     worker.receive({ type: 'ready', generation: 2, sessionId: 'take' })
     await transport.ready
@@ -76,6 +81,7 @@ describe('recording transfer transport', () => {
     const finishing = transport.finalize()
     expect(worklet.messages.at(-1)).toMatchObject({ type: 'finalize' })
     const transferredBlock = worker.messages.at(-1)
+
     if (
       transferredBlock === undefined ||
       !('buffer' in transferredBlock) ||
@@ -104,6 +110,7 @@ describe('recording transfer transport', () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
     let terminations = 0
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -114,6 +121,7 @@ describe('recording transfer transport', () => {
         terminations += 1
       } },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'take' })
     await transport.ready
     const aborting = transport.abort()
@@ -126,6 +134,7 @@ describe('recording transfer transport', () => {
   test('rejects finalize when the writer reports aborted', async () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -134,6 +143,7 @@ describe('recording transfer transport', () => {
       worklet,
       worker: { ...worker, terminate: () => undefined },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'take' })
     await transport.ready
     const finishing = transport.finalize()
@@ -144,6 +154,7 @@ describe('recording transfer transport', () => {
   test('rejects abort when the writer reports finalized', async () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -152,6 +163,7 @@ describe('recording transfer transport', () => {
       worklet,
       worker: { ...worker, terminate: () => undefined },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'take' })
     await transport.ready
     const aborting = transport.abort()
@@ -163,6 +175,7 @@ describe('recording transfer transport', () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
     let terminations = 0
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -173,6 +186,7 @@ describe('recording transfer transport', () => {
         terminations += 1
       } },
     })
+
     worker.receive({ malformed: true })
     await expect(transport.ready).rejects.toThrow('Malformed recording writer message.')
     expect(terminations).toBe(1)
@@ -181,6 +195,7 @@ describe('recording transfer transport', () => {
   test('propagates worklet failure and rejects completion', async () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -189,6 +204,7 @@ describe('recording transfer transport', () => {
       worklet,
       worker: { ...worker, terminate: () => undefined },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'take' })
     await transport.ready
     const finishing = transport.finalize()
@@ -207,6 +223,7 @@ describe('recording transfer transport', () => {
   test('terminate settles startup, capture, and closing promises', async () => {
     const startupWorklet = endpoint()
     const startupWorker = workerEndpoint()
+
     const startup = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'startup',
@@ -215,11 +232,13 @@ describe('recording transfer transport', () => {
       worklet: startupWorklet,
       worker: { ...startupWorker, terminate: () => undefined },
     })
+
     startup.terminate()
     await expect(startup.ready).rejects.toThrow('terminated')
 
     const openWorklet = endpoint()
     const openWorker = workerEndpoint()
+
     const open = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'open',
@@ -228,6 +247,7 @@ describe('recording transfer transport', () => {
       worklet: openWorklet,
       worker: { ...openWorker, terminate: () => undefined },
     })
+
     openWorker.receive({ type: 'ready', generation: 1, sessionId: 'open' })
     await open.ready
     open.terminate()
@@ -235,6 +255,7 @@ describe('recording transfer transport', () => {
 
     const closingWorklet = endpoint()
     const closingWorker = workerEndpoint()
+
     const closing = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'closing',
@@ -243,6 +264,7 @@ describe('recording transfer transport', () => {
       worklet: closingWorklet,
       worker: { ...closingWorker, terminate: () => undefined },
     })
+
     closingWorker.receive({ type: 'ready', generation: 1, sessionId: 'closing' })
     await closing.ready
     const finishing = closing.finalize()
@@ -253,6 +275,7 @@ describe('recording transfer transport', () => {
   test('rejects channel mismatch and blocks after completion', async () => {
     const worklet = endpoint()
     const worker = workerEndpoint()
+
     const transport = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'take',
@@ -261,6 +284,7 @@ describe('recording transfer transport', () => {
       worklet,
       worker: { ...worker, terminate: () => undefined },
     })
+
     worker.receive({ type: 'ready', generation: 1, sessionId: 'take' })
     await transport.ready
     worklet.receive({
@@ -277,6 +301,7 @@ describe('recording transfer transport', () => {
 
     const completeWorklet = endpoint()
     const completeWorker = workerEndpoint()
+
     const complete = createRecordingTransferTransport({
       generation: 1,
       sessionId: 'complete',
@@ -285,6 +310,7 @@ describe('recording transfer transport', () => {
       worklet: completeWorklet,
       worker: { ...completeWorker, terminate: () => undefined },
     })
+
     completeWorker.receive({ type: 'ready', generation: 1, sessionId: 'complete' })
     await complete.ready
     const finishing = complete.finalize()

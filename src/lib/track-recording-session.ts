@@ -15,6 +15,7 @@ const lockResultSchema = z.object({
 
 const readLockResult = (value: JsonValue) => {
   const result = lockResultSchema.safeParse(value)
+
   return result.success ? result.data : undefined
 }
 
@@ -63,16 +64,22 @@ export async function acquireTrackRecordingLock(options: {
       kind: 'tracks.lock',
       payload: { trackId: options.trackId },
     })
+
     const result = readLockResult(res)
+
     if (!result?.ok) {
       options.clearTrackLock(options.trackId)
+
       return { ok: false, reason: result?.reason }
     }
+
     options.setTrackLock(options.trackId, options.locker)
+
     return { ok: true }
   } catch (err) {
     console.error('[useTrackRecording] failed to lock track', err)
     options.clearTrackLock(options.trackId)
+
     return { ok: false, reason: 'Failed to lock track' }
   }
 }
@@ -86,18 +93,24 @@ export async function releaseTrackRecordingLock(options: {
 }): Promise<void> {
   if (!options.locker) {
     options.clearTrackLock(options.trackId)
+
     return
   }
+
   try {
     const response = await publishSharedTimelineOperation(options.projectId, {
       kind: 'tracks.unlock',
       payload: { trackId: options.trackId },
     })
+
     const result = readLockResult(response)
+
     if (!result?.ok) {
       options.clearTrackLock(options.trackId)
+
       return
     }
+
     options.setTrackLock(options.trackId, null)
   } catch (err) {
     console.error('[useTrackRecording] failed to unlock track', err)
@@ -108,6 +121,7 @@ export async function releaseTrackRecordingLock(options: {
 export function clearRecordingLockHeartbeat(lockHeartbeatTimer: number | null): number | null {
   if (lockHeartbeatTimer === null) return null
   window.clearInterval(lockHeartbeatTimer)
+
   return null
 }
 
@@ -124,6 +138,7 @@ export function startRecordingLockHeartbeat(options: {
       payload: { trackId: options.trackId },
     }).then((response) => {
       const result = readLockResult(response)
+
       if (result && !result.ok) options.onLost?.(result.reason)
     }).catch((error) => {
       options.onError?.(error)
@@ -163,9 +178,11 @@ export function haltRecordingPreview(options: {
 }): void {
   if (!options.activeCtx) return
   const ctx = options.activeCtx
+
   try {
     try { ctx.stream?.getTracks().forEach((track) => track.stop()) } catch {}
   } catch {}
+
   options.livePreviewPoints.length = 0
   options.setPreviewPoints(options.livePreviewPoints)
   options.setPreviewStartSec(null)

@@ -10,6 +10,7 @@ export const mergeRecoveryTrackOrderV1 = (
   const order = currentTracks
     .map((track) => ({ ...track, recovered: false }))
     .sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
+
   const recovered = [...recoveredTracks].sort((left, right) => left.index - right.index || left.id.localeCompare(right.id))
 
   for (const track of recovered) {

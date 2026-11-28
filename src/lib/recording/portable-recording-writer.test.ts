@@ -11,6 +11,7 @@ import { createPortableRecordingWriter } from '~/lib/recording/portable-recordin
 test('bridges portable planar blocks into the bounded recording writer protocol', async () => {
   const posted: WriterInboundMessage[] = []
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
+
   const writer = createPortableRecordingWriter({
     generation: 3,
     sessionId: 'take-1',
@@ -43,6 +44,7 @@ test('bridges portable planar blocks into the bounded recording writer protocol'
   const block = posted.find((message) => message.type === 'block')
   expect(block?.frameCount).toBe(2)
   expect(block?.buffer instanceof ArrayBuffer).toBeTrue()
+
   if (!block) throw new Error('Expected a portable recording block.')
   const samples = new Float32Array(block.buffer)
   expect(Array.from(samples.slice(0, 2))).toEqual([0.25, 0.5])
@@ -58,6 +60,7 @@ test('bridges portable planar blocks into the bounded recording writer protocol'
 
 test('fails instead of growing beyond the fixed portable writer queue', async () => {
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
+
   const writer = createPortableRecordingWriter({
     generation: 4,
     sessionId: 'take-2',
@@ -71,8 +74,10 @@ test('fails instead of growing beyond the fixed portable writer queue', async ()
       terminate: () => undefined,
     },
   })
+
   handleMessage({ type: 'ready', generation: 4, sessionId: 'take-2' })
   await writer.ready
+
   const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
     version: 2,
     type: 'recording-capture-block',
@@ -85,9 +90,11 @@ test('fails instead of growing beyond the fixed portable writer queue', async ()
     rms: 0,
     peak: 0,
   }
+
   for (let index = 0; index < RECORDER_MAX_QUEUED_BLOCKS; index += 1) {
     writer.write({ ...block, sequence: index })
   }
+
   expect(() => writer.write({ ...block, sequence: RECORDER_MAX_QUEUED_BLOCKS }))
     .toThrow('Portable recording writer queue exceeded its hard bound.')
   writer.terminate()
@@ -97,6 +104,7 @@ test('reports bounded buffer return latency and oldest outstanding age at overfl
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
   let now = 0
   const samples: { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number }[] = []
+
   const writer = createPortableRecordingWriter({
     generation: 9, sessionId: 'take-timing', sampleRate: 48_000, channelCount: 1,
     now: () => now,
@@ -107,16 +115,20 @@ test('reports bounded buffer return latency and oldest outstanding age at overfl
       terminate: () => undefined,
     },
   })
+
   handleMessage({ type: 'ready', generation: 9, sessionId: 'take-timing' })
   await writer.ready
+
   const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
     version: 2, type: 'recording-capture-block', generation: 9, sessionId: 10, sequence: 0,
     frameCount: 1, channelCount: 1, planes: [Float32Array.of(0)], rms: 0, peak: 0,
   }
+
   for (let index = 0; index < RECORDER_MAX_QUEUED_BLOCKS; index++) {
     writer.write({ ...block, sequence: index })
     now += 10
   }
+
   now = 350
   expect(() => writer.write({ ...block, sequence: 8 })).toThrow()
   expect(samples.at(-1)).toEqual({ returned: 0, latencyMs: 0, outstanding: 8, oldestAgeMs: 350, deliveryMs: 0 })
@@ -127,6 +139,7 @@ test('attributes worker return dispatch independently of writer round trip', asy
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
   let now = 1000
   const samples: { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number }[] = []
+
   const writer = createPortableRecordingWriter({
     generation: 9, sessionId: 'delivery', sampleRate: 48000, channelCount: 1,
     now: () => now,
@@ -137,6 +150,7 @@ test('attributes worker return dispatch independently of writer round trip', asy
       terminate: () => undefined,
     },
   })
+
   handleMessage({ type: 'ready', generation: 9, sessionId: 'delivery' })
   await writer.ready
   writer.write({
@@ -153,6 +167,7 @@ test('attributes worker return dispatch independently of writer round trip', asy
 test('reuses the fixed resident block pool across a long logical sequence', async () => {
   const posted: WriterInboundMessage[] = []
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
+
   const writer = createPortableRecordingWriter({
     generation: 7,
     sessionId: 'take-long',
@@ -166,10 +181,12 @@ test('reuses the fixed resident block pool across a long logical sequence', asyn
       terminate: () => undefined,
     },
   })
+
   handleMessage({ type: 'ready', generation: 7, sessionId: 'take-long' })
   await writer.ready
 
   const residentBuffers = new Set<ArrayBuffer>()
+
   const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
     version: 2,
     type: 'recording-capture-block',
@@ -182,16 +199,21 @@ test('reuses the fixed resident block pool across a long logical sequence', asyn
     rms: 0,
     peak: 0,
   }
+
   const outstanding: Extract<WriterInboundMessage, { type: 'block' }>[] = []
+
   for (let sequence = 0; sequence < RECORDER_MAX_QUEUED_BLOCKS; sequence += 1) {
     writer.write({ ...block, sequence })
     const message = posted.at(-1)
+
     if (!message || message.type !== 'block') throw new Error('Expected a writer block.')
     residentBuffers.add(message.buffer)
     outstanding.push(message)
   }
+
   for (let sequence = RECORDER_MAX_QUEUED_BLOCKS; sequence < 128; sequence += 1) {
     const returned = outstanding.shift()
+
     if (!returned) throw new Error('Expected an outstanding writer block.')
     handleMessage({
       type: 'return',
@@ -202,6 +224,7 @@ test('reuses the fixed resident block pool across a long logical sequence', asyn
     })
     writer.write({ ...block, sequence })
     const message = posted.at(-1)
+
     if (!message || message.type !== 'block') throw new Error('Expected a writer block.')
     residentBuffers.add(message.buffer)
     outstanding.push(message)
@@ -213,6 +236,7 @@ test('reuses the fixed resident block pool across a long logical sequence', asyn
 
 test('terminates when the portable writer never becomes ready', async () => {
   let terminations = 0
+
   const writer = createPortableRecordingWriter({
     generation: 5,
     sessionId: 'take-timeout',
@@ -236,6 +260,7 @@ test('terminates when portable writer abort acknowledgement hangs', async () => 
   const posted: WriterInboundMessage[] = []
   let handleMessage = (_message: WriterOutboundMessage | null) => {}
   let terminations = 0
+
   const writer = createPortableRecordingWriter({
     generation: 6,
     sessionId: 'take-abort-timeout',
@@ -252,6 +277,7 @@ test('terminates when portable writer abort acknowledgement hangs', async () => 
       },
     },
   })
+
   handleMessage({ type: 'ready', generation: 6, sessionId: 'take-abort-timeout' })
   await writer.ready
 

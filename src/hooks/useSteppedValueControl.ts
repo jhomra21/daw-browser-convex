@@ -25,6 +25,7 @@ type UseSteppedValueControlOptions = {
 export function quantizeSteppedValue(value: number, min: number, max: number, step: number) {
   const clamped = Math.max(min, Math.min(max, value))
   const stepped = min + Math.round((clamped - min) / step) * step
+
   return Math.max(min, Math.min(max, Number(stepped.toFixed(6))))
 }
 
@@ -42,6 +43,7 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
   let gestureStartValue = startValue
   // startValue rebases when Shift toggles precision; cancel restores the value from before the gesture.
   let fineDrag = false
+
   // Registered before useDrag so a dispose cancels a live drag before this gesture ends (cleanups run last-in first).
   const gesture = useParameterGesture({
     onClosed: () => {
@@ -49,24 +51,30 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
       setDragValue(null)
     },
   })
+
   // The wheel is a separate holder: it never ends a drag or key hold that is open at the same time.
   const wheelGesture = useParameterGesture({ idleMs: WHEEL_IDLE_MS })
   const visualValue = () => dragValue() ?? options.value()
   const normalizeValue = (value: number) => quantizeSteppedValue(value, options.min(), options.max(), options.step())
+
   const show = (value: number) => {
     const finalValue = normalizeValue(value)
     setDragValue(finalValue)
     gesture.tick(() => options.onValueChange(finalValue))
   }
+
   const endGesture = () => {
     gesture.end()
     setDragValue(null)
   }
+
   const cancelGesture = (restore = true) => {
     gesture.cancel()
+
     if (restore && !gesture.owned) options.onValueChange(gestureStartValue)
     setDragValue(null)
   }
+
   const drag = useDrag({
     disabled: options.disabled,
     onDragStart: (position, event) => {
@@ -80,11 +88,13 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     },
     onDragMove: (currentPosition, event) => {
       event.preventDefault()
+
       if (event.shiftKey !== fineDrag) {
         startPosition = currentPosition
         startValue = visualValue()
         fineDrag = event.shiftKey
       }
+
       show(options.valueFromDrag({ startValue, startPosition, currentPosition, fine: fineDrag }))
     },
     onDragEnd: (_position, event) => {
@@ -93,24 +103,33 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     },
     onDragCancel: (reason) => cancelGesture(reason === 'cancel'),
   })
+
   const handleKeyDown = (event: KeyboardEvent) => {
     if (options.disabled()) return
+
     // macOS can swallow keyup while Cmd is held, which would leave a keyboard hold open.
     if (event.metaKey || event.ctrlKey || event.altKey) return
+
     if (event.key === 'Escape' && (gesture.isOpen() || wheelGesture.isOpen()) && !drag.isDragging()) {
       event.preventDefault()
       event.stopPropagation()
       wheelGesture.cancel()
       cancelGesture()
+
       return
     }
+
     if (!isValueKey(event.key)) return
+
     // Auto-repeat only continues a hold: after Escape or an owner close it must not open a new gesture.
     if (event.repeat && !gesture.isOpen()) {
       event.preventDefault()
+
       return
     }
+
     const largeStep = options.step() * 10
+
     const nextValue = {
       ArrowUp: visualValue() + options.step(),
       ArrowRight: visualValue() + options.step(),
@@ -121,21 +140,28 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
       Home: options.min(),
       End: options.max(),
     }[event.key]
+
     if (nextValue === undefined) return
     event.preventDefault()
+
     if (!gesture.isOpen()) {
       gestureStartValue = visualValue()
       gesture.open()
     }
+
     show(nextValue)
   }
+
   const handleKeyUp = (event: KeyboardEvent) => {
     if (isValueKey(event.key) && !drag.isDragging()) endGesture()
   }
+
   const handleBlur = () => {
     wheelGesture.end()
+
     if (!drag.isDragging()) endGesture()
   }
+
   const handleWheel = (event: WheelEvent) => {
     if (options.disabled() || event.deltaY === 0) return
     event.preventDefault()
@@ -143,6 +169,7 @@ export function useSteppedValueControl(options: UseSteppedValueControlOptions) {
     const next = normalizeValue(visualValue() + (event.deltaY < 0 ? options.step() : -options.step()))
     wheelGesture.tick(() => options.onValueChange(next))
   }
+
   const commitValue = (value: number) => {
     gesture.once(() => options.onValueChange(normalizeValue(value)))
   }

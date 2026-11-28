@@ -5,6 +5,7 @@ import { z } from 'zod'
 test('isolates portalled dialogs and preserves arrangement and native keyboard behavior', async () => {
   const directory = `/tmp/daw-keyboard-${crypto.randomUUID()}`
   const session = `daw-keyboard-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     // Never inherit the attached desktop/CDP session for this isolated fixture.
     const env = { ...process.env }
@@ -13,25 +14,31 @@ test('isolates portalled dialogs and preserves arrangement and native keyboard b
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     // Bound CLI stalls independently of the test timeout, including cleanup.
     const timeout = setTimeout(() => child.kill(), 10_000)
+
     try {
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ])
+
       if (exitCode !== 0) throw new Error(`agent-browser ${args[0]} failed: ${stderr || stdout}`)
+
       return stdout.trim()
     } finally {
       clearTimeout(timeout)
     }
   }
+
   await mkdir(directory, { recursive: true })
+
   try {
     const build = await Bun.build({
       entrypoints: [new URL('./useTimelineKeyboard.browser-runtime.ts', import.meta.url).pathname],
       target: 'browser',
       format: 'iife',
     })
+
     expect(build.success).toBe(true)
     const bundle = await build.outputs[0]!.text()
     await Bun.write(`${directory}/index.html`, `<!doctype html><body><script>${bundle}</script>`)

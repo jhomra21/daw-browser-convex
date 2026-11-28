@@ -7,8 +7,10 @@ import { z } from "zod"
 // never hard-codes an expected count, hash or failing test.
 export const repoRoot = path.resolve(import.meta.dir, "../..")
 export const expectationsFile = path.join(import.meta.dir, "expectations.json")
+
 // Every argv, env value and spec string may name the job's own scratch directory through this token.
 export const jobDirToken = "{{DIR}}"
+
 // RC reference tooling lived under this /tmp root. Each file is archived byte-identical in fixtures/ with a .txt suffix (so root
 // lint, tsc and bun test never pick it up) and is written back out, relocated, into each run's own directory.
 export const archivedRoot = "/tmp/dv01-b6/"
@@ -16,6 +18,7 @@ export const fixturesDir = path.join(import.meta.dir, "fixtures")
 export const archivedPath = (original: string) => path.join(fixturesDir, `${original.slice(archivedRoot.length)}.txt`)
 
 const counts = z.object({ pass: z.number(), skip: z.number(), fail: z.number() })
+
 export type Counts = z.infer<typeof counts>
 
 const command = z.object({
@@ -26,7 +29,9 @@ const command = z.object({
   evidence: z.boolean(),
   rc7Seconds: z.number(),
 })
+
 export type Command = z.infer<typeof command>
+
 // A command that runs one of these test files (as opposed to linting it) runs alone.
 export const runsTestFile = (command: Command, files: string[]) =>
   command.argv.includes("test") && command.argv.some((value) => files.some((file) => value.endsWith(file)))
@@ -44,11 +49,13 @@ const judge = z.discriminatedUnion("kind", [
   z.object({ kind: z.literal("dp"), exit: z.number(), files: z.record(z.string(), z.string()) }),
   z.object({ kind: z.literal("campaign"), exit: z.number(), logSha256: z.string(), gateSha256: z.string(), summarySha256: z.string() }),
 ])
+
 export type Judge = z.infer<typeof judge>
 
 // When a gate runs in the default (change-scoped) mode. `full-only` gates repeat another gate's command in RC7 (or are
 // RC7's comparison campaigns) and run only with --full.
 const trigger = z.enum(["always", "native", "product", "fuzz", "full-only"])
+
 export type Trigger = z.infer<typeof trigger>
 
 const gate = z.object({
@@ -60,6 +67,7 @@ const gate = z.object({
   command,
   judge,
 })
+
 export type Gate = z.infer<typeof gate>
 
 const fuzzFailure = z.object({
@@ -69,6 +77,7 @@ const fuzzFailure = z.object({
 
 const specChange = z.object({ file: z.string(), from: z.string().optional(), to: z.string().optional(), contentsFile: z.string().optional() })
 const spec = z.object({ id: z.string(), changes: z.array(specChange), bounded: z.boolean().optional(), childPreload: z.boolean().optional() })
+
 export type Spec = z.infer<typeof spec>
 
 const armExpect = z.object({
@@ -100,6 +109,7 @@ const arm = z.object({
   rejectionGate: z.boolean(),
   expect: armExpect,
 })
+
 export type Arm = z.infer<typeof arm>
 
 const row = z.object({
@@ -119,6 +129,7 @@ const campaign = z.object({
   command,
   judge,
 })
+
 export type Campaign = z.infer<typeof campaign>
 
 const traceReference = z.object({ treeSha256: z.string(), files: z.number(), a: z.string(), b: z.string() })
@@ -166,50 +177,72 @@ export const expectationsSchema = z.object({
   }),
   mutations: z.object({ rejectionGateScript: z.string(), arms: z.array(arm), rows: z.array(row) }),
 })
+
 export type Expectations = z.infer<typeof expectationsSchema>
 
 export const sha256 = (data: string | Uint8Array) => createHash("sha256").update(data).digest("hex")
 
 const jsonValue = z.json()
+
 export type JsonValue = z.infer<typeof jsonValue>
+
 const jsonRecord = z.record(z.string(), jsonValue)
 
 // ---------- observations and rebases ----------
 // A job's measurement of the expectation it is judged against: a path into expectations.json and the value the run produced.
 // Array elements are addressed `name=<gate or campaign>`, `id=<arm>` or `#<index>`; object members by key.
 export type Observation = { path: string[]; value: JsonValue }
+
 const isRecord = (value: JsonValue | undefined): value is { [key: string]: JsonValue } =>
   typeof value === "object" && value !== null && !Array.isArray(value)
+
 const indexOf = (items: JsonValue[], segment: string) => segment.startsWith("#") ? Number(segment.slice(1))
   : items.findIndex((item) => isRecord(item) && [`name=${item.name}`, `id=${item.id}`].includes(segment))
+
 export const getAt = (node: JsonValue | undefined, path: string[]): JsonValue | undefined => {
   const [head, ...rest] = path
+
   if (head === undefined) return node
+
   if (Array.isArray(node)) return getAt(node[indexOf(node, head)], rest)
+
   return isRecord(node) ? getAt(node[head], rest) : undefined
 }
+
 export const setAt = (node: JsonValue, path: string[], value: JsonValue): JsonValue => {
   const [head, ...rest] = path
+
   if (head === undefined) return value
+
   if (Array.isArray(node)) {
     const at = indexOf(node, head)
+
     if (!(at >= 0 && at < node.length)) throw new Error(`rebase path ${path.join(" / ")} names no element`)
+
     return node.map((item, index) => index === at ? setAt(item, rest, value) : item)
   }
+
   if (!isRecord(node) || !(head in node) && rest.length > 0) throw new Error(`rebase path ${path.join(" / ")} names nothing`)
+
   return { ...node, [head]: setAt(node[head] ?? null, rest, value) }
 }
+
 const stable = (value: JsonValue): JsonValue => Array.isArray(value) ? value.map(stable)
   : isRecord(value) ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([key, entry]) => [key, stable(entry)])) : value
+
 export const sameJson = (a: JsonValue | undefined, b: JsonValue | undefined) => JSON.stringify(a === undefined ? null : stable(a)) === JSON.stringify(b === undefined ? null : stable(b))
+
 // Leaf-level differences: records member by member, equal-length arrays element by element, anything else whole.
 export const diffJson = (old: JsonValue | undefined, next: JsonValue, path: string[]): { path: string[]; old: JsonValue | null; new: JsonValue }[] => {
   if (isRecord(old) && isRecord(next))
     return [...new Set([...Object.keys(old), ...Object.keys(next)])].flatMap((key) => diffJson(old[key], next[key] ?? null, [...path, key]))
+
   if (Array.isArray(old) && Array.isArray(next) && old.length === next.length)
     return next.flatMap((item, index) => diffJson(old[index], item, [...path, `#${index}`]))
+
   return sameJson(old, next) ? [] : [{ path, old: old ?? null, new: next }]
 }
+
 // A rebase record (rebases/<name>.json): ruled changes that rebase.ts applies to expectations.json in place. `evidence.mode` is "bless", "rebase", or "anchor" (a hand-made edit cited by its `reason`).
 export const rebaseSchema = z.object({
   name: z.string(), sequence: z.number(), createdAt: z.string(),
@@ -220,24 +253,34 @@ export const rebaseSchema = z.object({
   // Ruled changes to seed-records.json (paths `<fixture> / #<seed - 1> / <field>`); rebase.ts applies them to that file, not to the expectations.
   seedRecordChanges: z.array(z.object({ path: z.array(z.string()), old: z.json(), new: z.json() })).default([]),
 })
+
 export type Rebase = z.input<typeof rebaseSchema>
+
 type Change = Rebase["changes"][number]
+
 // Moves each field old -> new; a field that no longer holds the recorded `old` means the base it was measured against is gone.
 export const applyChanges = (base: JsonValue, changes: Change[], label: string) => changes.reduce((current, change) => {
   if (!sameJson(getAt(current, change.path), change.old)) throw new Error(`${label}: ${change.path.join(" / ")} does not hold its recorded old value`)
+
   return setAt(current, change.path, change.new)
 }, base)
+
 export const rebasesDir = path.join(import.meta.dir, "rebases")
+
 // Applies one rebase: the watched file hashes (manifest entries and fuzz sources) move from -> to, then every changed field moves
 // old -> new. A field that no longer holds the rebase's `old` value means the base it was measured against is gone.
 export const applyRebase = (base: JsonValue, rebase: Rebase): JsonValue => {
   const watched = rebase.watched.reduce((current, { file, from, to }) => {
     const holders = [["manifest", "entries", file], ["fuzzSources", "controller", file], ["fuzzSources", "hook", file]].filter((at) => getAt(current, at) === from)
+
     if (holders.length === 0) throw new Error(`rebase ${rebase.name}: no watched hash ${from} for ${file}`)
+
     return holders.reduce((next, at) => setAt(next, at, to), current)
   }, base)
+
   return applyChanges(watched, rebase.changes, `rebase ${rebase.name}`)
 }
+
 // RC's compare-manifest normalization: wall-clock keys are dropped wherever they occur.
 const timingKey = /(^|[a-z])(ms|Ms|seconds|Seconds|elapsed|Elapsed|duration|Duration|startedAt|endedAt|timestamp|Timestamp|wallClock|WallClock|durationMs)$/
 
@@ -245,23 +288,31 @@ const keyedByScenario = (items: JsonValue[]): JsonValue => {
   const entries = items.map((item): [string, JsonValue] | undefined => {
     const record = jsonRecord.safeParse(item)
     const scenario = record.success ? z.string().safeParse(record.data.scenario) : undefined
+
     return scenario?.success ? [`@${scenario.data}`, item] : undefined
   })
+
   return entries.every((entry) => entry !== undefined) ? Object.fromEntries(entries) : items
 }
 
 const canonicalize = (value: JsonValue, root: string, key: string, dropTiming: boolean): JsonValue => {
   if (Array.isArray(value)) {
     const items = value.map((entry) => canonicalize(entry, root, "", dropTiming))
+
     return key === "prefixes" ? keyedByScenario(items) : items
   }
+
   const record = jsonRecord.safeParse(value)
+
   if (record.success) {
     const kept = Object.entries(record.data).filter(([name]) => !dropTiming || !timingKey.test(name))
     kept.sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0)
+
     return Object.fromEntries(kept.map(([name, entry]) => [name, canonicalize(entry, root, name, dropTiming)]))
   }
+
   const text = z.string().safeParse(value)
+
   return text.success ? text.data.split(root).join("<out>") : value
 }
 
@@ -271,6 +322,7 @@ export const canonicalJsonSha256 = (text: string, root: string, dropTiming: bool
 
 export const testCounts = (log: string): Counts => {
   const found = new Map([...log.matchAll(/^\s*(\d+) (pass|skip|fail)\s*$/gm)].map((match) => [match[2], Number(match[1])]))
+
   return { pass: found.get("pass") ?? 0, skip: found.get("skip") ?? 0, fail: found.get("fail") ?? 0 }
 }
 
@@ -282,20 +334,25 @@ export const leafName = (name: string) => name.split(" > ").at(-1) ?? name
 // A `bun test` file header (`<file>.ts:`), keyed by its path without a leading `./` and without the run directory
 // (`…/fast-cert/<run>/[revert|live/][jobs/<job>/]`), so every reader of a log keys a file the same way in every run.
 const fileHeader = (line: string) => /^\S.*\.(ts|tsx):$/.test(line) ? line.slice(0, -1).replace(/^\.\//, "").replace(/^.*?fast-cert\/[^/]+\/(?:(?:revert|live)\/)?(?:jobs\/[^/]+\/)?/, "") : undefined
+
 // The tests of a `bun test` log by file, in log order: the `(<marker>) <qualified name>` lines under each file header, without the duration.
 // A header that repeats appends its tests to the file's.
 const testsOf = (log: string, marker: "pass" | "fail") => {
   const files = new Map<string, string[]>()
   let current: string[] | undefined
+
   for (const line of log.split("\n")) {
     const file = fileHeader(line)
+
     if (file !== undefined) {
       current = files.get(file) ?? []
       files.set(file, current)
     } else if (current && line.startsWith(`(${marker}) `)) current.push(line.slice(marker.length + 3).replace(/ \[[\d.]+m?s\]$/, ""))
   }
+
   return files
 }
+
 export const passedTests = (log: string) => testsOf(log, "pass")
 export const failedTestsByFile = (log: string) => testsOf(log, "fail")
 
@@ -307,6 +364,7 @@ export const fuzzFailures = (summaryText: string): z.infer<typeof fuzzOutcome> =
     failures: z.array(z.object({ invariant: z.string().nullish(), detail: z.string().nullish(), class: z.string().nullish(),
       domain: z.string().nullish(), step: z.number().nullish() })).optional(),
   }).parse(JSON.parse(summaryText))
+
   return {
     status: summary.status ?? null,
     failures: (summary.failures ?? []).map((failure) => ({ invariant: failure.invariant ?? null, detail: failure.detail ?? null,
@@ -316,23 +374,29 @@ export const fuzzFailures = (summaryText: string): z.infer<typeof fuzzOutcome> =
 
 const oracleReport = z.record(z.string(), z.json())
 const defectReport = z.object({ defects: z.record(z.string(), z.object({ rejected: z.boolean() })) })
+
 // The analyzer self-test throws "<oracle> failed: {json}". Unrejected are the defects marked rejected: false (phase 5), or the
 // proof keys that are false (phase 4 attribution).
 export const oracleFailures = (log: string) => [...log.matchAll(/^error: (.+?): (\{.*\})$/gm)].map((match) => {
   const report = oracleReport.parse(JSON.parse(match[2] ?? "{}"))
   const defects = defectReport.safeParse(report)
+
   const unrejected = defects.success ? Object.entries(defects.data.defects).filter(([, entry]) => !entry.rejected).map(([name]) => name)
     : Object.entries(report).filter(([, value]) => value === false).map(([name]) => name)
+
   return { message: match[1] ?? "", unrejected: unrejected.sort() }
 })
 
 // Sorted: oxlint prints its diagnostics in thread order.
 export const lintSignature = (log: string): [string, string][] => {
   const lines = log.split("\n")
+
   return lines.flatMap((line, index): [string, string][] => {
     const head = /^ {2}([!x×]) (.+)$/.exec(line)
+
     if (!head) return []
     const location = lines.slice(index + 1, index + 4).map((next) => /,-\[(.+?)\]/.exec(next)).find((match) => match !== null)
+
     return location ? [[`${head[1]} ${head[2]}`, location[1] ?? ""]] : []
   }).sort(([a, b], [c, d]) => `${a}\t${b}` < `${c}\t${d}` ? -1 : 1)
 }
@@ -345,8 +409,10 @@ export const tscDiagnostics = (log: string) =>
 export const perFileCounts = (log: string) => {
   const files = new Map<string, Counts>()
   let current: Counts | undefined
+
   for (const line of log.split("\n")) {
     const file = fileHeader(line)
+
     if (file !== undefined) {
       current = files.get(file) ?? { pass: 0, skip: 0, fail: 0 }
       files.set(file, current)
@@ -354,5 +420,6 @@ export const perFileCounts = (log: string) => {
     else if (current && line.startsWith("(skip) ")) current.skip++
     else if (current && line.startsWith("(fail) ")) current.fail++
   }
+
   return files
 }

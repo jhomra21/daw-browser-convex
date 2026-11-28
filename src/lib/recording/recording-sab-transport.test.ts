@@ -19,11 +19,13 @@ type SabNotifyMessage = {
 }
 
 type WorkletMessage = Parameters<RecordingMessageEndpoint['postMessage']>[0]
+
 type WorkerMessage = WriterOutboundMessage | { malformed: boolean }
 
 const endpoint = () => {
   let handler = (_message: RecorderOutboundMessage | SabNotifyMessage | null) => {}
   const messages: WorkletMessage[] = []
+
   return {
     messages,
     postMessage: (message: WorkletMessage) => {
@@ -39,11 +41,13 @@ const endpoint = () => {
 const storage = (failure?: 'start' | 'append' | 'finalize') => {
   const blocks: Float32Array[][] = []
   let aborted = false
+
   return {
     blocks,
     aborted: () => aborted,
     createSession: async () => {
       if (failure === 'start') throw new Error('start-failed')
+
       return {
         append: async (channels: readonly Float32Array[]) => {
           if (failure === 'append') throw new Error('write-failed')
@@ -51,6 +55,7 @@ const storage = (failure?: 'start' | 'append' | 'finalize') => {
         },
         finalize: async () => {
           if (failure === 'finalize') throw new Error('finalize-failed')
+
           return { capturedFrames: blocks.reduce((total, block) => total + (block[0]?.length ?? 0), 0) }
         },
         abort: async () => {
@@ -65,6 +70,7 @@ const writer = (target: ReturnType<typeof storage>) => {
   let handler = (_message: WorkerMessage) => {}
   let terminated = false
   const core = createRecordingWriterHandler(target, (message) => handler(message))
+
   return {
     postMessage: (message: WriterInboundMessage) => core.handle(message),
     setMessageHandler: (next: (message: WorkerMessage) => void) => {
@@ -84,6 +90,7 @@ describe('recording SAB transport', () => {
     const buffers = createRecorderSabRingBuffers()
     const producer = createRecorderSabRingProducer(buffers)
     const target = storage()
+
     const transport = createRecordingSabTransport({
       generation: 3,
       sessionId: 'take',
@@ -93,6 +100,7 @@ describe('recording SAB transport', () => {
       buffers,
       worker: writer(target),
     })
+
     expect(Object.keys(transport).sort()).toEqual(['abort', 'finalize', 'ready', 'terminate'])
     await transport.ready
     expect(worklet.messages[0]).toMatchObject({ type: 'initialize-sab' })
@@ -115,6 +123,7 @@ describe('recording SAB transport', () => {
     const worklet = endpoint()
     const target = storage()
     const targetWriter = writer(target)
+
     const transport = createRecordingSabTransport({
       generation: 1,
       sessionId: 'lost',
@@ -123,6 +132,7 @@ describe('recording SAB transport', () => {
       worklet,
       worker: targetWriter,
     })
+
     await transport.ready
     const finishing = transport.finalize()
     worklet.receive({
@@ -142,6 +152,7 @@ describe('recording SAB transport', () => {
 
   test('terminates the writer after startup failure cleanup settles', async () => {
     const targetWriter = writer(storage('start'))
+
     const transport = createRecordingSabTransport({
       generation: 1,
       sessionId: 'start-failed',
@@ -150,6 +161,7 @@ describe('recording SAB transport', () => {
       worklet: endpoint(),
       worker: targetWriter,
     })
+
     await expect(transport.ready).rejects.toThrow('start-failed')
     await targetWriter.settled()
     expect(targetWriter.terminated()).toBe(true)
@@ -161,6 +173,7 @@ describe('recording SAB transport', () => {
     const producer = createRecorderSabRingProducer(buffers)
     const target = storage('append')
     const targetWriter = writer(target)
+
     const failed = createRecordingSabTransport({
       generation: 1,
       sessionId: 'failed',
@@ -170,6 +183,7 @@ describe('recording SAB transport', () => {
       buffers,
       worker: targetWriter,
     })
+
     await failed.ready
     expect(producer.push([Float32Array.of(1)], 1)).toBe(true)
     worklet.receive({ type: 'sab-notify', generation: 1, sessionId: 'failed' })
@@ -183,6 +197,7 @@ describe('recording SAB transport', () => {
     const worklet = endpoint()
     const target = storage('finalize')
     const targetWriter = writer(target)
+
     const transport = createRecordingSabTransport({
       generation: 1,
       sessionId: 'finalize-failed',
@@ -191,6 +206,7 @@ describe('recording SAB transport', () => {
       worklet,
       worker: targetWriter,
     })
+
     await transport.ready
     const finishing = transport.finalize()
     worklet.receive({
@@ -211,6 +227,7 @@ describe('recording SAB transport', () => {
     const abortWorklet = endpoint()
     const target = storage()
     const targetWriter = writer(target)
+
     const aborted = createRecordingSabTransport({
       generation: 2,
       sessionId: 'abort',
@@ -219,6 +236,7 @@ describe('recording SAB transport', () => {
       worklet: abortWorklet,
       worker: targetWriter,
     })
+
     await aborted.ready
     await aborted.abort()
     expect(target.aborted()).toBe(true)

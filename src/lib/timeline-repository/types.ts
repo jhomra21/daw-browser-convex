@@ -6,7 +6,9 @@ import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 export type TimelineEntityKind = 'track' | 'clip' | 'effect' | 'mixerChannel'
 
 export type TimelineTrackId = TrackId
+
 export type TimelineClipId = string
+
 export type TimelineAssetId = string
 
 export type TimelineTrackRow = {

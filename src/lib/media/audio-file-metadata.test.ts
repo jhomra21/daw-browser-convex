@@ -25,6 +25,7 @@ const tinyWave = () => {
   view.setUint32(40, 4, true)
   view.setInt16(44, 1000, true)
   view.setInt16(46, -1000, true)
+
   return bytes
 }
 
@@ -47,6 +48,7 @@ test('reads audio metadata without calling File.arrayBuffer()', async () => {
 test('reads capability-backed metadata through bounded ranges', async () => {
   const bytes = tinyWave()
   const reads: Array<{ offset: number; length: number }> = []
+
   const file = new CapabilityFile({
     requestId: 'metadata-test',
     token: '0'.repeat(64),
@@ -54,6 +56,7 @@ test('reads capability-backed metadata through bounded ranges', async () => {
     signal: new AbortController().signal,
     readChunk: async (_requestId, _token, offset, length) => {
       reads.push({ offset, length })
+
       return bytes.slice(offset, offset + length)
     },
   }, 'tiny.wav', 'audio/wav')

@@ -11,7 +11,9 @@ const createBuffer = (channels: readonly Float32Array[]) => ({
   length: channels[0]?.length ?? 0,
   getChannelData(channel: number) {
     const data = channels[channel]
+
     if (!data) throw new Error('Missing channel')
+
     return data
   },
 })
@@ -39,6 +41,7 @@ describe('independent true-peak scanner', () => {
         { length: Math.ceil(sampleRate * 0.01) },
         (_, frame) => 0.9 * Math.sin(2 * Math.PI * 0.3 * frame + Math.PI / 4),
       )
+
       const mono = scanTruePeak(createBuffer([samples]))
       const stereo = scanTruePeak(createBuffer([samples, Float32Array.from(samples, (sample) => -sample)]))
       expect(mono.peak).toBeGreaterThan(Math.max(...samples.map(Math.abs)))
@@ -74,6 +77,7 @@ describe('reachable limiter ceiling', () => {
       outputLayout: 'stereo',
     },
   })
+
   const channel = (
     id: string,
     options: {

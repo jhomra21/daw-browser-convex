@@ -48,12 +48,14 @@ const MAX_CONCURRENT_HYDRATION_LOADS = 4;
 
 const pickReplacementAudioFile = async (): Promise<File | null> => {
   const openFilePicker = window.showOpenFilePicker;
+
   if (openFilePicker) {
     try {
       const [handle] = await openFilePicker({
         multiple: false,
         types: [{ description: "Audio", accept: { "audio/*": [] } }],
       });
+
       return await handle.getFile();
     } catch (error) {
       if (isAbortError(error)) return null;
@@ -76,6 +78,7 @@ export const useMissingMediaRecovery = (input: Input) => {
   const [localTimelineSnapshot, setLocalTimelineSnapshot] = createSignal<
     Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>> | null
   >(null);
+
   const [mountedLocalMediaReady, setMountedLocalMediaReady] = createSignal(false);
 
   let reloadTail = Promise.resolve();
@@ -83,6 +86,7 @@ export const useMissingMediaRecovery = (input: Input) => {
   let mounted = true;
   let hydrationScope = "";
   let hydrationController: AbortController | undefined;
+
   const hydrateSnapshotMedia = async (
     snapshot: Awaited<ReturnType<ReturnType<typeof createLocalTimelineRepository>["loadSnapshot"]>>,
     guard: {
@@ -94,20 +98,25 @@ export const useMissingMediaRecovery = (input: Input) => {
     const projectId = guard.projectId;
     const generation = guard.mountedProjectGeneration;
     const scope = `${projectId}\u0000${generation}`;
+
     if (scope !== hydrationScope) {
       hydrationController?.abort();
       hydrationController = new AbortController();
       hydrationScope = scope;
     }
+
     const isCurrent = () => (
       !hydrationController?.signal.aborted
       && !guard.signal?.aborted
       && input.projectId() === projectId
       && input.mountedProjectGeneration() === generation
     );
+
     if (!isLocalId("project", projectId) || !isCurrent()) return false;
+
     const pending = snapshot.clips
       .filter((clip) => !clip.midi && (clip.sourceAssetKey || clip.sampleUrl));
+
     const signal = guard.signal ?? hydrationController?.signal;
     await runWithConcurrency(pending, MAX_CONCURRENT_HYDRATION_LOADS, async (clip) => {
       try {
@@ -122,14 +131,18 @@ export const useMissingMediaRecovery = (input: Input) => {
         if (signal?.aborted) throw error;
       }
     });
+
     if (!isCurrent()) return false;
+
     return pending.every((clip) => input.getClipBuffer(clip.id) !== undefined);
   };
+
   onCleanup(() => {
     mounted = false;
     reloadVersion++;
     hydrationController?.abort();
   });
+
   const reloadLocalTimeline = async (guard?: {
     projectId?: string;
     mountedProjectGeneration?: number;
@@ -137,23 +150,31 @@ export const useMissingMediaRecovery = (input: Input) => {
   }) => {
     const rid = guard?.projectId ?? input.projectId();
     const generation = guard?.mountedProjectGeneration ?? input.mountedProjectGeneration();
+
     const isWanted = () => (
       !guard?.signal?.aborted
       && input.projectId() === rid
       && input.mountedProjectGeneration() === generation
     );
+
     // A reload for a project or generation that is no longer mounted applies nothing, so it must not supersede the current one.
     if (!isWanted()) return;
     const version = ++reloadVersion;
     const isCurrent = () => mounted && version === reloadVersion && isWanted();
+
     const operation = reloadTail.catch(() => undefined).then(async () => {
       const isLocalProject = isLocalId("project", rid);
+
       if (!isCurrent()) return;
+
       if (!isLocalProject && input.remoteTimelineAvailable()) {
         setLocalTimelineSnapshot(null);
+
         return;
       }
+
       const snapshot = await createLocalTimelineRepository(rid).loadSnapshot();
+
       if (isCurrent()) {
         setMountedLocalMediaReady(false);
         batch(() => {
@@ -161,17 +182,21 @@ export const useMissingMediaRecovery = (input: Input) => {
           setLocalTimelineSnapshot(snapshot.tracks.length > 0 || isLocalProject ? snapshot : null);
         });
         await Promise.resolve();
+
         const mediaReady = await hydrateSnapshotMedia(snapshot, {
           projectId: rid,
           mountedProjectGeneration: generation,
           signal: guard?.signal,
         });
+
         if (isCurrent()) setMountedLocalMediaReady(mediaReady);
       }
     });
+
     reloadTail = operation.then(() => undefined, () => undefined);
     let awaited = reloadTail;
     await operation;
+
     // Superseded by newer reloads: wait for the newest, since it applies the snapshot this caller awaits.
     while (isWanted() && awaited !== reloadTail) {
       awaited = reloadTail;
@@ -183,11 +208,14 @@ export const useMissingMediaRecovery = (input: Input) => {
     const rid = input.projectId();
     const generation = input.mountedProjectGeneration();
     const isLocalProject = isLocalId("project", rid);
+
     if (!isLocalProject && input.remoteTimelineAvailable()) {
       setMountedLocalMediaReady(true);
       setLocalTimelineSnapshot(null);
+
       return;
     }
+
     setMountedLocalMediaReady(false);
     input.localTimelineReloadVersion();
     const operationController = new AbortController();
@@ -210,18 +238,23 @@ export const useMissingMediaRecovery = (input: Input) => {
   const removeMissingMediaClip = async (trackId: Track["id"], clipId: string) => {
     const projectId = input.projectId();
     const generation = input.mountedProjectGeneration();
+
     const isCurrent = () => (
       input.projectId() === projectId
       && input.mountedProjectGeneration() === generation
     );
+
     try {
       if (!await input.removeClip({ trackId, clipId })) return;
+
       if (!isCurrent()) return;
       input.projection.removeLocalClips([clipId]);
+
       if (input.selection.selectedClip()?.clipId === clipId) input.selection.setSelectedClip(null);
       input.selection.setSelectedClipIds((current) => {
         const next = new Set(current);
         next.delete(clipId);
+
         return next;
       });
       input.selection.selectTrackTarget(trackId, {
@@ -237,27 +270,36 @@ export const useMissingMediaRecovery = (input: Input) => {
 
   const replaceMissingMediaClip = async (trackId: Track["id"], clipId: string) => {
     const rid = input.projectId();
+
     if (!rid || !isLocalId("project", rid)) return;
     const generation = input.mountedProjectGeneration();
     const isCurrent = () => input.projectId() === rid && input.mountedProjectGeneration() === generation;
     let newAssetId: string | undefined;
+
     try {
       const track = input.renderTracks().find((entry) => entry.id === trackId);
       const clip = track?.clips.find((entry) => entry.id === clipId);
+
       if (!clip) return;
       const file = await pickReplacementAudioFile();
+
       if (!file) return;
       const source = await readAudioFileMetadata(file);
       const decoded = await input.audioEngine.decodeAudioData(await file.arrayBuffer());
+
       if (!isCurrent()) return;
+
       const asset = await createLocalAsset({
         projectId: rid,
         file,
         metadata: { ...source, sourceKind: "upload" },
       });
+
       newAssetId = asset.id;
+
       if (!isCurrent()) throw new DOMException("The media replacement was canceled.", "AbortError");
       const sourceKind: Clip["sourceKind"] = "upload";
+
       const updated = {
         ...clip,
         name: file.name || clip.name,
@@ -271,6 +313,7 @@ export const useMissingMediaRecovery = (input: Input) => {
         sourceChannelCount: source.channelCount,
         sampleUrl: undefined,
       };
+
       const row = await createLocalTimelineRepository(rid).updateClip({
         clipId,
         name: updated.name,
@@ -283,10 +326,12 @@ export const useMissingMediaRecovery = (input: Input) => {
         sourceChannelCount: source.channelCount,
         sampleUrl: null,
       });
+
       if (!row) throw new Error("The clip could not be updated.");
       newAssetId = undefined;
       const activeTrack = input.renderTracks().find((entry) => entry.id === trackId);
       const activeClip = activeTrack?.clips.find((entry) => entry.id === clipId);
+
       if (!isCurrent() || !activeClip) return;
       input.audioBufferCache.storeBuffer(clipId, decoded);
       input.projection.removeLocalClips([clipId]);
@@ -294,15 +339,20 @@ export const useMissingMediaRecovery = (input: Input) => {
     } catch (error) {
       if (newAssetId) {
         const snapshot = await createLocalTimelineRepository(rid).loadSnapshot().catch(() => null);
+
         const referenced = snapshot?.clips.some((entry) =>
           entry.id === clipId && (entry.sourceAssetId === newAssetId || entry.sourceAssetKey === newAssetId),
         );
+
         if (snapshot && !referenced) await deleteLocalAsset(rid, newAssetId).catch(() => null);
       }
+
       if (isAbortError(error)) return;
+
       if (!isCurrent()) return;
       const failure = error instanceof Error ? error : new Error("The media replacement could not be completed.");
       const message = errorMessage(failure);
+
       if (failure.name === "LocalAssetWriteError" || newAssetId) {
         input.onLocalSaveFailed?.(rid, message);
       } else {
@@ -310,6 +360,7 @@ export const useMissingMediaRecovery = (input: Input) => {
       }
     }
   };
+
   return {
     localTimelineSnapshot,
     mountedLocalMediaReady,
@@ -324,6 +375,7 @@ export const useMissingMediaRecovery = (input: Input) => {
         && input.mountedProjectGeneration() === guard.mountedProjectGeneration
       ) return;
       await reloadLocalTimeline(guard);
+
       if (
         !mountedLocalMediaReady()
         && input.projectId() === guard.projectId

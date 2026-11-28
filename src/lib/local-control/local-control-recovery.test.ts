@@ -50,6 +50,7 @@ test('accounts aggregate project recovery bytes and hashes metadata without payl
     artifact(`${prefix}-a`, maxLocalRecoveryExternalArtifactBytes / 2),
     artifact(`${prefix}-b`, maxLocalRecoveryExternalArtifactBytes / 2),
   ])
+
   const retained = Array.from({ length: 8 }, (_, index) => oneMiB(`retained-${index}`))
   const retainedBytes = retained.reduce((total, value) => total + localExternalRecoveryUsage([value]).byteLength, 0)
   expect(retainedBytes).toBe(maxLocalProjectExternalRecoveryBytes)

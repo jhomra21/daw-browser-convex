@@ -19,6 +19,7 @@ type TimelineExportSettings = {
 
 const cloneRange = (range: ExportRange): ExportRange => {
   if (range.mode === 'whole') return { mode: range.mode }
+
   return { mode: range.mode, startSec: range.startSec, endSec: range.endSec }
 }
 

@@ -22,12 +22,14 @@ import {
 } from './sampled-instrument-region'
 
 export type SamplerResolvedBuffers = ReadonlyMap<string, SampledInstrumentBuffer>
+
 export type SamplerNoteMiss = {
   trackId: string
   zoneId: string
   assetKey: string
   url: string
 }
+
 export type SamplerRegionUse = {
   trackId: string
   regionKey: string
@@ -49,13 +51,17 @@ type Options = {
 }
 
 type Config = { instanceId: string; params: SamplerParams; buffers: SamplerResolvedBuffers; roundRobin: SamplerRoundRobinState }
+
 type Voice = { id: number; clipId?: string; note: number; chokeGroup: number; regionKey: string; source: AudioBufferSourceNode; sources: AudioBufferSourceNode[]; nodes: AudioNode[]; gain: GainNode; removed: boolean; stopRequested: boolean }
+
 const EMPTY_BUFFERS: SamplerResolvedBuffers = new Map()
 const SAMPLER_TERMINATION_FADE_SEC = 0.006
+
 const SEGMENT_FADE_IN_CURVE = Float32Array.from(
   { length: 32 },
   (_, index) => Math.sin(index / 31 * Math.PI / 2),
 )
+
 const SEGMENT_FADE_OUT_CURVE = Float32Array.from(
   { length: 32 },
   (_, index) => Math.cos(index / 31 * Math.PI / 2),
@@ -77,10 +83,12 @@ export function scheduleSamplerVoice(input: {
 }) {
   const noteValue = (parameterId: SamplerAutomationParameterId, fallback: number) => {
     const envelope = input.automationEnvelopes?.find((candidate) => parseInstrumentAutomationKey(candidate.parameterId)?.parameterId === parameterId)
+
     return envelope && input.timelineStartSec !== undefined
       ? valueAtAutomationTime(envelope.points, input.timelineStartSec, fallback)
       : fallback
   }
+
   const params = normalizeSamplerParams({
     ...input.params,
     ampEnvelope: {
@@ -95,6 +103,7 @@ export function scheduleSamplerVoice(input: {
       amount: noteValue('filter.envAmount', input.params.filterEnvelope.amount),
     },
   })
+
   const plan = createSamplerVoicePlan({ ...input, params })
   const loop = getSamplerLoopBounds(input.zone)
   const filter = input.ctx.createBiquadFilter()
@@ -117,19 +126,24 @@ export function scheduleSamplerVoice(input: {
   filter.frequency.linearRampToValueAtTime(plan.filterBaseHz, plan.filterEnvelope.decayEnd)
   const sources: AudioBufferSourceNode[] = []
   const nodes: AudioNode[] = [filter, pan, gain, outputPan, outputGain]
+
   for (const segment of plan.segments) {
     const source = input.ctx.createBufferSource()
     source.buffer = input.buffer
     source.detune.setValueAtTime(plan.detuneCents, segment.startTime)
+
     if (input.zone.playbackMode === 'forward-loop' && loop) {
       source.loop = true
       source.loopStart = loop.startSec
       source.loopEnd = loop.endSec
     }
+
     if (segment.fadeInSec > 0 || segment.fadeOutSec > 0) {
       const segmentGain = input.ctx.createGain()
       segmentGain.gain.setValueAtTime(segment.fadeInSec > 0 ? 0 : 1, segment.startTime)
+
       if (segment.fadeInSec > 0) segmentGain.gain.setValueCurveAtTime(SEGMENT_FADE_IN_CURVE, segment.startTime, segment.fadeInSec)
+
       if (segment.fadeOutSec > 0) segmentGain.gain.setValueCurveAtTime(SEGMENT_FADE_OUT_CURVE, segment.startTime + segment.durationSec - segment.fadeOutSec, segment.fadeOutSec)
       source.connect(segmentGain)
       segmentGain.connect(filter)
@@ -139,11 +153,14 @@ export function scheduleSamplerVoice(input: {
     source.stop(Math.min(plan.endTime, segment.startTime + segment.durationSec))
     sources.push(source)
   }
+
   const oscillator = params.lfo.enabled ? input.ctx.createOscillator() : undefined
   const lfoDepthParams: Partial<Record<SamplerAutomationParameterId, AudioParam>> = {}
+
   if (params.lfo.enabled) {
     if (!oscillator) throw new Error('Sampler LFO oscillator unavailable')
     oscillator.frequency.setValueAtTime(params.lfo.frequencyHz, input.when)
+
     for (const [parameterId, amount, target] of [
       ['lfo.filterDepth', params.lfo.filterHz, filter.frequency],
       ['lfo.ampDepth', params.lfo.amp * plan.peakGain, gain.gain],
@@ -156,6 +173,7 @@ export function scheduleSamplerVoice(input: {
       lfoDepthParams[parameterId] = modulation.gain
       nodes.push(modulation)
     }
+
     for (const source of sources) {
       const modulation = input.ctx.createGain()
       modulation.gain.setValueAtTime(params.lfo.pitchCents, input.when)
@@ -164,15 +182,18 @@ export function scheduleSamplerVoice(input: {
       lfoDepthParams['lfo.pitchDepth'] = modulation.gain
       nodes.push(modulation)
     }
+
     oscillator.start(input.when)
     oscillator.stop(plan.endTime)
     nodes.push(oscillator)
   }
+
   filter.connect(pan)
   pan.connect(gain)
   gain.connect(outputPan)
   outputPan.connect(outputGain)
   outputGain.connect(input.destination)
+
   if (input.timelineStartSec !== undefined && input.timelineToCtxTime) {
     const directBindings = new Map<SamplerAutomationParameterId, AudioParam | undefined>([
       ['output.gain', outputGain.gain],
@@ -185,9 +206,11 @@ export function scheduleSamplerVoice(input: {
       ['lfo.panDepth', lfoDepthParams['lfo.panDepth']],
       ['lfo.pitchDepth', lfoDepthParams['lfo.pitchDepth']],
     ])
+
     for (const envelope of input.automationEnvelopes ?? []) {
       const key = parseInstrumentAutomationKey(envelope.parameterId)
       const param = key ? directBindings.get(key.parameterId) : undefined
+
       if (!key || !param || !envelope.enabled) continue
       scheduleAutomationEnvelope(
         [{ param, valueToAudioValue: (value) => key.parameterId === 'lfo.ampDepth' ? value * plan.peakGain : value }],
@@ -202,8 +225,11 @@ export function scheduleSamplerVoice(input: {
       )
     }
   }
+
   const source = sources[sources.length - 1]
+
   if (!source) throw new Error('Sampler voice has no playable segment')
+
   return { source, sources, gain, nodes }
 }
 
@@ -217,29 +243,38 @@ export function createSamplerRuntime(options: Options) {
     voice.removed = true
     voice.source.onended = null
     const active = voices.get(trackId)?.filter((candidate) => candidate !== voice) ?? []
+
     if (active.length) voices.set(trackId, active)
     else voices.delete(trackId)
+
     if (voice.clipId) options.sources.remove(voice.clipId, voice.source)
     options.onAssetUse({ trackId, regionKey: voice.regionKey, voiceId: voice.id, active: false })
     disconnectAudioNodes(voice.nodes)
   }
+
   const stop = (trackId: string, voice: Voice, when?: number) => {
     if (voice.removed) return
+
     if (when !== undefined) {
       if (voice.stopRequested) return
+
       try {
         for (const source of voice.sources) source.stop(when)
         voice.stopRequested = true
       } catch {
         stop(trackId, voice)
       }
+
       return
     }
+
     if (!voice.stopRequested) {
       for (const source of voice.sources) stopAndDisconnectSource(source)
     }
+
     remove(trackId, voice)
   }
+
   const terminateMatching = (trackId: string, when: number, predicate: (voice: Voice) => boolean) => {
     for (const voice of Array.from(voices.get(trackId) ?? [])) {
       if (!predicate(voice)) continue
@@ -249,27 +284,38 @@ export function createSamplerRuntime(options: Options) {
       stop(trackId, voice, when + SAMPLER_TERMINATION_FADE_SEC)
     }
   }
+
   const trigger = (trackId: string, note: number, velocity: number, when: number, durationSec: number, clipId?: string, timelineStartSec?: number, onEnded?: () => void): ((stopWhen: number) => void) | undefined => {
     const config = configs.get(trackId)
     const ctx = options.getAudioContext()
+
     if (!config || !ctx) return undefined
     const selected = selectSamplerZone(config.params.zones, note, Math.round(velocity * 127), config.roundRobin)
     config.roundRobin = selected.roundRobin
     const zone = selected.zone
     const sampled = zone ? config.buffers.get(zone.id) : undefined
+
     if (!zone) return undefined
+
     if (!sampled) {
       options.onNoteMiss({ trackId, zoneId: zone.id, assetKey: zone.sample.assetKey, url: zone.sample.url })
+
       return undefined
     }
+
     if (config.params.retrigger) terminateMatching(trackId, when, (voice) => voice.note === note)
+
     if (zone.chokeGroup > 0) terminateMatching(trackId, when, (voice) => voice.chokeGroup === zone.chokeGroup)
     const active = voices.get(trackId) ?? []
+
     if (active.length >= config.params.polyphony) terminateMatching(trackId, when, (voice) => voice.id === active[0]?.id)
+
     const automationEnvelopes = options.getAutomationEnvelopes().filter((envelope) => {
       const key = parseInstrumentAutomationKey(envelope.parameterId)
+
       return key?.trackId === trackId && key.instanceId === config.instanceId
     })
+
     const scheduled = scheduleSamplerVoice({
       ctx,
       destination: options.ensureTrackInput(trackId),
@@ -298,10 +344,12 @@ export function createSamplerRuntime(options: Options) {
         ? options.timelineToCtxTime
         : (timelineSec) => when + (timelineSec - timelineStartSec),
     })
+
     const regionKey = sampledInstrumentRegionIdentity(
       zone.sample,
       sampledInstrumentRegionForBuffer(sampled),
     )
+
     const id = voiceId++
     const voice: Voice = { ...scheduled, id, note, chokeGroup: zone.chokeGroup, regionKey, clipId, removed: false, stopRequested: false }
     options.onAssetUse({ trackId, regionKey, voiceId: id, active: true })
@@ -310,13 +358,17 @@ export function createSamplerRuntime(options: Options) {
       remove(trackId, voice)
       onEnded?.()
     }
+
     if (clipId) options.sources.add(clipId, scheduled.source)
+
     return (stopWhen, force = false) => {
       if (!force && zone.playbackMode === 'one-shot') return false
       stop(trackId, voice, stopWhen)
+
       return true
     }
   }
+
   const disposeTrack = (trackId: string) => {
     for (const voice of Array.from(voices.get(trackId) ?? [])) stop(trackId, voice)
     configs.delete(trackId)
@@ -331,17 +383,21 @@ export function createSamplerRuntime(options: Options) {
       if (!clip.midi) return false
       const events = getScheduledMidiEvents({ clip, bpm: options.getBpm(), notes: clip.midi.notes, rangeStartSec: playheadSec, rangeEndSec: endLimitSec, arp: options.getArpeggiator(track.id) })
       let scheduled = false
+
       for (const event of events) scheduled = Boolean(trigger(track.id, event.pitch, event.velocity ?? 1, Math.max(nowCtx, options.timelineToCtxTime(event.startSec)), event.endSec - event.startSec, clip.id, event.startSec)) || scheduled
+
       return scheduled
     },
     previewNote: (trackId: string, note: number, velocity: number) => {
       options.ensureAudio()
       const ctx = options.getAudioContext()
+
       return Boolean(ctx && trigger(trackId, note, velocity, ctx.currentTime, 0.5))
     },
     startLiveNote: (trackId: string, note: number, velocity: number, durationSec = 86_400, onEnded?: () => void) => {
       options.ensureAudio()
       const ctx = options.getAudioContext()
+
       return ctx ? trigger(trackId, note, velocity, ctx.currentTime, durationSec, undefined, undefined, onEnded) : undefined
     },
     stopLiveNotes: (trackId: string, when: number) => {

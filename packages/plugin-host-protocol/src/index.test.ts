@@ -56,6 +56,7 @@ describe('plugin host control protocol', () => {
         hidden: false,
       }).success).toBe(true)
     }
+
     expect(pluginParameterDescriptorSchema.safeParse({
       id: 0x1_0000_0000,
       title: 'Parameter',
@@ -94,6 +95,7 @@ describe('plugin host control protocol', () => {
         location: 'plugin-artifacts/a7a0b9ac-7884-492c-8b68-80f15802442c',
       },
     }
+
     expect(parsePluginHostControlFrame(JSON.stringify(request))).toMatchObject({
       type: 'state',
       action: 'load',
@@ -109,6 +111,7 @@ describe('plugin host control protocol', () => {
       type: 'scan',
       paths: ['/Plugins'],
     }
+
     expect(() => parsePluginHostControlFrame(JSON.stringify(request))).toThrow(
       'incompatible protocol compatibility',
     )
@@ -133,7 +136,9 @@ test('accepts bounded multi-class scanner responses', () => {
       { classId: 'instrument', vendor: 'Vendor', name: 'Instrument', version: '1', role: 'instrument', source: 'factory' },
     ],
   }))
+
   expect(response.type).toBe('result')
+
   if (response.type === 'result') expect(response.classes).toHaveLength(2)
 })
 
@@ -151,6 +156,7 @@ test('keeps worker controls versioned and bounds state transfers independently f
       bytesBase64: 'AQID',
     },
   }))
+
   expect(request.type).toBe('state-transfer')
   expect(() => parseVst3WorkerControlRequestV2(JSON.stringify({
     version: 2,
@@ -176,6 +182,7 @@ test('bounds worker events by sample offset and block capacity', () => {
     instanceId: 'a7a0b9ac-7884-492c-8b68-80f15802442c',
     events: [{ kind: 'midi', data: [0x90, 60, 100], sampleOffset: 8192 }],
   }
+
   expect(() => parseVst3WorkerControlRequestV2(JSON.stringify(request))).toThrow()
 })
 
@@ -283,6 +290,7 @@ test('round trips path-free native preflight availability and failure results', 
     requestId: 'preflight-1',
     requirements: preflightRequirements(),
   }
+
   const result: NativeVst3PreflightResult = {
     version: nativeVst3PreflightProtocolVersion,
     type: 'preflight-result',
@@ -291,6 +299,7 @@ test('round trips path-free native preflight availability and failure results', 
     hello: workerHello(),
     requirements: request.requirements,
   }
+
   const unavailable: NativeVst3PreflightResult = {
     version: nativeVst3PreflightProtocolVersion,
     type: 'preflight-result',
@@ -300,6 +309,7 @@ test('round trips path-free native preflight availability and failure results', 
     message: 'The worker timed out.',
     requirements: request.requirements,
   }
+
   const encodedRequest = encodeNativeVst3PreflightRequest(request)
   const encodedResult = encodeNativeVst3PreflightResult(result)
   expect(decodeNativeVst3PreflightRequest(encodedRequest)).toEqual(request)
@@ -319,6 +329,7 @@ test('rejects incomplete available preflight results and unknown artifact requir
     message: 'Packaged worker validation is unavailable.',
     requirements: preflightRequirements(),
   }
+
   expect(() => decodeNativeVst3PreflightResult(JSON.stringify({
     ...result,
     status: 'available',
@@ -391,6 +402,7 @@ test('round trips a versioned, path-free native external attachment plan', () =>
 
 test('accepts native stage metadata while retaining version-one compatibility', () => {
   const legacy = attachmentPlan()
+
   const staged = {
     version: 2,
     attachments: [{ ...legacy.attachments[0], stageIndex: 3 }],
@@ -440,6 +452,7 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
     ...plan,
     attachments: [{ ...attachment, nativeGraphNodeId: '18446744073709551616' }],
   }))).toThrow('exceeds uint64')
+
   const serial = decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [
@@ -451,7 +464,9 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
       },
     ],
   }))
+
   expect(serial.attachments).toHaveLength(2)
+
   const sparse = decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,
     attachments: [
@@ -463,6 +478,7 @@ test('rejects paths, invalid fingerprints, and out-of-bounds attachment dimensio
       },
     ],
   }))
+
   expect(sparse.attachments).toHaveLength(2)
   expect(() => decodeNativeExternalAttachmentPlan(JSON.stringify({
     ...plan,

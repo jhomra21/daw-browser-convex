@@ -17,46 +17,58 @@ export const readStdinChunks = (stdin: Readable): AsyncIterable<Uint8Array> => {
   let ended = false
   let failure: Error | undefined
   let wake: (() => void) | undefined
+
   const onData = (chunk: string | Buffer) => {
     if (pendingChunk !== undefined) {
       failure = new Error("Stdin backpressure queue overflow.")
       stdin.pause()
       wake?.()
       wake = undefined
+
       return
     }
+
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
     pendingChunk = bytes
     stdin.pause()
     wake?.()
     wake = undefined
   }
+
   const onEnd = () => {
     ended = true
     wake?.()
     wake = undefined
   }
+
   const onError = (error: Error) => {
     failure = error
     wake?.()
     wake = undefined
   }
+
   stdin.pause()
+
   const iterator = (async function* () {
     stdin.on("data", onData)
     stdin.once("end", onEnd)
     stdin.once("error", onError)
+
     try {
       stdin.resume()
+
       while (!ended || pendingChunk !== undefined) {
         if (failure) throw failure
         const chunk = pendingChunk
         pendingChunk = undefined
+
         if (chunk) {
           yield chunk
+
           if (pendingChunk === undefined) stdin.resume()
           continue
         }
+
         await new Promise<void>((resolve) => { wake = resolve })
       }
     } finally {
@@ -66,6 +78,7 @@ export const readStdinChunks = (stdin: Readable): AsyncIterable<Uint8Array> => {
       stdin.pause()
     }
   })()
+
   return iterator
 }
 
@@ -75,12 +88,15 @@ export const processIo: CliIo = {
   readStdin: async () => {
     const chunks: Buffer[] = []
     let bytes = 0
+
     for await (const chunk of process.stdin) {
       const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
       bytes += buffer.byteLength
+
       if (bytes > controlLimitsV1.maxSerializedBodyBytes) throw new Error("Request input exceeds the size limit.")
       chunks.push(buffer)
     }
+
     return Buffer.concat(chunks).toString("utf8")
   },
   readLines: () => decodeJsonlLines(readStdinChunks(process.stdin)),
@@ -88,18 +104,24 @@ export const processIo: CliIo = {
 
 export const option = (arguments_: string[], name: string) => {
   const index = arguments_.indexOf(name)
+
   if (index === -1) return undefined
   const value = arguments_[index + 1]
+
   if (!value || value.startsWith("--")) throw new Error(`Missing ${name} value.`)
+
   return value
 }
 
 export const jsonRequest = async (source: string, io: CliIo) => {
   const content = source === "-" ? await io.readStdin() : await (async () => {
     const info = await stat(source)
+
     if (!info.isFile() || info.size > controlLimitsV1.maxSerializedBodyBytes) throw new Error("Request input exceeds the size limit.")
+
     return readFile(source, "utf8")
   })()
+
   try {
     return JSON.parse(content)
   } catch {

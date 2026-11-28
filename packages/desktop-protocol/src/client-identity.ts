@@ -6,6 +6,7 @@ import { z } from "zod"
 
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/
 const maxIdentityBytes = 1024
+
 const actorIdentitySchema = z.object({
   version: z.literal("v1"),
   actorId: z.string().regex(uuid),
@@ -13,10 +14,13 @@ const actorIdentitySchema = z.object({
 
 export const defaultDesktopActorIdentityPath = () => {
   const configured = process.env.DAW_CONTROL_AUTH_PATH
+
   if (configured) return path.join(path.dirname(configured), "host-actor-v1.json")
   const home = process.env.HOME
+
   if (!home) throw new Error("HOME is not set.")
   const authPath = path.join(process.env.XDG_CONFIG_HOME ?? path.join(home, ".config"), "daw-browser", "control-auth.json")
+
   return path.join(path.dirname(authPath), "host-actor-v1.json")
 }
 
@@ -25,6 +29,7 @@ const hasErrorCode = (cause: unknown, code: string): cause is NodeJS.ErrnoExcept
 
 const validatePrivateDirectory = async (directory: string) => {
   const info = await lstat(directory)
+
   if (
     !info.isDirectory()
     || info.isSymbolicLink()
@@ -37,6 +42,7 @@ const validatePrivateDirectory = async (directory: string) => {
 const ensurePrivateDirectory = async (directory: string) => {
   try {
     await validatePrivateDirectory(directory)
+
     return
   } catch (error) {
     if (!hasErrorCode(error, "ENOENT")) throw error
@@ -44,24 +50,28 @@ const ensurePrivateDirectory = async (directory: string) => {
 
   await mkdir(path.dirname(directory), { recursive: true, mode: 0o700 })
   let created = false
+
   try {
     await mkdir(directory, { mode: 0o700 })
     created = true
   } catch (error) {
     if (!hasErrorCode(error, "EEXIST")) throw error
   }
+
   if (created && process.platform !== "win32") await chmod(directory, 0o700)
   await validatePrivateDirectory(directory)
 }
 
 const readIdentity = async (file: string) => {
   let info
+
   try {
     info = await lstat(file, { bigint: true })
   } catch (error) {
     if (hasErrorCode(error, "ENOENT")) return undefined
     throw error
   }
+
   if (
     !info.isFile()
     || info.isSymbolicLink()
@@ -78,9 +88,12 @@ const readIdentity = async (file: string) => {
     file,
     process.platform === "win32" ? "r" : constants.O_RDONLY | constants.O_NOFOLLOW,
   )
+
   let contents: string
+
   try {
     const openedInfo = await handle.stat({ bigint: true })
+
     if (
       !openedInfo.isFile()
       || openedInfo.dev !== info.dev
@@ -89,8 +102,10 @@ const readIdentity = async (file: string) => {
     ) {
       throw new Error("Host actor identity is not private.")
     }
+
     const buffer = Buffer.alloc(maxIdentityBytes + 1)
     let bytesRead = 0
+
     while (bytesRead < buffer.byteLength) {
       const result = await handle.read(
         buffer,
@@ -98,9 +113,11 @@ const readIdentity = async (file: string) => {
         buffer.byteLength - bytesRead,
         bytesRead,
       )
+
       if (result.bytesRead === 0) break
       bytesRead += result.bytesRead
     }
+
     if (bytesRead > maxIdentityBytes) throw new Error("Host actor identity is invalid.")
     contents = buffer.subarray(0, bytesRead).toString("utf8")
   } finally {
@@ -113,6 +130,7 @@ const readIdentity = async (file: string) => {
 const syncDirectory = async (directory: string) => {
   if (process.platform === "win32") return
   let handle
+
   try {
     handle = await open(
       directory,
@@ -136,9 +154,11 @@ const syncDirectory = async (directory: string) => {
 const publishIdentity = async (file: string, directory: string) => {
   const temporary = path.join(directory, `.host-actor-${randomUUID()}.tmp`)
   let created = false
+
   try {
     const handle = await open(temporary, "wx", 0o600)
     created = true
+
     try {
       if (process.platform !== "win32") await handle.chmod(0o600)
       await handle.writeFile(JSON.stringify({ version: "v1", actorId: randomUUID() }))
@@ -148,16 +168,20 @@ const publishIdentity = async (file: string, directory: string) => {
     }
 
     let won = true
+
     try {
       await link(temporary, file)
     } catch (error) {
       if (!hasErrorCode(error, "EEXIST")) throw error
       won = false
     }
+
     if (won) await syncDirectory(directory)
 
     const actorId = await readIdentity(file)
+
     if (actorId === undefined) throw new Error("Host actor identity publication failed.")
+
     return actorId
   } finally {
     if (created) await rm(temporary, { force: true })
@@ -171,9 +195,12 @@ const resolveHostActorPath = (defaultFile: string, configuredPath?: string) => (
 export const loadDesktopActorIdentity = (defaultFile: string, configuredPath?: string) => {
   const file = resolveHostActorPath(defaultFile, configuredPath)
   const directory = path.dirname(file)
+
   return ensurePrivateDirectory(directory).then(async () => {
     const actorId = await readIdentity(file)
+
     if (actorId !== undefined) return actorId
+
     return publishIdentity(file, directory)
   })
 }

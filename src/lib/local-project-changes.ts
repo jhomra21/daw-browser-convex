@@ -11,6 +11,7 @@ export const notifyLocalProjectChanged = (projectId: string) => {
   const sequence = localProjectChangeSequence(projectId) + 1
   changeSequences.set(projectId, sequence)
   changeTarget.dispatchEvent(new CustomEvent(projectId))
+
   return sequence
 }
 
@@ -23,6 +24,7 @@ export const subscribeToLocalProjectChanges = (
   callback: () => void,
 ) => {
   changeTarget.addEventListener(projectId, callback)
+
   return () => changeTarget.removeEventListener(projectId, callback)
 }
 
@@ -31,5 +33,6 @@ export const subscribeToLocalProjectStateChanges = (
   callback: () => void,
 ) => {
   projectStateChangeTarget.addEventListener(projectId, callback)
+
   return () => projectStateChangeTarget.removeEventListener(projectId, callback)
 }

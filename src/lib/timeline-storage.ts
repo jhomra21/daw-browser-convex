@@ -19,7 +19,9 @@ export type LocalMixPatch = Partial<{
   sends: TrackSend[]
   outputTargetId: TrackId | null
 }>
+
 export type LocalMixMap = Record<string, LocalMixPatch>
+
 type HistoryStorageScope = {
   projectId?: string
   userId?: string
@@ -27,8 +29,10 @@ type HistoryStorageScope = {
 
 export const canUseLocalStorage = () => {
   if (globalThis.window === undefined) return false
+
   try {
     const storage = window.localStorage
+
     return Boolean(storage)
   } catch {
     return false
@@ -37,7 +41,9 @@ export const canUseLocalStorage = () => {
 
 export const loadLocalMixMap = (rid?: string): LocalMixMap => {
   if (!rid) return {}
+
   if (!canUseLocalStorage()) return {}
+
   try {
     return JSON.parse(localStorage.getItem(`${MIX_KEY_PREFIX}${rid}`) || '{}')
   } catch {
@@ -47,7 +53,9 @@ export const loadLocalMixMap = (rid?: string): LocalMixMap => {
 
 export const saveLocalMixMap = (rid: string | undefined, map: LocalMixMap) => {
   if (!rid) return
+
   if (!canUseLocalStorage()) return
+
   try {
     localStorage.setItem(`${MIX_KEY_PREFIX}${rid}`, JSON.stringify(map))
   } catch {}
@@ -58,30 +66,39 @@ export const stripSharedTrackLocalOverrides = (
   writableTrackIds: Iterable<string>,
 ): LocalMixMap => {
   let next: LocalMixMap | null = null
+
   for (const trackId of writableTrackIds) {
     const entry = (next ?? map)[trackId]
+
     if (!entry) continue
+
     if (
       entry.muted === undefined
       && entry.soloed === undefined
       && entry.sends === undefined
       && entry.outputTargetId === undefined
     ) continue
+
     if (!next) next = { ...map }
+
     if (entry.volume === undefined) {
       delete next[trackId]
       continue
     }
+
     next[trackId] = {
       volume: entry.volume,
     }
   }
+
   return next ?? map
 }
 
 export const loadMixSyncFlag = (rid?: string): boolean => {
   if (!rid) return false
+
   if (!canUseLocalStorage()) return false
+
   try {
     return localStorage.getItem(`${MIX_SYNC_KEY_PREFIX}${rid}`) === '1'
   } catch {
@@ -91,7 +108,9 @@ export const loadMixSyncFlag = (rid?: string): boolean => {
 
 export const saveMixSyncFlag = (rid: string | undefined, value: boolean) => {
   if (!rid) return
+
   if (!canUseLocalStorage()) return
+
   try {
     localStorage.setItem(`${MIX_SYNC_KEY_PREFIX}${rid}`, value ? '1' : '0')
   } catch {}
@@ -104,12 +123,17 @@ type GridSettings = {
 
 export const loadGridSettings = (rid?: string): GridSettings => {
   if (!rid) return { enabled: true, denominator: 4 }
+
   if (!canUseLocalStorage()) return { enabled: true, denominator: 4 }
+
   try {
     const raw = localStorage.getItem(`${GRID_KEY_PREFIX}${rid}`)
+
     if (!raw) return { enabled: true, denominator: 4 }
     const parsed = JSON.parse(raw)
+
     if (!isJsonObject(parsed)) return { enabled: true, denominator: 4 }
+
     return {
       enabled: isJsonBoolean(parsed.enabled) ? parsed.enabled : true,
       denominator: isJsonNumber(parsed.denominator) ? parsed.denominator : 4,
@@ -121,7 +145,9 @@ export const loadGridSettings = (rid?: string): GridSettings => {
 
 export const saveGridSettings = (rid: string | undefined, enabled: boolean, denominator: number) => {
   if (!rid) return
+
   if (!canUseLocalStorage()) return
+
   try {
     localStorage.setItem(`${GRID_KEY_PREFIX}${rid}`, JSON.stringify({ enabled, denominator }))
   } catch {}
@@ -129,13 +155,18 @@ export const saveGridSettings = (rid: string | undefined, enabled: boolean, deno
 
 export const loadBpm = (rid?: string): number => {
   const DEFAULT = 120
+
   if (!rid) return DEFAULT
+
   if (!canUseLocalStorage()) return DEFAULT
+
   try {
     const raw = localStorage.getItem(`${BPM_KEY_PREFIX}${rid}`)
     const n = Number(raw)
+
     if (!Number.isFinite(n)) return DEFAULT
     const clamped = Math.min(300, Math.max(30, Math.round(n)))
+
     return clamped
   } catch {
     return DEFAULT
@@ -144,10 +175,12 @@ export const loadBpm = (rid?: string): number => {
 
 export const saveBpm = (rid: string | undefined, value: number) => {
   if (!rid) return
+
   if (!canUseLocalStorage()) return
   const DEFAULT = 120
   const safeValue = Number.isFinite(value) ? value : DEFAULT
   const clamped = Math.min(300, Math.max(30, Math.round(safeValue)))
+
   try {
     localStorage.setItem(`${BPM_KEY_PREFIX}${rid}`, String(clamped))
   } catch {}
@@ -164,9 +197,12 @@ const cloneLoop = (src: LoopSettings): LoopSettings => ({ enabled: !!src.enabled
 
 export const loadLoopSettings = (rid?: string): LoopSettings => {
   if (!rid) return cloneLoop(DEFAULT_LOOP)
+
   if (!canUseLocalStorage()) return cloneLoop(DEFAULT_LOOP)
+
   try {
     const raw = localStorage.getItem(`${LOOP_KEY_PREFIX}${rid}`)
+
     if (!raw) return cloneLoop(DEFAULT_LOOP)
     const parsed = JSON.parse(raw)
     const start = Number(parsed?.startSec)
@@ -174,6 +210,7 @@ export const loadLoopSettings = (rid?: string): LoopSettings => {
     const safeStart = Number.isFinite(start) && start >= 0 ? start : DEFAULT_LOOP.startSec
     const minEnd = safeStart + 0.1
     const safeEnd = Number.isFinite(end) && end > safeStart ? end : Math.max(DEFAULT_LOOP.endSec, minEnd)
+
     return cloneLoop({
       enabled: Boolean(parsed?.enabled),
       startSec: safeStart,
@@ -186,15 +223,18 @@ export const loadLoopSettings = (rid?: string): LoopSettings => {
 
 export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) => {
   if (!rid) return
+
   if (!canUseLocalStorage()) return
   const start = Number.isFinite(value.startSec) && value.startSec >= 0 ? value.startSec : DEFAULT_LOOP.startSec
   const minEnd = start + 0.1
   const end = Number.isFinite(value.endSec) && value.endSec > start ? value.endSec : Math.max(DEFAULT_LOOP.endSec, minEnd)
+
   const payload: LoopSettings = {
     enabled: !!value.enabled,
     startSec: start,
     endSec: end,
   }
+
   try {
     localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
   } catch {}
@@ -202,9 +242,12 @@ export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) =
 
 export const loadTimelineScale = (rid?: string): number => {
   if (!rid || !canUseLocalStorage()) return DEFAULT_PIXELS_PER_SECOND
+
   try {
     const raw = localStorage.getItem(`${TIMELINE_SCALE_KEY_PREFIX}${rid}`)
+
     if (raw === null) return DEFAULT_PIXELS_PER_SECOND
+
     return clampPixelsPerSecond(Number(raw))
   } catch {
     return DEFAULT_PIXELS_PER_SECOND
@@ -213,6 +256,7 @@ export const loadTimelineScale = (rid?: string): number => {
 
 export const saveTimelineScale = (rid: string | undefined, value: number) => {
   if (!rid || !canUseLocalStorage() || !Number.isFinite(value)) return
+
   try {
     localStorage.setItem(
       `${TIMELINE_SCALE_KEY_PREFIX}${rid}`,
@@ -223,6 +267,7 @@ export const saveTimelineScale = (rid: string | undefined, value: number) => {
 
 const toHistoryStorageKey = (scope: HistoryStorageScope) => {
   if (!scope.projectId) return null
+
   return scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
 }
 
@@ -230,15 +275,19 @@ const toHistoryLocalStorageKey = (storageKey: string) => `${HISTORY_KEY_PREFIX}$
 
 const readStoredHistory = (storageKey: string) => {
   const raw = localStorage.getItem(toHistoryLocalStorageKey(storageKey))
+
   if (!raw) return null
+
   return JSON.parse(raw)
 }
 
 export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
   if (!scope.projectId || !canUseLocalStorage()) return { undo: [], redo: [] }
+
   try {
     const scopedKey = scope.userId ? `${scope.projectId}:${scope.userId}` : scope.projectId
     const scopedHistory = readStoredHistory(scopedKey)
+
     return scopedHistory === null ? { undo: [], redo: [] } : normalizePersistedHistory(scopedHistory)
   } catch {
     return { undo: [], redo: [] }
@@ -247,7 +296,9 @@ export const loadHistory = (scope: HistoryStorageScope): PersistedHistory => {
 
 export const saveHistory = (scope: HistoryStorageScope, value: PersistedHistory) => {
   const storageKey = toHistoryStorageKey(scope)
+
   if (!storageKey || !canUseLocalStorage()) return
+
   try {
     localStorage.setItem(toHistoryLocalStorageKey(storageKey), JSON.stringify(serializePersistedHistory(value)))
   } catch {}

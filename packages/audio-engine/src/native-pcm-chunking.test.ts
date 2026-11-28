@@ -62,12 +62,14 @@ test('chunks stereo PCM at the exact payload-safe boundary with one-frame overla
   const planes = [new Float32Array(frameCount), new Float32Array(frameCount)]
   planes[0]![capacity - 1] = 0.25
   planes[0]![capacity] = 0.5
+
   const result = chunkNativePcmProjection({
     graph: graph(),
     assets: [{ asset: asset('source', frameCount), pcm: { frameCount, planes } }],
     events: [event({ sourceFrameCount: frameCount })],
     firstSequence: 1,
   })
+
   if ('supported' in result) throw new Error(result.reason)
   expect(result.assets).toHaveLength(2)
   expect(result.assets.map(({ asset: entry }) => entry.frameCount)).toEqual([capacity, 11])
@@ -98,6 +100,7 @@ test('chunks stereo PCM at the exact payload-safe boundary with one-frame overla
 test('preserves a fractional source seam and absolute fade anchors', () => {
   const capacity = nativeAudioHostMaximumAssetFramesForChannels(2)
   const frameCount = capacity + 10
+
   const result = chunkNativePcmProjection({
     graph: graph(),
     assets: [{
@@ -120,6 +123,7 @@ test('preserves a fractional source seam and absolute fade anchors', () => {
     })],
     firstSequence: 10,
   })
+
   if ('supported' in result) throw new Error(result.reason)
   expect(result.events).toHaveLength(2)
   expect(result.events.map((source) => source.sequence)).toEqual([10, 11])
@@ -143,6 +147,7 @@ test('preserves a fractional source seam and absolute fade anchors', () => {
 
 test('rejects oversized instrument-owned PCM because state has one asset identity', () => {
   const capacity = nativeAudioHostMaximumAssetFramesForChannels(1)
+
   const instrument: NonNullable<AudioCoreGraphSnapshot['nodes'][number]['instrument']> = {
     version: audioCoreContractVersion,
     kind: 'granular',
@@ -161,7 +166,9 @@ test('rejects oversized instrument-owned PCM because state has one asset identit
     reverseProbability: 0,
     stereoSpread: 0,
   }
+
   const frameCount = capacity + 1
+
   const result = chunkNativePcmProjection({
     graph: graph(instrument),
     assets: [{
@@ -171,6 +178,7 @@ test('rejects oversized instrument-owned PCM because state has one asset identit
     events: [],
     firstSequence: 1,
   })
+
   expect(result).toEqual({
     supported: false,
     reason: 'Native PCM asset "source" is owned by an instrument and exceeds the native payload capacity.',

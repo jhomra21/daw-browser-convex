@@ -17,8 +17,10 @@ export async function uploadClipSampleUrl(options: UploadClipSampleUrlOptions) {
     options.duration,
     options.signal,
   )
+
   if (!upload) {
     throw new Error('sample-upload-failed')
   }
+
   return upload
 }

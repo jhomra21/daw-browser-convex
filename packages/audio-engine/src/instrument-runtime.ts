@@ -9,6 +9,7 @@ import { getScheduledMidiEvents } from './audio-scheduling'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
+
 type RuntimeTrack = Track<AudioBuffer>
 
 type InstrumentRuntimeOptions = {
@@ -36,17 +37,22 @@ export type InstrumentRuntimeListeners = {
 export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
   let primaryListeners: InstrumentRuntimeListeners = {}
   const additionalListeners = new Set<InstrumentRuntimeListeners>()
+
   const notifyListeners = (notify: (listeners: InstrumentRuntimeListeners) => void) => {
     notify(primaryListeners)
+
     for (const listeners of additionalListeners) notify(listeners)
   }
+
   const activeKinds = new Map<string, TrackInstrumentParams['kind']>()
   const arpeggiators = new Map<string, ArpParams>()
+
   const synthRuntime = createSynthRuntime({
     ...options,
     getArpeggiator: (trackId) => arpeggiators.get(trackId),
     getAutomationEnvelopes: options.getAutomationEnvelopes,
   })
+
   const drumRackRuntime = createDrumRackRuntime({
     ...options,
     getArpeggiator: (trackId) => arpeggiators.get(trackId),
@@ -54,6 +60,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       notifyListeners((listeners) => listeners.onDrumRackAssetUse?.(use))
     },
   })
+
   const samplerRuntime = createSamplerRuntime({
     ...options,
     getArpeggiator: (trackId) => arpeggiators.get(trackId),
@@ -65,15 +72,18 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       notifyListeners((listeners) => listeners.onAssetUse?.(use))
     },
   })
+
   const granularRuntimes = new Map<string, Awaited<ReturnType<typeof createGranularRuntime>>>()
   const granularInstanceIds = new Map<string, string>()
   const granularRevisions = new Map<string, number>()
+
   const disposeGranular = (trackId: string) => {
     granularRevisions.set(trackId, (granularRevisions.get(trackId) ?? 0) + 1)
     granularRuntimes.get(trackId)?.close()
     granularRuntimes.delete(trackId)
     granularInstanceIds.delete(trackId)
   }
+
   const setTrackGranular = async (
     trackId: string,
     params: Extract<TrackInstrumentParams, { kind: 'granular' }>['params'],
@@ -82,10 +92,12 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
   ): Promise<EngineDisposition> => {
     options.ensureAudio()
     const context = options.getAudioContext()
+
     if (!context) return 'dropped'
     disposeGranular(trackId)
     const revision = granularRevisions.get(trackId) ?? 0
     let runtime: Awaited<ReturnType<typeof createGranularRuntime>>
+
     try {
       runtime = await createGranularRuntime({
         context,
@@ -96,24 +108,32 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       if (granularRevisions.get(trackId) !== revision) return 'superseded'
       throw error
     }
+
     if (granularRevisions.get(trackId) !== revision) {
       runtime.close()
+
       return 'superseded'
     }
+
     granularRuntimes.set(trackId, runtime)
     granularInstanceIds.set(trackId, instanceId)
     runtime.setFrozen(params.freeze)
+
     try {
       const disposition = installedBuffer ? await runtime.installSample(installedBuffer) : 'applied'
+
       if (granularRevisions.get(trackId) !== revision || granularRuntimes.get(trackId) !== runtime) return 'superseded'
+
       return disposition
     } catch (error) {
       if (granularRevisions.get(trackId) !== revision || granularRuntimes.get(trackId) !== runtime) return 'superseded'
+
       if (granularRuntimes.get(trackId) === runtime) {
         runtime.close()
         granularRuntimes.delete(trackId)
         granularInstanceIds.delete(trackId)
       }
+
       throw error
     }
   }
@@ -123,6 +143,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     drumRackRuntime.clearTrackDrumRack(trackId)
     samplerRuntime.disposeTrack(trackId)
     activeKinds.set(trackId, 'synth')
+
     return synthRuntime.setTrackSynth(trackId, params, instanceId)
   }
 
@@ -144,25 +165,31 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     setTrackInstrument: (trackId: string, input: SetTrackInstrumentInput): EngineDisposition => {
       if (input.instrument.kind === 'synth') return setTrackSynth(trackId, input.instrument.params, input.instrument.instanceId)
       synthRuntime.disposeTrack(trackId)
+
       if (input.instrument.kind === 'drum-rack') {
         disposeGranular(trackId)
         samplerRuntime.disposeTrack(trackId)
         activeKinds.set(trackId, 'drum-rack')
         drumRackRuntime.setTrackDrumRack(trackId, input.instrument.params, 'buffers' in input ? input.buffers : undefined)
+
         return 'applied'
       }
+
       if (input.instrument.kind === 'granular') {
         drumRackRuntime.clearTrackDrumRack(trackId)
         samplerRuntime.disposeTrack(trackId)
         activeKinds.set(trackId, 'granular')
         void setTrackGranular(trackId, input.instrument.params, 'installedBuffer' in input ? input.installedBuffer : undefined, input.instrument.instanceId).catch(() => undefined)
+
         return 'applied'
       }
+
       disposeGranular(trackId)
       drumRackRuntime.clearTrackDrumRack(trackId)
       samplerRuntime.disposeTrack(trackId)
       activeKinds.set(trackId, 'sampler')
       samplerRuntime.setTrackSampler(trackId, input.instrument.instanceId, input.instrument.params, 'buffers' in input ? input.buffers : undefined)
+
       return 'applied'
     },
     clearTrackInstrument,
@@ -173,6 +200,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       synthRuntime.disposeTrack(trackId)
       samplerRuntime.disposeTrack(trackId)
       activeKinds.set(trackId, 'drum-rack')
+
       return drumRackRuntime.setTrackDrumRack(trackId, params, buffers)
     },
     clearTrackDrumRack: (trackId: string) => {
@@ -191,6 +219,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       drumRackRuntime.clearTrackDrumRack(trackId)
       samplerRuntime.disposeTrack(trackId)
       activeKinds.set(trackId, 'granular')
+
       return setTrackGranular(trackId, params, installedBuffer, instanceId)
     },
     setTrackArpeggiator: (trackId: string, params: ArpParams) => {
@@ -241,17 +270,24 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       scheduleOptions?: { scheduleVoiceAutomation?: boolean },
     ): boolean => {
       if (activeKinds.get(track.id) === 'drum-rack') return drumRackRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
+
       if (activeKinds.get(track.id) === 'sampler') return samplerRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
+
       if (activeKinds.get(track.id) === 'granular') {
         if (!clip.midi) return false
         const runtime = granularRuntimes.get(track.id)
+
         if (!runtime) return false
         const instanceId = granularInstanceIds.get(track.id)
+
         const envelopes = options.getAutomationEnvelopes?.().filter((envelope) => {
           const key = parseGranularAutomationKey(envelope.parameterId)
+
           return key?.trackId === track.id && key.instanceId === instanceId
         }) ?? []
+
         const events = getScheduledMidiEvents({ clip, bpm: options.getBpm(), notes: clip.midi.notes, rangeStartSec: playheadSec, rangeEndSec: endLimitSec, arp: arpeggiators.get(track.id) })
+
         for (const note of events) {
           const timelineStartSec = note.startSec
           const durationSec = note.endSec - note.startSec
@@ -264,8 +300,10 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
             automationEnvelopes: envelopes,
           })
         }
+
         return events.length > 0
       }
+
       return synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec, scheduleOptions)
     },
     previewDrumRackPad: drumRackRuntime.previewPad,
@@ -276,6 +314,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     startLiveGranularNote: (trackId: string, when: number, durationSec: number, liveId: string) => {
       if (activeKinds.get(trackId) !== 'granular') return undefined
       const runtime = granularRuntimes.get(trackId)
+
       if (!runtime) return undefined
       runtime.scheduleNote({
         clipId: liveId,
@@ -285,6 +324,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
         timelineToCtxTime: (timeSec) => timeSec,
         automationEnvelopes: [],
       })
+
       return () => runtime.stopClip(liveId)
     },
     setSamplerRuntimeListeners: (listeners: {
@@ -296,18 +336,21 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
     },
     addSamplerRuntimeListeners: (listeners: InstrumentRuntimeListeners) => {
       additionalListeners.add(listeners)
+
       return () => additionalListeners.delete(listeners)
     },
     stopClip: (clipId: string) => {
       synthRuntime.stopClip(clipId)
       drumRackRuntime.stopClip(clipId)
       samplerRuntime.stopClip(clipId)
+
       for (const runtime of granularRuntimes.values()) runtime.stopClip(clipId)
     },
     stopAll: () => {
       synthRuntime.stopAll()
       drumRackRuntime.stopAll()
       samplerRuntime.stopAll()
+
       for (const runtime of granularRuntimes.values()) runtime.stop()
     },
     stopLiveNotes: (trackId: string, when: number) => {
@@ -329,6 +372,7 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       synthRuntime.clear()
       drumRackRuntime.clear()
       samplerRuntime.clear()
+
       for (const trackId of Array.from(granularRuntimes.keys())) disposeGranular(trackId)
     },
   }

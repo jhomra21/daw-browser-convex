@@ -38,8 +38,11 @@ import {
 } from '../../../packages/audio-core-contract/src/index'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
+
 export type PortableDynamicsKind = 'gate' | 'compressor' | 'limiter'
+
 export type PortableTimeEffectKind = 'delay' | 'reverb'
+
 export type PortableSpectralKind = 'spectral'
 
 export type PortableLegacyModulationFixture =
@@ -136,6 +139,7 @@ const graphVersion = 3
 
 const copyBytes = (target: Uint8Array, offset: number, source: Uint8Array) => {
   target.set(source, offset)
+
   return offset + source.byteLength
 }
 
@@ -147,9 +151,11 @@ export const encodePortableGraphParityFixture = (fixture: PortableGraphParityFix
   const instrumentStates = encodeFixtureInstrumentStates(fixture.instrumentStates ?? [])
   const blockPartitions = encodeFixtureBlockPartitions(fixture.blockPartitions)
   const graphEdits = encodeFixtureGraphEdits(fixture.graphEdits)
+
   const bytes = new Uint8Array(80 + fixture.graph.byteLength + fixture.input.byteLength
     + parameters.byteLength + events.byteLength + instrumentEvents.byteLength + assets.byteLength
     + instrumentStates.byteLength + blockPartitions.byteLength + graphEdits.byteLength)
+
   const view = new DataView(bytes.buffer)
   view.setUint32(0, 0x44474631, true)
   view.setUint32(4, 3, true)
@@ -180,6 +186,7 @@ export const encodePortableGraphParityFixture = (fixture: PortableGraphParityFix
   offset = copyBytes(bytes, offset, instrumentStates)
   offset = copyBytes(bytes, offset, blockPartitions)
   copyBytes(bytes, offset, graphEdits)
+
   return bytes
 }
 
@@ -189,6 +196,7 @@ const encodeFixtureGraphEdits = (edits: readonly PortableGraphEdit[] | undefined
   const view = new DataView(output.buffer)
   view.setUint32(0, edits.length, true)
   let offset = 4
+
   for (const [index, edit] of edits.entries()) {
     view.setUint32(offset, edit.frame, true)
     view.setUint32(offset + 4, edit.graph.byteLength, true)
@@ -197,6 +205,7 @@ const encodeFixtureGraphEdits = (edits: readonly PortableGraphEdit[] | undefined
     // The fixture graph is revision 1; each edit is the next revision after it.
     view.setUint32(graphOffset + 4, index + 2, true)
   }
+
   return output
 }
 
@@ -206,6 +215,7 @@ const encodeFixtureBlockPartitions = (partitions: readonly number[] | undefined)
   const view = new DataView(output.buffer)
   view.setUint32(0, partitions.length, true)
   partitions.forEach((frames, index) => view.setUint32(4 + index * 4, frames, true))
+
   return output
 }
 
@@ -215,11 +225,14 @@ const encodeFixtureAssets = (assets: readonly PortableFixtureAsset[]) => {
   const view = new DataView(output.buffer)
   view.setUint32(0, assets.length, true)
   let offset = 4
+
   for (const asset of assets) {
     const frames = asset.planes[0]?.length ?? 0
+
     if (frames === 0 || asset.planes.length === 0 || asset.planes.length > 2 || asset.planes.some((plane) => plane.length !== frames)) {
       throw new Error('Fixture assets require one or two equal-length planar PCM channels.')
     }
+
     view.setUint32(offset, asset.identity, true)
     view.setUint32(offset + 4, asset.generation, true)
     view.setUint32(offset + 8, asset.operation === 'install' ? 1 : 2, true)
@@ -228,8 +241,10 @@ const encodeFixtureAssets = (assets: readonly PortableFixtureAsset[]) => {
     view.setUint32(offset + 20, asset.planes.length, true)
     view.setUint32(offset + 24, frames * asset.planes.length * Float32Array.BYTES_PER_ELEMENT, true)
     offset += 28
+
     for (const plane of asset.planes) offset = copyBytes(output, offset, new Uint8Array(plane.buffer, plane.byteOffset, plane.byteLength))
   }
+
   return output
 }
 
@@ -241,23 +256,29 @@ const encodeFixtureInstrumentStates = (states: readonly PortableFixtureInstrumen
     entry,
     binary: encodeAudioCoreInstrumentState(entry.state, (assetId) => {
       const [identity, generation] = assetId.slice('fixture:'.length).split(':').map(Number)
+
       if (!identity || !generation) throw new Error(`Invalid fixture asset reference ${assetId}.`)
+
       return fixtureAssetHandle(identity, generation)
     }),
   }))
+
   const byteLength = encoded.reduce((total, { binary }) => total + 20 + binary.state.byteLength + (binary.zones?.byteLength ?? 0), 4)
   const output = new Uint8Array(byteLength)
   const view = new DataView(output.buffer)
   view.setUint32(0, states.length, true)
   let offset = 4
+
   for (const { entry, binary } of encoded) {
     view.setBigUint64(offset, entry.nodeId, true)
     view.setUint32(offset + 8, entry.kind, true)
     view.setUint32(offset + 12, binary.state.byteLength, true)
     view.setUint32(offset + 16, binary.zones?.byteLength ?? 0, true)
     offset = copyBytes(output, offset + 20, binary.state)
+
     if (binary.zones) offset = copyBytes(output, offset, binary.zones)
   }
+
   return output
 }
 
@@ -336,8 +357,10 @@ const graph = (
 ) => {
   const processorBytes = processors.reduce((total, processor) => {
     const state = processor.state ?? utilityState()
+
     return total + 48 + state.byteLength + (processor.parameterTargets?.length ?? 4) * 4
   }, 0)
+
   const bytes = 24 + nodes.length * 132 + edges.length * 48 + processorBytes
   const output = new Uint8Array(bytes)
   const view = new DataView(output.buffer)
@@ -347,6 +370,7 @@ const graph = (
   view.setUint32(12, edges.length, true)
   view.setUint32(16, processors.length, true)
   let offset = 24
+
   for (const node of nodes) {
     view.setBigUint64(offset, node.id, true)
     view.setUint32(offset + 8, node.kind, true)
@@ -354,20 +378,24 @@ const graph = (
     view.setUint32(offset + 16, node.outputLayout ?? 2, true)
     view.setUint32(offset + 20, node.bus, true)
     view.setUint32(offset + 24, node.latencyFrames ?? 0, true)
+
     if (node.instrumentKind) {
       view.setUint32(offset + 28, node.instrumentKind, true)
       view.setUint32(offset + 32, 1, true)
       view.setUint32(offset + 36, node.voiceCapacity ?? 2, true)
+
       if (node.instrumentKind === 1) {
         view.setUint32(offset + 40, 1, true)
         view.setUint32(offset + 44, 1, true)
       }
     }
+
     view.setBigUint64(offset + 108, node.id + 100n, true)
     view.setFloat32(offset + 116, 1, true)
     view.setFloat32(offset + 120, 0, true)
     offset += 132
   }
+
   for (const edge of edges) {
     view.setBigUint64(offset, BigInt(offset), true)
     view.setBigUint64(offset + 8, edge.from, true)
@@ -379,6 +407,7 @@ const graph = (
     view.setUint32(offset + 44, edge.pdcDelayFrames ?? 0, true)
     offset += 48
   }
+
   for (const processor of processors) {
     const state = processor.state ?? utilityState()
     const parameterTargets = processor.parameterTargets ?? [1, 2, 3, 4]
@@ -397,6 +426,7 @@ const graph = (
     parameterTargets.forEach((target, index) => view.setUint32(offset + 48 + state.byteLength + index * 4, target, true))
     offset += 48 + state.byteLength + parameterTargets.length * 4
   }
+
   return output
 }
 
@@ -408,7 +438,9 @@ const parameterEnvelope = (frames: number) => {
   view.setUint32(12, frames, true)
   view.setUint32(16, 1, true)
   view.setUint32(20, 2, true)
+
   for (let frame = 0; frame < frames; frame += 1) view.setFloat32(24 + frame * 4, frame === 0 ? -1 : 1, true)
+
   return output
 }
 
@@ -421,6 +453,7 @@ const parameterEnvelopeForTarget = (target: number, values: readonly number[]) =
   view.setUint32(16, 1, true)
   view.setUint32(20, target, true)
   values.forEach((value, frame) => view.setFloat32(24 + frame * 4, value, true))
+
   return output
 }
 
@@ -436,6 +469,7 @@ const processorEventEnvelope = (
   view.setUint32(12, target, true)
   view.setUint32(16, frameOffset, true)
   view.setFloat32(20, value, true)
+
   return output
 }
 
@@ -451,6 +485,7 @@ const mixerEventEnvelope = () => {
   view.setUint32(32, 26, true)
   view.setUint32(36, 2, true)
   view.setFloat32(40, 1, true)
+
   return output
 }
 
@@ -480,6 +515,7 @@ const instrumentEventEnvelope = (events: readonly FixtureInstrumentEvent[]) => {
   const output = new Uint8Array(4 + events.length * 48)
   const view = new DataView(output.buffer)
   view.setUint32(0, events.length, true)
+
   for (const [index, event] of events.entries()) {
     const offset = 4 + index * 48
     view.setBigUint64(offset, event.nodeId, true)
@@ -492,6 +528,7 @@ const instrumentEventEnvelope = (events: readonly FixtureInstrumentEvent[]) => {
     view.setUint32(offset + 40, event.note, true)
     view.setFloat32(offset + 44, event.value, true)
   }
+
   return output
 }
 
@@ -517,6 +554,7 @@ const synthAutomationMidiEnvelope = () => {
   view.setUint32(88, 0, true)
   view.setUint32(92, 1, true)
   view.setFloat32(96, 0.5, true)
+
   return output
 }
 
@@ -641,40 +679,53 @@ const sampleZone = (assetId: string, note: number, overrides: Partial<AudioCoreS
 const finite = (output: readonly Float32Array[]) => output.every((plane) => plane.every(Number.isFinite))
 const sampleAt = (output: readonly Float32Array[], frame: number) => output[0]?.[frame] ?? 0
 const closeTo = (value: number, expected: number, tolerance = 1e-4) => Math.abs(value - expected) <= tolerance
+
 const reverbOnsetFrame = (output: readonly Float32Array[], threshold = 1e-6) => {
   for (let frame = 0; frame < (output[0]?.length ?? 0); frame += 1) {
     if (output.some((plane) => Math.abs(plane[frame] ?? 0) >= threshold)) return frame
   }
+
   return null
 }
+
 const reverbStereoCorrelation = (output: readonly Float32Array[]): number | null => {
   const left = output[0]
   const right = output[1]
+
   if (!left || !right) return null
   let leftEnergy = 0
   let rightEnergy = 0
   let crossEnergy = 0
+
   for (let frame = 0; frame < Math.min(left.length, right.length); frame += 1) {
     leftEnergy += left[frame] * left[frame]
     rightEnergy += right[frame] * right[frame]
     crossEnergy += left[frame] * right[frame]
   }
+
   const minimumEnergy = 1e-10
+
   return leftEnergy < minimumEnergy || rightEnergy < minimumEnergy
     ? null
     : crossEnergy / Math.sqrt(leftEnergy * rightEnergy)
 }
+
 const reverbDecayFrame = (output: readonly Float32Array[], thresholdDb = -60) => {
   let peak = 0
+
   for (const plane of output) {
     for (const sample of plane) peak = Math.max(peak, Math.abs(sample))
   }
+
   const threshold = peak * Math.pow(10, thresholdDb / 20)
+
   for (let frame = (output[0]?.length ?? 0) - 1; frame >= 0; frame -= 1) {
     if (output.some((plane) => Math.abs(plane[frame] ?? 0) >= threshold)) return frame
   }
+
   return null
 }
+
 const reverbCharacterizationOutput = (
   output: readonly Float32Array[],
   expectedOnsetRange: readonly [number, number],
@@ -682,8 +733,10 @@ const reverbCharacterizationOutput = (
   const onset = reverbOnsetFrame(output)
   const decay = reverbDecayFrame(output)
   const correlation = reverbStereoCorrelation(output)
+
   const earlyEnergy = output.reduce((total, plane) =>
     total + plane.slice(onset ?? 0, (onset ?? 0) + 240).reduce((sum, sample) => sum + sample * sample, 0), 0)
+
   return finite(output)
     && onset !== null
     && onset >= expectedOnsetRange[0]
@@ -696,18 +749,24 @@ const reverbCharacterizationOutput = (
     // mono-expansion gap is asserted separately by the spin pair fixture.
     && correlation !== null
 }
+
 export const isPlanarImpulseFixtureInput = (input: Float32Array, channelCount = 2) => {
   if (channelCount <= 0 || input.length % channelCount !== 0) return false
   const frames = input.length / channelCount
+
   for (let channel = 0; channel < channelCount; channel += 1) {
     const offset = channel * frames
+
     if (!Number.isFinite(input[offset]) || input[offset] === 0) return false
+
     for (let frame = 1; frame < frames; frame += 1) {
       if (input[offset + frame] !== 0) return false
     }
   }
+
   return true
 }
+
 const sourceMaster = (processorCount = 0) => graph(
   [{ id: 1n, kind: 1, bus: 0 }, { id: 2n, kind: 6, bus: 0 }],
   [{ from: 1n, to: 2n }],
@@ -765,16 +824,21 @@ const limiterTruePeakCoefficients = (() => {
   const center = (taps - 1) / 2
   const coefficients = new Float64Array(taps)
   let sum = 0
+
   for (let index = 0; index < taps; index += 1) {
     const x = index - center
     const sinc = x === 0 ? 2 * cutoff : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x)
+
     const window = 0.42
       - 0.5 * Math.cos(2 * Math.PI * index / (taps - 1))
       + 0.08 * Math.cos(4 * Math.PI * index / (taps - 1))
+
     coefficients[index] = sinc * window
     sum += coefficients[index]
   }
+
   for (let index = 0; index < taps; index += 1) coefficients[index] *= 4 / sum
+
   return coefficients
 })()
 
@@ -782,42 +846,53 @@ const limiterTruePeak = (output: readonly Float32Array[]) => {
   const histories = output.map(() => new Float64Array(12))
   let historyWrite = 0
   let peak = 0
+
   for (let frame = 0; frame < (output[0]?.length ?? 0); frame += 1) {
     histories.forEach((history, channel) => {
       history[historyWrite] = output[channel]?.[frame] ?? 0
+
       for (let phase = 0; phase < 4; phase += 1) {
         let value = 0
+
         for (let tap = 0; tap < 12; tap += 1) {
           const historyIndex = (historyWrite + 11 - tap) % 12
           value += history[historyIndex] * limiterTruePeakCoefficients[tap * 4 + phase]
         }
+
         peak = Math.max(peak, Math.abs(value))
       }
     })
     historyWrite = (historyWrite + 1) % 12
   }
+
   return peak
 }
 
 const maximumSamplePeak = (planes: readonly Float32Array[] | Float32Array) => {
   let peak = 0
+
   for (const sample of planes) peak = Math.max(peak, Math.abs(sample))
+
   return peak
 }
 
 const sweep = (frames: number, startHz: number, endHz: number, sampleRateHz: number, amplitude = 0.5) => {
   const duration = frames / sampleRateHz
   const slope = (endHz - startHz) / duration
+
   return Array.from({ length: frames }, (_, frame) => {
     const time = frame / sampleRateHz
+
     return Math.sin(2 * Math.PI * (startHz * time + 0.5 * slope * time * time)) * amplitude
   })
 }
 
 const seededNoise = (frames: number, seed: number, amplitude = 0.5) => {
   let state = seed >>> 0
+
   return Array.from({ length: frames }, () => {
     state = (Math.imul(state, 1_664_525) + 1_013_904_223) >>> 0
+
     return ((state / 0xffff_ffff) * 2 - 1) * amplitude
   })
 }
@@ -834,6 +909,7 @@ const liveControlPair = (
 ): readonly PortableGraphParityFixture[] => {
   const key = `${fixture.name}-live-control`
   const maxFramesPerBlock = Math.max(fixture.maxFramesPerBlock, fixture.frames)
+
   return [
     { ...fixture, maxFramesPerBlock, blockPartitions: undefined, characterizationPairKey: key },
     {
@@ -860,10 +936,12 @@ const bypassInput = stereo(sine(16, 1_000, 48_000), sine(16, 2_000, 48_000, 0.25
 // A Saturator or EQ that is bypassed when its graph is first built has nothing
 // sounding to ramp away from, so it passes its input dry from the first sample.
 const rampedBypassFrames = 960
+
 const rampedBypassInput = stereo(
   sine(rampedBypassFrames, 1_000, 48_000),
   sine(rampedBypassFrames, 2_000, 48_000, 0.25),
 )
+
 const dryFromTheStart = (plane: Float32Array, channel: number) => plane.every((sample, frame) =>
   closeTo(sample, rampedBypassInput[channel * rampedBypassFrames + frame] ?? 0))
 
@@ -952,19 +1030,29 @@ const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
 
 const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
   if (fixture.kind === 'chorus') return encodeChorusProcessorState(fixture.state)
+
   if (fixture.kind === 'flanger') return encodeFlangerProcessorState(fixture.state)
+
   if (fixture.kind === 'phaser') return encodePhaserProcessorState(fixture.state)
+
   if (fixture.kind === 'tremolo') return encodeTremoloProcessorState(fixture.state)
+
   if (fixture.kind === 'autopan') return encodeAutoPanProcessorState(fixture.state)
+
   return encodeEnsembleProcessorState(fixture.state)
 }
 
 const modulationParameterTargets = (kind: PortableModulationKind): readonly number[] => {
   if (kind === 'chorus') return [74, 75, 76, 77, 78, 79]
+
   if (kind === 'flanger') return [80, 81, 82, 83, 84, 85]
+
   if (kind === 'phaser') return [86, 87, 88, 89, 90, 91]
+
   if (kind === 'tremolo') return [92, 93, 94, 95]
+
   if (kind === 'autopan') return [96, 97, 98, 99]
+
   return [100, 101, 102, 103, 104]
 }
 
@@ -975,9 +1063,11 @@ const modulationStateWith = (
   if (fixture.kind === 'chorus' || fixture.kind === 'flanger') {
     return { kind: fixture.kind, state: { ...fixture.state, enabled: overrides.enabled ?? fixture.state.enabled } }
   }
+
   if (fixture.kind === 'phaser') {
     return { kind: fixture.kind, state: { ...fixture.state, enabled: overrides.enabled ?? fixture.state.enabled } }
   }
+
   if (fixture.kind === 'tremolo' || fixture.kind === 'autopan') {
     return {
       kind: fixture.kind,
@@ -988,6 +1078,7 @@ const modulationStateWith = (
       },
     }
   }
+
   return { kind: fixture.kind, state: { ...fixture.state, enabled: overrides.enabled ?? fixture.state.enabled } }
 }
 
@@ -1007,6 +1098,7 @@ const modulationFixture = (
 ): PortableGraphParityFixture => {
   const legacy = options.legacy ?? definition.legacy
   const frames = input.length / 2
+
   return {
     name: `${definition.kind}-${name}`,
     capability,
@@ -1036,16 +1128,20 @@ const modulationFixture = (
 
 const modulationFixtures = modulationDefinitions.flatMap((definition): PortableGraphParityFixture[] => {
   const impulseFrames = 2_048
+
   const impulseState = modulationStateWith(definition.legacy, {
     phase: definition.kind === 'tremolo' || definition.kind === 'autopan' ? 0.75 : undefined,
   })
+
   const stepInput = stereo(
     Array.from({ length: 441 }, () => 0.25),
     Array.from({ length: 441 }, () => -0.125),
   )
+
   const sineInput = stereo(sine(480, 1_000, 48_000), sine(480, 2_000, 48_000, 0.25))
   const sweepInput = stereo(sweep(960, 80, 18_000, 96_000), sweep(960, 160, 12_000, 96_000, 0.25))
   const bypassState = modulationStateWith(definition.legacy, { enabled: false })
+
   const bypass = modulationFixture(
     definition,
     'bypass',
@@ -1054,10 +1150,12 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
     stereo(sine(960, 997, 48_000), sine(960, 1_993, 48_000, 0.25)),
     { legacy: bypassState, maxFramesPerBlock: 480, blockPartitions: [17, 463, 480], bypassed: true },
   )
+
   bypass.legacyStartFrame = 480
   bypass.assertOutput = (output) => finite(output)
     && output.every((plane, channel) => plane.every((sample, frame) =>
       closeTo(sample, bypass.input[channel * plane.length + frame] ?? 0, 1e-5)))
+
   const nonfinite = modulationFixture(
     definition,
     'nonfinite',
@@ -1068,9 +1166,11 @@ const modulationFixtures = modulationDefinitions.flatMap((definition): PortableG
       [Number.NEGATIVE_INFINITY, Number.NaN, 0.25, Number.POSITIVE_INFINITY, -0.25, 0.5, -0.5, 0.75],
     ),
   )
+
   nonfinite.assertOutput = finite
   nonfinite.legacyModulation = undefined
   nonfinite.legacyTolerance = undefined
+
   return [
     modulationFixture(
       definition,
@@ -1227,13 +1327,17 @@ const dynamicsDefinitions: readonly DynamicsFixtureDefinition[] = [
 
 const encodeDynamicsState = (fixture: PortableLegacyDynamicsFixture) => {
   if (fixture.kind === 'gate') return encodeGateProcessorState(fixture.state)
+
   if (fixture.kind === 'compressor') return encodeCompressorProcessorState(fixture.state)
+
   return encodeLimiterProcessorState(fixture.state)
 }
 
 const dynamicsParameterTargets = (kind: PortableDynamicsKind): readonly number[] => {
   if (kind === 'gate') return Array.from({ length: 11 }, (_, index) => 105 + index)
+
   if (kind === 'compressor') return Array.from({ length: 11 }, (_, index) => 116 + index)
+
   return [127, 128, 129, 130]
 }
 
@@ -1242,6 +1346,7 @@ const dynamicsStateWithEnabled = (
   enabled: boolean,
 ): PortableLegacyDynamicsFixture => {
   if (fixture.kind === 'gate') return { kind: fixture.kind, state: { ...fixture.state, enabled } }
+
   if (fixture.kind === 'compressor') {
     return {
       kind: fixture.kind,
@@ -1253,6 +1358,7 @@ const dynamicsStateWithEnabled = (
       },
     }
   }
+
   return { kind: fixture.kind, state: { ...fixture.state, enabled } }
 }
 
@@ -1276,6 +1382,7 @@ const dynamicsFixture = (
   const legacy = options.legacy ?? definition.legacy
   const frames = input.length / ((options.inputBusCount ?? 1) * 2)
   const latencyFrames = Math.ceil(definition.latencyMs * sampleRateHz / 1_000)
+
   return {
     name: `${definition.kind}-${name}`,
     capability,
@@ -1314,6 +1421,7 @@ const dynamicsFixture = (
 
 const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraphParityFixture[] => {
   const impulseFrames = Math.ceil(definition.latencyMs * 48_000 / 1_000) + 1_024
+
   const impulse = dynamicsFixture(
     definition,
     'impulse-partitions-reset',
@@ -1331,6 +1439,7 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
       assertReset: true,
     },
   )
+
   const latency = impulse.expectedLatencyFrames ?? 0
   impulse.assertOutput = (output) => finite(output)
     && output.every((plane) => plane.slice(0, latency).every((sample) => sample === 0))
@@ -1340,9 +1449,11 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
     Array.from({ length: 882 }, (_, frame) => frame < 441 ? 0.01 : 0.5),
     Array.from({ length: 882 }, (_, frame) => frame < 441 ? -0.005 : -0.25),
   )
+
   const sineInput = stereo(sine(1_440, 1_000, 48_000, 0.9), sine(1_440, 2_000, 48_000, 0.45))
   const sweepInput = stereo(sweep(2_880, 80, 18_000, 96_000, 0.9), sweep(2_880, 160, 12_000, 96_000, 0.45))
   const bypassState = dynamicsStateWithEnabled(definition.legacy, false)
+
   const bypass = dynamicsFixture(
     definition,
     'bypass',
@@ -1351,6 +1462,7 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
     stereo(sine(1_440, 997, 48_000), sine(1_440, 1_993, 48_000, 0.25)),
     { legacy: bypassState, maxFramesPerBlock: 480, blockPartitions: [17, 463, 480, 480], bypassed: true },
   )
+
   const bypassLatency = bypass.expectedLatencyFrames ?? 0
   bypass.assertOutput = (output) => finite(output)
     && output.every((plane, channel) => plane.slice(bypassLatency).every((sample, frame) =>
@@ -1366,6 +1478,7 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
       [Number.NEGATIVE_INFINITY, Number.NaN, 0.25, Number.POSITIVE_INFINITY, -0.25, 0.5, -0.5, 0.75],
     ),
   )
+
   nonfinite.assertOutput = finite
   nonfinite.legacyDynamics = undefined
   nonfinite.legacyTolerance = undefined
@@ -1376,16 +1489,21 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
     const left = sineWithPhase(frames, frequency, sampleRateHz, 0.8, 1.727875959)
     const linkedInput = stereo(left, sineWithPhase(frames, frequency, sampleRateHz, 0.2, 1.727875959))
     const unlinkedInput = stereo(left, sineWithPhase(frames, frequency, sampleRateHz, 0.2, 1.727875959))
+
     const blockPartitions = (maximum: number, first: number) => {
       const partitions = [first, 7, 64, 128, 256]
       let remaining = frames - partitions.reduce((total, partition) => total + partition, 0)
+
       while (remaining > maximum) {
         partitions.push(maximum)
         remaining -= maximum
       }
+
       if (remaining > 0) partitions.push(remaining)
+
       return partitions
     }
+
     const createTruePeakFixture = (
       name: string,
       input: Float32Array,
@@ -1397,14 +1515,17 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
         maxFramesPerBlock: Math.max(...blockPartitions),
         blockPartitions,
       })
+
       if (name === 'true-peak-unlinked') {
         fixture.characterizationPairKey = `limiter-true-peak-link-${sampleRateHz}`
         fixture.characterizationPairDifferenceMinimum = 0.01
       }
+
       fixture.assertOutput = (output) => {
         const inputSamplePeak = maximumSamplePeak(input)
         const inputTruePeak = limiterTruePeak([input.subarray(0, frames), input.subarray(frames)])
         const outputTruePeak = limiterTruePeak(output)
+
         return finite(output)
           && inputTruePeak > inputSamplePeak + 0.01
           // The shipped browser detector's finite 48-tap window leaves a
@@ -1412,8 +1533,10 @@ const dynamicsFixtures = dynamicsDefinitions.flatMap((definition): PortableGraph
           // intersample waveform; native must preserve that contract.
           && outputTruePeak <= 10 ** (-6 / 20) + 0.04
       }
+
       return fixture
     }
+
     return [
       createTruePeakFixture(
         'true-peak-linked',
@@ -1485,6 +1608,7 @@ const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamic
   .filter((definition) => definition.kind !== 'limiter')
   .flatMap((definition) => {
     const frames = 256
+
     const legacy = definition.kind === 'gate'
       ? {
           kind: 'gate' as const,
@@ -1494,12 +1618,15 @@ const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamic
           },
         }
       : definition.legacy
+
     const latencyFrames = Math.ceil(definition.latencyMs * 48_000 / 1_000)
     const stereoAudio = stereo(Array.from({ length: frames }, () => 0.25), Array.from({ length: frames }, () => -0.125))
+
     const stereoSidechain = stereo(
       Array.from({ length: frames }, (_, frame) => frame < frames / 2 ? 0.01 : 1),
       Array.from({ length: frames }, (_, frame) => frame < frames / 2 ? 0.005 : 0.5),
     )
+
     const fixture = (
       layout: 1 | 2,
       name: string,
@@ -1535,8 +1662,10 @@ const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamic
           ),
         },
       )
+
     const monoAudio = stereo(Array.from({ length: frames }, () => 0.25))
     const monoSidechain = stereo(Array.from({ length: frames }, (_, frame) => frame < frames / 2 ? 0.01 : 1))
+
     return [
       fixture(2, 'external-sidechain-stereo', stereoAudio, stereoSidechain),
       fixture(1, 'external-sidechain-mono', monoAudio, monoSidechain),
@@ -1583,13 +1712,16 @@ const timeEffectTailFrames = (
   if (kind === 'delay' && 'feedback' in state) {
     if (!state.enabled || state.dryWet === 0) return 0
     const repeats = Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(Math.max(state.feedback, 1e-6))))
+
     return Math.ceil(state.delayMs * sampleRateHz / 1_000 * repeats)
   }
+
   if (kind === 'reverb' && 'decaySec' in state) {
     return Math.ceil(state.enabled
       ? (state.preDelayMs / 1_000 + state.decaySec) * sampleRateHz
       : 0)
   }
+
   return 0
 }
 
@@ -1613,6 +1745,7 @@ const timeEffectFixture = (
 ): PortableGraphParityFixture => {
   const state = options.state ?? (kind === 'delay' ? delayState : reverbState)
   const frames = input.length / 2
+
   const graphFor = (processorState: DelayProcessorState | ReverbProcessorState, bypassed: boolean | undefined) =>
     processorSourceMaster({
       nodeId: 2n,
@@ -1628,6 +1761,7 @@ const timeEffectFixture = (
       tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
       bypassed,
     })
+
   return {
     name: `${kind}-${name}`,
     capability,
@@ -1687,6 +1821,7 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
       blockPartitions: [1, 31, 127, 512, 1_024, 1_024, 1_377],
     },
   )
+
   const graphView = new DataView(fixture.graph.buffer, fixture.graph.byteOffset, fixture.graph.byteLength)
   graphView.setUint32(24 + 12, 1, true)
   graphView.setUint32(24 + 16, 1, true)
@@ -1701,12 +1836,14 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
   fixture.assertOutput = (output) => {
     const onset = reverbOnsetFrame(output)
     const rightEnergy = output[1]?.reduce((sum, sample) => sum + sample * sample, 0) ?? 0
+
     return finite(output)
       && onset !== null
       && onset >= 1_840
       && onset <= 2_040
       && rightEnergy > 1e-8
   }
+
   return fixture
 }
 
@@ -1831,6 +1968,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
   )),
   (() => {
     const frames = 256
+
     const fixture = timeEffectFixture(
       'delay',
       'fractional-time-automation',
@@ -1846,7 +1984,9 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         )),
       },
     )
+
     fixture.assertOutput = (output) => finite(output) && changedFromInput(output, fixture.input, 1e-5)
+
     return fixture
   })(),
   (() => {
@@ -1858,11 +1998,13 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       stereo(sine(960, 997, 48_000), sine(960, 1_993, 48_000, 0.25)),
       { state: { ...delayState, enabled: false }, maxFramesPerBlock: 480, blockPartitions: [17, 463, 480], bypassed: true },
     )
+
     fixture.legacyDelay = undefined
     fixture.legacyDifferenceMinimum = undefined
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane, channel) => plane.slice(480).every((sample, frame) =>
         closeTo(sample, fixture.input[channel * plane.length + 480 + frame] ?? 0, 1e-5)))
+
     return fixture
   })(),
   (() => {
@@ -1880,6 +2022,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     right[20] = -0.5
     left[3_900] = 0.8
     right[3_900] = 0.4
+
     const fixture = timeEffectFixture(
       'delay',
       'toggle-keeps-running',
@@ -1893,9 +2036,12 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         enabledEdits: [{ frame: 1_024, enabled: false }, { frame: 4_096, enabled: true }],
       },
     )
+
     fixture.legacyStartFrame = 4_608
+
     const energy = (plane: Float32Array, start: number, end: number) =>
       plane.slice(start, end).some((sample) => Math.abs(sample) > 0.05)
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane, channel) =>
         // Enabled: the first echo is there.
@@ -1905,6 +2051,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
           closeTo(sample, fixture.input[channel * frames + 1_024 + 480 + frame] ?? 0, 1e-5))
         // Enabled again: the echo of what was heard while disabled.
         && energy(plane, 4_860, 4_900))
+
     return fixture
   })(),
   (() => {
@@ -1918,9 +2065,11 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         [Number.NEGATIVE_INFINITY, Number.NaN, 0.25, Number.POSITIVE_INFINITY, -0.25, 0.5, -0.5, 0.75],
       ),
     )
+
     fixture.legacyDelay = undefined
     fixture.legacyDifferenceMinimum = undefined
     fixture.assertOutput = finite
+
     return fixture
   })(),
   (() => {
@@ -1932,10 +2081,12 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       new Float32Array(8).fill(1),
       { maxFramesPerBlock: 4, parameters: parameterEnvelopeForTarget(7, [0, 1, 1, 1]) },
     )
+
     fixture.legacyDelay = undefined
     fixture.legacyDifferenceMinimum = undefined
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => closeTo(sample, 0)))
+
     return fixture
   })(),
   timeEffectFixture(
@@ -1978,9 +2129,11 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         blockPartitions: [1, 7, 64, 256, 512, 1_024, 2_048, 184],
       },
     )
+
     fixture.assertOutput = (output) => {
       const onset = reverbOnsetFrame(output)
       const decay = reverbDecayFrame(output)
+
       return finite(output)
         && onset !== null
         && onset >= 880
@@ -1990,6 +2143,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         // (2,280 frames) after the first at this size.
         && decay <= onset + 2_300
     }
+
     return fixture
   })(),
   reverbCapacityFixture(32),
@@ -2047,9 +2201,11 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       stereo(sine(960, 997, 48_000), sine(960, 1_993, 48_000, 0.25)),
       { state: { ...reverbState, enabled: false }, maxFramesPerBlock: 480, blockPartitions: [17, 463, 480], bypassed: true },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane, channel) => plane.slice(480).every((sample, frame) =>
         closeTo(sample, fixture.input[channel * plane.length + 480 + frame] ?? 0, 1e-5)))
+
     return fixture
   })(),
   (() => {
@@ -2063,7 +2219,9 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         [Number.NEGATIVE_INFINITY, Number.NaN, 0.25, Number.POSITIVE_INFINITY, -0.25, 0.5, -0.5, 0.75],
       ),
     )
+
     fixture.assertOutput = finite
+
     return fixture
   })(),
   (() => {
@@ -2075,8 +2233,10 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       new Float32Array(8).fill(1),
       { maxFramesPerBlock: 4, parameters: parameterEnvelopeForTarget(10, [0, 1, 1, 1]) },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => closeTo(sample, 0)))
+
     return fixture
   })(),
 ]
@@ -2153,6 +2313,7 @@ const spectralFixture = (
 ): PortableGraphParityFixture => {
   const inputBusCount = options.inputBusCount ?? 1
   const frames = input.length / (inputBusCount * 2)
+
   return {
     name: `spectral-${name}`,
     capability,
@@ -2190,6 +2351,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     const frames = 2_048
     const impulse = Array.from({ length: frames }, () => 0)
     impulse[256] = 1
+
     const fixture = spectralFixture(
       'freeze-impulse-partitions-state-restore',
       'chains',
@@ -2202,10 +2364,12 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
         assertReset: true,
       },
     )
+
     fixture.stateRestoreDirtyInput = new Float32Array(fixture.input.length)
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0))
       && output.some((plane) => plane.slice(512).some((sample) => Math.abs(sample) > 1e-6))
+
     return fixture
   })(),
   (() => {
@@ -2217,6 +2381,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     const frames = 3_072
     const impulse = Array.from({ length: frames }, () => 0)
     impulse[256] = 1
+
     const fixture = spectralFixture(
       'freeze-toggle-keeps-capture',
       'chains',
@@ -2229,9 +2394,12 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
         enabledEdits: [{ frame: 1_024, enabled: false }, { frame: 1_536, enabled: true }],
       },
     )
+
     fixture.legacyStartFrame = 2_560
+
     const energy = (plane: Float32Array, start: number, end: number) =>
       plane.slice(start, end).some((sample) => Math.abs(sample) > 1e-3)
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0)
         && energy(plane, 512, 1_024)
@@ -2239,6 +2407,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
         && plane.slice(1_024 + 480, 1_536).every((sample) => Math.abs(sample) < 1e-6)
         // Enabled again: the frozen capture is sounding, not a recapture of silence.
         && energy(plane, 2_560, frames))
+
     return fixture
   })(),
   (() => {
@@ -2247,6 +2416,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     const right = Array.from({ length: frames }, () => 0)
     left[127] = 1
     right[127] = -0.5
+
     const fixture = spectralFixture(
       'latency-impulse-44100',
       'sampleRates',
@@ -2255,9 +2425,11 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       spectralState({ mode: 'shift-blur', binShift: 1, blur: 0.25 }),
       { maxFramesPerBlock: 256, blockPartitions: [1, 7, 64, 128, 256, 256, 256, 56] },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => plane.slice(0, 512).every((sample) => sample === 0))
       && output.some((plane) => plane.slice(512).some((sample) => Math.abs(sample) > 1e-6))
+
     return fixture
   })(),
   spectralFixture(
@@ -2297,6 +2469,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
     const right = Array.from({ length: frames }, () => 0)
     left[127] = 1
     right[127] = -0.5
+
     const fixture = spectralFixture(
       'fft4096-overlap2-exact-latency-96000',
       'sampleRates',
@@ -2308,9 +2481,11 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
         blockPartitions: [1, 63, 128, 512, 1_024, 1_024, 1_024, 1_024, 1_024, 1_024, 1_024, 320],
       },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane) => plane.slice(0, state.fftSize).every((sample) => sample === 0))
       && output.some((plane) => plane.slice(state.fftSize).some((sample) => Math.abs(sample) > 1e-6))
+
     return fixture
   })(),
   spectralFixture(
@@ -2334,6 +2509,7 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
   ),
   (() => {
     const state = spectralState({ enabled: false })
+
     const fixture = spectralFixture(
       'bypass-fixed-latency',
       'chains',
@@ -2342,14 +2518,17 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       state,
       { maxFramesPerBlock: 768, blockPartitions: [17, 239, 512, 768], bypassed: true },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output.every((plane, channel) => plane.slice(state.fftSize).every((sample, frame) =>
         closeTo(sample, fixture.input[channel * plane.length + frame] ?? 0, 1e-5)))
+
     return fixture
   })(),
   (() => {
     const frames = 1_024
     const mixValues = Float32Array.from({ length: frames }, (_, frame) => frame < frames / 2 ? 0 : 1)
+
     return spectralFixture(
       'mix-automation-48000',
       'fullBlockAutomation',
@@ -2372,9 +2551,11 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       spectralState({ mode: 'shift-blur', binShift: 1.5, blur: 0.25 }),
       { maxFramesPerBlock: 512, blockPartitions: [1, 31, 127, 512, 353] },
     )
+
     fixture.assertOutput = (output) => finite(output)
       && output[1]?.every((sample) => sample === 0) === true
       && changedFromInput(output, fixture.input, 1e-5)
+
     return fixture
   })(),
   (() => {
@@ -2388,7 +2569,9 @@ const spectralFixtures: readonly PortableGraphParityFixture[] = [
       ),
       spectralState({ mode: 'shift-blur', binShift: 1, blur: 0.25 }),
     )
+
     fixture.assertOutput = finite
+
     return fixture
   })(),
 ]
@@ -2422,6 +2605,7 @@ const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_
     && output[0].some((sample) => Math.abs(sample) > 1e-4)
     && output[1].some((sample) => Math.abs(sample) > 1e-4),
   }
+
   return liveControlPair(fixture, 131, 16)
 })
 

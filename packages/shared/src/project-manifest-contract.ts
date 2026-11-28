@@ -1,4 +1,5 @@
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
+
 export type ProjectManifestEntityRow = {
   kind: string;
   id: string;
@@ -59,6 +60,7 @@ export type ProjectManifest = {
 };
 
 export const PROJECT_MANIFEST_SCHEMA_VERSION = 4;
+
 export const SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS: readonly number[] = [
   1,
   2,
@@ -70,6 +72,7 @@ const readNumber = (value: JsonValue, field: string) => {
   if (!isJsonNumber(value) || !Number.isFinite(value)) {
     throw new Error(`Project manifest has invalid ${field}.`);
   }
+
   return value;
 };
 
@@ -77,48 +80,65 @@ const readString = (value: JsonValue, field: string) => {
   if (!isJsonString(value) || value.trim() === "") {
     throw new Error(`Project manifest has invalid ${field}.`);
   }
+
   return value;
 };
 
 const readArray = (value: JsonValue, field: string) => {
   if (!Array.isArray(value)) throw new Error(`Project manifest has invalid ${field}.`);
+
   return value;
 };
 
 const readOptionalString = (value: JsonValue) => isJsonString(value) && value ? value : undefined;
 const readOptionalNumber = (value: JsonValue) => isJsonNumber(value) && Number.isFinite(value) ? value : undefined;
+
 const readOptionalSourceKind = (value: JsonValue): ProjectManifestAsset["sourceKind"] => (
   value === "upload" || value === "url" || value === "recording" ? value : undefined
 );
+
 const readPluginArtifact = (value: JsonValue): ProjectManifestPluginArtifact => {
   if (!isJsonObject(value)) throw new Error("Project manifest has invalid external plugin artifact.");
   const id = readString(value.id, "externalPluginArtifact.id");
+
   if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(id)) {
     throw new Error("Project manifest has invalid external plugin artifact id.");
   }
+
   const sha256 = readString(value.sha256, "externalPluginArtifact.sha256");
+
   if (!/^[a-f0-9]{64}$/.test(sha256)) throw new Error("Project manifest has invalid external plugin artifact hash.");
   const kind = value.kind;
+
   if (kind !== "plugin-state" && kind !== "plugin-freeze") {
     throw new Error("Project manifest has invalid external plugin artifact kind.");
   }
+
   const acl = value.acl;
+
   if (acl !== "owner" && acl !== "project-members") {
     throw new Error("Project manifest has invalid external plugin artifact ACL.");
   }
+
   const bucket = value.bucket;
+
   if (bucket !== "local" && bucket !== "r2-plugin-artifacts") {
     throw new Error("Project manifest has invalid external plugin artifact bucket.");
   }
+
   const byteLength = readNumber(value.byteLength, "externalPluginArtifact.byteLength");
+
   if (!Number.isInteger(byteLength) || byteLength <= 0 || byteLength > 512 * 1024 * 1024) {
     throw new Error("Project manifest has invalid external plugin artifact byte length.");
   }
+
   const ownerId = readString(value.ownerId, "externalPluginArtifact.ownerId");
   const location = readString(value.location, "externalPluginArtifact.location");
+
   if (ownerId.length > 256 || location.length > 1024) {
     throw new Error("Project manifest has invalid external plugin artifact metadata.");
   }
+
   return {
     id,
     sha256,
@@ -137,6 +157,7 @@ export const normalizeProjectManifestPluginArtifact = (
 
 const readEntityRow = (value: JsonValue): ProjectManifestEntityRow => {
   if (!isJsonObject(value)) throw new Error("Project manifest has invalid entity.");
+
   return {
     kind: readString(value.kind, "entity.kind"),
     id: readString(value.id, "entity.id"),
@@ -147,6 +168,7 @@ const readEntityRow = (value: JsonValue): ProjectManifestEntityRow => {
 
 const readProjectStateRow = (value: JsonValue): ProjectManifestStateRow => {
   if (!isJsonObject(value)) throw new Error("Project manifest has invalid project state row.");
+
   return {
     key: readString(value.key, "projectState.key"),
     value: value.value,
@@ -156,6 +178,7 @@ const readProjectStateRow = (value: JsonValue): ProjectManifestStateRow => {
 
 const readSyncStateRow = (value: JsonValue): ProjectManifestStateRow => {
   if (!isJsonObject(value)) throw new Error("Project manifest has invalid sync state row.");
+
   return {
     key: readString(value.key, "syncState.key"),
     value: value.value,
@@ -169,8 +192,10 @@ const assertUnique = <T>(
   label: string,
 ) => {
   const seen = new Set<string>();
+
   for (const row of rows) {
     const key = readKey(row);
+
     if (seen.has(key)) throw new Error(`Project manifest has duplicate ${label}.`);
     seen.add(key);
   }
@@ -180,12 +205,15 @@ export const assertProjectManifestBaseIntegrity = (manifest: ProjectManifest) =>
   if (!manifest.projectId.trim() || !manifest.name.trim()) {
     throw new Error("Project manifest has invalid identity.");
   }
+
   if (manifest.entityCount !== manifest.entities.length) {
     throw new Error("Project manifest entity count does not match entities.");
   }
+
   if (manifest.assetCount !== manifest.assets.length) {
     throw new Error("Project manifest asset count does not match assets.");
   }
+
   assertUnique(manifest.entities, (row) => JSON.stringify([row.kind, row.id]), "entity identity");
   assertUnique(manifest.assets, (row) => row.id, "asset id");
   assertUnique(manifest.assets, (row) => row.storagePath, "asset storage path");
@@ -196,14 +224,17 @@ export const assertProjectManifestBaseIntegrity = (manifest: ProjectManifest) =>
 
 export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest) => {
   assertProjectManifestBaseIntegrity(manifest);
+
   if (manifest.externalPluginArtifacts.some((artifact) => artifact.bucket === "r2-plugin-artifacts")) {
     throw new Error("Project manifest external plugin artifacts cannot be published to the configured backup bucket.");
   }
+
   const hasInvalidCloudKey = manifest.assets.some((asset) => (
     asset.missing
       ? asset.cloudKey !== undefined
       : !asset.cloudKey?.startsWith(`projects/${manifest.projectId}/assets/${asset.id}/`)
   ));
+
   if (hasInvalidCloudKey) {
     throw new Error("Project manifest contains invalid cloud asset key.");
   }
@@ -211,16 +242,21 @@ export const assertProjectManifestPublishIntegrity = (manifest: ProjectManifest)
 
 const readProjectManifest = (raw: JsonObject): ProjectManifest => {
   const schemaVersion = readNumber(raw.schemaVersion, "schemaVersion");
+
   if (!SUPPORTED_PROJECT_MANIFEST_SCHEMA_VERSIONS.includes(schemaVersion)) {
     throw new Error(`Unsupported project manifest schema version ${schemaVersion}.`);
   }
+
   if (raw.mode !== "backup" && raw.mode !== "shared") {
     throw new Error("Project manifest has invalid mode.");
   }
+
   const mode: ProjectManifest["mode"] = raw.mode === "backup" ? "backup" : "shared";
   const entities = readArray(raw.entities, "entities").map(readEntityRow);
+
   const assets = readArray(raw.assets, "assets").map((asset) => {
     if (!isJsonObject(asset)) throw new Error("Project manifest has invalid asset.");
+
     return {
       id: readString(asset.id, "asset.id"),
       name: readString(asset.name, "asset.name"),
@@ -241,6 +277,7 @@ const readProjectManifest = (raw: JsonObject): ProjectManifest => {
       cloudKey: readOptionalString(asset.cloudKey),
     };
   });
+
   const manifest = {
     schemaVersion: PROJECT_MANIFEST_SCHEMA_VERSION,
     projectId: readString(raw.projectId, "projectId"),
@@ -257,12 +294,15 @@ const readProjectManifest = (raw: JsonObject): ProjectManifest => {
       ? readArray(raw.externalPluginArtifacts, "externalPluginArtifacts").map(readPluginArtifact)
       : [],
   };
+
   assertProjectManifestBaseIntegrity(manifest);
+
   return manifest;
 };
 
 export const normalizeProjectManifest = (raw: JsonValue): ProjectManifest => {
   if (!isJsonObject(raw)) throw new Error("Project manifest must be an object.");
+
   return readProjectManifest(raw);
 };
 
@@ -285,6 +325,7 @@ export const withProjectManifestAssetKeys = (
     ...asset,
     cloudKey: uploadedAssetKeys[asset.id] ?? asset.cloudKey,
   }));
+
   return {
     ...manifest,
     assets,

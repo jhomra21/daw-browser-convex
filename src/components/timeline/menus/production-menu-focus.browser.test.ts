@@ -14,6 +14,7 @@ const browserSnapshotSchema = z.object({
   menuVisible: z.boolean(),
   menuItems: z.array(z.string()),
 });
+
 type BrowserSnapshot = z.infer<typeof browserSnapshotSchema>;
 
 test("production View menu preserves keyboard ownership and Escape focus return", async () => {
@@ -22,6 +23,7 @@ test("production View menu preserves keyboard ownership and Escape focus return"
   const evidence = directory;
   const session = `daw-production-menu-${crypto.randomUUID()}`;
   const spaceSession = `daw-production-menu-space-${crypto.randomUUID()}`;
+
   const stages: Partial<Record<
     | "menuOpenedForSelection"
     | "selectedMenuItemBeforeEnter"
@@ -36,59 +38,76 @@ test("production View menu preserves keyboard ownership and Escape focus return"
     | "afterUnmountDelete",
     BrowserSnapshot
   >> = {};
+
   const makeBrowser = (browserSession: string) => async (...args: string[]) => {
     const env = { ...process.env };
     delete env.AGENT_BROWSER_CDP;
     delete env.AGENT_BROWSER_SESSION;
+
     const child = Bun.spawn(["agent-browser", "--session", browserSession, ...args], {
       env,
       stdout: "pipe",
       stderr: "pipe",
     });
+
     // Keep each isolated CLI call bounded and clear its watchdog after completion.
     const timeout = setTimeout(() => child.kill(), 20_000);
+
     try {
       const [stdout, stderr, exitCode] = await Promise.all([
         new Response(child.stdout).text(),
         new Response(child.stderr).text(),
         child.exited,
       ]);
+
       if (exitCode !== 0) throw new Error(`agent-browser ${args[0]} failed: ${stderr || stdout}`);
+
       return stdout.trim();
     } finally {
       clearTimeout(timeout);
     }
   };
+
   const browser = makeBrowser(session);
   const spaceBrowser = makeBrowser(spaceSession);
+
   const readSnapshotWith = async (runBrowser: typeof browser) =>
     browserSnapshotSchema.parse(JSON.parse(JSON.parse(await runBrowser(
       "eval",
       "JSON.stringify(window.productionMenuFocus.snapshot())",
     ))));
+
   const readSnapshot = () => readSnapshotWith(browser);
+
   const clickView = async () => {
     const snapshot = await browser("snapshot", "-i");
     const trigger = snapshot.match(/^.*menuitem "View".*ref=(e\d+)/m)?.[1];
+
     if (!trigger) throw new Error(`Could not find the production View trigger in the browser snapshot:\n${snapshot}`);
     await browser("click", `@${trigger}`);
   };
+
   const moveFocusIntoViewMenu = async () => {
     await browser("press", "ArrowDown");
     let snapshot = await readSnapshot();
+
     if (!snapshot.activeInMenu) {
       await browser("press", "ArrowDown");
       snapshot = await readSnapshot();
     }
+
     if (!snapshot.menuItems.includes(snapshot.activeText)) {
       throw new Error(`Could not move focus into the open View menu: ${JSON.stringify(snapshot)}`);
     }
+
     expect(snapshot.activeRole).toBe("menuitem");
     expect(snapshot.activeInMenu).toBe(true);
+
     return snapshot;
   };
 
   await mkdir(directory, { recursive: true });
+
   try {
     const result = await build({
       root: repositoryRoot,
@@ -106,7 +125,9 @@ test("production View menu preserves keyboard ownership and Escape focus return"
         },
       },
     });
+
     const output = Array.isArray(result) ? result[0] : result;
+
     if (!output || !("output" in output)) throw new Error("Expected a single production menu fixture bundle.");
     const bundle = output.output.find((chunk) => chunk.type === "chunk")?.code;
     expect(bundle).toBeDefined();
@@ -116,10 +137,12 @@ test("production View menu preserves keyboard ownership and Escape focus return"
     );
     await browser("open", `file://${directory}/index.html`);
     await browser("wait", "--fn", "!!window.productionMenuFocus || !!window.__fixtureError");
+
     const startup = z.object({ ready: z.boolean(), error: z.string().nullable() }).parse(JSON.parse(JSON.parse(await browser(
       "eval",
       "JSON.stringify({ready: !!window.productionMenuFocus, error: window.__fixtureError ?? null})",
     ))));
+
     expect(startup).toEqual({ ready: true, error: null });
 
     await clickView();
@@ -177,6 +200,7 @@ test("production View menu preserves keyboard ownership and Escape focus return"
     expect(state.viewExpanded).not.toBe("true");
     expect(state.menuVisible).toBe(false);
     stages.afterEnter = state;
+
     const enterSelectedExactlyOnce =
       state.calls.slice(callsBeforeEnter.length).filter((call) => call === "view:browser-tab:assets").length === 1 &&
       state.calls.slice(callsBeforeEnter.length).filter((call) => call === "view:browser-open").length === 1;
@@ -225,9 +249,11 @@ test("production View menu preserves keyboard ownership and Escape focus return"
     await spaceBrowser("wait", "--fn", "!!window.productionMenuFocus");
     const initialSpaceSnapshot = await spaceBrowser("snapshot", "-i");
     const spaceViewTrigger = initialSpaceSnapshot.match(/^.*menuitem "View".*ref=(e\d+)/m)?.[1];
+
     if (!spaceViewTrigger) {
       throw new Error(`Could not find the View trigger for Space coverage:\n${initialSpaceSnapshot}`);
     }
+
     await spaceBrowser("click", `@${spaceViewTrigger}`);
     await spaceBrowser("wait", "--fn", "window.productionMenuFocus.snapshot().menuVisible");
     await spaceBrowser("wait", "--fn", "window.productionMenuFocus.snapshot().activeInMenu");
@@ -253,6 +279,7 @@ test("production View menu preserves keyboard ownership and Escape focus return"
       escapeRestoresTriggerFocus,
       arrangementShortcutResumesAfterRefocus,
     };
+
     await Bun.write(`${evidence}/gates.json`, JSON.stringify(checks, null, 2));
     await Bun.write(`${evidence}/stages.json`, JSON.stringify(stages, null, 2));
     await Bun.write(`${evidence}/final-snapshot.json`, JSON.stringify(state, null, 2));

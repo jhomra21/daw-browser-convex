@@ -12,6 +12,7 @@ describe('waveform canvas bounds', () => {
         cssHeightPx: 47,
         devicePixelRatio: dpr,
       })
+
       expect(size.cssWidthPx).toBe(2_000)
       expect(size.backingHeightPx).toBe(backingHeightPx)
       expect(size.backingWidthPx * size.backingHeightPx).toBeLessThanOrEqual(MAX_WAVEFORM_BACKING_PIXELS)
@@ -25,6 +26,7 @@ describe('waveform canvas bounds', () => {
       cssHeightPx: 47,
       devicePixelRatio: 3,
     })
+
     expect(size.cssWidthPx).toBe(4_096)
     expect(size.backingWidthPx).toBe(12_288)
     expect(size.backingHeightPx).toBe(141)
@@ -38,11 +40,13 @@ describe('waveform canvas bounds', () => {
       cssHeightPx: 40,
       devicePixelRatio: 6,
     })
+
     const maximum = waveformCanvasSize({
       cssWidthPx: 1_000,
       cssHeightPx: 40,
       devicePixelRatio: 3,
     })
+
     expect(capped.dpr).toBe(3)
     expect(capped).toEqual(maximum)
   })
@@ -53,6 +57,7 @@ describe('waveform canvas bounds', () => {
       cssHeightPx: 220,
       devicePixelRatio: 3,
     })
+
     expect(size.backingWidthPx * size.backingHeightPx).toBeLessThanOrEqual(MAX_WAVEFORM_BACKING_PIXELS)
     expect(size.backingHeightPx).toBe(660)
     expect(size.backingWidthPx).toBe(3_030)
@@ -65,11 +70,13 @@ describe('waveform canvas bounds', () => {
       cssHeightPx: 47,
       devicePixelRatio: 2,
     })
+
     const remounted = waveformCanvasSize({
       cssWidthPx: 1_000,
       cssHeightPx: 47,
       devicePixelRatio: 2,
     })
+
     expect(hidden.backingWidthPx).toBe(2)
     expect(remounted.backingWidthPx).toBeGreaterThan(hidden.backingWidthPx)
   })

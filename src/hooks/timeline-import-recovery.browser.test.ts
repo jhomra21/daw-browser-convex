@@ -844,17 +844,22 @@ const resultSchema = z.object({
 const runInChromium = async (name: string, entry: string) => {
   const directory = `/tmp/daw-${name}-${crypto.randomUUID()}`
   const session = `${name}-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/fixture.js`, fixture)
+
   const build = await Bun.build({
     entrypoints: [`${directory}/fixture.js`],
     target: 'browser',
@@ -874,21 +879,27 @@ const runInChromium = async (name: string, entry: string) => {
       },
     }],
   })
+
   expect(build.success).toBe(true)
+
   // OPFS and IndexedDB need a real origin, so serve the bundle from localhost.
   const server = Bun.serve({
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname
+
       if (path === '/bundle.js') return new Response(Bun.file(`${directory}/bundle.js`), { headers: { 'content-type': 'text/javascript' } })
+
       return new Response('<!doctype html><script type="module" src="/bundle.js"></script>', { headers: { 'content-type': 'text/html' } })
     },
   })
+
   try {
     await browser('open', `http://localhost:${server.port}/`)
     const output = resultSchema.parse(JSON.parse(await browser('eval', `window.${entry}()`)))
     await Bun.write(`${directory}/results.json`, JSON.stringify(output, null, 2))
     console.log(`${name} evidence: ${directory}/results.json`)
+
     return output
   } finally {
     await browser('close').catch(() => undefined)

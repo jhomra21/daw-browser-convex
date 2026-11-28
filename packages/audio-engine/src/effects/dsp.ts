@@ -5,7 +5,9 @@ type MidiNote = { id?: string; beat: number; length: number; pitch: number; velo
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
   const nodes: BiquadFilterNode[] = []
+
   if (!params?.enabled) return nodes
+
   for (const band of params.bands) {
     if (!band.enabled) continue
     const filter = ctx.createBiquadFilter()
@@ -13,11 +15,13 @@ export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, chan
     applyEqBandParams(filter, band)
     nodes.push(filter)
   }
+
   return nodes
 }
 
 export function resolveEqChannelCount(mode: EqChannelMode, availableChannels = 2): number {
   if (mode === 'mono') return 1
+
   return Math.max(1, Math.min(2, availableChannels))
 }
 
@@ -35,15 +39,18 @@ export function configureEqNodeChannels(node: ConfigurableEqNodeChannels, mode: 
 
 export function getEqTopologySignature(params?: EqParamsLite): string {
   if (!params?.enabled) return ''
+
   const bandsSignature = params.bands
     .filter((band) => band.enabled)
     .map((band) => `${band.id}:${band.type}`)
     .join('|')
+
   return bandsSignature ? `${params.channelMode}|${bandsSignature}` : ''
 }
 
 export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {
   const bands = params.enabled ? params.bands.filter((band) => band.enabled) : []
+
   for (let index = 0; index < nodes.length; index++) {
     applyEqBandParams(nodes[index], bands[index])
   }
@@ -58,11 +65,13 @@ function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
 
 export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
   const values = new Float32Array(new ArrayBuffer(4096 * Float32Array.BYTES_PER_ELEMENT))
+
   for (let index = 0; index < values.length; index++) {
     const x = (index / (values.length - 1)) * 2 - 1
     const y = evaluateSaturatorCurvePoint(curve, x)
     values[index] = Math.max(-1, Math.min(1, Number.isFinite(y) ? y : 0))
   }
+
   return values
 }
 
@@ -70,9 +79,11 @@ const saturatorCurveCache = new Map<SaturatorCurve, Float32Array<ArrayBuffer>>()
 
 function getSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
   const cached = saturatorCurveCache.get(curve)
+
   if (cached) return cached
   const values = createSaturatorCurve(curve)
   saturatorCurveCache.set(curve, values)
+
   return values
 }
 
@@ -99,9 +110,11 @@ export function applySaturatorNodeParams(nodes: {
 
 export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): number {
   const normalized = normalizeDelayParams(params)
+
   if (normalized.mode === 'time') return Math.min(DELAY_MAX_DELAY_TIME_SEC, normalized.timeMs / 1000)
   const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : 120)
   const multipliers = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
+
   return Math.min(DELAY_MAX_DELAY_TIME_SEC, beatSec * (multipliers[normalized.syncDivision] ?? 0.5))
 }
 
@@ -120,18 +133,22 @@ export function applyDelayNodeParams(nodes: {
   const normalized = normalizeDelayParams(params)
   const timeSec = resolveDelayTimeSec(normalized, bpm)
   nodes.delayLeft.delayTime.value = timeSec
+
   if (nodes.delayRight) nodes.delayRight.delayTime.value = timeSec
   nodes.feedbackLeft.gain.value = normalized.feedback
+
   if (nodes.feedbackRight) nodes.feedbackRight.gain.value = normalized.feedback
   // A disabled delay keeps running on its input and only its output is dry.
   nodes.dryGain.gain.value = normalized.enabled ? 1 - normalized.dryWet : 1
   nodes.wetGain.gain.value = normalized.enabled ? normalized.dryWet : 0
+
   for (const filter of [nodes.lowCutLeft, nodes.lowCutRight]) {
     if (!filter) continue
     filter.type = 'highpass'
     filter.frequency.value = normalized.filterEnabled ? normalized.lowCutHz : 20
     filter.Q.value = 0.707
   }
+
   for (const filter of [nodes.highCutLeft, nodes.highCutRight]) {
     if (!filter) continue
     filter.type = 'lowpass'
@@ -154,12 +171,15 @@ export function applyArpeggiatorToNotes(
 
   for (const note of sorted) {
     const lastChord = chords[chords.length - 1]
+
     if (lastChord && Math.abs(note.beat - lastChord.beat) < chordThreshold) {
       lastChord.pitches.push(note.pitch)
+
       if (note.id !== undefined) lastChord.ids.push(note.id)
       lastChord.endBeat = Math.max(lastChord.endBeat, note.beat + note.length)
       continue
     }
+
     chords.push({
       beat: note.beat,
       endBeat: note.beat + note.length,
@@ -170,19 +190,24 @@ export function applyArpeggiatorToNotes(
   }
 
   const arpeggiated: MidiNote[] = []
+
   for (const chord of chords) {
     const basePitches = chord.pitches.slice().sort((left, right) => left - right)
+
     if (basePitches.length === 0) continue
 
     const sequence = arpeggiatorSequence(basePitches, params, chord.beat)
+
     if (sequence.length === 0) continue
 
     const endBeat = params.hold ? clipDurationBeats : chord.endBeat
     const gate = Math.max(0, params.gate)
+
     if (gate <= 0) continue
     const noteLength = stepBeats * gate
     let currentBeat = chord.beat
     let sequenceIndex = 0
+
     while (currentBeat < endBeat && currentBeat < clipDurationBeats) {
       arpeggiated.push({
         id: `${chord.ids.join(',')}:${currentBeat}:${sequenceIndex}`,

@@ -34,16 +34,20 @@ type SynthProps = {
 type AutomationProps = Pick<SynthProps,
   'automationRangesByParameterId' | 'onAutomationParameterTouch' | 'onManualAutomationOverride'
 >
+
 type EnvelopeTab = 'amp' | 'filter'
+
 type SourceTab = 'lfo' | 'voice' | 'noise'
 
 const envelopeTabs = ['amp', 'filter'] satisfies readonly EnvelopeTab[]
 const sourceTabs = ['lfo', 'voice', 'noise'] satisfies readonly SourceTab[]
 
 const formatFrequency = (frequencyHz: number) => formatDeviceFrequency(frequencyHz, 1)
+
 const formatSeconds = (seconds: number) => (
   seconds < 1 ? formatDeviceMilliseconds(seconds * 1000, 0) : `${seconds.toFixed(2)} s`
 )
+
 const formatPercent = formatDevicePercent
 const formatCents = (value: number) => `${value > 0 ? '+' : ''}${Math.round(value)} ct`
 const formatOctaves = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} oct`
@@ -83,6 +87,7 @@ function WaveformButtons(props: {
     'flex h-6 w-7 select-none items-center justify-center border-l border-border first:border-l-0 transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
     props.value === wave ? 'bg-cyan-500/20 text-cyan-200' : 'bg-muted text-muted-foreground hover:bg-secondary',
   )
+
   return (
     <div class="flex overflow-hidden border border-border" role="group" aria-label={props.label}>
       <button type="button" class={buttonClass('sine')} disabled={props.disabled} aria-pressed={props.value === 'sine'} aria-label={`${props.label}: sine`} onClick={() => props.onChange('sine')}><WaveformIcon wave="sine" /></button>
@@ -147,6 +152,7 @@ function SynthKnob(props: {
   onValueChange: (value: number) => void
 }) {
   const automationRange = () => props.parameterId ? props.automationRangesByParameterId?.get(props.parameterId) : undefined
+
   return (
     <Knob
       label={props.label}
@@ -184,6 +190,7 @@ function NativeSelect(props: {
   children: JSX.Element
 }) {
   let changedByPointer = false
+
   return (
     <select
       class={cn(
@@ -198,6 +205,7 @@ function NativeSelect(props: {
       onBlur={() => { changedByPointer = false }}
       onChange={(event) => {
         props.onChange(event.currentTarget.value)
+
         if (changedByPointer) event.currentTarget.blur()
         changedByPointer = false
       }}
@@ -216,9 +224,11 @@ function OscillatorPanel(props: {
 } & AutomationProps) {
   const oscillator = () => props.params.oscillators[props.index]
   const isFirst = () => props.index === 0
+
   const update = (updates: Partial<SynthOscillatorParams>) => (
     props.onChange({ oscillators: isFirst() ? [updates] : [undefined, updates] })
   )
+
   const defaults = () => props.defaults.oscillators[props.index]
   const oscillatorLabel = () => `Oscillator ${props.index + 1}`
   const levelParameterId = (): SynthAutomationParameterId => isFirst() ? 'osc1.level' : 'osc2.level'
@@ -267,6 +277,7 @@ function FilterPanel(props: {
   disabled?: boolean
 } & AutomationProps) {
   const filterDisabled = () => props.disabled || !props.params.filter.enabled
+
   return (
     <SynthPanel
       title="Filter"
@@ -312,6 +323,7 @@ function EnvelopeDrawer(props: {
   onChange: (updates: Partial<SynthEnvelopeParams>) => void
 } & AutomationProps) {
   const parameterId = (field: 'attack' | 'decay' | 'sustain' | 'release'): SynthAutomationParameterId => `${props.parameterPrefix}.${field}`
+
   return (
     <div class="grid h-28 grid-cols-[minmax(8rem,1fr)_auto] gap-2 px-2 py-1.5">
       <div class="h-full min-h-0 min-w-0 border-y border-border/60 bg-background/40"><EnvelopePreview envelope={props.envelope} color={props.previewColor} /></div>
@@ -332,6 +344,7 @@ function LfoDrawer(props: {
   disabled?: boolean
 } & AutomationProps) {
   const lfoDisabled = () => props.disabled || !props.params.lfo.enabled
+
   return (
     <div class="flex h-28 min-w-0 items-center gap-2 overflow-x-auto px-2 py-1.5">
       <div class="flex shrink-0 items-center gap-1">
@@ -374,6 +387,7 @@ function NoiseDrawer(props: {
   disabled?: boolean
 } & AutomationProps) {
   const noiseDisabled = () => props.disabled || !props.params.noise.enabled
+
   return (
     <div class="flex h-28 items-center gap-3 px-2 py-1.5">
       <svg class={cn('h-12 min-w-0 flex-1 border-y border-border/60 bg-background/40', noiseDisabled() && 'opacity-50')} viewBox="0 0 220 48" preserveAspectRatio="none" aria-hidden="true">
@@ -396,13 +410,17 @@ export default function Synth(props: SynthProps) {
   }))
   createEffect(() => {
     const amount = props.params.filter.envelopeAmountOctaves
+
     if (amount !== 0) setLastFilterEnvelopeAmount(amount)
   })
+
   const tabClass = (selected: boolean) => cn(
     'min-h-7 select-none border-r border-border px-2 py-1 text-2xs font-semibold uppercase tracking-wide transition-colors focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70 disabled:cursor-not-allowed disabled:opacity-50',
     selected ? 'bg-cyan-500/15 text-cyan-200' : 'text-muted-foreground hover:bg-secondary',
   )
+
   const filterEnvelopeDisabled = () => props.disabled || !props.params.filter.enabled || props.params.filter.envelopeAmountOctaves === 0
+
   const updateFilterEnvelopeAmount = (envelopeAmountOctaves: number) => {
     if (envelopeAmountOctaves !== 0) setLastFilterEnvelopeAmount(envelopeAmountOctaves)
     props.onChange({ filter: { envelopeAmountOctaves } })
@@ -418,6 +436,7 @@ export default function Synth(props: SynthProps) {
             if (updates.filter?.envelopeAmountOctaves !== undefined && updates.filter.envelopeAmountOctaves !== 0) {
               setLastFilterEnvelopeAmount(updates.filter.envelopeAmountOctaves)
             }
+
             props.onChange(updates)
           }} disabled={props.disabled} automationRangesByParameterId={props.automationRangesByParameterId} onAutomationParameterTouch={props.onAutomationParameterTouch} onManualAutomationOverride={props.onManualAutomationOverride} />
         </div>
@@ -474,6 +493,7 @@ function handleRovingTabKey<T extends string>(
   onSelect: (tab: T) => void,
 ) {
   const selectedIndex = tabs.indexOf(selectedTab)
+
   const nextIndex = event.key === 'ArrowLeft'
     ? (selectedIndex + tabs.length - 1) % tabs.length
     : event.key === 'ArrowRight'
@@ -483,6 +503,7 @@ function handleRovingTabKey<T extends string>(
         : event.key === 'End'
           ? tabs.length - 1
           : undefined
+
   if (nextIndex === undefined) return
   event.preventDefault()
   onSelect(tabs[nextIndex])

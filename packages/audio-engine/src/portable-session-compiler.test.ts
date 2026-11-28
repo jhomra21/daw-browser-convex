@@ -94,6 +94,7 @@ test('compiles normalized browser synth controls into the portable synth ABI pro
     polyphony: 64,
     retrigger: true,
   })
+
   expect(compiled.state.voiceCapacity).toBe(32)
   expect(compiled.values).toMatchObject({
     oscillators: [{ waveform: 1, octave: 1 }, { waveform: 3, octave: -1 }],
@@ -107,12 +108,15 @@ test('compiles normalized browser synth controls into the portable synth ABI pro
 
 test('encodes every portable synth filter mode', () => {
   const modes = ['lowpass', 'highpass', 'bandpass', 'notch'] as const
+
   for (const [index, mode] of modes.entries()) {
     const defaults = createDefaultSynthParams()
+
     const compiled = compilePortableSynthConfiguration(`track-${index}`, `instrument:${index}`, {
       ...defaults,
       filter: { ...defaults.filter, mode },
     })
+
     expect(Number(compiled.values.filterMode)).toBe(index)
   }
 })
@@ -129,6 +133,7 @@ test('compiles browser sampler controls and exact registered asset metadata into
     polyphony: 128,
     retrigger: true,
   }, assets)
+
   expect(state.state).toMatchObject({
     kind: 'sampler',
     voiceCapacity: 32,
@@ -152,7 +157,9 @@ test('compiles browser sampler controls and exact registered asset metadata into
 test('compiles browser drum transpose and 6ms choke state into exact-key portable pads', () => {
   const params = createDefaultDrumRackParams()
   const pad = params.pads[0]
+
   if (!pad) throw new Error('Expected default drum pad.')
+
   const state = compilePortableDrumRackConfiguration('track-a', 'drums:a', {
     ...params,
     pads: [{
@@ -165,6 +172,7 @@ test('compiles browser drum transpose and 6ms choke state into exact-key portabl
       chokeGroup: 2,
     }],
   }, assets)
+
   expect(state.state).toMatchObject({
     kind: 'drum-rack',
     ampReleaseMs: 6,
@@ -199,16 +207,20 @@ test('compiles one-shot sampler and drum zones with a start offset into states t
     },
     assets,
   ).state
+
   expect(isAudioCoreSamplerInstrumentState(sampler)).toBe(true)
   expect(sampler.zones[0]).toMatchObject({ playbackMode: 'one-shot', startFrame: 4_800, endFrame: 38_400 })
 
   const params = createDefaultDrumRackParams()
   const pad = params.pads[0]
+
   if (!pad) throw new Error('Expected default drum pad.')
+
   const drums = compilePortableDrumRackConfiguration('track-a', 'drums:one-shot', {
     ...params,
     pads: [{ ...pad, sample, note: 36, transpose: 0, startSec: 0.25, endSec: 0.5, chokeGroup: 0 }],
   }, assets).state
+
   expect(isAudioCoreDrumRackState(drums)).toBe(true)
   expect(drums.zones[0]).toMatchObject({ startFrame: 12_000, endFrame: 24_000 })
 })
@@ -235,6 +247,7 @@ test('compiles crossfade loops with the same loop bounds as forward loops', () =
 test('omits muted and explicitly unavailable drum pad assets without emitting their zones', () => {
   const params = createDefaultDrumRackParams()
   const pad = params.pads[0]
+
   if (!pad) throw new Error('Expected default drum pad.')
   const mutedPad = { ...pad, mute: true, sample }
 
@@ -271,18 +284,21 @@ test('compiles empty sampled instruments as silent portable configurations', () 
     createDefaultSamplerParams(),
     undefined,
   )
+
   const drums = compilePortableDrumRackConfiguration(
     'track-drums',
     'drums:empty',
     createDefaultDrumRackParams(),
     undefined,
   )
+
   const granular = compilePortableGranularConfiguration(
     'track-granular',
     'granular:empty',
     createDefaultGranularParams(),
     undefined,
   )
+
   expect(sampler.state.zones).toEqual([])
   expect(drums.state.zones).toEqual([])
   expect(granular.state.assetId).toBe('')
@@ -290,7 +306,9 @@ test('compiles empty sampled instruments as silent portable configurations', () 
 
 test('compiles fixture-proven granular controls and rejects stale assets', () => {
   const asset = assets.assets[0]
+
   if (!asset) throw new Error('Expected registered portable asset.')
+
   const state = compilePortableGranularConfiguration('track-a', 'granular:a', {
     ...createDefaultGranularParams(),
     zone: samplerZone,
@@ -306,6 +324,7 @@ test('compiles fixture-proven granular controls and rejects stale assets', () =>
     reverseProbability: 0.2,
     stereoSpread: 0.7,
   }, assets)
+
   expect(state.state).toMatchObject({
     kind: 'granular',
     assetId: 'asset:kick:7',
@@ -357,7 +376,9 @@ test('compiles available drum pads when another pad sample is missing', () => {
   const params = createDefaultDrumRackParams()
   const firstPad = params.pads[0]
   const secondPad = params.pads[1]
+
   if (!firstPad || !secondPad) throw new Error('Expected default drum pads.')
+
   const state = compilePortableDrumRackConfiguration(
     'track-a',
     'drums:partial',
@@ -402,6 +423,7 @@ test('reports only unsupported browser fields or rejected asset state in portabl
     automationEnvelopes: [],
     assetRegistry: assets,
   })
+
   expect(compilation.samplers).toHaveLength(1)
   expect(compilation.portableAssets).toEqual([...assets.assets])
   expect(compilation.unsupportedInstruments).toEqual([])
@@ -413,11 +435,13 @@ const portableSessionInput = (): PreparedPortableSessionInput => {
     kind: 'utility',
     params: { version: 1, state: createDefaultUtilityParams() },
   }
+
   const compressor: AudioEffectRuntimeInstance = {
     id: 'return-compressor',
     kind: 'compressor',
     params: createDefaultCompressorParams(),
   }
+
   const mixer = resolveMixerGraph({
     channels: createMixerChannels([
       { id: 'synth', kind: 'instrument', name: 'Synth', clips: [], volume: 0.8, outputTargetId: 'group', sends: [{ targetId: 'return', amount: 0.2, tap: 'pre-fx' }] },
@@ -429,9 +453,12 @@ const portableSessionInput = (): PreparedPortableSessionInput => {
     ]),
     trackFx: { return: { instances: [utility, compressor] } },
   })
+
   const drumDefaults = createDefaultDrumRackParams()
   const firstPad = drumDefaults.pads[0]
+
   if (!firstPad) throw new Error('Expected default drum pad.')
+
   return {
     tracks: [],
     mixer,
@@ -492,6 +519,7 @@ const sourceTrack = (clipId = 'clip-a'): Track => ({
 
 const sourceSessionInput = (tracks: readonly Track[] = [sourceTrack()]): PreparedPortableSessionInput => {
   const base = portableSessionInput()
+
   return {
     ...base,
     tracks,
@@ -524,10 +552,12 @@ test('canonicalizes source identity and ordering independently of mixer state', 
     sourceTrack('clip-b'),
     { ...sourceTrack('clip-a'), clips: [{ ...sourceTrack('clip-a').clips[0]!, startSec: 1 }] },
   ]))
+
   const changedMixer = sourceSessionInput([
     sourceTrack('clip-b'),
     { ...sourceTrack('clip-a'), clips: [{ ...sourceTrack('clip-a').clips[0]!, startSec: 1 }] },
   ])
+
   changedMixer.mixer = resolveMixerGraph({
     channels: changedMixer.mixer.channels.map((entry) => ({
       ...entry.channel,
@@ -542,6 +572,7 @@ test('canonicalizes source identity and ordering independently of mixer state', 
   const mixed = compilePreparedPortableSession(changedMixer)
   expect(baseline.supported).toBe(true)
   expect(mixed.supported).toBe(true)
+
   if (!baseline.supported || !mixed.supported) throw new Error('Expected source sessions to be supported.')
   expect(mixed.sources).toEqual(baseline.sources)
   expect(mixed.sources.map((source) => source.sourceIdentity)).toEqual([
@@ -556,7 +587,9 @@ test('rejects duplicate source identities, missing source targets, and missing a
     sourceTrack('clip-a'),
     sourceTrack('clip-a'),
   ]))
+
   expect(duplicate).toMatchObject({ supported: false })
+
   if (duplicate.supported) throw new Error('Expected duplicate source identity rejection.')
   expect(duplicate.reasons).toContain('source:5:audio:6:clip-a: duplicate portable source identity.')
 
@@ -564,7 +597,9 @@ test('rejects duplicate source identities, missing source targets, and missing a
     ...sourceSessionInput(),
     tracks: [{ ...sourceTrack(), id: 'missing' }],
   })
+
   expect(missingTarget).toMatchObject({ supported: false })
+
   if (missingTarget.supported) throw new Error('Expected missing graph target rejection.')
   expect(missingTarget.reasons).toContain('source:7:missing:6:clip-a: portable source target "missing" is absent from the graph snapshot.')
 
@@ -572,7 +607,9 @@ test('rejects duplicate source identities, missing source targets, and missing a
     ...sourceSessionInput(),
     tracks: [{ ...sourceTrack(), clips: [{ ...sourceTrack().clips[0]!, sourceAssetKey: 'missing' }] }],
   })
+
   expect(missingAsset).toMatchObject({ supported: false })
+
   if (missingAsset.supported) throw new Error('Expected missing source asset rejection.')
   expect(missingAsset.reasons).toContain('clip-a: source asset is not registered.')
 })
@@ -582,6 +619,7 @@ test('projects nonzero playhead windows and adjacent windows without losing sour
     ...sourceSessionInput(),
     sourceRangeEndSec: 3,
   })
+
   const first = compilePreparedPortableSession({
     ...sourceSessionInput(),
     schedule: {
@@ -590,6 +628,7 @@ test('projects nonzero playhead windows and adjacent windows without losing sour
     },
     sourceRangeEndSec: 2.5,
   })
+
   const second = compilePreparedPortableSession({
     ...sourceSessionInput(),
     schedule: {
@@ -598,9 +637,11 @@ test('projects nonzero playhead windows and adjacent windows without losing sour
     },
     sourceRangeEndSec: 3,
   })
+
   expect(whole.supported).toBe(true)
   expect(first.supported).toBe(true)
   expect(second.supported).toBe(true)
+
   if (!whole.supported || !first.supported || !second.supported) throw new Error('Expected source windows to be supported.')
   expect(second.sources[0]).toMatchObject({
     startFrame: 120_000,
@@ -609,6 +650,7 @@ test('projects nonzero playhead windows and adjacent windows without losing sour
   const wholeSource = whole.sources[0]
   const firstSource = first.sources[0]
   const secondSource = second.sources[0]
+
   if (!wholeSource || !firstSource || !secondSource) throw new Error('Expected projected source windows.')
   expect({
     identity: [firstSource.sourceIdentity, secondSource.sourceIdentity],
@@ -633,6 +675,7 @@ test('keeps rolling source windows supported when older clips are out of range',
       { ...sourceTrack().clips[0]!, id: 'playable', startSec: 3 },
     ],
   }])
+
   const result = compilePreparedPortableSession({
     ...base,
     schedule: {
@@ -643,6 +686,7 @@ test('keeps rolling source windows supported when older clips are out of range',
   })
 
   expect(result).toMatchObject({ supported: true })
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.sources).toHaveLength(1)
   expect(result.sources[0]).toMatchObject({
@@ -659,6 +703,7 @@ test('atomically assembles a deterministic fixture-proven portable live session'
   const repeated = compilePreparedPortableSession(input)
   expect(prepared.supported).toBe(true)
   expect(repeated.supported).toBe(true)
+
   if (!prepared.supported || !repeated.supported) throw new Error('Expected portable session support.')
   expect(prepared.graph.nodes.map((node) => [node.id, node.kind])).toEqual([
     ['synth', 'instrument'],
@@ -691,24 +736,30 @@ test('atomically assembles a deterministic fixture-proven portable live session'
 test('rejects unsupported graph features and unresolved schedule targets without returning a partial payload', () => {
   const effectInput = portableSessionInput()
   const trackFx = effectInput.fx.trackFx
+
   if (!trackFx) throw new Error('Expected track FX.')
   const returnFx = trackFx.return
+
   if (!returnFx) throw new Error('Expected return FX.')
+
   const saturator: AudioEffectRuntimeInstance = {
     id: 'portable-saturator',
     kind: 'saturator',
     params: { ...createDefaultSaturatorParams(), driveDb: 12 },
   }
+
   const eq: AudioEffectRuntimeInstance = {
     id: 'portable-eq',
     kind: 'eq',
     params: { ...createDefaultEqParams(), channelMode: 'mono' },
   }
+
   const chorus: AudioEffectRuntimeInstance = {
     id: 'portable-chorus',
     kind: 'chorus',
     params: { version: 1, state: createDefaultChorusParams() },
   }
+
   const portableEffectsInput: PreparedPortableSessionInput = {
     ...effectInput,
     mixer: resolveMixerGraph({
@@ -726,8 +777,10 @@ test('rejects unsupported graph features and unresolved schedule targets without
       },
     },
   }
+
   const portableEffects = compilePreparedPortableSession(portableEffectsInput)
   expect(portableEffects.supported).toBe(true)
+
   if (!portableEffects.supported) throw new Error(portableEffects.reasons.join('\n'))
   const group = portableEffects.graph.nodes.find((node) => node.id === 'group')
   expect(group?.processorOrder.map((processor) => [
@@ -742,7 +795,9 @@ test('rejects unsupported graph features and unresolved schedule targets without
   expect(group?.processorOrder[1]?.parameterTargets).toHaveLength(24)
 
   const closingEvent = portableEffectsInput.schedule.events[6]
+
   if (!closingEvent) throw new Error('Expected portable session closing event.')
+
   const automatedEffect = compilePreparedPortableSession({
     ...portableEffectsInput,
     schedule: {
@@ -792,7 +847,9 @@ test('rejects unsupported graph features and unresolved schedule targets without
       ],
     },
   })
+
   expect(automatedEffect).toMatchObject({ supported: false })
+
   if (automatedEffect.supported) throw new Error('Expected unsupported portable effect automation.')
   expect(automatedEffect.reasons).toEqual([
     'portable-eq: scheduled parameter "eq.band-1.gainDb" is not portable.',
@@ -842,11 +899,14 @@ test('rejects unsupported graph features and unresolved schedule targets without
       },
     },
   })
+
   expect(unsupportedEffect).toMatchObject({ supported: false })
+
   if (unsupportedEffect.supported) throw new Error('Expected unsupported portable session.')
   expect(unsupportedEffect.reasons).toContain('return-utility: scheduled parameter "utility.gainDb" is not portable.')
 
   const targetInput = portableSessionInput()
+
   const unresolvedTarget = compilePreparedPortableSession({
     ...targetInput,
     schedule: {
@@ -862,7 +922,9 @@ test('rejects unsupported graph features and unresolved schedule targets without
       }],
     },
   })
+
   expect(unresolvedTarget).toMatchObject({ supported: false })
+
   if (unresolvedTarget.supported) throw new Error('Expected unresolved portable session.')
   expect(unresolvedTarget.reasons).toEqual(['missing: scheduled note targets no portable instrument.'])
 })

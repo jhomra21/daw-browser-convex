@@ -48,6 +48,7 @@ class TestAudioBuffer implements AudioBuffer {
 }
 
 const sampled = (buffer: AudioBuffer): SampledInstrumentBuffer => ({ buffer, sourceStartFrame: 0 });
+
 const decodeTestPages = async function* (
   _source: Blob | string | URL | Request,
   options?: { startSec?: number; endSec?: number },
@@ -63,6 +64,7 @@ const decodeTestPages = async function* (
     planes: [new Float32Array(frameCount), new Float32Array(frameCount)],
   };
 };
+
 const sample = {
   assetKey: "asset-runtime",
   url: "/runtime-sample.wav",
@@ -90,6 +92,7 @@ const zone = {
 };
 
 const originalFetch = globalThis.fetch;
+
 type TestRejectionReason = Error;
 
 // This suite supplies every cloud row/commit locally. Close the eager fixture
@@ -128,10 +131,12 @@ class TestAudioEngine extends AudioEngine {
   }
   override setTrackDrumRack(trackId: string, _params: DrumRackParams, buffers?: ReadonlyMap<string, SampledInstrumentBuffer>): ReturnType<AudioEngine["setTrackDrumRack"]> {
     this.drumRackBuffers.set(trackId, buffers ?? new Map());
+
     return "applied";
   }
   override setTrackGranular(trackId: string, _params: GranularParams, installedBuffer?: Parameters<AudioEngine["setTrackGranular"]>[2]): ReturnType<AudioEngine["setTrackGranular"]> {
     this.granularBuffers.set(trackId, installedBuffer);
+
     return Promise.resolve("applied");
   }
   override setSamplerRuntimeListeners(listeners: Parameters<AudioEngine["setSamplerRuntimeListeners"]>[0]) {
@@ -140,8 +145,10 @@ class TestAudioEngine extends AudioEngine {
   override addSamplerRuntimeListeners(listeners: Parameters<AudioEngine["addSamplerRuntimeListeners"]>[0]) {
     const previous = this.samplerRuntimeListeners;
     this.samplerRuntimeListeners = { ...previous, ...listeners };
+
     return () => {
       this.samplerRuntimeListeners = previous;
+
       return true;
     };
   }
@@ -175,6 +182,7 @@ const createEngine = (buffer: AudioBuffer) => {
   globalThis.fetch = Object.assign(async () => new Response(new ArrayBuffer(0)), {
     preconnect: originalFetch.preconnect,
   });
+
   return engine;
 };
 
@@ -183,41 +191,53 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
   // the owner misses the unselected row, or switching leaves the sampled cache alive.
   const projectId = `project:b5c-kind-switch-${crypto.randomUUID()}`;
   const track: Track = { id: "sampled-track", kind: "instrument", name: "Unselected", volume: 1, clips: [] };
+
   const initial = normalizeTrackInstrumentParams({
     kind: "sampler", instanceId: "old-sampler",
     params: { ...createDefaultSamplerParams(), zones: [zone] },
   });
+
   if (!initial || initial.kind !== "sampler") throw new Error("Invalid B5c sampler fixture");
+
   const next: TrackInstrumentParams = {
     kind: "synth", instanceId: "new-synth", params: { ...createDefaultSynthParams(), gain: 0.37 },
   };
+
   await setLocalEffect(projectId, track.id, "instrument", initial);
   const audio = createFxTestAudio();
   const createGain = audio.context.createGain;
   const synthGains: { value: number }[] = [];
+
   const context = Object.assign(audio.context, {
     createStereoPanner: () => {
       const node = createGain();
+
       return Object.assign(node, { pan: node.gain });
     },
     createGain: () => {
       const node = createGain();
+
       const gain = {
         value: 1,
         cancelScheduledValues: () => {},
         setValueAtTime(value: number) { this.value = value; },
         setTargetAtTime(value: number) { this.value = value; },
       };
+
       synthGains.push(gain);
+
       return { connect: node.connect, disconnect: node.disconnect, gain };
     },
   });
+
   const runtime = createInstrumentRuntime({
     ensureAudio: () => {}, getAudioContext: () => context, getBpm: () => 120,
     timelineToCtxTime: value => value, ensureTrackInput: () => audio.masterInput,
     sources: createSourceRegistry(),
   });
+
   const calls: { family: string; disposition?: string }[] = [];
+
   class InstrumentEngine extends AudioEngine {
     override setTrackSampler(...args: Parameters<AudioEngine["setTrackSampler"]>) {
       calls.push({ family: "sampler", disposition: "applied" });
@@ -226,6 +246,7 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
       const disposition = runtime.setTrackInstrument(...args);
       calls.push({ family: args[1].instrument.kind, disposition });
+
       return disposition;
     }
     override getTrackInstrumentKind(id: string) { return runtime.getTrackInstrumentKind(id); }
@@ -237,9 +258,11 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
     override setTrackFxInstances(): ReturnType<AudioEngine["setTrackFxInstances"]> { return Promise.resolve("skipped"); }
     override setMasterFxInstances(): ReturnType<AudioEngine["setMasterFxInstances"]> { return Promise.resolve("skipped"); }
   }
+
   const engine = new InstrumentEngine(), buffer = new TestAudioBuffer();
   const entered = Promise.withResolvers<void>(), decoded = Promise.withResolvers<void>();
   const budget = createSampledInstrumentRegionBudget(1024 * 1024);
+
   const sampler = createSamplerBufferSync({
     projectId: () => projectId, aggregateBudget: budget,
     decodePages: async function* (...args) {
@@ -249,12 +272,15 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
     },
     createBuffer: () => buffer,
   });
+
   const drum = createDrumRackBufferSync(), client = new QueryClient();
   const errors: string[] = [];
   let panel: EffectsPanelController | undefined, snapshot: EffectsPanelExportSnapshot | undefined, dispose = () => {};
+
   globalThis.fetch = Object.assign(async () => new Response(new ArrayBuffer(0)), { preconnect: originalFetch.preconnect });
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: () => "selected-elsewhere",
@@ -265,28 +291,37 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
         onExportSnapshotChange: value => { snapshot = value; },
         onEffectError: (title, message) => { errors.push(`${title}: ${message}`); },
       });
+
       return null;
     } });
   });
+
   try {
     if (!panel || !snapshot) throw new Error("Missing B5c controller");
     const device = panel.devices.instrument, effects = snapshot;
     await entered.promise;
     expect(device.readInstrumentForTarget(track.id)).toEqual(initial);
     let ready = false;
-    const compiling = effects.awaitInstrumentReadiness().then(lease => { ready = true; return lease; });
+
+    const compiling = effects.awaitInstrumentReadiness().then(lease => { ready = true;
+
+ return lease; });
+
     // One microtask checkpoint while the decoder's explicit latch is closed, not a polling wait.
     await Promise.resolve();
     expect(ready).toBe(false);
     decoded.resolve();
     const lease = await compiling;
+
     try {
       const hydrated = lease?.hydrateInstrumentBuffers({
         fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument: initial } } },
         automationEnvelopes: [],
       });
+
       expect(hydrated?.fx?.trackFx?.[track.id]?.samplerBuffers?.get(zone.id)?.buffer).toBe(buffer);
     } finally { lease?.release(); }
+
     await effects.flushPending();
     expect(engine.getTrackInstrumentKind(track.id)).toBe("sampler");
     expect(sampler.snapshotSamplerBuffers(track.id, initial)?.get(zone.id)?.buffer).toBe(buffer);
@@ -325,8 +360,11 @@ const b5c2Instrument = (kind: TrackInstrumentParams["kind"], id: string): TrackI
         ? { kind, instanceId: id, params: { ...createDefaultGranularParams(), zone } }
         : { kind, instanceId: id, params: { ...createDefaultDrumRackParams(),
           pads: createDefaultDrumRackParams().pads.map(pad => pad.id === "pad-36" ? { ...pad, sample } : pad) } };
+
   const normalized = normalizeTrackInstrumentParams(raw);
+
   if (!normalized) throw new Error("Invalid B5c2 instrument");
+
   return normalized;
 };
 
@@ -339,13 +377,18 @@ type B5c2GranularPort = {
 const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams, holdSuccessor = false, arp?: ArpeggiatorParams, subscribed = false, agent = false, native = false) => {
   const initialProject = agent && local ? (await createLocalProject("B5 agent")).id
     : `${local ? "project:" : "cloud-"}b5c2-${crypto.randomUUID()}`;
+
   const [projectId, setProjectId] = createSignal(initialProject);
   const db = b5CloudDatabase();
+
   if (agent && !local) await db.withIdentity({ subject: "b5-agent" }).mutation(convexApi.projects.createOwnedRoom, { projectId: initialProject });
+
   const remoteTrackId = await db.run(ctx => ctx.db.insert("tracks", {
     projectId: initialProject, name: "Unselected", kind: "instrument", index: 0,
   }));
+
   const track: Track = { id: local ? "sampled-track" : remoteTrackId, kind: "instrument", name: "Unselected", volume: 1, clips: [] };
+
   if (agent) {
     if (local) {
       await createLocalTimelineRepository(initialProject).createTrack({ id: track.id, kind: "instrument" });
@@ -361,6 +404,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
         duration: 1, sampleRate: 48_000, channelCount: 2, ownerUserId: "b5-agent", createdAt: 1, updatedAt: 1 });
     });
   }
+
   const [tracks, setTracks] = createSignal<Track[]>([track]);
   const [selectedTarget, selectTarget] = createSignal("selected-elsewhere");
   const wasOnline = onlineManager.isOnline();
@@ -370,10 +414,12 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
   const transport = b5EffectsSubscription(readRows);
   const subscription = subscribed ? transport : undefined;
   let mounted = false;
+
   const publish = async () => {
     if (subscription && mounted) await subscription.publish();
     else if (!local) client.setQueryData(["convex", "effects", "room", initialProject, subscribed ? "collaborator" : undefined], await readRows());
   };
+
   const write = async (instrument: TrackInstrumentParams | undefined) => {
     if (local) {
       if (instrument) await setLocalEffect(initialProject, track.id, "instrument", instrument);
@@ -381,7 +427,9 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     } else {
       await db.run(async ctx => {
         const rows = await ctx.db.query("effects").collect();
+
         for (const row of rows) await ctx.db.delete(row._id);
+
         if (instrument) await ctx.db.insert("effects", {
           projectId: initialProject, targetType: "track", trackId: remoteTrackId,
           type: "instrument", index: 0, params: instrument, revision: ++revision, createdAt: 1,
@@ -390,8 +438,10 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       await publish();
     }
   };
+
   let revision = 0;
   await write(initial);
+
   const writeArp = async (params: ArpeggiatorParams | undefined) => {
     if (local) {
       if (params) await setLocalEffect(initialProject, track.id, "arp", params);
@@ -399,6 +449,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     } else {
       await db.run(async ctx => {
         for (const row of await ctx.db.query("effects").collect()) if (row.type === "arpeggiator") await ctx.db.delete(row._id);
+
         if (params) await ctx.db.insert("effects", {
           projectId: initialProject, targetType: "track", trackId: remoteTrackId,
           type: "arpeggiator", index: 1, params, revision: ++revision, createdAt: 1,
@@ -407,6 +458,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       await publish();
     }
   };
+
   const writeLegacySynth = async (params: ReturnType<typeof createDefaultSynthParams>) => {
     if (local) await setLocalEffect(initialProject, track.id, "synth", params);
     else {
@@ -418,23 +470,28 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       await publish();
     }
   };
+
   if (arp) await writeArp(arp);
   const audio = createFxTestAudio(), buffer = new TestAudioBuffer();
   const gains: { value: number }[] = [];
   const sources: { buffer: AudioBuffer | null; playbackRate: { value: number }; detune: { value: number } }[] = [];
   const granularInstalls: { assetKey: string; channels: readonly Float32Array[] }[] = [];
   const granularPositions: { value: number }[] = [];
+
   const param = (value = 0) => ({
     value, cancelScheduledValues: () => {},
     setValueAtTime(next: number) { this.value = next; },
     setTargetAtTime(next: number) { this.value = next; },
     linearRampToValueAtTime(next: number) { this.value = next; },
   });
+
   const gainNode = audio.context.createGain;
+
   const context = Object.assign(audio.context, {
     createGain: () => {
       const node = gainNode(), gain = param(1);
       gains.push(gain);
+
       return Object.assign(node, { gain });
     },
     createStereoPanner: () => Object.assign(gainNode(), { pan: param() }),
@@ -443,10 +500,13 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
         buffer: null, playbackRate: param(1), detune: param(), start: () => {}, stop: () => {},
         addEventListener: () => {}, removeEventListener: () => {},
       });
+
       sources.push(node);
+
       return node;
     },
   });
+
   class GranularNode {
     readonly position = param();
     readonly parameters = new Map([["position", this.position]]);
@@ -463,12 +523,16 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     disconnect() {}
     constructor() { granularPositions.push(this.position); }
   }
+
   Object.defineProperty(globalThis, "AudioWorkletNode", { configurable: true, value: GranularNode });
+
   const runtime = createInstrumentRuntime({
     ensureAudio: () => {}, getAudioContext: () => context, getBpm: () => 120,
     timelineToCtxTime: value => value, ensureTrackInput: () => audio.masterInput, sources: createSourceRegistry(),
   });
+
   const calls: { family: string; disposition?: string }[] = [];
+
   class InstrumentEngine extends AudioEngine {
     override setTrackSampler(...args: Parameters<AudioEngine["setTrackSampler"]>) {
       runtime.setTrackSampler(...args);
@@ -477,16 +541,19 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     override setTrackDrumRack(...args: Parameters<AudioEngine["setTrackDrumRack"]>) {
       const disposition = runtime.setTrackDrumRack(...args);
       calls.push({ family: "drum-rack", disposition });
+
       return disposition;
     }
     override async setTrackGranular(...args: Parameters<AudioEngine["setTrackGranular"]>) {
       const disposition = await runtime.setTrackGranular(...args);
       calls.push({ family: "granular", disposition });
+
       return disposition;
     }
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
       const disposition = runtime.setTrackInstrument(...args);
       calls.push({ family: args[1].instrument.kind, disposition });
+
       return disposition;
     }
     override getTrackInstrumentKind(id: string) { return runtime.getTrackInstrumentKind(id); }
@@ -495,6 +562,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     override setTrackArpeggiator(id: string, params: ArpeggiatorParams): ReturnType<AudioEngine["setTrackArpeggiator"]> {
       runtime.setTrackArpeggiator(id, params);
       calls.push({ family: "arp", disposition: "applied" });
+
       return "applied";
     }
     override clearTrackArpeggiator(id: string) {
@@ -505,24 +573,29 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     override setTrackFxInstances(): ReturnType<AudioEngine["setTrackFxInstances"]> { return Promise.resolve("skipped"); }
     override setMasterFxInstances(): ReturnType<AudioEngine["setMasterFxInstances"]> { return Promise.resolve("skipped"); }
   }
+
   const engine = new InstrumentEngine();
   const [currentEngine, replaceEngine] = createSignal<AudioEngine>(engine);
   const [legacyMode, setLegacyMode] = createSignal(!native);
   const entered = Promise.withResolvers<void>(), decoded = Promise.withResolvers<void>();
   const budget = createSampledInstrumentRegionBudget(4 * 1024 * 1024);
+
   const decodePages = async function* (...args: Parameters<typeof decodeTestPages>) {
     entered.resolve();
     await decoded.promise;
     yield* decodeTestPages(...args);
   };
+
   const sampler = createSamplerBufferSync({ projectId, aggregateBudget: budget, decodePages, createBuffer: () => buffer });
   const drum = createDrumRackBufferSync({ projectId, aggregateBudget: budget, decodePages, createBuffer: () => buffer });
   const errors: string[] = [];
   const joins: PublicationJoin[] = [];
   let panel: EffectsPanelController | undefined, snapshot: EffectsPanelExportSnapshot | undefined, dispose = () => {};
+
   globalThis.fetch = Object.assign(async () => new Response(new ArrayBuffer(0)), { preconnect: originalFetch.preconnect });
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = untrack(() => createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: selectedTarget, tracks, sidechainRoutes: () => [],
@@ -530,35 +603,44 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
         onClose: () => {}, usesLegacyAudioEngine: legacyMode, samplerBufferSync: sampler, drumRackBufferSync: drum,
         joinPublication: join => {
           joins.push(join);
+
           // No native host is attached. Capture the real compiled key, not a fabricated ACK.
           return { receipt: { key: join.contentKey, serial: joins.length }, settled: Promise.resolve({ state: "unavailable" }) };
         },
         onExportSnapshotChange: value => { snapshot = value; },
         onEffectError: (title, message) => { errors.push(`${title}: ${message}`); },
       }));
+
       return null;
     } });
   });
   mounted = true;
+
   if (!panel || !snapshot) throw new Error("Missing B5c2 controller");
   const device = panel.devices.instrument, effects = snapshot;
+
   const readiness = async (instrument?: TrackInstrumentParams) => {
     const lease = await effects.awaitInstrumentReadiness();
+
     try {
       if (!instrument || instrument.kind === "synth") return;
+
       const hydrated = lease?.hydrateInstrumentBuffers({
         fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument } } },
         automationEnvelopes: [],
       });
+
       const held = hydrated?.fx.trackFx?.[track.id];
       expect(instrument.kind === "sampler" ? held?.samplerBuffers?.get(zone.id)?.buffer
         : instrument.kind === "drum-rack" ? held?.drumRackBuffers?.get("pad-36")?.buffer
           : held?.granularBuffer?.buffer).toBe(buffer);
     } finally { lease?.release(); }
   };
+
   const assertContent = (instrument: TrackInstrumentParams) => {
     expect(device.readInstrumentForTarget(track.id)).toEqual(instrument);
     expect(engine.getTrackInstrumentKind(track.id)).toBe(instrument.kind);
+
     if (instrument.kind === "synth") expect(gains.some(gain => gain.value === instrument.params.gain)).toBe(true);
     else if (instrument.kind === "granular") {
       expect(granularInstalls.at(-1)?.channels[0]?.length).toBe(buffer.length);
@@ -566,24 +648,32 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     }
     else {
       const before = sources.length;
+
       if (instrument.kind === "sampler") expect(runtime.previewSamplerNote(track.id, 60, 1)).toBe(true);
       else runtime.previewDrumRackNote(track.id, 36, 1);
       expect(sources.length).toBeGreaterThan(before);
       expect(sources.at(-1)?.buffer).toBe(buffer);
+
       const semitones = instrument.kind === "sampler"
         ? 60 - (instrument.params.zones[0]?.rootNote ?? 60)
         : instrument.params.pads.find(pad => pad.id === "pad-36")?.transpose ?? 0;
+
       if (instrument.kind === "sampler") expect(sources.at(-1)?.detune.value).toBe(semitones * 100);
       else expect(sources.at(-1)?.playbackRate.value).toBeCloseTo(2 ** (semitones / 12));
       runtime.stopAll();
     }
+
     expect(errors).toEqual([]);
   };
+
   const assertRetired = (instrument: TrackInstrumentParams) => {
     if (instrument.kind === "sampler") expect(sampler.snapshotSamplerBuffers(track.id, instrument)).toBeUndefined();
+
     if (instrument.kind === "granular") expect(sampler.snapshotGranularBuffer(track.id, instrument)).toBeUndefined();
+
     if (instrument.kind === "drum-rack") expect(drum.snapshotBuffers(track.id, instrument)).toBeUndefined();
   };
+
   return {
     track, device, effects, calls, write, writeArp, readiness, assertContent, assertRetired, selectedTarget, selectTarget,
     engine, initialProject, publish, db, writeLegacySynth, joins, errors,
@@ -591,28 +681,35 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     demote: () => setTracks([{ ...track, kind: "audio" }]),
     nativeContent: (instrument: TrackInstrumentParams) => {
       const hydrate = effects.hydrateInstrumentBuffers;
+
       if (!hydrate) throw new Error("Missing native buffer hydration");
+
       const hydrated = hydrate({
         fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument } } },
         automationEnvelopes: [],
       });
+
       const compiled = compileLiveNativeInstrumentConfigurations([], localizeInstrumentFx(hydrated.fx));
       expect(compiled.reasons).toEqual([]);
       expect([...compiled.instrumentAssets.values()]).toEqual([buffer]);
       const configuration = compiled.configurations.find(entry => entry.nodeId === track.id);
+
       if (!configuration) throw new Error("Missing native instrument configuration");
       expect(joins.at(-1)?.contentKey).toBe(nativeInstrumentContentKey(configuration.state));
       expect(joins.at(-1)?.target).toEqual({ nodeId: track.id, instanceId: instrument.instanceId });
       expect(errors).toEqual([]);
+
       return joins.at(-1)?.contentKey;
     },
     removeTrack: () => setTracks([]),
     switchProject: async () => {
       const nextProject = `${initialProject}-next`;
+
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
       batch(() => { setTracks([]); setProjectId(nextProject); });
       // Publish after the observer has changed keys, not to its old cache entry.
       await Promise.resolve();
+
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
     },
     decodeEntered: entered.promise,
@@ -621,6 +718,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     canStartGranularNote: () => {
       const stop = runtime.startLiveGranularNote(track.id, 0, 0.1, "h6-note");
       stop?.();
+
       return stop !== undefined;
     },
     runtimeArp: () => runtime.getTrackArpeggiator(track.id),
@@ -656,24 +754,31 @@ const step5ArpWitnesses = [
   { id: "B25-foreign-off", action: "off" },
   { id: "B25-own-gesture", action: "gesture" },
 ];
+
 for (const kind of ["sampler", "drum-rack", "granular"]) {
   test(`STEP5 ${kind === "sampler" ? "B23" : kind === "drum-rack" ? "B22" : "B24"} persisted sampled structure`, async () => {
     if (kind !== "sampler" && kind !== "drum-rack" && kind !== "granular") throw new Error("Invalid sampled family");
     const initial = b5c2Instrument(kind, "step5-sampled");
     const f = await createB5c2Fixture(true, initial);
     let native: Awaited<ReturnType<typeof mountStep5Playback>> | undefined;
+
     try {
       await f.start();
+
       const inputs = () => ({ canonical: undefined, local: undefined, masterVolume: 1,
         effects: f.effects.snapshotEffectsProjection(), automation: [], sidechains: [] });
+
       const fx = (captured: ReturnType<typeof inputs>) => resolveDesiredPlaybackFx(
         { masterVolume: 1, masterFxInstances: [], trackFx: {} }, captured.effects, undefined);
+
       native = await mountStep5Playback({ projectId: f.initialProject, tracks: () => [f.track],
         playbackInputs: inputs, desiredFx: fx, renderState: async captured => {
           const lease = await f.effects.awaitInstrumentReadiness();
+
           try {
             const state = await createExportRenderStateSnapshot({ projectId: f.initialProject, userId: undefined, cloudRows: undefined,
               masterVolume: 1, effectsProjection: captured.effects, externalPluginPolicy: "native-playback" });
+
             return lease?.hydrateInstrumentBuffers(state) ?? state;
           } finally { lease?.release(); }
         } });
@@ -708,13 +813,16 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
       const next = spec.action === "off" ? { ...initial, enabled: false } : { ...initial, octaves: 2 };
     const f = await createB5c2Fixture(true, b5c2Instrument("synth", "step5-arp"), false, initial);
     let native: Awaited<ReturnType<typeof mountStep5Playback>> | undefined;
+
     try {
       await f.start();
       expect(f.selectedTarget()).not.toBe(f.track.id);
+
       const snapshot = (effectsProjection = f.effects.snapshotEffectsProjection()) => createExportRenderStateSnapshot({
         projectId: f.initialProject, userId: undefined, masterVolume: 1, cloudRows: undefined,
         effectsProjection, externalPluginPolicy: "native-playback",
       });
+
       native = await mountStep5Playback({
         projectId: f.initialProject, tracks: () => [f.track],
         // Raw Timeline sources; the mount narrows them with the real picker.
@@ -727,11 +835,13 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
         ),
         renderState: captured => snapshot(captured.effects),
       });
+
       if (transport === "playing") await native.playback.handlePlay([f.track]);
       await settleStep5Playback();
       expect(native.playback.isPlaying()).toBe(transport === "playing");
       const before = native.mark();
       const phases = [];
+
       if (spec.action === "gesture") {
         // The panel remains closed. A real own control needs its selected
         // target while held; deselection otherwise cancels on lost permission.
@@ -749,6 +859,7 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
       } else {
         await f.writeArp(spec.action === "remove" ? undefined : next);
       }
+
       await f.effects.flushPending();
       await settleStep5Playback();
       await native.playback.awaitPlaybackPreparation();
@@ -762,10 +873,12 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
       const fresh = await snapshot();
       expect(fresh.fx.trackFx?.[f.track.id]?.arp).toEqual(expected);
       const counts = native.counts(before);
+
       const resolved = resolveDesiredPlaybackFx(
         { masterVolume: 1, masterFxInstances: [], trackFx: { [f.track.id]: { instances: [], arp: initial } } },
         f.effects.snapshotEffectsProjection(), undefined,
       );
+
       console.log("STEP5 arp witness", JSON.stringify({
         id: spec.id, transport, counts, phases,
         projectedArpRows: f.effects.snapshotEffectsProjection().upsertDeviceRows.filter(row => row.effect === "arp").length,
@@ -783,6 +896,7 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
       expect(counts.liveSends).toBe(0);
       expect(native.host.calls.slice(before.calls).filter(call => ["begin", "configure", "start", "stop", "teardown"].includes(call))).toEqual([]);
       expect(native.compilations.at(-1)?.renderState.fx.trackFx?.[f.track.id]?.arp).toEqual(expected);
+
       if (spec.action === "remove") expect(resolved.trackFx?.[f.track.id]?.arp).toBeUndefined();
     } finally { await native?.close(); f.close(); }
   });
@@ -794,11 +908,14 @@ for (const stale of ["cloud", "idb"]) {
   test(`STEP5 B25-removal-stale-${stale} resolver after persisted capture`, async () => {
     const initial = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(stale !== "cloud", b5c2Instrument("synth", `stale-${stale}`), false, initial);
+
     try {
       await f.start();
       const cloudRows = { effects: await f.db.run(ctx => ctx.db.query("effects").collect()), automationEnvelopes: [] };
+
       const captured = await createExportRenderStateSnapshot({ projectId: f.initialProject,
         userId: stale === "cloud" ? "fixture" : undefined, masterVolume: 1, cloudRows, externalPluginPolicy: "native-playback" });
+
       expect(captured.fx.trackFx?.[f.track.id]?.arp).toEqual(initial);
       await f.writeArp(undefined);
       await f.effects.flushPending();
@@ -806,6 +923,7 @@ for (const stale of ["cloud", "idb"]) {
       expect(f.runtimeArp()).toBeUndefined();
       expect(f.selectedTarget()).not.toBe(f.track.id);
       const projection = f.effects.snapshotEffectsProjection();
+
       if (stale === "idb") {
         // A real pre-removal IDB capture seeds the same projection resolver.
         // This is clear-list boundary evidence, not a held native compile.
@@ -827,28 +945,37 @@ for (const stale of ["cloud", "idb"]) {
     const instrument = b5c2Instrument("synth", `override-${stale}`);
     const initial = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(stale !== "cloud", instrument, false, initial);
+
     try {
       await f.start();
       const cloudRows = { effects: await f.db.run(ctx => ctx.db.query("effects").collect()), automationEnvelopes: [] };
+
       const captured = await createExportRenderStateSnapshot({ projectId: f.initialProject,
         userId: stale === "cloud" ? "fixture" : undefined, masterVolume: 1, cloudRows, externalPluginPolicy: "native-playback" });
+
       expect(captured.fx.trackFx?.[f.track.id]?.arp).toEqual(initial);
       await f.writeArp(undefined);
       await f.effects.flushPending();
       expect(f.device.arp.readForTarget(f.track.id)).toBeUndefined();
+
       if (instrument.kind !== "synth") throw new Error("Expected a synth fixture");
       const next: TrackInstrumentParams = { ...instrument, params: { ...instrument.params, polyphony: 8 } };
       const lease = await f.effects.awaitInstrumentReadiness({ targetId: f.track.id, instrument: next });
+
       try {
         const projection = lease?.projection;
+
         const resolved = stale === "idb"
           ? resolveDesiredPlaybackFx(captured.fx, projection, undefined)
           : resolveDesiredPlaybackFx({ masterVolume: 1, masterFxInstances: [], trackFx: {} }, projection, cloudRows);
+
         expect(resolved.trackFx?.[f.track.id]?.instrument).toEqual(next);
         expect(resolved.trackFx?.[f.track.id]?.arp).toBeUndefined();
+
         if (stale === "cloud") {
           const compiled = await createExportRenderStateSnapshot({ projectId: f.initialProject, userId: "fixture",
             masterVolume: 1, cloudRows, effectsProjection: projection, externalPluginPolicy: "native-playback" });
+
           expect(compiled.fx.trackFx?.[f.track.id]?.instrument).toEqual(next);
           expect(compiled.fx.trackFx?.[f.track.id]?.arp).toBeUndefined();
         }
@@ -869,8 +996,10 @@ const reviewReentryKinds: TrackInstrumentParams["kind"][] = ["sampler", "synth"]
 for (const local of [true, false]) {
   test(`INDEPENDENT granular reentry plus changed row installs once local=${local}`, async () => {
     const instrument = b5c2Instrument("granular", "duplicate-reentry");
+
     if (instrument.kind !== "granular") throw new Error("Expected granular");
     const f = await createB5c2Fixture(local, instrument);
+
     try {
       await f.start();
       f.setLegacyMode(false);
@@ -888,8 +1017,10 @@ for (const local of [true, false]) {
 
   test(`INDEPENDENT granular engine change plus changed row installs once local=${local}`, async () => {
     const instrument = b5c2Instrument("granular", "duplicate-granular");
+
     if (instrument.kind !== "granular") throw new Error("Expected granular");
     const f = await createB5c2Fixture(local, instrument);
+
     try {
       await f.start();
       const before = f.granularInstalls.length;
@@ -906,11 +1037,13 @@ for (const local of [true, false]) {
   test(`INDEPENDENT restore and new engine exactly one owner delivery local=${local}`, async () => {
     const instrument = b5c2Instrument("sampler", "restore-new-engine");
     const f = await createB5c2Fixture(local, instrument, false, undefined, false, false, true);
+
     class Replacement extends AudioEngine {
       override setTrackSampler() {}
       override setTrackFxInstances() { return Promise.resolve<"skipped">("skipped"); }
       override setMasterFxInstances() { return Promise.resolve<"skipped">("skipped"); }
     }
+
     try {
       await f.start();
       f.removeTrack(); await f.effects.flushPending();
@@ -927,6 +1060,7 @@ for (const local of [true, false]) {
     test(`REVIEW ${kind} legacy re-entry local=${local}`, async () => {
       const instrument = b5c2Instrument(kind, "review-reentry");
       const f = await createB5c2Fixture(local, instrument);
+
       try {
         await f.start();
         f.setLegacyMode(false);
@@ -941,10 +1075,12 @@ for (const local of [true, false]) {
       } finally { f.close(); }
     });
   }
+
   test(`REVIEW arp legacy re-entry local=${local}`, async () => {
     const instrument = b5c2Instrument("synth", "review-arp-reentry");
     const arp = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(local, instrument, false, arp);
+
     try {
       await f.start();
       f.setLegacyMode(false);
@@ -963,12 +1099,16 @@ for (const local of [true, false]) {
     const arp = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(local, instrument, false, arp);
     const installed: string[] = [];
+
     class Replacement extends AudioEngine {
       override setTrackSampler() { installed.push("sampler"); }
-      override setTrackArpeggiator(): ReturnType<AudioEngine["setTrackArpeggiator"]> { installed.push("arp"); return "applied"; }
+      override setTrackArpeggiator(): ReturnType<AudioEngine["setTrackArpeggiator"]> { installed.push("arp");
+
+ return "applied"; }
       override setTrackFxInstances(): ReturnType<AudioEngine["setTrackFxInstances"]> { return Promise.resolve("skipped"); }
       override setMasterFxInstances(): ReturnType<AudioEngine["setMasterFxInstances"]> { return Promise.resolve("skipped"); }
     }
+
     try {
       await f.start();
       f.replaceEngine(new Replacement());
@@ -983,6 +1123,7 @@ for (const local of [true, false]) {
     const instrument = b5c2Instrument("sampler", "review-track");
     const arp = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(local, instrument, false, arp);
+
     try {
       await f.start();
       f.removeTrack();
@@ -998,6 +1139,7 @@ for (const local of [true, false]) {
   });
   test(`REVIEW repeated audio observations local=${local}`, async () => {
     const f = await createB5c2Fixture(local, b5c2Instrument("sampler", "review-audio"));
+
     try {
       await f.start();
       f.demote();
@@ -1016,6 +1158,7 @@ for (const local of [true, false]) {
     const instrument = b5c2Instrument("sampler", "demotion");
     const arp = { ...createDefaultArpeggiatorParams(), enabled: true };
     const f = await createB5c2Fixture(local, instrument, false, arp);
+
     try {
       await f.start();
       expect(f.runtimeArp()).toEqual(arp);
@@ -1029,11 +1172,13 @@ for (const local of [true, false]) {
       expect(f.remainingBytes()).toBe(0);
     } finally { f.close(); }
   });
+
   for (const kind of ["sampler", "drum-rack"]) {
     test(`B5d native registration ${kind} local=${local}`, async () => {
       if (kind !== "sampler" && kind !== "drum-rack") throw new Error("Unknown sampled instrument");
       const instrument = b5c2Instrument(kind, "native");
       const f = await createB5c2Fixture(local, instrument, false, undefined, false, false, true);
+
       try {
         await f.decodeEntered;
         expect(f.joins).toEqual([]);
@@ -1049,13 +1194,16 @@ for (const local of [true, false]) {
       } finally { f.close(); }
     });
   }
+
   test(`B5d native instrument history undo redo local=${local}`, async () => {
     const from = b5c2Instrument("sampler", "native-history"), to = b5c3ChangedInstrument(from);
     const f = await createB5c2Fixture(local, from, false, undefined, false, false, true);
+
     const restore = b5HistoryTransport(async operation => {
       if (operation.kind !== "instruments.setTrackInstrument") throw new Error("Unexpected native history operation");
       await f.write(operation.payload.instrument);
     });
+
     try {
       await f.start();
       const fromKey = f.nativeContent(from);
@@ -1063,8 +1211,10 @@ for (const local of [true, false]) {
       await f.effects.flushPending();
       const toKey = f.nativeContent(to);
       expect(toKey).not.toBe(fromKey);
+
       const entry: HistoryEntry = { type: "effect-params", projectId: f.initialProject,
         data: { trackRef: f.track.id, effect: "instrument", from, to } };
+
       const deps = b5HistoryDeps(f.initialProject, f.track, entry);
       await execUndo(entry, deps);
       await f.effects.flushPending();
@@ -1086,9 +1236,11 @@ for (const local of [true, false]) {
   ]) {
     test(`B5c2 switch ${from} to ${to}, local=${local}, closed and unselected`, async () => {
       if (from !== "sampler" && from !== "drum-rack" && from !== "granular" && from !== "synth") throw new Error("Unknown source");
+
       if (to !== "sampler" && to !== "drum-rack" && to !== "granular" && to !== "synth") throw new Error("Unknown successor");
       const initial = b5c2Instrument(from, "old"), next = b5c2Instrument(to, "new");
       const fixture = await createB5c2Fixture(local, initial);
+
       try {
         await fixture.start();
         const before = fixture.calls.length;
@@ -1108,11 +1260,13 @@ for (const local of [true, false]) for (const scenario of ["track removal", "pro
   test(`B5c3 teardown ${scenario}, arp, local=${local}, closed and unselected`, async () => {
     const arp = { ...createDefaultArpeggiatorParams(), enabled: true };
     const fixture = await createB5c2Fixture(local, b5c2Instrument("synth", "synth"), false, arp);
+
     try {
       await fixture.start();
       expect(fixture.device.arp.readForTarget(fixture.track.id)).toEqual(arp);
       expect(fixture.runtimeArp()).toEqual(arp);
       const before = fixture.calls.length;
+
       if (scenario === "track removal") fixture.removeTrack();
       else await fixture.switchProject();
       await fixture.effects.flushPending();
@@ -1132,10 +1286,12 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
       if (kind !== "synth" && kind !== "sampler" && kind !== "drum-rack" && kind !== "granular") throw new Error("Unknown instrument");
       const instrument = b5c2Instrument(kind, "same-id");
       const fixture = await createB5c2Fixture(local, instrument);
+
       try {
         await fixture.start();
         await fixture.readiness(instrument);
         const before = scenario === "initial load" ? 0 : fixture.calls.length;
+
         if (scenario === "removal and re-add") {
           await fixture.write(undefined);
           await fixture.effects.flushPending();
@@ -1149,6 +1305,7 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
           await fixture.readiness(instrument);
           fixture.assertContent(instrument);
         }
+
         const expectedBytes = kind === "synth" ? 0 : 48_000 * 2 * Float32Array.BYTES_PER_ELEMENT * (kind === "granular" ? 2 : 1);
         expect(fixture.remainingBytes()).toBe(expectedBytes);
         console.log("B5c3 matrix", JSON.stringify({ group: "load", scenario, family: kind, local, target: "track",
@@ -1162,6 +1319,7 @@ for (const local of [true, false]) {
   test(`B5c3 synth to sampler held successor load, local=${local}, closed and unselected`, async () => {
     const fixture = await createB5c2Fixture(local, b5c2Instrument("synth", "old"), true);
     const successor = b5c2Instrument("sampler", "new");
+
     try {
       await fixture.start();
       const before = fixture.calls.length;
@@ -1186,9 +1344,11 @@ for (const local of [true, false]) for (const scenario of ["initial load", "remo
   test(`B5c3 load ${scenario}, arp, local=${local}, closed and unselected`, async () => {
     const params = { ...createDefaultArpeggiatorParams(), enabled: true };
     const fixture = await createB5c2Fixture(local, b5c2Instrument("synth", "host"), false, params);
+
     try {
       await fixture.start();
       const before = scenario === "initial load" ? 0 : fixture.calls.length;
+
       if (scenario === "removal and re-add") {
         await fixture.writeArp(undefined);
         await fixture.effects.flushPending();
@@ -1198,6 +1358,7 @@ for (const local of [true, false]) for (const scenario of ["initial load", "remo
         await fixture.writeArp(params);
         await fixture.effects.flushPending();
       }
+
       await fixture.readiness();
       expect(fixture.device.arp.readForTarget(fixture.track.id)).toEqual(params);
       expect(fixture.runtimeArp()).toEqual(params);
@@ -1209,9 +1370,12 @@ for (const local of [true, false]) for (const scenario of ["initial load", "remo
 
 const b5c3ChangedInstrument = (instrument: TrackInstrumentParams): TrackInstrumentParams => {
   if (instrument.kind === "synth") return { ...instrument, params: { ...instrument.params, gain: 0.61 } };
+
   if (instrument.kind === "sampler") return { ...instrument, params: { ...instrument.params,
     zones: instrument.params.zones.map(entry => ({ ...entry, rootNote: 72 })) } };
+
   if (instrument.kind === "granular") return { ...instrument, params: { ...instrument.params, position: 0.25 } };
+
   return { ...instrument, params: { ...instrument.params,
     pads: instrument.params.pads.map(pad => pad.id === "pad-36" ? { ...pad, transpose: 12 } : pad) } };
 };
@@ -1223,21 +1387,27 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
     if (kind !== "synth" && kind !== "sampler" && kind !== "drum-rack" && kind !== "granular") throw new Error("Unknown instrument");
     const from = b5c2Instrument(kind, "same"), to = b5c3ChangedInstrument(from);
     const f = await createB5c2Fixture(local, from);
+
     const restore = b5HistoryTransport(async operation => {
       if (operation.kind !== "instruments.setTrackInstrument") throw new Error("Unexpected instrument history operation");
       await f.write(operation.payload.instrument);
     });
+
     try {
       await f.start();
       await f.write(to);
       await f.effects.flushPending();
       await f.readiness(to);
       f.assertContent(to);
+
       const entry: HistoryEntry = { type: "effect-params", projectId: f.initialProject,
         data: { trackRef: f.track.id, effect: "instrument", from, to } };
+
       const deps = b5HistoryDeps(f.initialProject, f.track, entry);
+
       for (const direction of ["undo", "redo"]) {
         const before = f.calls.length, expected = direction === "undo" ? from : to;
+
         if (direction === "undo") await execUndo(entry, deps);
         else await execRedo(entry, deps);
         await f.effects.flushPending();
@@ -1255,19 +1425,25 @@ for (const local of [true, false]) {
     const from = { ...createDefaultArpeggiatorParams(), enabled: true };
     const to = { ...from, octaves: 2 };
     const f = await createB5c2Fixture(local, b5c2Instrument("synth", "host"), false, from);
+
     const restore = b5HistoryTransport(async operation => {
       if (operation.kind !== "effects.setArpeggiatorParams") throw new Error("Unexpected arp history operation");
       await f.writeArp(operation.payload.params);
     });
+
     try {
       await f.start();
       await f.writeArp(to);
       await f.effects.flushPending();
+
       const entry: HistoryEntry = { type: "effect-params", projectId: f.initialProject,
         data: { trackRef: f.track.id, effect: "arp", instanceId: "arp", from, to } };
+
       const deps = b5HistoryDeps(f.initialProject, f.track, entry);
+
       for (const direction of ["undo", "redo"]) {
         const before = f.calls.length, expected = direction === "undo" ? from : to;
+
         if (direction === "undo") await execUndo(entry, deps);
         else await execRedo(entry, deps);
         await f.effects.flushPending();
@@ -1289,6 +1465,7 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
       if (kind !== "synth" && kind !== "sampler" && kind !== "drum-rack" && kind !== "granular") throw new Error("Unknown instrument");
       const initial = b5c2Instrument(kind, "same"), next = b5c3ChangedInstrument(initial);
       const f = await createB5c2Fixture(local, initial, false, undefined, scenario === "collaborator");
+
       try {
         await f.start();
         const before = f.calls.length;
@@ -1303,10 +1480,12 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
     });
   }
 }
+
 for (const local of [true, false]) for (const scenario of local ? ["another surface"] : ["another surface", "collaborator"]) {
   test(`B5c3 external ${scenario}, arp, local=${local}, closed and unselected`, async () => {
     const initial = { ...createDefaultArpeggiatorParams(), enabled: true }, next = { ...initial, octaves: 2 };
     const f = await createB5c2Fixture(local, b5c2Instrument("synth", "host"), false, initial, scenario === "collaborator");
+
     try {
       await f.start();
       const before = f.calls.length;
@@ -1329,6 +1508,7 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
     if (kind !== "synth" && kind !== "sampler" && kind !== "drum-rack" && kind !== "granular" && kind !== "arp") throw new Error("Unknown instrument");
     const initial = b5c2Instrument(kind === "arp" ? "synth" : kind, "same");
     const f = await createB5c2Fixture(local, initial, false, undefined, !local, true);
+
     try {
       await f.start();
       const next = b5c3ChangedInstrument(initial), before = f.calls.length;
@@ -1338,18 +1518,21 @@ for (const local of [true, false]) for (const kind of ["synth", "sampler", "drum
         : { kind: "instrument.set", target: { kind: "track", track: { source: "persisted", id: f.track.id } }, instrumentKind: next.kind, params: next.params });
       await f.publish();
       await f.effects.flushPending();
+
       if (kind === "arp") {
         await f.readiness();
         expect(f.device.arp.readForTarget(f.track.id)).toEqual(params);
         expect(f.runtimeArp()).toEqual(params);
       } else {
         const observed = f.device.readInstrumentForTarget(f.track.id);
+
         if (!observed) throw new Error("Agent row was not observed");
         expect(observed.kind).toBe(next.kind);
         expect(observed.params).toEqual(next.params);
         await f.readiness(observed);
         f.assertContent(observed);
       }
+
       console.log("B5c3 matrix", JSON.stringify({ group: "agent", scenario: "agent commit", family: kind, local,
         target: "track", calls: f.calls.slice(before), remainingBytes: f.remainingBytes(), subscription: !local }));
     } finally { f.close(); }
@@ -1360,26 +1543,33 @@ for (const local of [true, false]) {
   test(`B5c3 legacy synth history undo redo, local=${local}, closed and unselected`, async () => {
     const initial = b5c2Instrument("synth", "initial"), from = { ...createDefaultSynthParams(), gain: 0.37 }, to = { ...from, gain: 0.61 };
     const f = await createB5c2Fixture(local, initial);
+
     const restore = b5HistoryTransport(async operation => {
       if (operation.kind !== "effects.setSynthParams") throw new Error("Unexpected legacy synth history operation");
       await f.writeLegacySynth(operation.payload.params);
     });
+
     try {
       await f.start();
       await f.write(undefined);
       await f.effects.flushPending();
       await f.writeLegacySynth(to);
       await f.effects.flushPending();
+
       const entry: HistoryEntry = { type: "effect-params", projectId: f.initialProject,
         data: { trackRef: f.track.id, effect: "synth", instanceId: "legacy-synth", from, to } };
+
       const deps = b5HistoryDeps(f.initialProject, f.track, entry);
+
       for (const direction of ["undo", "redo"]) {
         const before = f.calls.length, expected = direction === "undo" ? from : to;
+
         if (direction === "undo") await execUndo(entry, deps);
         else await execRedo(entry, deps);
         await f.effects.flushPending();
         await f.readiness();
         const observed = f.device.readInstrumentForTarget(f.track.id);
+
         if (observed?.kind !== "synth") throw new Error("Legacy synth row not observed");
         expect(observed.params).toEqual(expected);
         f.assertContent(observed);
@@ -1393,6 +1583,7 @@ for (const local of [true, false]) {
 test("B5c2 track removal, sampler local, closed and unselected", async () => {
   const initial = b5c2Instrument("sampler", "removed");
   const fixture = await createB5c2Fixture(true, initial);
+
   try {
     await fixture.start();
     const before = fixture.calls.length;
@@ -1417,9 +1608,11 @@ for (const local of [true, false]) {
         if (kind !== "synth" && kind !== "sampler" && kind !== "drum-rack" && kind !== "granular") throw new Error("Unknown instrument");
         const initial = b5c2Instrument(kind, "retired");
         const fixture = await createB5c2Fixture(local, initial);
+
         try {
           await fixture.start();
           const before = fixture.calls.length;
+
           if (scenario === "track removal") fixture.removeTrack();
           else await fixture.switchProject();
           await fixture.effects.flushPending();
@@ -1441,6 +1634,7 @@ test("3B1 r5 Retry must replace a stale missing error with the fresh decode erro
   const localSample = { ...sample, url: "local-asset:asset-runtime", name: "Kick" };
   const params = { ...createDefaultDrumRackParams(), pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample: localSample }] };
   const failure = new Error("fresh restored-file decode failure");
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true, projectId: () => "project:review-error",
     readLocalAsset: async () => restored
@@ -1448,6 +1642,7 @@ test("3B1 r5 Retry must replace a stale missing error with the fresh decode erro
     decodePages: async function* () { yield await Promise.reject<DecodedAudioPage>(failure); },
     createBuffer: () => buffer,
   });
+
   try {
     await sync.syncTrack(engine, "track", params, "drum");
     expect(sync.getNativePreparation("track")?.error).toContain("is missing");
@@ -1462,11 +1657,13 @@ test("3B1 r5 native preparation errors retry with the cached decode", async () =
   const buffer = new TestAudioBuffer(), engine = createEngine(buffer);
   const params = { ...createDefaultDrumRackParams(), pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample }] };
   let decodes = 0, calls = 0;
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true, projectId: () => "project:review-native",
     decodePages: async function* (...args) { decodes++; yield* decodeTestPages(...args); },
     createBuffer: () => buffer,
   });
+
   try {
     await sync.syncTrack(engine, "track", params, "drum");
     sync.setNativePreparation("track", { state: "error", error: "mlock unavailable" });
@@ -1486,23 +1683,33 @@ test("3B1 r5 cached same-key content is not refreshed by Retry", async () => {
     getChannelData(channel: number) { return this.planes[channel]!; }
     copyFromChannel() {} copyToChannel() {}
   }
+
   const engine = createEngine(new TestAudioBuffer());
   const localSample = { ...sample, url: "local-asset:asset-runtime" };
+
   const instrument: Extract<TrackInstrumentParams, { kind: "drum-rack" }> = { kind: "drum-rack", instanceId: "drum",
     params: { ...createDefaultDrumRackParams(), pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample: localSample }] } };
+
   let content = 1, reads = 0, decodedContent = 0;
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true, projectId: () => "project:review-replaced",
-    readLocalAsset: async () => { reads++; return { status: "ready", file: new File([String(content)], "sample.wav") }; },
+    readLocalAsset: async () => { reads++;
+
+ return { status: "ready", file: new File([String(content)], "sample.wav") }; },
     decodePages: async function* (source, options) {
       if (!(source instanceof File)) throw new Error("Expected local file");
       decodedContent = Number(await source.text());
+
       for await (const page of decodeTestPages(source, options)) {
-        yield { ...page, planes: page.planes.map(plane => { plane.fill(decodedContent); return plane; }) };
+        yield { ...page, planes: page.planes.map(plane => { plane.fill(decodedContent);
+
+ return plane; }) };
       }
     },
     createBuffer: () => new RealBuffer(),
   });
+
   try {
     await sync.syncTrack(engine, "track", instrument.params, "drum");
     content = 2;
@@ -1519,6 +1726,7 @@ test("3B1 r5 cached same-key content is not refreshed by Retry", async () => {
 
 test("3B1 r5 hydration input identities cover loader descriptors and mapping", () => {
   const sampler = createSamplerBufferSync(), drum = createDrumRackBufferSync();
+
   const variants: NonNullable<DrumRackParams["pads"][number]["sample"]>[] = [
     { ...sample, assetKey: "other" }, { ...sample, url: "/other.wav" },
     { ...sample, sourceKind: "recording" },
@@ -1526,16 +1734,22 @@ test("3B1 r5 hydration input identities cover loader descriptors and mapping", (
     { ...sample, source: { ...sample.source, sampleRate: 44_100 } },
     { ...sample, source: { ...sample.source, channelCount: 1 } },
   ];
+
   const sampledInstrument: Extract<TrackInstrumentParams, { kind: "sampler" }> = { kind: "sampler", instanceId: "sampled",
     params: { ...createDefaultSamplerParams(), zones: [zone] } };
+
   const granular: Extract<TrackInstrumentParams, { kind: "granular" }> = { kind: "granular", instanceId: "granular",
     params: { ...createDefaultGranularParams(), zone } };
+
   const pad = { ...createDefaultDrumRackParams().pads[0]!, sample };
+
   const drumInstrument: Extract<TrackInstrumentParams, { kind: "drum-rack" }> = { kind: "drum-rack", instanceId: "drum",
     params: { pads: [pad] } };
+
   const samplerKey = JSON.stringify(sampler.hydrationInputs(sampledInstrument));
   const granularKey = JSON.stringify(sampler.hydrationInputs(granular));
   const drumKey = JSON.stringify(drum.hydrationInputs(drumInstrument));
+
   try {
     for (const variant of variants) {
       expect(JSON.stringify(sampler.hydrationInputs({ ...sampledInstrument, params: { ...sampledInstrument.params,
@@ -1544,12 +1758,14 @@ test("3B1 r5 hydration input identities cover loader descriptors and mapping", (
         zone: { ...zone, sample: variant } } }))).not.toBe(granularKey);
       expect(JSON.stringify(drum.hydrationInputs({ ...drumInstrument, params: { pads: [{ ...pad, sample: variant }] } }))).not.toBe(drumKey);
     }
+
     for (const patch of [{ id: "renamed" }, { startSec: 0.1 }, { endSec: 0.9 }]) {
       expect(JSON.stringify(sampler.hydrationInputs({ ...sampledInstrument, params: { ...sampledInstrument.params,
         zones: [{ ...zone, ...patch }] } }))).not.toBe(samplerKey);
       expect(JSON.stringify(sampler.hydrationInputs({ ...granular, params: { ...granular.params, zone: { ...zone, ...patch } } }))).not.toBe(granularKey);
       expect(JSON.stringify(drum.hydrationInputs({ ...drumInstrument, params: { pads: [{ ...pad, ...patch }] } }))).not.toBe(drumKey);
     }
+
     expect(JSON.stringify(sampler.hydrationInputs({ ...sampledInstrument, instanceId: "new" }))).not.toBe(samplerKey);
     expect(JSON.stringify(sampler.hydrationInputs({ ...granular, instanceId: "new" }))).not.toBe(granularKey);
     expect(JSON.stringify(drum.hydrationInputs({ ...drumInstrument, instanceId: "new" }))).not.toBe(drumKey);
@@ -1570,16 +1786,21 @@ test.each(["project", "replacement", "clear"])("3B1 r5 native Retry guard reject
   const entered = Promise.withResolvers<void>(), finish = Promise.withResolvers<LocalAssetBytesResult>();
   const localSample = { ...sample, url: "local-asset:asset-runtime" };
   const params = { pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample: localSample }] };
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true, projectId: () => project,
-    readLocalAsset: async () => { if (!armed) return { status: "missing" }; entered.resolve(); return finish.promise; },
+    readLocalAsset: async () => { if (!armed) return { status: "missing" }; entered.resolve();
+
+ return finish.promise; },
     decodePages: decodeTestPages, createBuffer: () => buffer,
   });
+
   try {
     await sync.syncTrack(engine, "track", params, "drum");
     armed = true;
     const retry = sync.retryTrack(engine, "track", params, "drum", async () => { calls++; });
     await entered.promise;
+
     if (cause === "project") project = "project:other";
     else if (cause === "replacement") await sync.syncTrack(engine, "track", { pads: [] }, "replacement");
     else sync.clearTrack("track");
@@ -1597,9 +1818,12 @@ test("3B1 r5 real float-WAV rejects non-finite PCM before caching and Retry prep
     view.setUint32(16, 16, true); view.setUint16(20, 3, true); view.setUint16(22, 2, true);
     view.setUint32(24, 48_000, true); view.setUint32(28, 48_000 * 8, true); view.setUint16(32, 8, true);
     view.setUint16(34, 32, true); text(36, "data"); view.setUint32(40, bytes.length - 44, true);
+
     for (let offset = 44; offset < bytes.length; offset += 4) view.setFloat32(offset, value, true);
+
     return new File([bytes], "sample.wav");
   };
+
   class PcmBuffer implements AudioBuffer {
     readonly length = 48_000; readonly numberOfChannels = 2; readonly sampleRate = 48_000; readonly duration = 1;
     planes = [new Float32Array(this.length), new Float32Array(this.length)];
@@ -1609,34 +1833,48 @@ test("3B1 r5 real float-WAV rejects non-finite PCM before caching and Retry prep
     }
     copyToChannel() {}
   }
+
   let file = wav(NaN), reads = 0;
+
   const instrument: Extract<TrackInstrumentParams, { kind: "drum-rack" }> = { kind: "drum-rack", instanceId: "drum",
     params: { pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample: { ...sample, url: "local-asset:asset-runtime" } }] } };
+
   const engine = createEngine(new TestAudioBuffer());
+
   const sync = createDrumRackBufferSync({ nativeAudio: () => true, projectId: () => "project:review-wave",
-    readLocalAsset: async () => { reads++; return { status: "ready", file }; },
+    readLocalAsset: async () => { reads++;
+
+ return { status: "ready", file }; },
     createBuffer: () => new PcmBuffer(),
   });
+
   const prepare = async () => {
     const buffer = sync.snapshotBuffers("track", instrument)?.buffers.get("pad-36")?.buffer;
+
     if (!buffer) throw new Error("Missing projected PCM");
+
     const descriptor = createAudioPcmSourceDescriptor({
       identity: "regional-buffer", durationSec: buffer.duration, frameCount: buffer.length,
       sampleRate: buffer.sampleRate, channelCount: buffer.numberOfChannels, source: buffer,
     });
+
     const manager = createNativeTimelinePageManager({
       sources: [{ sourceAssetKey: "asset-runtime", sessionAssetId: 1, frameCount: buffer.length,
         sampleRateHz: buffer.sampleRate, channelCount: buffer.numberOfChannels, descriptor }],
       writePage: async page => {
         // Mirrors AudioHost::WriteMappedAssetPage's std::isfinite admission, not a new product rule.
         const samples = new Float32Array(page.planarPcm.buffer, page.planarPcm.byteOffset, page.planarPcm.byteLength / 4);
+
         if (!samples.every(Number.isFinite)) throw new Error("invalid-asset-page");
       },
     });
+
     try { await manager.ensureRanges([{ sourceAssetKey: "asset-runtime", startFrame: 0, endFrame: buffer.length }]); }
     finally { await manager.dispose(); }
+
     sync.setNativePreparation("track", { state: "ready" });
   };
+
   try {
     let rejected = false;
     await sync.syncTrack(engine, "track", instrument.params, "drum").catch(() => { rejected = true; });
@@ -1656,9 +1894,11 @@ test("3B1 r5 real float-WAV rejects non-finite PCM before caching and Retry prep
 test.each([NaN, Infinity, -Infinity])("3B1 r5 sampler loader rejects non-finite PCM %s without caching", async value => {
   let decodes = 0;
   let corrupt = true;
+
   const sync = createSamplerBufferSync({
     decodePages: async function* (...args) {
       decodes++;
+
       for await (const page of decodeTestPages(...args)) {
         if (corrupt) page.planes[1]![page.frameCount - 1] = value;
         yield page;
@@ -1666,9 +1906,11 @@ test.each([NaN, Infinity, -Infinity])("3B1 r5 sampler loader rejects non-finite 
     },
     createBuffer: () => new TestAudioBuffer(),
   });
+
   const instrument: Extract<TrackInstrumentParams, { kind: "sampler" }> = {
     kind: "sampler", instanceId: "sampled", params: { ...createDefaultSamplerParams(), zones: [zone] },
   };
+
   try {
     await expect(sync.loadBuffers("track", instrument)).rejects.toThrow("non-finite");
     await expect(sync.loadBuffers("track", instrument)).rejects.toThrow("non-finite");
@@ -1689,7 +1931,9 @@ const compileProjection = async (snapshot: () => EffectsPanelExportSnapshot) => 
   const effects = snapshot();
   const readiness = await awaitCompileInstruments(effects, undefined);
   const projection = compileEffectsProjection(effects, readiness);
+
   if (!projection) throw new Error("Missing compiled effects projection");
+
   return { projection, readiness };
 };
 
@@ -1699,16 +1943,20 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
   const projectId = `project:3b1-r2b-${crypto.randomUUID()}`;
   const track: Track = { id: "sampled-track", kind: "instrument", name: "Sampled", volume: 1, clips: [] };
   const initial: TrackInstrumentParams = { kind: "sampler", instanceId: "sampled", params: createDefaultSamplerParams() };
+
   const rawLoaded: TrackInstrumentParams = schedule === "granular-row"
     ? { kind: "granular", instanceId: "sampled", params: { ...createDefaultGranularParams(), zone } }
     : { ...initial, params: { ...initial.params, zones: [zone] } };
+
   const loaded = normalizeTrackInstrumentParams(rawLoaded);
+
   if (!loaded) throw new Error("Invalid sampled fixture");
   const persisted = schedule === "sampler-draft" ? initial : loaded;
   await setLocalEffect(projectId, track.id, "instrument", persisted);
   let enter = () => {}, release = () => {};
   const entered = new Promise<void>(resolve => { enter = resolve; });
   const held = new Promise<void>(resolve => { release = resolve; });
+
   const sampler = createSamplerBufferSync({
     decodePages: async function* (...args) {
       enter();
@@ -1717,6 +1965,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
     },
     createBuffer: () => buffer,
   });
+
   const drum = createDrumRackBufferSync();
   const client = new QueryClient();
   let dispose = () => {};
@@ -1724,6 +1973,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
   let snapshot: EffectsPanelExportSnapshot | undefined;
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, {
       client,
       get children() {
@@ -1734,49 +1984,62 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
           usesLegacyAudioEngine: () => false, samplerBufferSync: sampler, drumRackBufferSync: drum,
           onExportSnapshotChange: next => { snapshot = next; },
         });
+
         return null;
       },
     });
   });
+
   try {
     if (!panel || !snapshot) throw new Error("Panel snapshot was not published");
     const device = panel.devices.instrument;
     const effects = snapshot;
+
     if (schedule === "sampler-draft") {
       await effects.flushPending();
       device.setInstrumentForTarget(track.id, loaded);
     }
+
     await entered;
     // A real decode is held. In the draft case the old row is still authoritative in storage.
     expect((await getLocalEffect(projectId, track.id, "instrument"))?.params).toEqual(persisted);
     expect(device.readInstrumentForTarget(track.id)).toEqual(loaded);
     let compiled = false;
+
     const compilation = compileProjection(() => effects).then(({ projection, readiness }) => {
       try {
         const instrument = projection.upsertDeviceRows.find(row => row.effect === "instrument")?.params;
+
         if (!instrument || !("kind" in instrument)) throw new Error("Missing projected instrument");
         expect(instrument).toEqual(loaded);
         const hydrate = readiness?.hydrateInstrumentBuffers ?? effects.hydrateInstrumentBuffers;
+
         const hydrated = hydrate?.({
           fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument: loaded } } },
           automationEnvelopes: [],
         });
+
         if (!hydrated) throw new Error("Missing hydration");
+
         const result = compileLivePlaybackSnapshot({
           revision: 1, bpm: 120,
           transport: { state: "stopped", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
           tracks: [track], renderState: hydrated, sidechainRoutes: [],
         });
+
         compiled = true;
+
         return result;
       } finally { readiness?.release(); }
     });
+
     for (let turn = 0; turn < 80; turn++) await Promise.resolve();
     const compiledBeforeDecode = compiled;
     release();
     const result = await compilation;
     // Report both facts on red: the early compile and the truthful missing-buffer rejection.
     expect({ compiledBeforeDecode, supported: result.supported }).toEqual({ compiledBeforeDecode: false, supported: true });
+
     if (result.supported) expect(result.snapshot.assets[0]?.buffer).toBe(buffer);
     await effects.flushPending();
   } finally {
@@ -1795,28 +2058,35 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
   const projectId = `project:3b1-r3-successor-${crypto.randomUUID()}`;
   const track: Track = { id: "sampled-track", kind: "instrument", name: "Sampled", volume: 1, clips: [] };
   const initial: TrackInstrumentParams = { kind: "sampler", instanceId: "sampled", params: createDefaultSamplerParams() };
+
   const next = (assetKey: string): TrackInstrumentParams => kind === "granular"
     ? { kind: "granular", instanceId: "sampled", params: { ...createDefaultGranularParams(),
       zone: { ...zone, sample: { ...sample, assetKey, url: `/${assetKey}.wav` } } } }
     : { ...initial, params: { ...initial.params,
       zones: [{ ...zone, sample: { ...sample, assetKey, url: `/${assetKey}.wav` } }] } };
+
   const first = next("first"), second = next("successor");
   const final = schedule === "sampler-change" ? next("fresh") : second;
   await setLocalEffect(projectId, track.id, "instrument", initial);
   let decodes = 0;
   const decodingSuccessor = Promise.withResolvers<void>(), finishSuccessor = Promise.withResolvers<void>();
+
   const sampler = createSamplerBufferSync({ decodePages: async function* (...args) {
     decodes++;
+
     if (schedule === "sampler-change" && decodes === 2) {
       decodingSuccessor.resolve();
       await finishSuccessor.promise;
     }
+
     yield* decodeTestPages(...args);
   }, createBuffer: () => buffer });
+
   const drum = createDrumRackBufferSync();
   const client = new QueryClient();
   const announced = Promise.withResolvers<void>(), preparation = Promise.withResolvers<void>();
   let armed = false, dispose = () => {};
+
   const structural = createInstrumentPlaybackChange({
     mountedProjectGeneration: () => 0,
     awaitPlaybackPreparation: async () => { if (armed) { announced.resolve(); await preparation.promise; } },
@@ -1826,10 +2096,12 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
     syncPlaybackBackend: async () => {}, renderTracks: () => [track],
     captureStructuralPlaybackIntent: () => ({}),
   });
+
   let panel: EffectsPanelController | undefined;
   let snapshot: EffectsPanelExportSnapshot | undefined;
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track],
@@ -1838,9 +2110,11 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
         usesLegacyAudioEngine: () => false, samplerBufferSync: sampler, drumRackBufferSync: drum,
         onExportSnapshotChange: next => { snapshot = next; }, onStructuralPlaybackChange: structural,
       });
+
       return null;
     } });
   });
+
   try {
     if (!panel || !snapshot) throw new Error("Missing controller");
     const device = panel.devices.instrument, effects = snapshot;
@@ -1853,30 +2127,39 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
     const installs = engine.samplerInstalls, previousGranular = engine.granularBuffer(track.id);
     device.setInstrumentForTarget(track.id, second);
     const compiling = compileProjection(() => effects);
+
     if (schedule === "sampler-change") {
       await decodingSuccessor.promise;
       device.setInstrumentForTarget(track.id, final);
       finishSuccessor.resolve();
     }
+
     const { projection, readiness } = await compiling;
+
     try {
       expect(projection.upsertDeviceRows.find(row => row.effect === "instrument")?.params).toEqual(final);
       expect(engine.samplerInstalls).toBe(installs);
       expect(engine.granularBuffer(track.id)).toBe(previousGranular);
       const hydrate = readiness?.hydrateInstrumentBuffers ?? effects.hydrateInstrumentBuffers;
+
       const hydrated = hydrate?.({
         fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument: final } } },
         automationEnvelopes: [],
       });
+
       if (!hydrated) throw new Error("Missing hydration");
+
       const result = compileLivePlaybackSnapshot({
         revision: 1, bpm: 120,
         transport: { state: "stopped", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
         tracks: [track], renderState: hydrated, sidechainRoutes: [],
       });
+
       expect(result.supported).toBeTrue();
+
       if (result.supported) expect(result.snapshot.assets[0]?.buffer).toBe(buffer);
     } finally { readiness?.release(); }
+
     armed = false;
     preparation.resolve();
     await effects.flushPending();
@@ -1895,23 +2178,30 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
   const projectId = `project:3b1-r4-${crypto.randomUUID()}`;
   const track: Track = { id: "track", kind: "instrument", name: "Sampled", volume: 1, clips: [] };
   const localZone = { ...zone, sample: { ...sample, url: "local-asset:asset-runtime" } };
+
   const instrument: TrackInstrumentParams = schedule === "granular"
     ? { kind: "granular", instanceId: "sampled", params: { ...createDefaultGranularParams(), zone: localZone } }
     : { kind: "sampler", instanceId: "sampled", params: { ...createDefaultSamplerParams(), zones: [localZone] } };
+
   await setLocalEffect(projectId, track.id, "instrument", instrument);
   await setLocalEffectInstance(projectId, track.id, "utility", { version: 1, state: createDefaultUtilityParams() }, { instanceId: "utility" });
   const reads: ReturnType<typeof Promise.withResolvers<LocalAssetBytesResult>>[] = [];
   let armed = false;
+
   const sampler = createSamplerBufferSync({ projectId: () => projectId, readLocalAsset: async () => {
     if (!armed) return { status: "missing" };
     const read = Promise.withResolvers<LocalAssetBytesResult>();
     reads.push(read);
+
     return read.promise;
   } });
+
   const drum = createDrumRackBufferSync(), client = new QueryClient();
   let panel: EffectsPanelController | undefined, snapshot: EffectsPanelExportSnapshot | undefined, dispose = () => {};
+
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
@@ -1919,9 +2209,11 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
         onClose: () => {}, usesLegacyAudioEngine: () => false, samplerBufferSync: sampler, drumRackBufferSync: drum,
         onExportSnapshotChange: next => { snapshot = next; },
       });
+
       return null;
     } });
   });
+
   if (!panel || !snapshot) throw new Error("Missing controller");
   const device = panel.devices.instrument, audio = panel.devices.audioEffects, effects = snapshot;
   await effects.flushPending();
@@ -1929,19 +2221,27 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
   // Hold the existing preview frame so parameter drafts change without starting a separate FIFO load.
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = () => {};
+
   const gesture = schedule === "utility" ? audio.gestureOwner("utility", "utility") : device.gestureOwner;
   const holder = new ParameterGestureHolder();
   gesture.open(holder);
   armed = true;
   let settled = false, changes = 0;
-  const compiling = effects.awaitInstrumentReadiness().then(lease => { settled = true; return lease; });
+
+  const compiling = effects.awaitInstrumentReadiness().then(lease => { settled = true;
+
+ return lease; });
+
   // Finite microtask observation, with each source read explicitly held and released.
   const turns = async () => { for (let turn = 0; turn < 150; turn++) await Promise.resolve(); };
+
   try {
     for (let attempt = 0; attempt < 5; attempt++) {
       await turns();
+
       if (settled) break;
       expect(reads.length).toBe(attempt + 1);
+
       for (let tick = 0; tick < 5; tick++) {
         changes++;
         gesture.tick(holder, () => {
@@ -1950,34 +2250,47 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
           else device.granular.update({ grainSizeMs: 80 + changes });
         });
       }
+
       reads[attempt]?.resolve({ status: "missing" });
     }
+
     await turns();
     expect({ reads: reads.length, settled }).toEqual({ reads: 1, settled: true });
     const lease = await compiling;
+
     try {
       const current = device.readInstrumentForTarget(track.id);
       expect(lease?.projection.upsertDeviceRows.find(row => row.effect === "instrument")?.params).toEqual(current);
+
       const utility = lease?.projection.replaceAudioEffectTargets.flatMap(target => target.rows)
         .find(row => row.effect === "utility");
+
       if (schedule === "utility") expect(utility?.params).toEqual({ version: 1, state: { ...createDefaultUtilityParams(), gainDb: changes } });
+
       if (schedule === "sampler") expect(current?.kind === "sampler" && current.params.ampEnvelope.attackSec).toBe(changes);
+
       if (schedule === "granular") expect(current?.kind === "granular" && current.params.grainSizeMs).toBe(80 + changes);
+
       const hydrated = lease?.hydrateInstrumentBuffers({
         fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument: current } } },
         automationEnvelopes: [],
       });
+
       if (!hydrated) throw new Error("Missing hydration");
       expect(hydrated.fx.trackFx?.[track.id].unavailableSampleAssetKeys).toEqual([sample.assetKey]);
+
       const compiled = compileLivePlaybackSnapshot({
         revision: 1, bpm: 120, tracks: [track], renderState: hydrated, sidechainRoutes: [],
         transport: { state: "stopped", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 },
       });
+
       expect(compiled.supported).toBeTrue();
+
       if (compiled.supported) expect(compiled.snapshot.mixer.fx.trackFx?.[track.id].instrument).toEqual(current);
     } finally { lease?.release(); }
   } finally {
     armed = false;
+
     for (const read of reads) read.resolve({ status: "missing" });
     (await compiling)?.release();
     gesture.cancel(holder);
@@ -1989,42 +2302,56 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
 
 test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during a held unchanged-input read", async schedule => {
   const buffer = new TestAudioBuffer();
+
   class Engine extends TestAudioEngine {
     clears = 0;
     override clearTrackDrumRack() { this.clears++; }
   }
+
   const engine = new Engine(buffer), projectId = `project:r4-retry-${crypto.randomUUID()}`;
   const track: Track = { id: "track", kind: "instrument", name: "Drum", volume: 1, clips: [] };
   const missing = { ...sample, assetKey: "missing", url: "local-asset:missing" };
   const available = { ...sample, assetKey: "available", url: "local-asset:available" };
+
   const instrument: Extract<TrackInstrumentParams, { kind: "drum-rack" }> = {
     kind: "drum-rack", instanceId: "drum", params: { ...createDefaultDrumRackParams(),
       pads: createDefaultDrumRackParams().pads.map(pad => pad.id === "pad-36"
         ? { ...pad, sample: missing } : pad.id === "pad-37" ? { ...pad, sample: available } : pad) },
   };
+
   await setLocalEffect(projectId, track.id, "instrument", instrument);
   let armed = false, reads = 0, availableReads = 0;
   const entered = Promise.withResolvers<void>(), replacementEntered = Promise.withResolvers<void>();
   const held = Promise.withResolvers<LocalAssetBytesResult>(), replacement = Promise.withResolvers<LocalAssetBytesResult>();
+
   const drum = createDrumRackBufferSync({
     projectId: () => projectId, nativeAudio: () => true,
     decodePages: decodeTestPages, createBuffer: () => buffer,
     readLocalAsset: async (_project, assetId) => {
       if (assetId === available.assetKey) {
         availableReads++;
+
         return { status: "ready", file: new File(["sample"], "available.wav") };
       }
+
       if (!armed) return { status: "missing" };
       reads++;
-      if (reads === 1) { entered.resolve(); return held.promise; }
+
+      if (reads === 1) { entered.resolve();
+
+ return held.promise; }
+
       replacementEntered.resolve();
+
       return replacement.promise;
     },
   });
+
   const sampler = createSamplerBufferSync(), client = new QueryClient();
   let dispose = () => {}, panel: EffectsPanelController | undefined, snapshot: EffectsPanelExportSnapshot | undefined;
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
@@ -2032,9 +2359,11 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
         onClose: () => {}, usesLegacyAudioEngine: () => false, samplerBufferSync: sampler, drumRackBufferSync: drum,
         onExportSnapshotChange: next => { snapshot = next; },
       });
+
       return null;
     } });
   });
+
   if (!panel || !snapshot) throw new Error("Missing controller");
   const device = panel.devices.instrument, effects = snapshot;
   await effects.flushPending();
@@ -2043,32 +2372,40 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
   const clears = engine.clears, previousAvailableReads = availableReads;
   const projection = effects.snapshotEffectsProjection();
   armed = true;
+
   const compiling = effects.awaitInstrumentReadiness().then(
     lease => ({ lease, cause: undefined }), (cause: unknown) => ({ lease: undefined, cause }));
+
   try {
     await entered.promise;
     device.drumRack.retry();
     await replacementEntered.promise;
     expect(effects.snapshotEffectsProjection()).toEqual(projection);
+
     if (schedule === "runtime") {
       expect(engine.clears).toBe(clears);
       expect(engine.drumRackBufferIds(track.id)).toEqual(["pad-37"]);
       expect(device.drumRack.nativeStatus()).toMatchObject({ state: "error", error: expect.stringContaining("missing") });
     }
+
     held.resolve({ status: "missing" });
     replacement.resolve({ status: "ready", file: new File(["sample"], "restored.wav") });
     const result = await compiling;
+
     try {
       if (schedule === "readiness") {
         expect(result.cause).toBeUndefined();
+
         const hydrated = result.lease?.hydrateInstrumentBuffers({
           fx: { masterVolume: 1, masterFxInstances: [], trackFx: { [track.id]: { instances: [], instrument } } },
           automationEnvelopes: [],
         });
+
         expect(hydrated?.fx.trackFx?.[track.id].drumRackBuffers)
           .toEqual(new Map([["pad-36", sampled(buffer)], ["pad-37", sampled(buffer)]]));
         expect(hydrated?.fx.trackFx?.[track.id].unavailableSampleAssetKeys).toEqual([]);
       }
+
       await effects.flushPending();
       expect(reads).toBe(2);
       expect(availableReads).toBe(previousAvailableReads);
@@ -2087,28 +2424,36 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
   const engine = createEngine(new TestAudioBuffer()), projectId = `project:3b1-r4-error-${crypto.randomUUID()}`;
   const track: Track = { id: "track", kind: "instrument", name: "Sampled", volume: 1, clips: [] };
   const localZone = { ...zone, sample: { ...sample, url: "local-asset:asset-runtime" } };
+
   const instrument: TrackInstrumentParams = { kind: "sampler", instanceId: "sampled",
     params: { ...createDefaultSamplerParams(), zones: [localZone] } };
+
   await setLocalEffect(projectId, track.id, "instrument", instrument);
   await setLocalEffectInstance(projectId, track.id, "utility", { version: 1, state: createDefaultUtilityParams() }, { instanceId: "utility" });
   const entered = Promise.withResolvers<void>(), finish = Promise.withResolvers<LocalAssetBytesResult>();
   let armed = false, reads = 0;
   const failure = new Error("r4 genuine decode failure");
+
   const sampler = createSamplerBufferSync({
     projectId: () => projectId,
     readLocalAsset: async () => {
       if (!armed) return { status: "missing" };
       reads++;
+
       if (reads > 1) return { status: "missing" };
       entered.resolve();
+
       return finish.promise;
     },
     decodePages: async function* () { yield await Promise.reject<DecodedAudioPage>(failure); },
   });
+
   const drum = createDrumRackBufferSync(), client = new QueryClient();
   let panel: EffectsPanelController | undefined, snapshot: EffectsPanelExportSnapshot | undefined, dispose = () => {};
+
   createRoot(end => {
     dispose = end;
+
     return createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
@@ -2116,9 +2461,11 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
         onClose: () => {}, usesLegacyAudioEngine: () => false, samplerBufferSync: sampler, drumRackBufferSync: drum,
         onExportSnapshotChange: next => { snapshot = next; },
       });
+
       return null;
     } });
   });
+
   if (!panel || !snapshot) throw new Error("Missing controller");
   const device = panel.devices.instrument, audio = panel.devices.audioEffects, effects = snapshot;
   await effects.flushPending();
@@ -2126,12 +2473,15 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
   // Keep the real owner draft visible while its existing preview frame is held.
   globalThis.requestAnimationFrame = () => 1;
   globalThis.cancelAnimationFrame = () => {};
+
   const holder = new ParameterGestureHolder(), audioHolder = new ParameterGestureHolder();
   const gesture = device.gestureOwner, audioGesture = audio.gestureOwner("utility", "utility");
   gesture.open(holder); audioGesture.open(audioHolder);
   armed = true;
+
   const compiling = effects.awaitInstrumentReadiness().then(lease => ({ lease, cause: undefined }),
     (cause: unknown) => ({ lease: undefined, cause }));
+
   try {
     await entered.promise;
     audioGesture.tick(audioHolder, () => audio.utility.changeInstance("utility", params => ({ ...params, state: { ...params.state, gainDb: 5 } })));
@@ -2141,9 +2491,11 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
     });
     finish.resolve({ status: "ready", file: new File(["sample"], "sample.wav") });
     const result = await compiling;
+
     try {
       expect(result.cause).toBe(schedule === "changed" ? undefined : failure);
       expect(reads).toBe(schedule === "changed" ? 2 : 1);
+
       if (schedule === "changed") {
         expect(result.lease?.projection.upsertDeviceRows.find(row => row.effect === "instrument")?.params)
           .toEqual(device.readInstrumentForTarget(track.id));
@@ -2161,22 +2513,26 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
 
 test("3B1 r3 granular processorerror settles the tracked readiness drain truthfully", async () => {
   const installed = Promise.withResolvers<void>(), faults: string[] = [];
+
   const node: ReturnType<NonNullable<Parameters<typeof createGranularRuntime>[0]["createNode"]>> = {
     parameters: new Map(), connect: () => {}, disconnect: () => {}, onprocessorerror: null,
     port: { onmessage: null, close: () => {}, postMessage: (message: GranularWorkletControlMessage) => {
       if (message.type === "install") installed.resolve();
     } },
   };
+
   const runtime = await createGranularRuntime({
     context: { currentTime: 0 }, params: createDefaultGranularParams(),
     createNode: () => node, onFault: code => { faults.push(code); },
   });
+
   class Engine extends TestAudioEngine {
     override setTrackGranular(_id: string, _params: GranularParams,
       buffer?: Parameters<AudioEngine["setTrackGranular"]>[2]): ReturnType<AudioEngine["setTrackGranular"]> {
       return buffer ? runtime.installSample(buffer) : Promise.resolve("applied");
     }
   }
+
   const engine = new Engine(new TestAudioBuffer()), owner = createPendingWorkOwner();
   const sampler = createSamplerBufferSync({ decodePages: decodeTestPages, createBuffer: () => new TestAudioBuffer() });
   const work = sampler.syncGranularTrack(engine, "track", { ...createDefaultGranularParams(), zone }, "granular");
@@ -2185,9 +2541,11 @@ test("3B1 r3 granular processorerror settles the tracked readiness drain truthfu
   owner.track("project", work);
   let drained = false;
   const drain = owner.flushPending("project").then(() => { drained = true; });
+
   try {
     await installed.promise;
     node.onprocessorerror?.(Object.assign(new Event("processorerror"), { message: "processor failed", filename: "", lineno: 0, colno: 0, error: null }));
+
     // Finite microtask observation detects a missing terminal without introducing a timer.
     for (let turn = 0; turn < 100; turn++) await Promise.resolve();
     expect({ faults, drained, error: failure instanceof Error ? failure.message : undefined })
@@ -2203,29 +2561,37 @@ test.each(["sampler", "granular", "drum-rack"])("3B1 r3 load-only %s shares its 
   const bytes = buffer.length * buffer.numberOfChannels * 4;
   const budget = createSampledInstrumentRegionBudget(bytes * (kind === "granular" ? 2 : 1));
   let decodes = 0;
+
   const options = { aggregateBudget: budget, decodePages: async function* (...args: Parameters<typeof decodeTestPages>) {
     decodes++;
     yield* decodeTestPages(...args);
   }, createBuffer: () => buffer };
+
   const sampler = createSamplerBufferSync(options), drum = createDrumRackBufferSync(options);
+
   const instrument: Exclude<TrackInstrumentParams, { kind: "synth" }> = kind === "sampler"
     ? { kind: "sampler", instanceId: "sampled", params: { ...createDefaultSamplerParams(), zones: [zone] } }
     : kind === "granular" ? { kind: "granular", instanceId: "sampled", params: { ...createDefaultGranularParams(), zone } }
       : { kind: "drum-rack", instanceId: "sampled", params: { ...createDefaultDrumRackParams(),
         pads: createDefaultDrumRackParams().pads.map(pad => pad.id === "pad-36" ? { ...pad, sample } : pad) } };
+
   let release = () => {};
+
   try {
     const loaded = instrument.kind === "drum-rack"
       ? await drum.loadBuffers("track", instrument) : await sampler.loadBuffers("track", instrument);
+
     release = loaded.release;
     expect(engine.samplerInstalls).toBe(0);
     expect(budget.totalBytes()).toBe(bytes * (kind === "granular" ? 2 : 1));
     expect(() => budget.ensureCapacity("competitor", bytes)).toThrow("aggregate limit");
+
     if (instrument.kind === "sampler") await sampler.syncTrack(engine, "track", instrument.params, instrument.instanceId);
     else if (instrument.kind === "granular") await sampler.syncGranularTrack(engine, "track", instrument.params, instrument.instanceId);
     else await drum.syncTrack(engine, "track", instrument.params, instrument.instanceId);
     expect(decodes).toBe(1);
     release();
+
     // Granular's runtime owns its independent playback pin until its track ends.
     if (instrument.kind === "granular") sampler.clearTrack("track");
     expect(() => budget.ensureCapacity("competitor", bytes)).not.toThrow();
@@ -2237,14 +2603,17 @@ test("hydrates sampler, drum-rack, and granular buffers from their live sync cac
   const engine = createEngine(buffer);
   const samplerSync = createSamplerBufferSync({ decodePages: decodeTestPages, createBuffer: () => buffer });
   const drumSync = createDrumRackBufferSync({ decodePages: decodeTestPages, createBuffer: () => buffer });
+
   const sampler = {
     ...createDefaultSamplerParams(),
     zones: [zone],
   };
+
   const drum = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample } : pad),
   };
+
   const granular = {
     ...createDefaultGranularParams(),
     zone,
@@ -2301,13 +2670,18 @@ test("hydrates sampler, drum-rack, and granular buffers from their live sync cac
     automationEnvelopes: [],
   }, (targetId, instrument) => {
     if (instrument.kind === "sampler") return samplerSync.snapshotSamplerBuffers(targetId, instrument) ? { samplerBuffers: samplerSync.snapshotSamplerBuffers(targetId, instrument) } : undefined;
+
     if (instrument.kind === "drum-rack") {
       const snapshot = drumSync.snapshotBuffers(targetId, instrument);
+
       return snapshot ? { drumRackBuffers: snapshot.buffers, unavailableSampleAssetKeys: snapshot.unavailableSampleAssetKeys } : undefined;
     }
+
     if (instrument.kind === "granular") return samplerSync.snapshotGranularBuffer(targetId, instrument) ? { granularBuffer: samplerSync.snapshotGranularBuffer(targetId, instrument) } : undefined;
+
     return undefined;
   });
+
   const compiled = compileLivePlaybackSnapshot({
     revision: 1,
     bpm: 120,
@@ -2320,7 +2694,9 @@ test("hydrates sampler, drum-rack, and granular buffers from their live sync cac
     renderState: hydrated,
     sidechainRoutes: [],
   });
+
   expect(compiled.supported).toBeTrue();
+
   if (compiled.supported) {
     expect(compiled.snapshot.assets.map((asset) => asset.assetId)).toEqual([
       sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1)),
@@ -2339,35 +2715,44 @@ test("resolves local project samples without fetching their pseudo-URLs", async 
   let fetchCalls = 0;
   globalThis.fetch = Object.assign(async () => {
     fetchCalls += 1;
+
     return new Response(new ArrayBuffer(0));
   }, { preconnect: originalFetch.preconnect });
   const localSample = { ...sample, assetKey: "asset-1", url: "local-asset:asset-1" };
+
   const samplerSync = createSamplerBufferSync({
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
     projectId: () => "project:local",
     readLocalAsset: async (_projectId, assetId) => {
       readCalls.push(assetId);
+
       return { status: "ready", file: new File([sampleBytes], "sample.wav") };
     },
   });
+
   const sampler = { ...createDefaultSamplerParams(), zones: [{ ...zone, sample: localSample }] };
   const granular = { ...createDefaultGranularParams(), zone: { ...zone, sample: localSample } };
+
   const drum = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample: localSample } : pad),
   };
+
   const samplerSyncPending = samplerSync.syncTrack(engine, "local-sampler", sampler, "sampler-instance");
   const granularSyncPending = samplerSync.syncGranularTrack(engine, "local-granular", granular, "granular-instance");
+
   const drumSync = createDrumRackBufferSync({
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
     projectId: () => "project:local",
     readLocalAsset: async (_projectId, assetId) => {
       readCalls.push(assetId);
+
       return { status: "ready", file: new File([sampleBytes], "sample.wav") };
     },
   });
+
   const drumSyncPending = drumSync.syncTrack(engine, "local-drum", drum, "drum-instance");
   await Promise.all([samplerSyncPending, granularSyncPending, drumSyncPending]);
   expect(readCalls).toHaveLength(3);
@@ -2397,18 +2782,21 @@ test("reports missing sampled instruments and retries Drum Rack after asset rest
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let restored = false;
+
   const missingSample = {
     ...sample,
     assetKey: "missing-kick",
     url: "local-asset:missing-kick",
     name: "Kick",
   };
+
   const availableSample = {
     ...sample,
     assetKey: "available-snare",
     url: "local-asset:available-snare",
     name: "Snare",
   };
+
   const localDrum = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => (
@@ -2419,6 +2807,7 @@ test("reports missing sampled instruments and retries Drum Rack after asset rest
           : pad
     )),
   };
+
   const drumSync = createDrumRackBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:missing",
@@ -2458,23 +2847,28 @@ test("reports missing sampled instruments and retries Drum Rack after asset rest
 test("reports missing Sampler and Granular assets as errors rather than loading", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
+
   const missingSample = {
     ...sample,
     assetKey: "missing-instrument",
     url: "local-asset:missing-instrument",
     name: "Missing Source",
   };
+
   const missingZone = { ...zone, sample: missingSample };
+
   const sync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:missing",
     readLocalAsset: async (_projectId, assetKey) => {
       if (assetKey === missingSample.assetKey && !restored) return { status: "missing" };
+
       return { status: "ready", file: new File([new Uint8Array([1])], "restored.wav") };
     },
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   let restored = false;
 
   await sync.syncTrack(engine, "missing-sampler", {
@@ -2518,14 +2912,17 @@ test("reports missing Sampler and Granular assets as errors rather than loading"
 test("preserves unavailable sampler markers when retry confirms the sample is still missing", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
+
   const missingSample = {
     ...sample,
     assetKey: "retry-still-missing",
     url: "local-asset:retry-still-missing",
     name: "Retry Sample",
   };
+
   const missingZone = { ...zone, sample: missingSample };
   const params = { ...createDefaultSamplerParams(), zones: [missingZone] };
+
   const sync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:retry-missing",
@@ -2556,24 +2953,30 @@ test("clears confirmed missing state when reused instrument identities switch pr
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let projectId = "project:a";
+
   const unavailableSample = {
     ...sample,
     assetKey: "reused-instrument-asset",
     url: "local-asset:reused-instrument-asset",
     name: "Reused Sample",
   };
+
   const missingZone = { ...zone, sample: unavailableSample };
+
   const drumParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => (
       pad.id === "pad-36" ? { ...pad, sample: unavailableSample } : pad
     )),
   };
+
   const samplerParams = { ...createDefaultSamplerParams(), zones: [missingZone] };
   const granularParams = { ...createDefaultGranularParams(), zone: missingZone };
+
   const readLocalAsset = async (): Promise<LocalAssetBytesResult> => projectId === "project:a"
     ? { status: "missing" }
     : { status: "permission-denied" };
+
   const drumSync = createDrumRackBufferSync({
     nativeAudio: () => true,
     projectId: () => projectId,
@@ -2581,6 +2984,7 @@ test("clears confirmed missing state when reused instrument identities switch pr
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   const samplerSync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => projectId,
@@ -2638,12 +3042,14 @@ test("invalidates Drum Rack unavailable snapshots when revalidation fails", asyn
   const engine = createEngine(buffer);
   let readResult: LocalAssetBytesResult = { status: "missing" };
   const missingSample = { ...sample, assetKey: "rack-revalidation", url: "local-asset:rack-revalidation" };
+
   const params = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => (
       pad.id === "pad-36" ? { ...pad, sample: missingSample } : pad
     )),
   };
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:rack-revalidation",
@@ -2651,6 +3057,7 @@ test("invalidates Drum Rack unavailable snapshots when revalidation fails", asyn
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   await sync.syncTrack(engine, "rack-revalidation", params, "drum-instance");
   expect(sync.snapshotBuffers("rack-revalidation", {
     kind: "drum-rack",
@@ -2676,37 +3083,45 @@ test("hydrates confirmed missing samples through native projection without dropp
   const missingSample = { ...sample, assetKey: "missing-rack", url: "local-asset:missing-rack", name: "Missing Rack Sample" };
   const availableSample = { ...sample, assetKey: "available-rack", url: "local-asset:available-rack" };
   const missingSamplerSample = { ...sample, assetKey: "missing-sampler", url: "local-asset:missing-sampler", name: "Missing Sampler Sample" };
+
   const drumParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36"
       ? { ...pad, sample: missingSample }
       : pad.id === "pad-37" ? { ...pad, sample: availableSample } : pad),
   };
+
   const samplerParams = { ...createDefaultSamplerParams(), zones: [{ ...zone, sample: missingSamplerSample }] };
+
   const samplerSync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:confirmed-missing",
     readLocalAsset: async (_projectId, assetKey) => {
       if (assetKey === "missing-rack" || assetKey === "missing-sampler") return { status: "missing" };
+
       return { status: "ready", file: new File([new Uint8Array([1])], "restored.wav") };
     },
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   const drumSync = createDrumRackBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:confirmed-missing",
     readLocalAsset: async (_projectId, assetKey) => {
       if (assetKey === "missing-rack") return { status: "missing" };
+
       return { status: "ready", file: new File([new Uint8Array([1])], "sample.wav") };
     },
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   await Promise.all([
     drumSync.syncTrack(engine, "missing-rack-track", drumParams, "drum-instance"),
     samplerSync.syncTrack(engine, "missing-sampler-track", samplerParams, "sampler-instance"),
   ]);
+
   const renderState: ExportRenderStateSnapshot = {
     fx: {
       masterVolume: 1,
@@ -2718,25 +3133,32 @@ test("hydrates confirmed missing samples through native projection without dropp
     },
     automationEnvelopes: [],
   };
+
   const hydrated = hydrateInstrumentBuffers(renderState, (trackId, instrument) => {
     if (instrument.kind === "drum-rack") {
       const snapshot = drumSync.snapshotBuffers(trackId, instrument);
+
       return snapshot
         ? { drumRackBuffers: snapshot.buffers, unavailableSampleAssetKeys: snapshot.unavailableSampleAssetKeys }
         : undefined;
     }
+
     if (instrument.kind === "sampler") {
       const buffers = samplerSync.snapshotSamplerBuffers(trackId, instrument);
       const unavailableSampleAssetKeys = samplerSync.snapshotUnavailableAssetKeys(trackId, instrument);
+
       return buffers && unavailableSampleAssetKeys
         ? { samplerBuffers: buffers, unavailableSampleAssetKeys }
         : undefined;
     }
+
     return undefined;
   });
+
   expect(hydrated.fx.trackFx?.["missing-rack-track"]?.drumRackBuffers?.has("pad-37")).toBe(true);
   expect(hydrated.fx.trackFx?.["missing-rack-track"]?.unavailableSampleAssetKeys).toEqual(["missing-rack"]);
   expect(hydrated.fx.trackFx?.["missing-sampler-track"]?.unavailableSampleAssetKeys).toEqual(["missing-sampler"]);
+
   const playback = compileLivePlaybackSnapshot({
     revision: 1,
     bpm: 120,
@@ -2748,8 +3170,11 @@ test("hydrates confirmed missing samples through native projection without dropp
     renderState: hydrated,
     sidechainRoutes: [],
   });
+
   expect(playback.supported).toBe(true);
+
   if (!playback.supported) throw new Error(playback.reasons.join(" "));
+
   const projection = compileLiveNativeProjection({
     tracks: playback.snapshot.tracks,
     fx: playback.snapshot.mixer.fx,
@@ -2759,7 +3184,9 @@ test("hydrates confirmed missing samples through native projection without dropp
     epoch: 1,
     firstSequence: 1,
   });
+
   expect(projection.supported).toBe(true);
+
   if (projection.supported) {
     expect(projection.graph.nodes.find((node) => node.id === "missing-rack-track")?.instrument).toMatchObject({
       kind: "drum-rack",
@@ -2770,6 +3197,7 @@ test("hydrates confirmed missing samples through native projection without dropp
       zones: [],
     });
   }
+
   samplerSync.dispose();
   drumSync.dispose();
 });
@@ -2779,6 +3207,7 @@ test("isolates sampled instrument buffers by project identity", async () => {
   const projectBBuffer = new TestAudioBuffer();
   let projectId = "project:a";
   const reads: string[] = [];
+
   class ProjectAudioEngine extends AudioEngine {
     override decodeAudioData(data: ArrayBuffer) {
       return Promise.resolve(new Uint8Array(data)[0] === 1 ? projectABuffer : projectBBuffer);
@@ -2788,21 +3217,26 @@ test("isolates sampled instrument buffers by project identity", async () => {
     override setTrackGranular(): ReturnType<AudioEngine["setTrackGranular"]> { return Promise.resolve("applied"); }
     override setSamplerRuntimeListeners() {}
   }
+
   const engine = new ProjectAudioEngine();
   const localSample = { ...sample, assetKey: "shared-asset", url: "local-asset:shared-asset" };
   const sampler = { ...createDefaultSamplerParams(), zones: [{ ...zone, sample: localSample }] };
   const granular = { ...createDefaultGranularParams(), zone: { ...zone, sample: localSample } };
+
   const drum = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample: localSample } : pad),
   };
+
   const readLocalAsset = async (activeProjectId: string): Promise<LocalAssetBytesResult> => {
     reads.push(activeProjectId);
+
     return {
       status: "ready",
       file: new File([new Uint8Array([activeProjectId === "project:a" ? 1 : 2])], "sample.wav"),
     };
   };
+
   const samplerSync = createSamplerBufferSync({ projectId: () => projectId, readLocalAsset, decodePages: decodeTestPages, createBuffer: () => projectId === "project:a" ? projectABuffer : projectBBuffer });
   const drumSync = createDrumRackBufferSync({ projectId: () => projectId, readLocalAsset, decodePages: decodeTestPages, createBuffer: () => projectId === "project:a" ? projectABuffer : projectBBuffer });
 
@@ -2871,16 +3305,19 @@ test("pins active sampler regions and releases them after the final voice ends",
     sampleRate,
     getChannelData: () => new Float32Array(frames),
   });
+
   const engine = new TestAudioEngine(bufferForRegion(2, 1, 48_000));
   const source = { durationSec: 3, sampleRate: 48_000, channelCount: 2 };
   const firstZone = { ...zone, id: "zone-first", sample: { ...sample, assetKey: "asset-first", source }, startSec: 0, endSec: 1.5 };
   const secondZone = { ...zone, id: "zone-second", sample: { ...sample, assetKey: "asset-second", source }, startSec: 1.5, endSec: 3 };
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     cachePolicy: "lazy",
     maxDecodedBytes: 1 * 1024 * 1024,
     zones: [firstZone, secondZone],
   };
+
   const sync = createSamplerBufferSync({
     decodePages: decodeTestPages,
     createBuffer: bufferForRegion,
@@ -2948,13 +3385,16 @@ test("releases a retired Drum Rack generation through the ending hit token", asy
   const aggregate = createSampledInstrumentRegionBudget(regionBytes * 2);
   const engine = createEngine(buffer);
   const pad = createDefaultDrumRackParams().pads[0];
+
   if (!pad) throw new Error("Missing default Drum Rack pad");
+
   const params = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((candidate) => candidate.id === pad.id
       ? { ...candidate, sample, startSec: 0, endSec: 1 }
       : candidate),
   };
+
   const sync = createDrumRackBufferSync({ aggregateBudget: aggregate, decodePages: decodeTestPages, createBuffer: () => buffer });
   await sync.syncTrack(engine, "drum-generation", params, "drum-instance");
   const regionKey = sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1));
@@ -2974,16 +3414,19 @@ test("a superseded Drum Rack sync settles after its replacement", async () => {
   let calls = 0;
   let firstStartedResolve: (() => void) | undefined;
   const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number; signal?: AbortSignal },
   ): AsyncGenerator<DecodedAudioPage> {
     calls += 1;
+
     if (calls === 1) {
       firstStartedResolve?.();
       await new Promise<void>((resolve) => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
       options?.signal?.throwIfAborted();
     }
+
     const startFrame = options?.startFrame ?? 0;
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield {
@@ -2994,7 +3437,9 @@ test("a superseded Drum Rack sync settles after its replacement", async () => {
       planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
     };
   };
+
   const sync = createDrumRackBufferSync({ decodePages, createBuffer: () => buffer });
+
   const params = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample } : pad),
@@ -3019,6 +3464,7 @@ test("clearing a Drum Rack track uses ordinary cancellation", async () => {
   const engine = createEngine(buffer);
   let firstStartedResolve: (() => void) | undefined;
   const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number; signal?: AbortSignal },
@@ -3036,11 +3482,14 @@ test("clearing a Drum Rack track uses ordinary cancellation", async () => {
       planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
     };
   };
+
   const sync = createDrumRackBufferSync({ decodePages, createBuffer: () => buffer });
+
   const params = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample } : pad),
   };
+
   const request = sync.syncTrack(engine, "drum-clear-cancel", params, "drum-instance");
   await firstStarted;
   sync.clearTrack("drum-clear-cancel");
@@ -3054,16 +3503,19 @@ test("a superseded Sampler sync settles after its replacement", async () => {
   let calls = 0;
   let firstStartedResolve: (() => void) | undefined;
   const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number; signal?: AbortSignal },
   ): AsyncGenerator<DecodedAudioPage> {
     calls += 1;
+
     if (calls === 1) {
       firstStartedResolve?.();
       await new Promise<void>((resolve) => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
       options?.signal?.throwIfAborted();
     }
+
     const startFrame = options?.startFrame ?? 0;
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield {
@@ -3074,6 +3526,7 @@ test("a superseded Sampler sync settles after its replacement", async () => {
       planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
     };
   };
+
   const sync = createSamplerBufferSync({ decodePages, createBuffer: () => buffer });
   const params = { ...createDefaultSamplerParams(), zones: [zone] };
 
@@ -3099,16 +3552,19 @@ test("a superseded Granular sync settles after its replacement", async () => {
   let calls = 0;
   let firstStartedResolve: (() => void) | undefined;
   const firstStarted = new Promise<void>((resolve) => { firstStartedResolve = resolve; });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number; signal?: AbortSignal },
   ): AsyncGenerator<DecodedAudioPage> {
     calls += 1;
+
     if (calls === 1) {
       firstStartedResolve?.();
       await new Promise<void>((resolve) => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
       options?.signal?.throwIfAborted();
     }
+
     const startFrame = options?.startFrame ?? 0;
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield {
@@ -3119,6 +3575,7 @@ test("a superseded Granular sync settles after its replacement", async () => {
       planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
     };
   };
+
   const sync = createSamplerBufferSync({ decodePages, createBuffer: () => buffer });
   const params = { ...createDefaultGranularParams(), zone };
 
@@ -3143,14 +3600,17 @@ test("counts reusable Drum Rack regions in the complete resulting budget", async
   const secondSample = { ...sample, assetKey: "drum-budget-b", source };
   const firstPad = { ...createDefaultDrumRackParams().pads[0]!, sample: firstSample };
   const secondPad = { ...createDefaultDrumRackParams().pads[1]!, sample: secondSample };
+
   const firstParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === firstPad.id ? firstPad : pad),
   };
+
   const secondParams = {
     ...firstParams,
     pads: firstParams.pads.map((pad) => pad.id === secondPad.id ? secondPad : pad),
   };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -3166,6 +3626,7 @@ test("counts reusable Drum Rack regions in the complete resulting budget", async
       planes: [new Float32Array(frameCount)],
     };
   };
+
   const createBuffer = (_channels: number, length: number, sampleRate: number): AudioBuffer => ({
     duration: length / sampleRate,
     length,
@@ -3175,6 +3636,7 @@ test("counts reusable Drum Rack regions in the complete resulting budget", async
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(length),
   });
+
   const engine = createEngine(new TestAudioBuffer());
   const sync = createDrumRackBufferSync({ decodePages, createBuffer });
 
@@ -3192,6 +3654,7 @@ test("permits sampler replacement after obsolete unpinned cache entries are evic
   const params = { ...createDefaultSamplerParams(), maxDecodedBytes: 8, zones: [firstZone] };
   const replacement = { ...params, zones: [secondZone] };
   const engine = createEngine(new TestAudioBuffer());
+
   const sync = createSamplerBufferSync({
     decodePages: decodeTestPages,
     createBuffer: (_channels, frames, sampleRate) => ({
@@ -3224,6 +3687,7 @@ test("refuses sampler replacement while an obsolete region is pinned", async () 
   const params = { ...createDefaultSamplerParams(), maxDecodedBytes: 8, zones: [firstZone] };
   const replacement = { ...params, zones: [secondZone] };
   const engine = createEngine(new TestAudioBuffer());
+
   const sync = createSamplerBufferSync({
     decodePages: decodeTestPages,
     createBuffer: (_channels, frames, sampleRate) => ({
@@ -3239,10 +3703,12 @@ test("refuses sampler replacement while an obsolete region is pinned", async () 
   });
 
   await sync.syncTrack(engine, "sampler-pinned", params, "sampler-instance");
+
   const firstKey = sampledInstrumentRegionIdentity(
     firstZone.sample,
     sampledInstrumentRegion(firstZone.sample.source, firstZone.startSec, firstZone.endSec),
   );
+
   engine.emitSamplerRegionUse({ trackId: "sampler-pinned", regionKey: firstKey, voiceId: 1, active: true });
   await expect(sync.syncTrack(engine, "sampler-pinned", replacement, "sampler-instance")).rejects.toThrow("byte limit");
   sync.dispose();
@@ -3254,6 +3720,7 @@ test("refreshes the runtime sampler map when releasing pinned regions evicts the
   const secondZone = { ...zone, id: "runtime-second", sample: { ...sample, assetKey: "runtime-second", source }, startSec: 1, endSec: 2 };
   const params = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, maxDecodedBytes: 16, zones: [firstZone, secondZone] };
   const constrained = { ...params, maxDecodedBytes: 8 };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -3268,6 +3735,7 @@ test("refreshes the runtime sampler map when releasing pinned regions evicts the
       planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
     };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -3277,6 +3745,7 @@ test("refreshes the runtime sampler map when releasing pinned regions evicts the
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const engine = createEngine(new TestAudioBuffer());
   const sync = createSamplerBufferSync({ decodePages, createBuffer });
 
@@ -3309,6 +3778,7 @@ test("refreshes the runtime sampler map when releasing pinned regions evicts the
 test("records a sampler note-miss load failure without an unhandled rejection", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
+
   const sync = createSamplerBufferSync({
     decodePages: async function* () {
       for (const page of [] satisfies readonly DecodedAudioPage[]) yield page;
@@ -3316,12 +3786,15 @@ test("records a sampler note-miss load failure without an unhandled rejection", 
     },
     createBuffer: () => buffer,
   });
+
   const params = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, zones: [zone] };
   const unhandled: TestRejectionReason[] = [];
   const onUnhandledRejection = (reason: TestRejectionReason) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandledRejection);
+
   try {
     await sync.syncTrack(engine, "sampler-note-miss-error", params, "sampler-instance");
+
     const failed = new Promise<void>((resolve) => {
       const unsubscribe = sync.subscribe(() => {
         if (sync.getStatus("sampler-note-miss-error").zones.get(zone.id) !== "error") return;
@@ -3329,6 +3802,7 @@ test("records a sampler note-miss load failure without an unhandled rejection", 
         resolve();
       });
     });
+
     engine.emitSamplerNoteMiss({
       trackId: "sampler-note-miss-error",
       zoneId: zone.id,
@@ -3347,6 +3821,7 @@ test("records a sampler note-miss load failure without an unhandled rejection", 
 test("does not overwrite newer sampler state when a note-miss load is aborted", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
+
   const sync = createSamplerBufferSync({
     decodePages: async function* (
       _source: Blob | string | URL | Request,
@@ -3366,6 +3841,7 @@ test("does not overwrite newer sampler state when a note-miss load is aborted", 
     },
     createBuffer: () => buffer,
   });
+
   const firstParams = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, zones: [zone] };
   const secondZone = { ...zone, id: "newer-zone" };
   const secondParams = { ...firstParams, zones: [secondZone] };
@@ -3386,6 +3862,7 @@ test("does not overwrite newer sampler state when a note-miss load is aborted", 
 test("records a granular retry failure without an unhandled rejection", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
+
   const sync = createSamplerBufferSync({
     decodePages: async function* () {
       for (const page of [] satisfies readonly DecodedAudioPage[]) yield page;
@@ -3393,12 +3870,15 @@ test("records a granular retry failure without an unhandled rejection", async ()
     },
     createBuffer: () => buffer,
   });
+
   const params = { ...createDefaultGranularParams(), zone };
   const unhandled: TestRejectionReason[] = [];
   const onUnhandledRejection = (reason: TestRejectionReason) => unhandled.push(reason);
   process.on("unhandledRejection", onUnhandledRejection);
+
   try {
     await expect(sync.syncGranularTrack(engine, "granular-retry-error", params, "granular-instance")).rejects.toBeDefined();
+
     const failed = new Promise<void>((resolve) => {
       const unsubscribe = sync.subscribe(() => {
         if (sync.getGranularStatus("granular-retry-error").state !== "error") return;
@@ -3406,6 +3886,7 @@ test("records a granular retry failure without an unhandled rejection", async ()
         resolve();
       });
     });
+
     sync.retryGranular(engine, "granular-retry-error");
     await failed;
     expect(sync.getGranularStatus("granular-retry-error").state).toBe("error");
@@ -3426,11 +3907,13 @@ test("reports the disposition that the sampled runtime installed", async () => {
   expect(await sync.syncGranularTrack(engine, "disposition-granular", granular, "granular-instance")).toBe("applied");
   const drums = createDrumRackBufferSync({ decodePages: decodeTestPages, createBuffer: () => buffer });
   expect(await drums.syncTrack(engine, "disposition-drum-rack", drumRack, "drum-instance")).toBe("applied");
+
   const nativeSync = createSamplerBufferSync({
     nativeAudio: () => true,
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   expect(await nativeSync.syncGranularTrack(engine, "disposition-native-granular", granular, "granular-instance")).toBe("dropped");
 
   sync.dispose();
@@ -3440,6 +3923,7 @@ test("reports the disposition that the sampled runtime installed", async () => {
 
 test("forwards Drum Rack equality skips and drops work outside its project", async () => {
   const buffer = new TestAudioBuffer();
+
   class SkippedDrumEngine extends TestAudioEngine {
     override setTrackDrumRack(
       trackId: string,
@@ -3447,9 +3931,11 @@ test("forwards Drum Rack equality skips and drops work outside its project", asy
       buffers?: ReadonlyMap<string, SampledInstrumentBuffer>,
     ): ReturnType<AudioEngine["setTrackDrumRack"]> {
       super.setTrackDrumRack(trackId, params, buffers);
+
       return "skipped";
     }
   }
+
   const engine = new SkippedDrumEngine(buffer);
   const params = createDefaultDrumRackParams();
   const sync = createDrumRackBufferSync({ decodePages: decodeTestPages, createBuffer: () => buffer });
@@ -3461,6 +3947,7 @@ test("forwards Drum Rack equality skips and drops work outside its project", asy
     decodePages: decodeTestPages,
     createBuffer: () => buffer,
   });
+
   expect(await unavailable.syncTrack(engine, "disposition-unavailable-drum-rack", params, "drum-instance")).toBe("dropped");
   unavailable.dispose();
 });
@@ -3469,6 +3956,7 @@ test("reports dropped when granular buffer work is disposed before installation"
   const buffer = new TestAudioBuffer();
   const entered = Promise.withResolvers<void>();
   const release = Promise.withResolvers<void>();
+
   const sync = createSamplerBufferSync({
     decodePages: async function* (_source, options) {
       entered.resolve();
@@ -3477,6 +3965,7 @@ test("reports dropped when granular buffer work is disposed before installation"
     },
     createBuffer: () => buffer,
   });
+
   const request = sync.syncGranularTrack(
     createEngine(buffer),
     "disposed-granular",
@@ -3493,6 +3982,7 @@ test("reports dropped when granular buffer work is disposed before installation"
 test("reports dropped when Drum Rack work is cleared during a region load", async () => {
   const buffer = new TestAudioBuffer();
   const entered = Promise.withResolvers<void>();
+
   const sync = createDrumRackBufferSync({
     decodePages: async function* (_source, options) {
       entered.resolve();
@@ -3502,6 +3992,7 @@ test("reports dropped when Drum Rack work is cleared during a region load", asyn
     },
     createBuffer: () => buffer,
   });
+
   const request = sync.syncTrack(
     createEngine(buffer),
     "cleared-drum-rack",
@@ -3525,15 +4016,19 @@ test("loads long native regions without the install duration diagnostic and wait
     ...new TestAudioBuffer(), length: 384_000, duration: 8, numberOfChannels: 2, sampleRate: 48_000,
     copyFromChannel: () => {}, copyToChannel: () => {}, getChannelData: () => new Float32Array(384_000),
   };
+
   const sync = createSamplerBufferSync({ nativeAudio: () => true, decodePages: decodeTestPages, createBuffer: () => buffer });
   const engine = createEngine(buffer);
   const durationSec = 8;
+
   const oversizedZone = {
     ...zone,
     sample: { ...sample, source: { ...sample.source, durationSec } },
     endSec: durationSec,
   };
+
   const samplerParams = { ...createDefaultSamplerParams(), zones: [oversizedZone] };
+
   const granularParams = {
     ...createDefaultGranularParams(),
     zone: { ...oversizedZone, keyLow: 0, keyHigh: 127 },
@@ -3557,6 +4052,7 @@ test("native readiness acknowledgement survives a later same-identity region dec
     const engine = createEngine(buffer);
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
+
     const sync = createSamplerBufferSync({
       nativeAudio: () => true,
       decodePages: async function* (source, options) {
@@ -3566,13 +4062,16 @@ test("native readiness acknowledgement survives a later same-identity region dec
       },
       createBuffer: () => buffer,
     });
+
     const status = () => kind === "sampler"
       ? sync.getStatus(kind).zones.get(zone.id)
       : sync.getGranularStatus(kind).state;
+
     try {
       const decoding = kind === "sampler"
         ? sync.syncTrack(engine, kind, { ...createDefaultSamplerParams(), zones: [zone] }, kind)
         : sync.syncGranularTrack(engine, kind, { ...createDefaultGranularParams(), zone }, kind);
+
       await entered.promise;
       sync.setNativePreparation(kind, { state: "ready" });
       expect(status()).toBe("loading");
@@ -3581,9 +4080,11 @@ test("native readiness acknowledgement survives a later same-identity region dec
       expect(status()).toBe("ready");
       // Identity changes still invalidate the old acknowledgement before decoding.
       const changedZone = { ...zone, endSec: 0.5 };
+
       const changed = kind === "sampler"
         ? sync.syncTrack(engine, kind, { ...createDefaultSamplerParams(), zones: [changedZone] }, kind)
         : sync.syncGranularTrack(engine, kind, { ...createDefaultGranularParams(), zone: changedZone }, kind);
+
       await changed;
       expect(status()).toBe("loading");
       sync.setNativePreparation(kind, { state: "ready" });
@@ -3604,6 +4105,7 @@ test("native sampler retry clears pane error and waits for successful native pre
   const commit = Promise.withResolvers<void>();
   const releaseCommit = Promise.withResolvers<void>();
   let decodeCount = 0;
+
   const sync = createSamplerBufferSync({
     nativeAudio: () => true,
     decodePages: async function* (
@@ -3611,14 +4113,17 @@ test("native sampler retry clears pane error and waits for successful native pre
       options?: { startSec?: number; endSec?: number },
     ) {
       decodeCount += 1;
+
       if (decodeCount === 2) {
         retryDecodeEntered.resolve();
         await retryDecodeRelease.promise;
       }
+
       yield* decodeTestPages(source, options);
     },
     createBuffer: () => buffer,
   });
+
   const engine = createEngine(buffer);
   const params = { ...createDefaultSamplerParams(), zones: [zone] };
   await sync.syncTrack(engine, "native-retry", params, "sampler-instance");
@@ -3629,6 +4134,7 @@ test("native sampler retry clears pane error and waits for successful native pre
   expect(sync.getStatus("native-retry").zones.get(zone.id)).toBe("error");
 
   let nativePrepareCount = 0;
+
   const retry = sync.retryZone(engine, "native-retry", zone.id, async () => {
     nativePrepareCount += 1;
     preparationAck.resolve();
@@ -3662,6 +4168,7 @@ test("does not rebuild a same-project replacement device after granular retry", 
   const retryDecodeEntered = Promise.withResolvers<void>();
   const retryDecodeRelease = Promise.withResolvers<void>();
   let decodeCount = 0;
+
   const sync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => "project:retry-origin",
@@ -3670,15 +4177,19 @@ test("does not rebuild a same-project replacement device after granular retry", 
       options?: { startSec?: number; endSec?: number; signal?: AbortSignal },
     ) {
       decodeCount += 1;
+
       if (decodeCount === 1) throw new Error("Initial decode failed.");
+
       if (decodeCount === 2) {
         retryDecodeEntered.resolve();
         await retryDecodeRelease.promise;
       }
+
       yield* decodeTestPages(source, options);
     },
     createBuffer: () => buffer,
   });
+
   const engine = createEngine(buffer);
   const params = { ...createDefaultGranularParams(), zone };
   await expect(sync.syncGranularTrack(engine, "granular-retry-stale", params, "granular-instance")).rejects.toThrow("Initial decode failed.");
@@ -3700,6 +4211,7 @@ test("does not rebuild after a project switch during granular retry", async () =
   const retryDecodeRelease = Promise.withResolvers<void>();
   let decodeCount = 0;
   let projectId = "project:retry-origin";
+
   const sync = createSamplerBufferSync({
     nativeAudio: () => true,
     projectId: () => projectId,
@@ -3708,15 +4220,19 @@ test("does not rebuild after a project switch during granular retry", async () =
       options?: { startSec?: number; endSec?: number; signal?: AbortSignal },
     ) {
       decodeCount += 1;
+
       if (decodeCount === 1) throw new Error("Initial decode failed.");
+
       if (decodeCount === 2) {
         retryDecodeEntered.resolve();
         await retryDecodeRelease.promise;
       }
+
       yield* decodeTestPages(source, options);
     },
     createBuffer: () => buffer,
   });
+
   const engine = createEngine(buffer);
   const params = { ...createDefaultGranularParams(), zone };
   await expect(sync.syncGranularTrack(engine, "granular-retry-project", params, "granular-instance")).rejects.toThrow("Initial decode failed.");
@@ -3735,6 +4251,7 @@ test("does not rebuild after a project switch during granular retry", async () =
 test("native Drum Rack retry reuses loaded regions and requests guarded native preparation", async () => {
   const buffer = new TestAudioBuffer();
   let decodeCount = 0;
+
   const sync = createDrumRackBufferSync({
     nativeAudio: () => true,
     decodePages: async function* (source, options) {
@@ -3744,6 +4261,7 @@ test("native Drum Rack retry reuses loaded regions and requests guarded native p
     createBuffer: () => buffer,
     projectId: () => "project:drum-retry",
   });
+
   const engine = createEngine(buffer);
   const pad = { ...createDefaultDrumRackParams().pads[0]!, sample };
   const params = { ...createDefaultDrumRackParams(), pads: [pad] };
@@ -3773,15 +4291,19 @@ test("native Drum Rack retry reuses loaded regions and requests guarded native p
 
 test("native-only decoded ceilings admit three-minute regions while portable granular and drum limits remain unchanged", async () => {
   const frameCount = 180 * 48_000;
+
   const buffer: AudioBuffer = {
     length: frameCount, duration: 180, numberOfChannels: 2, sampleRate: 48_000,
     copyFromChannel: () => {}, copyToChannel: () => {}, getChannelData: () => new Float32Array(frameCount),
   };
+
   const longSample = { ...sample, source: { ...sample.source, durationSec: 180 } };
   const longZone = { ...zone, sample: longSample, endSec: 180 };
   const granular = { ...createDefaultGranularParams(), zone: longZone };
+
   const drums = { ...createDefaultDrumRackParams(),
     pads: [{ ...createDefaultDrumRackParams().pads[0]!, sample: longSample, endSec: 180 }] };
+
   const options = { decodePages: decodeTestPages, createBuffer: () => buffer };
   const engine = createEngine(buffer);
   const portableSampler = createSamplerBufferSync(options);
@@ -3790,6 +4312,7 @@ test("native-only decoded ceilings admit three-minute regions while portable gra
   await expect(portableDrums.syncTrack(engine, "portable-drums", drums)).rejects.toThrow("limit");
   const nativeSampler = createSamplerBufferSync({ ...options, nativeAudio: () => true });
   const nativeDrums = createDrumRackBufferSync({ ...options, nativeAudio: () => true });
+
   try {
     await nativeSampler.syncGranularTrack(engine, "native-granular", granular, "granular-instance");
     expect(nativeSampler.snapshotGranularBuffer("native-granular", { kind: "granular", instanceId: "granular-instance", params: granular })?.buffer).toBe(buffer);
@@ -3818,25 +4341,32 @@ test("does not reuse a Drum Rack snapshot when only the sampled region changes",
       getChannelData: () => new Float32Array(24_000),
     },
   });
+
   const firstBuffer = regionBuffer(0);
   const secondBuffer = regionBuffer(24_000);
+
   const firstPad = {
     ...createDefaultDrumRackParams().pads[0]!,
     sample,
     startSec: 0,
     endSec: 0.5,
   };
+
   const secondPad = { ...firstPad, startSec: 0.5, endSec: 1 };
+
   const firstParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === firstPad.id ? firstPad : pad),
   };
+
   const secondParams = {
     ...firstParams,
     pads: firstParams.pads.map((pad) => pad.id === secondPad.id ? secondPad : pad),
   };
+
   const engine = createEngine(firstBuffer.buffer);
   let decodedStartFrame = 0;
+
   const sync = createDrumRackBufferSync({
     decodePages: async function* (
       _source: Blob | string | URL | Request,
@@ -3875,6 +4405,7 @@ test("evicts inactive sampled regions across tracks within the aggregate budget"
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const firstZone = { ...zone, id: "aggregate-first", sample: { ...sample, assetKey: "aggregate-first", source }, startSec: 0, endSec: 1 };
   const secondZone = { ...zone, id: "aggregate-second", sample: { ...sample, assetKey: "aggregate-second", source }, startSec: 1, endSec: 2 };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -3883,6 +4414,7 @@ test("evicts inactive sampled regions across tracks within the aggregate budget"
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -3892,21 +4424,26 @@ test("evicts inactive sampled regions across tracks within the aggregate budget"
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const engine = createEngine(new TestAudioBuffer());
+
   const sync = createSamplerBufferSync({
     aggregateBudget: createSampledInstrumentRegionBudget(4),
     decodePages,
     createBuffer,
   });
+
   const firstParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [firstZone] };
   const secondParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [secondZone] };
 
   await sync.syncTrack(engine, "aggregate-track-a", firstParams, "instance-a");
   expect(sync.getStatus("aggregate-track-a").zones.get(firstZone.id)).toBe("ready");
   let samplerMissingNotifications = 0;
+
   const unsubscribe = sync.subscribe(() => {
     if (sync.getStatus("aggregate-track-a").zones.get(firstZone.id) === "missing") samplerMissingNotifications += 1;
   });
+
   await sync.syncTrack(engine, "aggregate-track-b", secondParams, "instance-b");
 
   expect(sync.getStatus("aggregate-track-a").totalBytes).toBe(0);
@@ -3926,6 +4463,7 @@ test("clears granular state and runtime buffer when another track evicts it", as
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const granularZone = { ...zone, id: "aggregate-granular", sample: { ...sample, assetKey: "aggregate-granular", source }, startSec: 0, endSec: 1 };
   const samplerZone = { ...zone, id: "aggregate-reload", sample: { ...sample, assetKey: "aggregate-reload", source }, startSec: 0, endSec: 1 };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -3934,6 +4472,7 @@ test("clears granular state and runtime buffer when another track evicts it", as
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -3943,6 +4482,7 @@ test("clears granular state and runtime buffer when another track evicts it", as
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const aggregate = createSampledInstrumentRegionBudget(8);
   const engine = createEngine(new TestAudioBuffer());
   const sync = createSamplerBufferSync({ aggregateBudget: aggregate, decodePages, createBuffer });
@@ -3952,9 +4492,11 @@ test("clears granular state and runtime buffer when another track evicts it", as
   expect(sync.getGranularStatus("aggregate-granular-track").state).toBe("ready");
   expect(engine.granularBuffer("aggregate-granular-track")).toBeDefined();
   let granularMissingNotifications = 0;
+
   const unsubscribe = sync.subscribe(() => {
     if (sync.getGranularStatus("aggregate-granular-track").state === "missing") granularMissingNotifications += 1;
   });
+
   await sync.syncGranularTrack(
     engine,
     "aggregate-granular-track",
@@ -3976,6 +4518,7 @@ test("clears granular state and runtime buffer when another track evicts it", as
 test("disposes pinned granular cache and aggregate handles before clearing entries", async () => {
   const source = { durationSec: 1, sampleRate: 1, channelCount: 1 };
   const granularZone = { ...zone, id: "dispose-granular", sample: { ...sample, assetKey: "dispose-granular", source }, startSec: 0, endSec: 1 };
+
   const buffer: AudioBuffer = {
     duration: 1,
     length: 1,
@@ -3985,8 +4528,10 @@ test("disposes pinned granular cache and aggregate handles before clearing entri
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(1),
   };
+
   const aggregate = createSampledInstrumentRegionBudget(8);
   const engine = createEngine(buffer);
+
   const sync = createSamplerBufferSync({
     aggregateBudget: aggregate,
     decodePages: async function* (
@@ -3999,6 +4544,7 @@ test("disposes pinned granular cache and aggregate handles before clearing entri
     },
     createBuffer: () => buffer,
   });
+
   const params = { ...createDefaultGranularParams(), maxDecodedBytes: 4, zone: granularZone };
 
   await sync.syncGranularTrack(engine, "dispose-granular", params, "granular-instance");
@@ -4013,6 +4559,7 @@ test("rejects a pinned aggregate region until release makes capacity available",
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const firstZone = { ...zone, id: "aggregate-pinned-first", sample: { ...sample, assetKey: "aggregate-pinned-first", source }, startSec: 0, endSec: 1 };
   const secondZone = { ...zone, id: "aggregate-pinned-second", sample: { ...sample, assetKey: "aggregate-pinned-second", source }, startSec: 1, endSec: 2 };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -4021,6 +4568,7 @@ test("rejects a pinned aggregate region until release makes capacity available",
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -4030,12 +4578,15 @@ test("rejects a pinned aggregate region until release makes capacity available",
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const engine = createEngine(new TestAudioBuffer());
+
   const sync = createSamplerBufferSync({
     aggregateBudget: createSampledInstrumentRegionBudget(4),
     decodePages,
     createBuffer,
   });
+
   const firstParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [firstZone] };
   const secondParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [secondZone] };
   await sync.syncTrack(engine, "aggregate-pinned-a", firstParams, "instance-a");
@@ -4056,6 +4607,7 @@ test("invalidates live sampler reuse when the persisted source descriptor change
   const oldZone = { ...zone, id: "identity-zone", sample: oldSample, endSec: 1 };
   const newZone = { ...oldZone, sample: newSample };
   let decodeCalls = 0;
+
   const decodePages = async function* (
     input: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -4071,11 +4623,14 @@ test("invalidates live sampler reuse when the persisted source descriptor change
       planes: [Float32Array.of(String(input).includes("new") ? 2 : 1)],
     };
   };
+
   const buffers = new Map<string, Float32Array>();
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => {
     const data = new Float32Array(frames);
     const id = `buffer-${buffers.size}`;
     buffers.set(id, data);
+
     return {
       duration: frames / sampleRate,
       length: frames,
@@ -4086,6 +4641,7 @@ test("invalidates live sampler reuse when the persisted source descriptor change
       getChannelData: () => data,
     };
   };
+
   const engine = createEngine(new TestAudioBuffer());
   const sync = createSamplerBufferSync({ decodePages, createBuffer });
   const firstParams = { ...createDefaultSamplerParams(), zones: [oldZone] };
@@ -4095,11 +4651,13 @@ test("invalidates live sampler reuse when the persisted source descriptor change
   await sync.syncTrack(engine, "identity-track", secondParams, "identity-instance");
 
   expect(decodeCalls).toBe(2);
+
   const resolved = sync.snapshotSamplerBuffers("identity-track", {
     kind: "sampler",
     instanceId: "identity-instance",
     params: secondParams,
   })?.get(newZone.id);
+
   expect(resolved?.buffer.getChannelData(0)[0]).toBe(2);
   sync.dispose();
 });
@@ -4108,15 +4666,18 @@ test("shares the live aggregate budget across multiple Drum Racks and instrument
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const firstSample = { ...sample, assetKey: "rack-a", source };
   const secondSample = { ...sample, assetKey: "rack-b", source };
+
   const makeDrum = (sampleValue: typeof firstSample) => ({
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample: sampleValue, startSec: 0, endSec: 1 } : pad),
   });
+
   const makeSampler = (sampleValue: typeof firstSample) => ({
     ...createDefaultSamplerParams(),
     maxDecodedBytes: 4,
     zones: [{ ...zone, sample: sampleValue, startSec: 0, endSec: 1 }],
   });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -4125,6 +4686,7 @@ test("shares the live aggregate budget across multiple Drum Racks and instrument
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -4134,6 +4696,7 @@ test("shares the live aggregate budget across multiple Drum Racks and instrument
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const aggregate = createSampledInstrumentRegionBudget(8);
   const engine = createEngine(new TestAudioBuffer());
   const samplerSync = createSamplerBufferSync({ aggregateBudget: aggregate, decodePages, createBuffer });
@@ -4165,10 +4728,12 @@ test("pins active Drum Rack regions in the shared aggregate budget", async () =>
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const firstSample = { ...sample, assetKey: "pinned-rack-a", source };
   const secondSample = { ...sample, assetKey: "pinned-rack-b", source };
+
   const makeDrum = (sampleValue: typeof firstSample) => ({
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample: sampleValue, startSec: 0, endSec: 1 } : pad),
   });
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -4177,6 +4742,7 @@ test("pins active Drum Rack regions in the shared aggregate budget", async () =>
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -4186,6 +4752,7 @@ test("pins active Drum Rack regions in the shared aggregate budget", async () =>
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const aggregate = createSampledInstrumentRegionBudget(4);
   const engine = createEngine(new TestAudioBuffer());
   const sync = createDrumRackBufferSync({ aggregateBudget: aggregate, decodePages, createBuffer });
@@ -4270,6 +4837,7 @@ test("a joined sampler sync fails together with the load it joined when the trac
 
   const settled = await Promise.allSettled([first, second]);
   expect(settled.map((entry) => entry.status)).toEqual(["rejected", "rejected"]);
+
   for (const entry of settled) {
     if (entry.status === "rejected") expect(entry.reason).toBeInstanceOf(DOMException);
   }
@@ -4279,6 +4847,7 @@ test("an equal sampler sync joins a failing load and the next equal sync loads a
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
   let failNext = true;
+
   const decodePages = async function* (
     source: Blob | string | URL | Request,
     options?: { startSec?: number; endSec?: number },
@@ -4287,8 +4856,10 @@ test("an equal sampler sync joins a failing load and the next equal sync loads a
       failNext = false;
       throw new Error("decode failed");
     }
+
     yield* decodeTestPages(source, options);
   };
+
   const sync = createSamplerBufferSync({ decodePages, createBuffer: () => buffer });
   const params = { ...createDefaultSamplerParams(), cachePolicy: "preload" as const, zones: [zone] };
 
@@ -4320,6 +4891,7 @@ const createEvictionFixture = (cachePolicy: SamplerParams["cachePolicy"]) => {
   const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
   const firstZone = { ...zone, id: "evicted-first", sample: { ...sample, assetKey: "evicted-first", source }, startSec: 0, endSec: 1 };
   const secondZone = { ...zone, id: "evicted-second", sample: { ...sample, assetKey: "evicted-second", source }, startSec: 1, endSec: 2 };
+
   const decodePages = async function* (
     _source: Blob | string | URL | Request,
     options?: { startFrame?: number; endFrame?: number },
@@ -4328,6 +4900,7 @@ const createEvictionFixture = (cachePolicy: SamplerParams["cachePolicy"]) => {
     const endFrame = options?.endFrame ?? startFrame + 1;
     yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
   };
+
   const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
     duration: frames / sampleRate,
     length: frames,
@@ -4337,15 +4910,19 @@ const createEvictionFixture = (cachePolicy: SamplerParams["cachePolicy"]) => {
     copyToChannel: () => {},
     getChannelData: () => new Float32Array(frames),
   });
+
   const engine = createEngine(new TestAudioBuffer());
   const sync = createSamplerBufferSync({ aggregateBudget: createSampledInstrumentRegionBudget(4), decodePages, createBuffer });
   const firstParams = { ...createDefaultSamplerParams(), cachePolicy, maxDecodedBytes: 4, zones: [firstZone] };
   const secondParams = { ...createDefaultSamplerParams(), cachePolicy, maxDecodedBytes: 4, zones: [secondZone] };
+
   // A lazy track loads a region only when asked to.
   const load = async (trackId: string, params: SamplerParams, instanceId: string) => {
     await sync.syncTrack(engine, trackId, params, instanceId);
+
     if (cachePolicy === "lazy") await sync.retryZone(engine, trackId, params.zones[0].id);
   };
+
   return { engine, sync, firstZone, firstParams, secondParams, load };
 };
 
@@ -4398,9 +4975,11 @@ for (const local of [true, false]) {
   test(`H6 granular failed replacement then original row recovers local=${local}`, async () => {
     // The runtime disposes A before constructing B; a later A row must not trust the earlier A installation.
     const original = b5c2Instrument("granular", "h6-throw");
+
     if (original.kind !== "granular") throw new Error("Expected granular");
     const f = await createB5c2Fixture(local, original);
     const node = globalThis.AudioWorkletNode;
+
     try {
       await f.start();
       const before = f.granularInstalls.length;

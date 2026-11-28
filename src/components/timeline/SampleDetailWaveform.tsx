@@ -58,20 +58,28 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   let markerHandleRef: HTMLButtonElement | undefined;
   const [waveformWidthPx, setWaveformWidthPx] = createSignal(DEFAULT_WAVEFORM_WIDTH_PX);
   const [waveformHeightPx, setWaveformHeightPx] = createSignal(220);
+
   const [viewportState, setViewportState] = createSignal<ViewportState>({
     clipId: "",
     viewport: fitSampleDetailWaveformViewport(0),
   });
+
   const sourceSampleRate = createMemo(() => props.clip.buffer?.sampleRate ?? props.clip.sourceSampleRate ?? 0);
+
   const viewport = createMemo(() => {
     const state = viewportState();
+
     if (state.clipId !== props.clip.id) return fitSampleDetailWaveformViewport(props.clip.duration);
+
     return state.viewport;
   });
+
   const setViewport = (next: SampleDetailWaveformViewport) => {
     setViewportState({ clipId: props.clip.id, viewport: next });
   };
+
   const fitViewport = () => setViewport(fitSampleDetailWaveformViewport(props.clip.duration));
+
   const waveform = useClipWaveformViewModel({
     clip: () => props.clip,
     cssWidthPx: waveformWidthPx,
@@ -87,6 +95,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       devicePixelRatio: devicePixelRatio(),
     }).contextScaleX,
   });
+
   createEffect(on(
     () => [
       props.clip.id,
@@ -115,6 +124,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
   const [dragMarker, setDragMarker] = createSignal<{ id: string; timelineBeat: number; sourceBeat: number }>();
   const visibleSourceBeatOffset = createMemo(() => dragPreviewOffset() ?? sourceBeatOffset());
   const secondsPerBeat = createMemo(() => 60 / Math.max(1, props.projectBpm));
+
   const markerX = createMemo(() => sampleDetailWaveformXAtTime({
     viewport: viewport(),
     timeSec: clipAudioStartSec() + visibleSourceBeatOffset() * secondsPerBeat(),
@@ -128,15 +138,21 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       setWaveformWidthPx((currentWidthPx) => currentWidthPx === nextWidthPx ? currentWidthPx : nextWidthPx);
       setWaveformHeightPx((currentHeightPx) => currentHeightPx === nextHeightPx ? currentHeightPx : nextHeightPx);
     };
+
     const measure = () => {
       const bounds = canvasWrapRef?.getBoundingClientRect();
+
       if (bounds) commitSize(bounds.width, bounds.height);
     };
+
     measure();
+
     const resizeObserver = new ResizeObserver((entries) => {
       const entry = entries[0];
+
       if (entry) commitSize(entry.contentRect.width, entry.contentRect.height);
     });
+
     if (canvasWrapRef) resizeObserver.observe(canvasWrapRef);
     onCleanup(() => resizeObserver.disconnect());
   });
@@ -148,9 +164,11 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {
     const canvas = canvasRef;
+
     if (!canvas) return viewport().startSec;
     const bounds = canvas.getBoundingClientRect();
     const x = Math.min(bounds.width, Math.max(0, event.clientX - bounds.left));
+
     return sampleDetailWaveformTimeAtX({
       viewport: viewport(),
       xPx: x,
@@ -160,14 +178,17 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   const beatFromPointer = (event: Pick<PointerEvent, "clientX" | "altKey">) => {
     const rawBeat = (clipTimeFromPointer(event) - clipAudioStartSec()) / secondsPerBeat();
+
     return Math.max(0, event.altKey ? rawBeat : Math.round(rawBeat));
   };
 
   const previewOffsetFromPointer = (event: PointerEvent) => {
     const rawOffset = (clipTimeFromPointer(event) - clipAudioStartSec()) / secondsPerBeat();
+
     const snapped = event.altKey
       ? rawOffset
       : Math.round(rawOffset / SOURCE_BEAT_OFFSET_SNAP) * SOURCE_BEAT_OFFSET_SNAP;
+
     return normalizeSourceBeatOffsetValue(snapped);
   };
 
@@ -176,6 +197,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       enabled: true,
       sourceBeatOffset: value,
     });
+
     if (audioWarp) props.onWarpChange(audioWarp);
   };
 
@@ -185,15 +207,18 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
       markers,
       mode: "stretch",
     });
+
     if (audioWarp) props.onWarpChange(audioWarp);
   };
 
   const addMarker = (event: MouseEvent) => {
     if (!props.canWrite || event.detail !== 2 || !canvasRef || props.clip.audioWarp?.enabled !== true) return;
     const timelineBeat = beatFromPointer(event);
+
     const sourceBeat = warpMarkers().length >= 2
       ? mapTimelineBeatToSourceBeat(warpMarkers(), timelineBeat)
       : timelineBeat + sourceBeatOffset();
+
     const marker = { id: `warp-marker-${Date.now().toString(36)}`, timelineBeat, sourceBeat };
     commitMarkers([...warpMarkers(), marker]);
     setSelectedMarkerId(marker.id);
@@ -201,6 +226,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   const deleteSelectedMarker = () => {
     const selected = selectedMarkerId();
+
     if (!selected || !props.canWrite || props.clip.audioWarp?.enabled !== true) return;
     commitMarkers(warpMarkers().filter((marker) => marker.id !== selected));
     setSelectedMarkerId(undefined);
@@ -210,6 +236,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     if (!canvasRef || sourceSampleRate() <= 0) return;
     const bounds = canvasRef.getBoundingClientRect();
     const current = viewport();
+
     if (!event.ctrlKey && !event.metaKey && Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       event.preventDefault();
       const visibleDurationSec = current.endSec - current.startSec;
@@ -219,8 +246,10 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         sampleRate: sourceSampleRate(),
         deltaSec: (event.deltaX / Math.max(1, bounds.width)) * visibleDurationSec,
       }));
+
       return;
     }
+
     if (!event.ctrlKey && !event.metaKey) return;
 
     event.preventDefault();
@@ -236,21 +265,27 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
   const draw = () => {
     const canvas = canvasRef;
+
     if (!canvas) return;
     const width = waveformWidthPx();
     const height = waveformHeightPx();
+
     const canvasSize = waveformCanvasSize({
       cssWidthPx: width,
       cssHeightPx: height,
       devicePixelRatio: devicePixelRatio(),
     });
+
     const pxW = canvasSize.backingWidthPx;
     const pxH = canvasSize.backingHeightPx;
+
     if (canvas.width !== pxW || canvas.height !== pxH) {
       canvas.width = pxW;
       canvas.height = pxH;
     }
+
     const ctx = canvas.getContext("2d");
+
     if (!ctx) return;
     ctx.setTransform(canvasSize.contextScaleX, 0, 0, canvasSize.contextScaleY, 0, 0);
     ctx.clearRect(0, 0, canvasSize.cssWidthPx, canvasSize.cssHeightPx);
@@ -272,6 +307,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     const visibleTimelineStartSec = props.clip.startSec + currentViewport.startSec;
     const visibleTimelineEndSec = props.clip.startSec + currentViewport.endSec;
     const firstBeat = Math.ceil(visibleTimelineStartSec / beatDurationSec) * beatDurationSec;
+
     for (
       let timelineSec = firstBeat;
       timelineSec <= visibleTimelineEndSec + 1e-6;
@@ -286,9 +322,11 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
     const renderSegments = waveform.segments();
     const firstPopulatedSegment = renderSegments.find((segment) => segment.data.channels.length > 0);
+
     const visibleChannelCount = firstPopulatedSegment
       ? firstPopulatedSegment.data.channels.length
       : Math.max(1, props.clip.buffer?.numberOfChannels ?? props.clip.sourceChannelCount ?? 1);
+
     const contentTop = 16;
     const contentHeight = Math.max(1, height - 32);
     const channelHeight = contentHeight / visibleChannelCount;
@@ -313,6 +351,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
 
     ctx.strokeStyle = timelineGridMajor;
     ctx.lineWidth = 1;
+
     for (let channel = 0; channel < visibleChannelCount; channel += 1) {
       const centerY = contentTop + channel * channelHeight + channelHeight / 2;
       ctx.beginPath();
@@ -372,11 +411,13 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         <For each={warpMarkers()}>
           {(marker, index) => {
             const preview = createMemo(() => dragMarker()?.id === marker.id ? dragMarker() ?? marker : marker);
+
             const markerLeft = createMemo(() => sampleDetailWaveformXAtTime({
               viewport: viewport(),
               timeSec: clipAudioStartSec() + preview().timelineBeat * secondsPerBeat(),
               widthPx: waveformWidthPx(),
             }));
+
             return (
               <button
                 type="button"
@@ -406,22 +447,28 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                   const previous = markers[index() - 1];
                   const next = markers[index() + 1];
                   const lower = previous ? previous.timelineBeat + MIN_MARKER_GAP_BEATS : 0;
+
                   const upper = next
                     ? next.timelineBeat - MIN_MARKER_GAP_BEATS
                     : getClipBeatWidth(Math.max(0, props.clip.duration - clipAudioStartSec()), props.projectBpm);
+
                   const timelineBeat = Math.min(upper, Math.max(lower, beat));
                   const current = dragMarker();
+
                   if (current?.timelineBeat === timelineBeat && current.sourceBeat === marker.sourceBeat) return;
                   setDragMarker({ id: marker.id, timelineBeat, sourceBeat: marker.sourceBeat });
                 }}
                 onPointerUp={(event) => {
                   const dragged = dragMarker();
+
                   if (!dragged || dragged.id !== marker.id) return;
                   setDragMarker(undefined);
                   props.onMarkerDragStateChange?.(false);
+
                   if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                     event.currentTarget.releasePointerCapture(event.pointerId);
                   }
+
                   if (dragged.timelineBeat === marker.timelineBeat && dragged.sourceBeat === marker.sourceBeat) return;
                   commitMarkers(warpMarkers().map((entry) => entry.id === marker.id ? dragged : entry));
                 }}
@@ -429,6 +476,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                   if (dragMarker()?.id !== marker.id) return;
                   setDragMarker(undefined);
                   props.onMarkerDragStateChange?.(false);
+
                   if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                     event.currentTarget.releasePointerCapture(event.pointerId);
                   }
@@ -477,9 +525,11 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 const nextOffset = previewOffsetFromPointer(event);
                 setIsDraggingMarker(false);
                 props.onMarkerDragStateChange?.(false);
+
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                   event.currentTarget.releasePointerCapture(event.pointerId);
                 }
+
                 setDragPreviewOffset(undefined);
                 commitSourceBeatOffset(nextOffset);
               }}
@@ -488,6 +538,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 setIsDraggingMarker(false);
                 props.onMarkerDragStateChange?.(false);
                 setDragPreviewOffset(undefined);
+
                 if (event.currentTarget.hasPointerCapture(event.pointerId)) {
                   event.currentTarget.releasePointerCapture(event.pointerId);
                 }

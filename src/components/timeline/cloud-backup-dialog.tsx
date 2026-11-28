@@ -27,15 +27,21 @@ type CloudBackupDialogProps = {
 export default function CloudBackupDialog(props: CloudBackupDialogProps) {
   const title = () => {
     const state = props.state;
+
     if (state?.type === "conflict") return "Cloud backup conflict";
+
     if (state?.type === "restore") return "Restore cloud backup?";
+
     return state?.title ?? "";
   };
 
   const message = () => {
     const state = props.state;
+
     if (state?.type === "conflict") return state.message;
+
     if (state?.type === "restore") return "This will replace local project data with the latest cloud backup. Local changes not in the cloud backup will be replaced.";
+
     return state?.message ?? "";
   };
 

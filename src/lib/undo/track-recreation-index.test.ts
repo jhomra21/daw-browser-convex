@@ -26,10 +26,12 @@ test('redo recreates a Return track at the current canonical index', async () =>
   const repository = createLocalTimelineRepository(projectId)
   await repository.createTrack({ id: 'normal-a' })
   await repository.createTrack({ id: 'return', channelRole: 'return' })
+
   let tracks = [
     track('normal-a', 'track'),
     track('return', 'return'),
   ]
+
   const entry: HistoryEntry = {
     type: 'track-create',
     projectId,
@@ -41,7 +43,9 @@ test('redo recreates a Return track at the current canonical index', async () =>
       collapsed: true,
     },
   }
+
   const inserted: Array<{ track: Track; index: number }> = []
+
   const deps: Parameters<typeof execRedo>[1] = {
     convexClient,
     convexApi,

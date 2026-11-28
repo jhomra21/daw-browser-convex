@@ -21,38 +21,48 @@ import { canonicalProjectSnapshotSchema } from './snapshots'
 import { nameSchema, projectIdSchema } from './primitives'
 
 export const controlOperationTargetSchema = z.enum(['cloud', 'desktop'])
+
 export type ControlOperationTarget = z.infer<typeof controlOperationTargetSchema>
 
 export const controlOperationEffectSchema = z.enum(['read', 'preview', 'write', 'runtime'])
+
 export type ControlOperationEffect = z.infer<typeof controlOperationEffectSchema>
 
 export const controlOperationIdempotencySchema = z.enum(['safe', 'keyed', 'none'])
+
 export type ControlOperationIdempotency = z.infer<typeof controlOperationIdempotencySchema>
 
 export const controlOperationApprovalSchema = z.enum(['never', 'conditional'])
+
 export type ControlOperationApproval = z.infer<typeof controlOperationApprovalSchema>
 
 export const projectDiscoveryEntrySchema = z.object({
   projectId: projectIdSchema,
   name: nameSchema.optional(),
 }).strict()
+
 export type ProjectDiscoveryEntry = z.infer<typeof projectDiscoveryEntrySchema>
 
 export const projectListInputSchema = z.object({}).strict()
+
 export type ProjectListInput = z.infer<typeof projectListInputSchema>
 
 export const maxProjectDiscoveryResults = 1_000
+
 export const projectListResultSchema = z.object({
   projects: z.array(projectDiscoveryEntrySchema)
     .max(maxProjectDiscoveryResults)
     .readonly(),
 }).strict()
+
 export type ProjectListResult = z.infer<typeof projectListResultSchema>
 
 export const projectCurrentInputSchema = z.object({}).strict()
+
 export type ProjectCurrentInput = z.infer<typeof projectCurrentInputSchema>
 
 const currentProjectSchema = projectDiscoveryEntrySchema
+
 export const projectCurrentResultSchema = z.discriminatedUnion('status', [
   z.object({
     status: z.literal('present'),
@@ -62,6 +72,7 @@ export const projectCurrentResultSchema = z.discriminatedUnion('status', [
     status: z.literal('absent'),
   }).strict(),
 ])
+
 export type ProjectCurrentResult = z.infer<typeof projectCurrentResultSchema>
 
 type ControlOperationSchema = z.ZodTypeAny
@@ -87,9 +98,11 @@ const defineControlOperationCatalog = <
     if (operationId !== descriptor.id) {
       throw new Error(`Control operation descriptor ID does not match catalog key: ${operationId}.`)
     }
+
     Object.freeze(descriptor.targets)
     Object.freeze(descriptor)
   }
+
   return Object.freeze(catalog)
 }
 
@@ -187,14 +200,18 @@ export type ControlOperationMap = {
 }
 
 export type ControlInput<Id extends ControlOperationId> = ControlOperationMap[Id]['input']
+
 export type ControlOutput<Id extends ControlOperationId> = ControlOperationMap[Id]['output']
 
 export const controlOperationIdSchema = z.string().refine(
   (operationId): operationId is ControlOperationId => Object.hasOwn(controlOperationCatalog, operationId),
   'Unknown control operation.',
 )
+
 export type ControlOperationIdInput = z.input<typeof controlOperationIdSchema>
+
 const controlOperationInputSchema = z.unknown()
+
 export type ControlOperationInput = z.input<typeof controlOperationInputSchema>
 
 export const parseControlOperationId = <Input>(input: Input): ControlOperationId => (
@@ -209,6 +226,7 @@ export const getControlOperationDescriptor = (
   operationId: ControlOperationIdInput,
 ): ControlOperationDescriptor => {
   const parsedOperationId = parseControlOperationId(operationId)
+
   return controlOperationCatalog[parsedOperationId]
 }
 
@@ -217,7 +235,9 @@ export const supportsControlOperation = (
   target: ControlOperationTarget,
 ): boolean => {
   const parsedOperationId = controlOperationIdSchema.safeParse(operationId)
+
   if (!parsedOperationId.success) return false
+
   return controlOperationCatalog[parsedOperationId.data].targets.some((candidate) => candidate === target)
 }
 
@@ -238,9 +258,11 @@ export const assertControlOperationSupported = (
   target: ControlOperationTarget,
 ): ControlOperationId => {
   const parsedOperationId = parseControlOperationId(operationId)
+
   if (!controlOperationCatalog[parsedOperationId].targets.some((candidate) => candidate === target)) {
     throw new UnsupportedControlTargetError(parsedOperationId, target)
   }
+
   return parsedOperationId
 }
 
@@ -286,6 +308,7 @@ const invokeControlOperation = async (
   const missingHandler = (id: ControlOperationId): never => {
     throw new Error(`No handler is registered for control operation ${id}.`)
   }
+
   switch (operationId) {
     case 'project.list':
       return projectListResultSchema.parse(await (handlers[operationId] ?? missingHandler(operationId))(
@@ -357,6 +380,7 @@ export function dispatchControlOperation(
   context: ControlRequestContext,
 ): Promise<ControlOutput<ControlOperationId>> {
   const parsedOperationId = assertControlOperationSupported(operationId, context.target)
+
   return invokeControlOperation(handlers, parsedOperationId, input, context)
 }
 

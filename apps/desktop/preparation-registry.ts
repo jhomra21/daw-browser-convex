@@ -1,5 +1,6 @@
 export const createPreparationRegistry = () => {
   const controllers = new Set<AbortController>()
+
   return {
     add(controller: AbortController) {
       controllers.add(controller)

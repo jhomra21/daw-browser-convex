@@ -28,6 +28,7 @@ function DropdownMenuContent(
   props: PolymorphicProps<ValidComponent, DropdownMenuContentProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
@@ -54,6 +55,7 @@ function DropdownMenuItem(
   props: PolymorphicProps<ValidComponent, DropdownMenuItemProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class", "inset"])
+
   return (
     <DropdownMenuPrimitive.Item
       class={cn(
@@ -68,6 +70,7 @@ function DropdownMenuItem(
 
 const DropdownMenuShortcut: Component<ComponentProps<"span">> = (props) => {
   const [, rest] = splitProps(props, ["class"])
+
   return <span class={cn("ml-auto text-xs tracking-widest opacity-60", props.class)} {...rest} />
 }
 
@@ -78,6 +81,7 @@ type DropdownMenuLabelProps = ComponentProps<"div"> & {
 
 const DropdownMenuLabel: Component<DropdownMenuLabelProps> = (props) => {
   const [local, rest] = splitProps(props, ["class", "inset"])
+
   return (
     <div
       class={cn("px-2 py-1.5 text-sm font-semibold", local.inset && "pl-8", local.class)}
@@ -98,6 +102,7 @@ function DropdownMenuSeparator(
   props: PolymorphicProps<ValidComponent, DropdownMenuSeparatorProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DropdownMenuPrimitive.Separator
       class={cn("-mx-1 my-1 h-px bg-muted", props.class)}
@@ -120,6 +125,7 @@ function DropdownMenuSubTrigger(
   props: PolymorphicProps<ValidComponent, DropdownMenuSubTriggerProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class", "children", "inset"])
+
   return (
     <DropdownMenuPrimitive.SubTrigger
       class={cn(
@@ -156,6 +162,7 @@ function DropdownMenuSubContent(
   props: PolymorphicProps<ValidComponent, DropdownMenuSubContentProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class"])
+
   return (
     <DropdownMenuPrimitive.SubContent
       class={cn(
@@ -180,6 +187,7 @@ function DropdownMenuCheckboxItem(
   props: PolymorphicProps<ValidComponent, DropdownMenuCheckboxItemProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class", "children"])
+
   return (
     <DropdownMenuPrimitive.CheckboxItem
       class={cn(
@@ -220,6 +228,7 @@ function DropdownMenuGroupLabel(
   props: PolymorphicProps<ValidComponent, DropdownMenuGroupLabelProps<ValidComponent>>,
 ): JSX.Element {
   const [local, rest] = splitProps(props, ["class", "inset"])
+
   return (
     <DropdownMenuPrimitive.GroupLabel
       class={cn("px-2 py-1.5 text-sm font-semibold", local.inset && "pl-8", local.class)}
@@ -241,6 +250,7 @@ function DropdownMenuRadioItem(
   props: PolymorphicProps<ValidComponent, DropdownMenuRadioItemProps<ValidComponent>>,
 ): JSX.Element {
   const [, rest] = splitProps(props, ["class", "children"])
+
   return (
     <DropdownMenuPrimitive.RadioItem
       class={cn(

@@ -16,6 +16,7 @@ function Skeleton(
   props: PolymorphicProps<ValidComponent, SkeletonRootProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class"])
+
   return (
     <SkeletonPrimitive.Root
       class={cn("bg-primary/10 data-[animate='true']:animate-pulse", local.class)}

@@ -4,14 +4,19 @@ export type ComplexSpectrum = { real: Float64Array; imaginary: Float64Array }
 
 export const fftInPlace = (real: Float64Array, imaginary: Float64Array, inverse = false) => {
   const size = real.length
+
   if (size !== imaginary.length || size < 2 || (size & (size - 1)) !== 0) throw new Error('FFT size must be equal power-of-two arrays')
+
   for (let index = 1, reversed = 0; index < size; index += 1) {
     let bit = size >> 1
+
     while (reversed & bit) {
       reversed ^= bit
       bit >>= 1
     }
+
     reversed ^= bit
+
     if (index < reversed) {
       const realValue = real[index]
       real[index] = real[reversed]
@@ -21,13 +26,16 @@ export const fftInPlace = (real: Float64Array, imaginary: Float64Array, inverse 
       imaginary[reversed] = imaginaryValue
     }
   }
+
   for (let length = 2; length <= size; length <<= 1) {
     const angle = (inverse ? 2 : -2) * Math.PI / length
     const stepReal = Math.cos(angle)
     const stepImaginary = Math.sin(angle)
+
     for (let start = 0; start < size; start += length) {
       let twiddleReal = 1
       let twiddleImaginary = 0
+
       for (let offset = 0; offset < length / 2; offset += 1) {
         const even = start + offset
         const odd = even + length / 2
@@ -43,6 +51,7 @@ export const fftInPlace = (real: Float64Array, imaginary: Float64Array, inverse 
       }
     }
   }
+
   if (inverse) {
     for (let index = 0; index < size; index += 1) {
       real[index] /= size
@@ -53,7 +62,9 @@ export const fftInPlace = (real: Float64Array, imaginary: Float64Array, inverse 
 
 export const createSqrtHannWindow = (size: number) => {
   const window = new Float64Array(size)
+
   for (let index = 0; index < size; index += 1) window[index] = Math.sqrt(0.5 - 0.5 * Math.cos(2 * Math.PI * index / size))
+
   return window
 }
 
@@ -70,6 +81,7 @@ export type SpectralTransformState = {
 
 export const createSpectralTransformState = (fftSize: SpectralFftSize): SpectralTransformState => {
   const bins = fftSize / 2 + 1
+
   return {
     frozenMagnitude: new Float64Array(bins),
     frozenPhase: new Float64Array(bins),
@@ -97,16 +109,20 @@ export type SpectralTransformParams = {
 }
 
 const magnitudeAt = (spectrum: ComplexSpectrum, bin: number) => Math.hypot(spectrum.real[bin], spectrum.imaginary[bin])
+
 const median = (values: Float64Array, count: number) => {
   for (let index = 1; index < count; index += 1) {
     const value = values[index]
     let cursor = index - 1
+
     while (cursor >= 0 && values[cursor] > value) {
       values[cursor + 1] = values[cursor]
       cursor -= 1
     }
+
     values[cursor + 1] = value
   }
+
   return values[Math.floor(count / 2)]
 }
 
@@ -119,14 +135,17 @@ export const transformSpectrum = (
   hopSize: number,
 ) => {
   const bins = spectrum.real.length / 2 + 1
+
   if (params.mode === 'freeze') {
     if (params.freeze > 0 && !state.freezeCaptured) {
       for (let bin = 0; bin < bins; bin += 1) {
         state.frozenMagnitude[bin] = magnitudeAt(spectrum, bin)
         state.frozenPhase[bin] = Math.atan2(spectrum.imaginary[bin], spectrum.real[bin])
       }
+
       state.freezeCaptured = true
     } else if (params.freeze === 0) state.freezeCaptured = false
+
     if (state.freezeCaptured) {
       for (let bin = 0; bin < bins; bin += 1) {
         const magnitude = state.frozenMagnitude[bin]
@@ -139,6 +158,7 @@ export const transformSpectrum = (
     const threshold = linearFromDb(params.gateThresholdDb)
     const attack = Math.exp(-hopSize / Math.max(1, params.gateAttackMs * sampleRate / 1000))
     const release = Math.exp(-hopSize / Math.max(1, params.gateReleaseMs * sampleRate / 1000))
+
     for (let bin = 0; bin < bins; bin += 1) {
       const target = magnitudeAt(spectrum, bin) >= threshold ? 1 : 0
       const coefficient = target > state.gateGain[bin] ? attack : release
@@ -155,23 +175,29 @@ export const transformSpectrum = (
     }
   } else if (params.mode === 'shift-blur') {
     for (let bin = 0; bin < bins; bin += 1) state.scratch[bin] = magnitudeAt(spectrum, bin)
+
     for (let bin = 0; bin < bins; bin += 1) {
       const source = bin - params.binShift
       const lower = Math.floor(source)
       const fraction = source - lower
+
       const shifted = lower >= 0 && lower + 1 < bins
         ? state.scratch[lower] * (1 - fraction) + state.scratch[lower + 1] * fraction
         : 0
+
       const radius = Math.min(15, Math.ceil(params.blur * 15))
       let blurred = 0
       let count = 0
+
       for (let offset = -radius; offset <= radius; offset += 1) {
         const sourceBin = lower + offset
+
         if (sourceBin >= 0 && sourceBin < bins) {
           blurred += state.scratch[sourceBin]
           count += 1
         }
       }
+
       const magnitude = shifted * (1 - params.blur) + (count > 0 ? blurred / count : 0) * params.blur
       const phase = Math.atan2(spectrum.imaginary[bin], spectrum.real[bin])
       spectrum.real[bin] = magnitude * Math.cos(phase)
@@ -179,15 +205,21 @@ export const transformSpectrum = (
     }
   } else if (params.mode === 'hpss') {
     const history = state.hpssHistory[state.hpssIndex]
+
     for (let bin = 0; bin < bins; bin += 1) history[bin] = magnitudeAt(spectrum, bin)
     state.hpssIndex = (state.hpssIndex + 1) % state.hpssHistory.length
+
     for (let bin = 0; bin < bins; bin += 1) {
       let count = 0
+
       for (let offset = -15; offset <= 15; offset += 1) {
         const candidate = bin + offset
+
         if (candidate >= 0 && candidate < bins) state.scratch[count++] = history[candidate]
       }
+
       const percussive = median(state.scratch, count)
+
       for (let frame = 0; frame < state.hpssHistory.length; frame += 1) state.scratch[frame] = state.hpssHistory[frame][bin]
       const harmonic = median(state.scratch, state.hpssHistory.length)
       const balance = (params.harmonicPercussiveBalance + 1) / 2
@@ -204,6 +236,7 @@ export const transformSpectrum = (
       spectrum.imaginary[bin] *= gain
     }
   }
+
   for (let bin = 1; bin < spectrum.real.length / 2; bin += 1) {
     spectrum.real[spectrum.real.length - bin] = spectrum.real[bin]
     spectrum.imaginary[spectrum.imaginary.length - bin] = -spectrum.imaginary[bin]
@@ -227,26 +260,33 @@ export const processStft = (input: Float64Array, options: StftOptions) => {
   const window = createSqrtHannWindow(options.fftSize)
   const real = new Float64Array(options.fftSize)
   const imaginary = new Float64Array(options.fftSize)
+
   for (let frame = 0; frame < frameCount; frame += 1) {
     const start = frame * hopSize
+
     for (let index = 0; index < options.fftSize; index += 1) {
       const source = start + index - padding
       real[index] = (source >= 0 && source < input.length ? input[source] : 0) * window[index]
       imaginary[index] = 0
     }
+
     fftInPlace(real, imaginary)
     options.transform?.({ real, imaginary }, frame)
     fftInPlace(real, imaginary, true)
+
     for (let index = 0; index < options.fftSize; index += 1) {
       const target = start + index
       output[target] += real[index] * window[index]
       normalization[target] += window[index] * window[index]
     }
   }
+
   const result = new Float64Array(input.length)
+
   for (let index = 0; index < result.length; index += 1) {
     const source = index + padding
     result[index] = normalization[source] > 1e-12 ? output[source] / normalization[source] : 0
   }
+
   return result
 }

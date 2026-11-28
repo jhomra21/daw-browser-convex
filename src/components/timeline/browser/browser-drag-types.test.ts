@@ -17,6 +17,7 @@ describe("browserDropTargetTrackId", () => {
       trackId: "return-a",
       laneIndex: 0,
     };
+
     const scrollingTarget: BrowserDropTarget = {
       kind: "track",
       trackId: "track-a",
@@ -39,6 +40,7 @@ describe("resolveBrowserDeviceDropTarget", () => {
     instrument: "synth",
     label: "Synth",
   };
+
   const canDrop = () => true;
 
   test("excludes Master base and automation geometry", () => {
@@ -85,6 +87,7 @@ describe("resolveTimelineTrackTarget", () => {
       left: 0,
     }),
   };
+
   const scrollElement = {
     scrollTop: 0,
     getBoundingClientRect: () => ({
@@ -94,6 +97,7 @@ describe("resolveTimelineTrackTarget", () => {
       left: 0,
     }),
   };
+
   const rows = [{
     trackId: "scrolling-track",
     topPx: 0,

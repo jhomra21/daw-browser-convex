@@ -54,7 +54,9 @@ const shouldPreserveNativeContextMenu = (target: EventTarget | null) => (
 
 const renderTimelineContextMenuEntry = (current: TimelineContextMenuItem) => {
   if (current.kind === "label") return <ContextMenuLabel>{current.label}</ContextMenuLabel>;
+
   if (current.kind === "separator") return <ContextMenuSeparator />;
+
   if (current.kind === "color") {
     return (
         <div class="flex min-h-6 items-center gap-2 px-2 py-0.5 leading-5 text-foreground">
@@ -70,6 +72,7 @@ const renderTimelineContextMenuEntry = (current: TimelineContextMenuItem) => {
         </div>
     );
   }
+
   return (
     <ContextMenuItem
       disabled={current.disabled}

@@ -22,8 +22,10 @@ test("probe starts three bounded task sources and has deterministic cleanup", ()
 
 test("evidence parser rejects oversized or private properties", () => {
   const source = { samples: [{ startEpochMs: 1, endEpochMs: 2 }], total: 1 }
+
   const encoded = JSON.stringify(JSON.stringify({ message: source, animation: source, electron: source,
     messageDelivery: source, electronToMain: source, electronMainToRenderer: source, supported: true, clockOffsetMs: 0 }))
+
   expect(parseTaskSourceEvidence(encoded).message.samples).toHaveLength(1)
   expect(() => parseTaskSourceEvidence(JSON.stringify(JSON.stringify({ message: { ...source, token: "private" }, animation: source, electron: source,
     messageDelivery: source, electronToMain: source, electronMainToRenderer: source, supported: true, clockOffsetMs: 0 })))).toThrow()
@@ -32,12 +34,15 @@ test("evidence parser rejects oversized or private properties", () => {
 
 test("does not claim continuous liveness when samples do not cover the delayed return", () => {
   const delayed = { returnedAtEpochMs: 100, receivedAtEpochMs: 1100 }
+
   const source = { samples: [
     { startEpochMs: 0, endEpochMs: 150 },
     { startEpochMs: 150, endEpochMs: 1150 },
   ], total: 2 }
+
   const evidence = { supported: true, clockOffsetMs: 0, message: source, animation: source, electron: source,
     messageDelivery: source, electronToMain: source, electronMainToRenderer: source }
+
   expect(analyzeTaskSourceEvidence(evidence, delayed).classification).toBe("renderer-global-stall")
   expect(analyzeTaskSourceEvidence({ ...evidence, message: { samples: source.samples.slice(1), total: 2 } }, delayed).classification).toBe("unknown")
   expect(analyzeTaskSourceEvidence({ ...evidence, supported: false }, delayed).classification).toBe("unknown")
@@ -48,10 +53,12 @@ test("attributes simultaneous posted-message delays only with rAF and main-threa
   const ticks = { samples: Array.from({ length: 12 }, (_, i) => ({ startEpochMs: i * 100, endEpochMs: (i + 1) * 100 })), total: 12 }
   const delayedDelivery = { samples: [{ startEpochMs: 90, endEpochMs: 1110 }], total: 1 }
   const mainFast = { samples: [{ startEpochMs: 200, endEpochMs: 201 }], total: 1 }
+
   const evidence = {
     supported: true, clockOffsetMs: 0, message: ticks, animation: ticks, electron: ticks,
     messageDelivery: delayedDelivery, electronToMain: mainFast, electronMainToRenderer: delayedDelivery,
   }
+
   expect(analyzeTaskSourceEvidence(evidence, delayed).dispatchBoundary).toBe("renderer-message-delivery-delay")
   expect(analyzeTaskSourceEvidence({ ...evidence, electronToMain: delayedDelivery }, delayed).dispatchBoundary).toBe("unknown")
   expect(analyzeTaskSourceEvidence({ ...evidence, animation: { samples: ticks.samples.slice(3), total: 9 } }, delayed).dispatchBoundary).toBe("unknown")

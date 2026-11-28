@@ -192,6 +192,7 @@ const readRecorderBlockMessage = <Value>(value: Value): RecorderBlockMessage | n
     !(value.buffer instanceof ArrayBuffer) ||
     value.buffer.byteLength !== RECORDER_BLOCK_FRAMES * value.channelCount * Float32Array.BYTES_PER_ELEMENT
   ) return null
+
   return {
     type: 'block',
     generation: value.generation,
@@ -206,7 +207,9 @@ const readRecorderBlockMessage = <Value>(value: Value): RecorderBlockMessage | n
 
 export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutboundMessage | null => {
   const block = readRecorderBlockMessage(value)
+
   if (block) return block
+
   if (
     isRecord(value) &&
     value.type === 'meter' &&
@@ -227,6 +230,7 @@ export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutbou
       peak: value.peak,
     }
   }
+
   if (
     !isRecord(value) ||
     !isGeneration(value.generation) ||
@@ -235,6 +239,7 @@ export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutbou
     !isGeneration(value.droppedFrames) ||
     !isGeneration(value.droppedBlocks)
   ) return null
+
   if (value.type === 'complete') {
     return {
       type: 'complete',
@@ -245,6 +250,7 @@ export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutbou
       droppedBlocks: value.droppedBlocks,
     }
   }
+
   if (value.type === 'failure' && isString(value.reason) && value.reason.length > 0) {
     return {
       type: 'failure',
@@ -256,6 +262,7 @@ export const readRecorderOutboundMessage = <Value>(value: Value): RecorderOutbou
       droppedBlocks: value.droppedBlocks,
     }
   }
+
   return null
 }
 
@@ -269,6 +276,7 @@ const readRecorderReturnMessage = <Value>(value: Value): RecorderReturnMessage |
     !(value.buffer instanceof ArrayBuffer) ||
     (value.returnedAtMs !== undefined && (!isNumber(value.returnedAtMs) || !Number.isFinite(value.returnedAtMs) || value.returnedAtMs < 0 || value.returnedAtMs > Number.MAX_SAFE_INTEGER))
   ) return null
+
   const result: RecorderReturnMessage = {
     type: 'return',
     generation: value.generation,
@@ -276,14 +284,19 @@ const readRecorderReturnMessage = <Value>(value: Value): RecorderReturnMessage |
     blockId: value.blockId,
     buffer: value.buffer,
   }
+
   if (value.returnedAtMs !== undefined) result.returnedAtMs = value.returnedAtMs
+
   return result
 }
 
 export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMessage | null => {
   const block = readRecorderBlockMessage(value)
+
   if (block) return block
+
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
+
   if (
     (value.type === 'start' || value.type === 'start-sab') &&
     isPositiveInteger(value.sampleRate) &&
@@ -298,6 +311,7 @@ export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMess
         !(value.frameCounts instanceof SharedArrayBuffer) ||
         !(value.samples instanceof SharedArrayBuffer)
       ) return null
+
       return {
         type: 'start-sab',
         generation: value.generation,
@@ -309,6 +323,7 @@ export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMess
         samples: value.samples,
       }
     }
+
     return {
       type: 'start',
       generation: value.generation,
@@ -317,11 +332,14 @@ export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMess
       channelCount: value.channelCount,
     }
   }
+
   if (value.type === 'wake') {
     return { type: 'wake', generation: value.generation, sessionId: value.sessionId }
   }
+
   if (value.type === 'finalize') {
     if (value.capturedFrames !== undefined && !isGeneration(value.capturedFrames)) return null
+
     return value.capturedFrames === undefined
       ? { type: 'finalize', generation: value.generation, sessionId: value.sessionId }
       : {
@@ -331,27 +349,38 @@ export const readWriterInboundMessage = <Value>(value: Value): WriterInboundMess
           capturedFrames: value.capturedFrames,
         }
   }
+
   if (value.type === 'abort') {
     return { type: 'abort', generation: value.generation, sessionId: value.sessionId }
   }
+
   return null
 }
 
 export const readWriterOutboundMessage = <Value>(value: Value): WriterOutboundMessage | null => {
   const returned = readRecorderReturnMessage(value)
+
   if (returned) return returned
+
   if (!isRecord(value) || !isGeneration(value.generation) || !isSessionId(value.sessionId)) return null
   const rawTiming = 'timing' in value ? value.timing : undefined
   const parsedTiming = writerTimingSchema.optional().safeParse(rawTiming)
+
   if (!parsedTiming.success) return null
   const timing = parsedTiming.data
+
   if (value.type === 'boot') return { type: 'boot', generation: value.generation, sessionId: value.sessionId }
+
   if (value.type === 'ready') return { type: 'ready', generation: value.generation, sessionId: value.sessionId }
+
   if (value.type === 'aborted') {
     const result: WriterOutboundMessage = { type: 'aborted', generation: value.generation, sessionId: value.sessionId }
+
     if (timing) result.timing = timing
+
     return result
   }
+
   if (value.type === 'finalized' && isGeneration(value.capturedFrames)) {
     const result: WriterOutboundMessage = {
       type: 'finalized',
@@ -359,9 +388,12 @@ export const readWriterOutboundMessage = <Value>(value: Value): WriterOutboundMe
       sessionId: value.sessionId,
       capturedFrames: value.capturedFrames,
     }
+
     if (timing) result.timing = timing
+
     return result
   }
+
   if (value.type === 'failure' && isString(value.reason)) {
     const result: WriterOutboundMessage = {
       type: 'failure',
@@ -369,8 +401,11 @@ export const readWriterOutboundMessage = <Value>(value: Value): WriterOutboundMe
       sessionId: value.sessionId,
       reason: value.reason,
     }
+
     if (timing) result.timing = timing
+
     return result
   }
+
   return null
 }

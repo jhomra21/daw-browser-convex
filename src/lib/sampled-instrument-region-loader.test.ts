@@ -31,7 +31,9 @@ class TestAudioBuffer implements AudioBuffer {
 
   getChannelData(channelNumber: number): Float32Array<ArrayBuffer> {
     const channel = this.channels[channelNumber]
+
     if (!channel) throw new Error('missing channel')
+
     return channel
   }
 }
@@ -57,6 +59,7 @@ const decoder = (pages: readonly DecodedAudioPage[]) => async function* (): Asyn
 
 test('allocates and returns only the requested regional PCM', async () => {
   let allocations = 0
+
   const loaded = await loadSampledInstrumentRegion(
     input,
     { sourceStartFrame: 4, sourceEndFrame: 8 },
@@ -66,11 +69,14 @@ test('allocates and returns only the requested regional PCM', async () => {
       decodePages: decoder([page(4, [1, 2]), page(6, [3, 4])]),
       createBuffer: (channels, frames, rate) => {
         allocations += 1
+
         return new TestAudioBuffer(channels, frames, rate)
       },
     },
   )
+
   expect(loaded.status).toBe('ready')
+
   if (loaded.status !== 'ready') throw new Error('Expected the sample region to load.')
   const result = loaded.buffer
   expect(allocations).toBe(1)
@@ -82,6 +88,7 @@ test('allocates and returns only the requested regional PCM', async () => {
 
 test('passes exact integer frame bounds through to page decoding', async () => {
   const requests: Array<{ startSec?: number; endSec?: number; startFrame?: number; endFrame?: number }> = []
+
   const result = await loadSampledInstrumentRegion(
     {
       ...input,
@@ -109,7 +116,9 @@ test('passes exact integer frame bounds through to page decoding', async () => {
       createBuffer: (_channels, frames, sampleRate) => new TestAudioBuffer(1, frames, sampleRate),
     },
   )
+
   expect(result.status).toBe('ready')
+
   if (result.status !== 'ready') throw new Error('Expected the sample region to load.')
   expect(result.buffer.buffer.length).toBe(12)
   expect(requests).toEqual([{
@@ -131,7 +140,9 @@ test('copies non-page-aligned coverage from source-aligned pages', async () => {
       createBuffer: (channels, frames, rate) => new TestAudioBuffer(channels, frames, rate),
     },
   )
+
   expect(result.status).toBe('ready')
+
   if (result.status !== 'ready') throw new Error('Expected the sample region to load.')
   expect([...result.buffer.buffer.getChannelData(0)]).toEqual([1, 2, 3, 4, 5, 6])
   expect([...result.buffer.buffer.getChannelData(1)]).toEqual([10, 20, 30, 40, 50, 60])
@@ -148,7 +159,9 @@ test('accepts exact tail coverage when the final page ends at the region', async
       createBuffer: (channels, frames, rate) => new TestAudioBuffer(channels, frames, rate),
     },
   )
+
   expect(result.status).toBe('ready')
+
   if (result.status !== 'ready') throw new Error('Expected the sample region to load.')
   expect([...result.buffer.buffer.getChannelData(0)]).toEqual([1, 2, 3, 4, 5, 6])
 })
@@ -181,10 +194,12 @@ test('rejects budget before reading or allocating', async () => {
     {
       decodePages: async function* () {
         reads += 1
+
         if (reads < 0) yield page(0, [])
       },
       createBuffer: () => {
         allocations += 1
+
         return new TestAudioBuffer(2, 2, 4)
       },
     },
@@ -222,6 +237,7 @@ test('cancels before source access', async () => {
     {
       resolveUrl: () => {
         reads += 1
+
         return '/sample.wav'
       },
     },
@@ -232,10 +248,12 @@ test('cancels before source access', async () => {
 test('distinguishes confirmed missing assets from resolution and permission failures', async () => {
   const localInput = { ...input, url: 'local-asset:asset-runtime' }
   const bounds = { sourceStartFrame: 0, sourceEndFrame: 2 }
+
   const missing = await loadSampledInstrumentRegion(localInput, bounds, 128, undefined, {
     projectId: () => 'project',
     readLocalAsset: async (): Promise<LocalAssetBytesResult> => ({ status: 'missing' }),
   })
+
   expect(missing).toEqual({ status: 'missing' })
   await expect(loadSampledInstrumentRegion(localInput, bounds, 128, undefined, {
     projectId: () => 'project',

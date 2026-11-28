@@ -19,12 +19,15 @@ import { useTimelineIdentity } from './useTimelineIdentity'
 import { useTimelineLocalMix } from './useTimelineLocalMix'
 import { useTimelineMixerController } from './useTimelineMixerController'
 import { useTimelineResolvedModel } from './useTimelineResolvedModel'
+
 test.skipIf(!isServer)('local projection reconciliation runs Solid effects', async () => {
   const child = Bun.spawn(["bun", "test", "--conditions=browser", import.meta.path, "-t", "^local canonical"],
     { stdout: "pipe", stderr: "pipe" })
+
   const [stdout, stderr, code] = await Promise.all([
     new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited,
   ])
+
   if (code !== 0) throw new Error(`${stdout}\n${stderr}`)
   expect(code).toBe(0)
 })
@@ -32,19 +35,25 @@ test.skipIf(!isServer)('local projection reconciliation runs Solid effects', asy
 test.skipIf(isServer)('local canonical snapshots retire reflected overlays without clearing unsaved drafts', async () => {
   const clip = { id: "clip-1", trackId: "track-1", historyRef: "clip-1", name: "Clip",
     color: "#fff", startSec: 0, duration: 4, createdAt: 1, updatedAt: 1 }
+
   const snapshot: TimelineSnapshot = { projectId: "local_project-projection", tracks: [{
     id: "track-1", historyRef: "track-1", name: "Track", index: 0, volume: 1,
     muted: false, soloed: false, kind: "audio", channelRole: "track", sends: [], createdAt: 1, updatedAt: 1,
   }], clips: [clip] }
+
   let dispose = () => {}
+
   const projection = createRoot((cleanup) => {
     dispose = cleanup
+
     return useTimelineProjectionState({
       projectId: () => snapshot.projectId, serverData: () => undefined,
       rememberTrackProjection: () => {}, rememberClipHistoryRef: () => {},
     })
   })
+
   const setSnapshot = projection.reconcileLocalSnapshot
+
   try {
     await Promise.resolve()
     projection.commitClipTiming(clip.id, { startSec: 2 })
@@ -72,21 +81,27 @@ test.skipIf(isServer)('local canonical snapshots retire reflected overlays witho
 
 test.skipIf(isServer)('local canonical snapshots keep the identity of tracks and clips another track change leaves alone', () => {
   const row = { historyRef: 'x', createdAt: 1, updatedAt: 1 }
+
   const track = (id: string, index: number): TimelineSnapshot['tracks'][number] => ({
     ...row, id, historyRef: id, name: id, index, volume: 1, muted: false, soloed: false, kind: 'audio', channelRole: 'track', sends: [],
   })
+
   const clip: TimelineSnapshot['clips'][number] = {
     ...row, id: 'clip-1', trackId: 'track-1', historyRef: 'clip-1', name: 'Clip', color: '#fff', startSec: 0, duration: 4,
     audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120, sourceBeatOffset: 0, markers: [] },
   }
+
   const [snapshot, setSnapshot] = createSignal<TimelineSnapshot | null>({
     projectId: 'local_project-identity', tracks: [track('track-1', 0)], clips: [clip],
   })
+
   const remember = () => {}
   const buffer = new Map<string, AudioBuffer>()
   let dispose = () => {}
+
   const resolved = createRoot((cleanup) => {
     dispose = cleanup
+
     return useTimelineResolvedModel({
       projectId: () => 'local_project-identity', fullViewData: () => undefined, localSnapshot: snapshot, syncMix: () => false,
       writableTrackIds: () => new Set(), serverTrackState: () => null, localMixByTrackId: () => ({}),
@@ -99,6 +114,7 @@ test.skipIf(isServer)('local canonical snapshots keep the identity of tracks and
       buffers: { getBuffer: (clipId) => buffer.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0,
     })
   })
+
   try {
     const [before] = resolved.renderTracks()
     const beforeClip = before?.clips[0]
@@ -176,35 +192,45 @@ class C0fAudioBuffer implements AudioBuffer {
 // One entry per track and clip field, plus the clip's key order, which JSON fingerprints see.
 const c0fView = (tracks: RuntimeTrack[], bufferIds: Map<AudioBuffer, number>) => {
   const view = new Map([['order', tracks.map((track) => track.id).join(',')]])
+
   for (const { clips, ...track } of tracks) {
     for (const [key, value] of Object.entries(track)) view.set(`${track.id}.${key}`, JSON.stringify(value) ?? 'undefined')
     view.set(`${track.id}.clipOrder`, clips.map((clip) => clip.id).join(','))
+
     for (const { buffer, ...clip } of clips) {
       view.set(`${track.id}.${clip.id}.keyOrder`, Object.keys(clip).join(','))
       view.set(`${track.id}.${clip.id}.buffer`, String(buffer ? bufferIds.get(buffer) : null))
+
       for (const [key, value] of Object.entries(clip)) view.set(`${track.id}.${clip.id}.${key}`, JSON.stringify(value) ?? 'undefined')
     }
   }
+
   return view
 }
 
 test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once per user action', async () => {
   const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
   const audioBuffer = Object.getOwnPropertyDescriptor(globalThis, 'AudioBuffer')
+
   if (!audioBuffer) Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: C0fAudioBuffer })
   let dispose = () => {}
   let mounted: Awaited<ReturnType<typeof mountStep5Playback>> | undefined
+
   try {
     const project = await createLocalProject(`C0F remove-readd ${crypto.randomUUID()}`)
     const repository = createLocalTimelineRepository(project.id)
     const retainedTrack = (await repository.loadSnapshot()).tracks[0]
+
     if (!retainedTrack) throw new Error('Expected a persisted track.')
     const changedTrack = await repository.createTrack({ index: 1, name: 'Changed right' })
     const source = { sourceKind: 'upload' as const, sourceDurationSec: 0.25, sourceSampleRate: 48_000, sourceChannelCount: 2 }
+
     const retainedClip = await repository.createClip({ trackId: retainedTrack.id, name: 'retained.wav', startSec: 0,
       duration: 0.25, sourceAssetKey: 'asset-c0f-retained', ...source })
+
     const changedClip = await repository.createClip({ trackId: changedTrack.id, name: 'changed.wav', startSec: 0,
       duration: 0.25, sourceAssetKey: 'asset-c0f-changed', ...source })
+
     const buffers = new Map<string, AudioBuffer>([[retainedClip.id, new C0fAudioBuffer(12_000, 2)], [changedClip.id, new C0fAudioBuffer(12_000, 2)]])
     const bufferIds = new Map([...buffers.values()].map((buffer, index) => [buffer, index + 1]))
     const [localSnapshot] = createSignal<TimelineSnapshot | null>(await repository.loadSnapshot())
@@ -212,17 +238,22 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
     const undone = Promise.withResolvers<void>()
     let historyActions: TimelineHistoryActions | undefined
     let rescheduleChangedClips = (_clipIds: string[]) => {}
+
     const timeline = createRoot((cleanup) => {
       dispose = cleanup
       const identity = useTimelineIdentity({ projectId, serverData: () => undefined })
+
       const projection = useTimelineProjectionState({ projectId, serverData: () => undefined,
         rememberTrackProjection: identity.rememberTrackProjection, rememberClipHistoryRef: identity.rememberClipHistoryRef })
+
       const [renderTracks, setRenderTracks] = createSignal<RuntimeTrack[]>([])
       const writable = new Set([retainedTrack.id, changedTrack.id])
       const writableTrackIds = () => writable
       const localMix = useTimelineLocalMix({ projectId, writableTrackIds })
+
       const mixer = useTimelineMixerController({ projectId, userId: () => '', syncMix: () => false, tracks: renderTracks, localMix,
         optimisticTrackIds: () => new Set(), canWriteTrack: () => true, pushHistory: () => undefined, serverTrackState: () => null })
+
       const resolved = useTimelineResolvedModel({ projectId, fullViewData: () => undefined, localSnapshot, syncMix: () => false,
         writableTrackIds, serverTrackState: () => null, localMixByTrackId: localMix.byTrackId,
         pendingSharedTrackVolumes: mixer.pendingSharedTrackVolumes, pendingSharedTrackRouting: mixer.pendingSharedTrackRouting,
@@ -232,14 +263,18 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
           removedClipIds: projection.removedClipIds, committedClipEditsById: projection.committedClipEditsById,
           draftClipEditsById: projection.draftClipEditsById, previewClipsByTrackId: projection.previewClipsByTrackId },
         identity, buffers: { getBuffer: (clipId) => buffers.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0 })
+
       createEffect(() => { setRenderTracks(resolved.renderTracks()) })
+
       const history = useTimelineHistory({ projectId, userId: () => 'local', getTracks: renderTracks, convexClient, convexApi,
         grantTrackWrite: () => {}, grantClipWrite: () => {}, persistLocalMix: (_projectId, trackId, patch) => localMix.persist(trackId, patch),
         notify: (title, message) => undone.reject(new Error(`${title}: ${message}`)),
         getActions: () => {
           if (!historyActions) throw new Error('Timeline history actions are not initialized.')
+
           return historyActions
         } })
+
       createEffect(() => { if (history.canRedo()) undone.resolve() })
       historyActions = {
         insertLocalTrack: projection.insertLocalTrack, removeLocalTrack: projection.removeLocalTrack,
@@ -254,23 +289,33 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
         applyTrackRouting: (trackId, routing) => mixer.applyTrackRouting(trackId, { sends: routing.sends ?? [], outputTargetId: routing.outputTargetId }),
         applyTrackPatch: () => {}, applyAutomationEnvelope: () => {},
       }
+
       return { projection, renderTracks, history }
     })
+
     // What each playing compile read: the fixture compiles `tracks()` right after its render state resolves.
     const compiles: { at: number; view: Map<string, string> }[] = []
     let armed = false
     let hostCalls: readonly string[] = []
+
     const tracks = () => {
       const current = timeline.renderTracks()
+
       if (armed) {
         armed = false
         compiles.push({ at: hostCalls.length, view: c0fView(current, bufferIds) })
       }
+
       return current
     }
+
     const fx = () => ({ masterVolume: 1, masterFxInstances: [], trackFx: {} })
+
     const f = await mountStep5Playback({ projectId: project.id, tracks, playbackInputs: () => ({ masterVolume: 1, automation: [], sidechains: [] }),
-      desiredFx: fx, renderState: async () => { armed = true; return { fx: fx(), automationEnvelopes: [] } } })
+      desiredFx: fx, renderState: async () => { armed = true;
+
+ return { fx: fx(), automationEnvelopes: [] } } })
+
     mounted = f
     hostCalls = f.host.calls
     // Timeline.rescheduleChangedClips → rebuildPlaybackBackend with captureStructuralPlaybackIntent.
@@ -279,21 +324,27 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
       void f.playback.restartTimelineSchedule(timeline.renderTracks(), { rebuildBackend: true, resumePlayback: f.playback.isPlaying(),
         playheadSec: f.playback.playheadSec(), owner: 'native', projectId: project.id, projectGeneration: undefined })
     }
+
     await f.playback.handlePlay(timeline.renderTracks()); await f.frame()
     const actions: { name: string; from: number; to: number }[] = []
+
     const act = async (name: string, run: () => Promise<void>) => {
       const from = f.host.calls.length
       await run()
       await f.frame(); await settleStep5Playback(); await f.frame()
       actions.push({ name, from, to: f.host.calls.length })
     }
+
     // useTimelineClipActions.performDeleteTrack, local project branch.
     await act('delete', async () => {
       const snapshot = timeline.renderTracks()
       const deleted = snapshot.find((track) => track.id === changedTrack.id)
+
       if (!deleted) throw new Error('Changed track is not projected.')
+
       const entry = buildTrackDeleteHistoryEntry({ projectId: project.id, track: deleted, tracks: snapshot,
         effects: await loadTrackEffectSnapshot(project.id, deleted.id), automation: [], sidechainRoutes: [] })
+
       await createLocalTimelineRepository(project.id).deleteTrack(deleted.id)
       timeline.history.pushHistory({ type: 'section-edit', projectId: project.id, data: { entries: [entry] } })
       timeline.projection.removeLocalTrack(deleted.id)
@@ -303,19 +354,25 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
       await undone.promise
     })
     await act('trim', async () => { timeline.projection.commitClipTiming(changedClip.id, { duration: 0.2 }) })
+
     const publications = f.host.calls.flatMap((call, index) => {
       if (call !== 'revision.publish') return []
       const prepared = f.host.calls.lastIndexOf('revision.prepare', index)
       const compile = compiles.findLast((entry) => entry.at <= prepared)
+
       return [{ index, action: actions.find((entry) => entry.from <= index && index < entry.to)?.name, view: compile?.view ?? new Map<string, string>() }]
     })
+
     const baseline = compiles.findLast((entry) => entry.at < (actions[0]?.from ?? 0))?.view ?? new Map<string, string>()
+
     const report = publications.map((publication, index) => {
       const previous = publications[index - 1]?.view ?? baseline
       const paths = new Set([...previous.keys(), ...publication.view.keys()])
-      return { action: publication.action, changed: [...paths].filter((path) => previous.get(path) !== publication.view.get(path))
-        .map((path) => `${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`) }
+
+      return { action: publication.action, changed: [...paths].flatMap((path) => previous.get(path) !== publication.view.get(path)
+        ? [`${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`] : []) }
     })
+
     console.log('C0F-RRT', JSON.stringify({ actions, calls: f.host.calls, compiledAt: compiles.map((entry) => entry.at),
       compilations: f.compilations.map((entry) => entry.mode), report }, null, 1))
     const restored = timeline.renderTracks().find((track) => track.id === changedTrack.id)
@@ -328,6 +385,7 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
     await mounted?.close()
     dispose()
     restoreWindow()
+
     if (!audioBuffer) Reflect.deleteProperty(globalThis, 'AudioBuffer')
   }
 })
@@ -339,24 +397,31 @@ test.skipIf(isServer)('C0F a track-delete undo while native plays publishes once
 const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', ending: 'trim' | 'pause-play') => {
   const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
   const audioBuffer = Object.getOwnPropertyDescriptor(globalThis, 'AudioBuffer')
+
   if (!audioBuffer) Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: C0fAudioBuffer })
   let dispose = () => {}
   let mounted: Awaited<ReturnType<typeof mountStep5Playback>> | undefined
+
   try {
     const project = await createLocalProject(`C0G remove-readd ${variant} ${crypto.randomUUID()}`)
     const repository = createLocalTimelineRepository(project.id)
     const retainedTrack = (await repository.loadSnapshot()).tracks[0]
+
     if (!retainedTrack) throw new Error('Expected a persisted track.')
     const changedTrack = await repository.createTrack({ index: 1, name: 'Changed right', kind: variant === 'midi' ? 'instrument' : 'audio' })
+
     const retainedClip = await repository.createClip({ trackId: retainedTrack.id, name: 'retained.wav', startSec: 0, duration: 0.25,
       sourceAssetKey: 'asset-c0g-retained', sourceKind: 'upload', sourceDurationSec: 0.25, sourceSampleRate: 48_000, sourceChannelCount: 2 })
+
     const changedClip = await repository.createClip(variant === 'midi'
       ? { trackId: changedTrack.id, name: 'changed', startSec: 0, duration: 0.25,
         midi: { wave: 'sine', notes: [{ id: 'note-c0g', pitch: 60, beat: 0, length: 0.25, velocity: 0.8 }] } }
       : { trackId: changedTrack.id, name: 'changed.wav', startSec: 0, duration: 0.25, sourceAssetKey: 'asset-c0g-changed',
         sourceKind: 'upload', sourceDurationSec: 0.25, sourceSampleRate: 48_000, sourceChannelCount: 2,
         sampleUrl: variant === 'sampleUrl' ? 'https://r2.example/asset-c0g-changed.wav' : undefined })
+
     const buffers = new Map<string, AudioBuffer>([[retainedClip.id, new C0fAudioBuffer(12_000, 2)]])
+
     if (variant !== 'midi') buffers.set(changedClip.id, new C0fAudioBuffer(12_000, 2))
     const bufferIds = new Map([...buffers.values()].map((buffer, index) => [buffer, index + 1]))
     const [localSnapshot] = createSignal<TimelineSnapshot | null>(await repository.loadSnapshot())
@@ -364,17 +429,22 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
     const undone = Promise.withResolvers<void>()
     let historyActions: TimelineHistoryActions | undefined
     let rescheduleChangedClips = (_clipIds: string[]) => {}
+
     const timeline = createRoot((cleanup) => {
       dispose = cleanup
       const identity = useTimelineIdentity({ projectId, serverData: () => undefined })
+
       const projection = useTimelineProjectionState({ projectId, serverData: () => undefined,
         rememberTrackProjection: identity.rememberTrackProjection, rememberClipHistoryRef: identity.rememberClipHistoryRef })
+
       const [renderTracks, setRenderTracks] = createSignal<RuntimeTrack[]>([])
       const writable = new Set([retainedTrack.id, changedTrack.id])
       const writableTrackIds = () => writable
       const localMix = useTimelineLocalMix({ projectId, writableTrackIds })
+
       const mixer = useTimelineMixerController({ projectId, userId: () => '', syncMix: () => false, tracks: renderTracks, localMix,
         optimisticTrackIds: () => new Set(), canWriteTrack: () => true, pushHistory: () => undefined, serverTrackState: () => null })
+
       const resolved = useTimelineResolvedModel({ projectId, fullViewData: () => undefined, localSnapshot, syncMix: () => false,
         writableTrackIds, serverTrackState: () => null, localMixByTrackId: localMix.byTrackId,
         pendingSharedTrackVolumes: mixer.pendingSharedTrackVolumes, pendingSharedTrackRouting: mixer.pendingSharedTrackRouting,
@@ -384,14 +454,18 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
           removedClipIds: projection.removedClipIds, committedClipEditsById: projection.committedClipEditsById,
           draftClipEditsById: projection.draftClipEditsById, previewClipsByTrackId: projection.previewClipsByTrackId },
         identity, buffers: { getBuffer: (clipId) => buffers.get(clipId), getMediaStatus: () => undefined }, bufferVersion: () => 0 })
+
       createEffect(() => { setRenderTracks(resolved.renderTracks()) })
+
       const history = useTimelineHistory({ projectId, userId: () => 'local', getTracks: renderTracks, convexClient, convexApi,
         grantTrackWrite: () => {}, grantClipWrite: () => {}, persistLocalMix: (_projectId, trackId, patch) => localMix.persist(trackId, patch),
         notify: (title, message) => undone.reject(new Error(`${title}: ${message}`)),
         getActions: () => {
           if (!historyActions) throw new Error('Timeline history actions are not initialized.')
+
           return historyActions
         } })
+
       createEffect(() => { if (history.canRedo()) undone.resolve() })
       historyActions = {
         insertLocalTrack: projection.insertLocalTrack, removeLocalTrack: projection.removeLocalTrack,
@@ -406,24 +480,34 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
         applyTrackRouting: (trackId, routing) => mixer.applyTrackRouting(trackId, { sends: routing.sends ?? [], outputTargetId: routing.outputTargetId }),
         applyTrackPatch: () => {}, applyAutomationEnvelope: () => {},
       }
+
       return { projection, renderTracks, history }
     })
+
     // Timeline's nativePlaybackRevision: every playing compile reads it, and each rebuild request bumps it first.
     let revision = 1
     const compiles: { at: number; revision: number; view: Map<string, string> }[] = []
     let armed = false
     let hostCalls: readonly string[] = []
+
     const tracks = () => {
       const current = timeline.renderTracks()
+
       if (armed) {
         armed = false
         compiles.push({ at: hostCalls.length, revision, view: c0fView(current, bufferIds) })
       }
+
       return current
     }
+
     const fx = () => ({ masterVolume: 1, masterFxInstances: [], trackFx: {} })
+
     const f = await mountStep5Playback({ projectId: project.id, tracks, playbackInputs: () => ({ masterVolume: 1, automation: [], sidechains: [] }),
-      desiredFx: fx, renderState: async () => { armed = true; return { fx: fx(), automationEnvelopes: [] } }, revision: () => revision })
+      desiredFx: fx, renderState: async () => { armed = true;
+
+ return { fx: fx(), automationEnvelopes: [] } }, revision: () => revision })
+
     mounted = f
     hostCalls = f.host.calls
     // Timeline.rescheduleChangedClips → rebuildPlaybackBackend with captureStructuralPlaybackIntent.
@@ -433,21 +517,27 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
       void f.playback.restartTimelineSchedule(timeline.renderTracks(), { rebuildBackend: true, resumePlayback: f.playback.isPlaying(),
         playheadSec: f.playback.playheadSec(), owner: 'native', projectId: project.id, projectGeneration: undefined })
     }
+
     await f.playback.handlePlay(timeline.renderTracks()); await f.frame()
     const actions: { name: string; from: number; to: number }[] = []
+
     const act = async (name: string, run: () => Promise<void>) => {
       const from = f.host.calls.length
       await run()
       await f.frame(); await settleStep5Playback(); await f.frame()
       actions.push({ name, from, to: f.host.calls.length })
     }
+
     // useTimelineClipActions.performDeleteTrack, local project branch.
     await act('delete', async () => {
       const snapshot = timeline.renderTracks()
       const deleted = snapshot.find((track) => track.id === changedTrack.id)
+
       if (!deleted) throw new Error('Changed track is not projected.')
+
       const entry = buildTrackDeleteHistoryEntry({ projectId: project.id, track: deleted, tracks: snapshot,
         effects: await loadTrackEffectSnapshot(project.id, deleted.id), automation: [], sidechainRoutes: [] })
+
       await createLocalTimelineRepository(project.id).deleteTrack(deleted.id)
       timeline.history.pushHistory({ type: 'section-edit', projectId: project.id, data: { entries: [entry] } })
       timeline.projection.removeLocalTrack(deleted.id)
@@ -456,29 +546,37 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
       timeline.history.handleUndo()
       await undone.promise
     })
+
     if (ending === 'trim') await act('trim', async () => { timeline.projection.commitClipTiming(changedClip.id, { duration: 0.2 }) })
     else {
       await act('pause', () => f.playback.handlePause())
       await act('play', () => f.playback.handlePlay(timeline.renderTracks()))
     }
+
     const publications = f.host.calls.flatMap((call, index) => {
       if (call !== 'revision.publish') return []
       const prepared = f.host.calls.lastIndexOf('revision.prepare', index)
       const compile = compiles.findLast((entry) => entry.at <= prepared)
+
       return [{ index, action: actions.find((entry) => entry.from <= index && index < entry.to)?.name, view: compile?.view ?? new Map<string, string>() }]
     })
+
     const baseline = compiles.findLast((entry) => entry.at < (actions[0]?.from ?? 0))?.view ?? new Map<string, string>()
+
     const report = publications.map((publication, index) => {
       const previous = publications[index - 1]?.view ?? baseline
       const paths = new Set([...previous.keys(), ...publication.view.keys()])
-      return { action: publication.action, changed: [...paths].filter((path) => previous.get(path) !== publication.view.get(path))
-        .map((path) => `${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`) }
+
+      return { action: publication.action, changed: [...paths].flatMap((path) => previous.get(path) !== publication.view.get(path)
+        ? [`${path}: ${previous.get(path) ?? '(absent)'} -> ${publication.view.get(path) ?? '(absent)'}`] : []) }
     })
+
     const play = actions.find((entry) => entry.name === 'play')
     const resumed = play ? f.host.calls.slice(play.from, play.to) : []
     console.log('C0G-RRT', JSON.stringify({ variant, ending, actions, calls: f.host.calls,
       compiled: compiles.map((entry) => ({ at: entry.at, revision: entry.revision })), report, resumed }, null, 1))
     const restored = timeline.renderTracks().find((track) => track.id === changedTrack.id)
+
     return {
       perAction: Object.fromEntries(actions.map(({ name }) => [name, report.filter((entry) => entry.action === name).length])),
       total: publications.length,
@@ -494,6 +592,7 @@ const c0gTrackDeleteUndo = async (variant: 'audio' | 'midi' | 'sampleUrl', endin
     await mounted?.close()
     dispose()
     restoreWindow()
+
     if (!audioBuffer) Reflect.deleteProperty(globalThis, 'AudioBuffer')
   }
 }

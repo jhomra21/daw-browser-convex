@@ -10,10 +10,12 @@ export const listByRoom = query({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"])
+
     const rows = await ctx.db
       .query("exports")
       .withIndex("by_room_createdAt", q => q.eq("projectId", projectId))
       .collect()
+
     // Sort desc by createdAt client-side to be safe
     return rows.sort((a, b) => (b.createdAt ?? 0) - (a.createdAt ?? 0))
   },
@@ -34,9 +36,11 @@ export const create = mutation({
     const userId = await requireAuthenticatedUserId(ctx)
     await requireProjectRole(ctx, projectId, userId, ["owner", "editor"])
     const project = await requireProjectRow(ctx, projectId)
+
     if (!isValidR2DeleteKey(projectId, project.storageNamespace, "export", r2Key)) {
       throw new Error("Invalid export key.")
     }
+
     return await ctx.db.insert("exports", {
       projectId,
       name,
@@ -57,8 +61,10 @@ export const remove = mutation({
   handler: async (ctx, { exportId }) => {
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedExportId = ctx.db.normalizeId("exports", exportId)
+
     if (!normalizedExportId) return
     const row = await ctx.db.get(normalizedExportId)
+
     if (!row) return
     await requireProjectRole(ctx, row.projectId, userId, ["owner", "editor"])
     const project = await requireProjectRow(ctx, row.projectId)
@@ -66,6 +72,7 @@ export const remove = mutation({
       projectId: row.projectId, storageNamespace: project.storageNamespace, keys: [row.r2Key], kind: "export",
     })
     await ctx.db.delete(normalizedExportId)
+
     return { projectId: row.projectId }
   },
 })

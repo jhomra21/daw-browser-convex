@@ -27,6 +27,7 @@ const wavFile = (sampleRate = 44_100, channelCount = 2) => {
   header.setUint32(36, 0x64617461)
   header.setUint32(40, data.byteLength, true)
   bytes.set(data, 44)
+
   return new File([bytes], 'fixture.wav', { type: 'audio/wav' })
 }
 
@@ -35,7 +36,9 @@ const mp3File = () => {
   frame.set([0xff, 0xe3, 0x18, 0xc4], 0)
   frame.set([0, 0, 0, 3, 72, 0, 0, 0, 0, 76, 65, 77, 69, 51, 46, 57, 57, 46, 53], 4)
   const bytes = new Uint8Array(frame.byteLength * 5)
+
   for (let index = 0; index < 5; index += 1) bytes.set(frame, index * frame.byteLength)
+
   return new File([bytes], 'fixture.mp3', { type: 'audio/mpeg' })
 }
 
@@ -68,6 +71,7 @@ test('does not traverse packets to obtain upload duration', async () => {
   InputTrack.prototype.computeDuration = async () => {
     throw new Error('packet traversal is forbidden')
   }
+
   try {
     await expect(inspectControlUploadAudioMetadata({
       file: wavFile(),
@@ -85,8 +89,10 @@ test('falls back to metadata-only packet duration when container metadata is abs
   InputTrack.prototype.getDurationFromMetadata = async () => null
   InputTrack.prototype.computeDuration = async (nextOptions) => {
     options = nextOptions
+
     return 1.55
   }
+
   try {
     await expect(inspectControlUploadAudioMetadata({
       file: wavFile(),
@@ -120,6 +126,7 @@ test('propagates an unexpected Mediabunny parser failure', async () => {
   Input.prototype.getFormat = async () => {
     throw new Error('unexpected parser failure')
   }
+
   try {
     await expect(inspectControlUploadAudioMetadata({
       file: wavFile(),
@@ -147,41 +154,51 @@ test('rejects unsupported decoded metadata', async () => {
 
 test('stops R2 metadata reads at the cumulative request budget', async () => {
   let requests = 0
+
   const read = createControlUploadR2MetadataReader({
     key: 'asset/object',
     bucket: {
       get: async () => {
         requests += 1
+
         return { arrayBuffer: async () => new Uint8Array([1]).buffer }
       },
     },
   })
+
   for (let index = 0; index < 32; index += 1) {
     await read(index, index + 1)
   }
+
   await expect(read(32, 33)).rejects.toThrow('exceeded the R2 read budget')
   expect(requests).toBe(32)
 })
 
 test('stops R2 metadata reads at the cumulative byte budget', async () => {
   let requests = 0
+
   const read = createControlUploadR2MetadataReader({
     key: 'asset/object',
     bucket: {
       get: async (_key, options) => {
         requests += 1
+
         const range = z.object({
           offset: z.number().optional(),
           length: z.number().optional(),
         }).parse(options?.range)
+
         return { arrayBuffer: async () => new ArrayBuffer(range.length ?? 0) }
       },
     },
   })
+
   const maxIndividualReadBytes = 8 * 1024 * 1024
+
   for (let index = 0; index < 4; index += 1) {
     await read(index * maxIndividualReadBytes, (index + 1) * maxIndividualReadBytes)
   }
+
   await expect(read(4 * maxIndividualReadBytes, (4 * maxIndividualReadBytes) + 1))
     .rejects.toThrow('exceeded the R2 read budget')
   expect(requests).toBe(4)
@@ -191,6 +208,7 @@ test('inspects R2 metadata through bounded ranged reads', async () => {
   const file = wavFile()
   const bytes = new Uint8Array(await file.arrayBuffer())
   const ranges: Array<{ offset: number; length: number }> = []
+
   const inspected = await inspectControlUploadR2Metadata({
     size: bytes.byteLength,
     key: 'asset/object',
@@ -200,12 +218,15 @@ test('inspects R2 metadata through bounded ranged reads', async () => {
           offset: z.number().optional(),
           length: z.number().optional(),
         }).safeParse(options?.range)
+
         if (!range.success) {
           throw new Error('Expected a bounded range.')
         }
+
         const offset = range.data.offset ?? 0
         const length = range.data.length ?? bytes.byteLength - offset
         ranges.push({ offset, length })
+
         return {
           arrayBuffer: async () => bytes.slice(offset, offset + length),
         }
@@ -215,6 +236,7 @@ test('inspects R2 metadata through bounded ranged reads', async () => {
   }).catch((error) => {
     throw new Error(error instanceof Error ? error.message : 'metadata failure')
   })
+
   expect(inspected).toMatchObject({ sampleRate: 44_100, channelCount: 2 })
   expect(ranges.length).toBeGreaterThan(0)
   expect(ranges.every((range) => range.length <= 8 * 1024 * 1024)).toBeTrue()

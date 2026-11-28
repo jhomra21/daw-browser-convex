@@ -35,6 +35,7 @@ test('deleteClips exposes permanent shared rejection without reporting optimisti
     async () => new Response('clip no longer exists', { status: 400 }),
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     await expect(createTimelineClipWriteAdapter({
       projectId: `shared-delete-rejection-${crypto.randomUUID()}`,

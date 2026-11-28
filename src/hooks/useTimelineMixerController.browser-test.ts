@@ -35,15 +35,18 @@ describe('useTimelineMixerController browser reactivity', () => {
           let dispose: () => void = () => undefined
           const history: HistoryEntry[] = []
           const failures: string[] = []
+
           const [serverTrackState, setServerTrackState] = createSignal({
             serverVolumes: new Map([[originalTrackId, 0.8]]),
             serverMuted: new Map([[originalTrackId, initial]]),
             serverSoloed: new Map([[originalTrackId, initial]]),
             serverRouting: new Map(),
           })
+
           try {
             const controller = createRoot((cleanup) => {
               dispose = cleanup
+
               return useTimelineMixerController({
                 projectId: () => projectId,
                 userId: () => '',
@@ -61,6 +64,7 @@ describe('useTimelineMixerController browser reactivity', () => {
                 serverTrackState,
               })
             })
+
             // Let the initial project-scope effect and its flush settle.
             await Bun.sleep(0)
             const first = muteFirst ? controller.handleToggleTrackMute : controller.handleToggleTrackSolo
@@ -69,6 +73,7 @@ describe('useTimelineMixerController browser reactivity', () => {
             expect(controller.pendingSharedTrackMix().get(originalTrackId)).toEqual(
               muteFirst ? { muted: !initial } : { soloed: !initial },
             )
+
             if (separated) {
               // Bounded wait for the production 150 ms debounce; no polling.
               await Bun.sleep(200)
@@ -77,15 +82,18 @@ describe('useTimelineMixerController browser reactivity', () => {
               expect(firstSaved?.muted).toBe(muteFirst ? !initial : initial)
               expect(firstSaved?.soloed).toBe(muteFirst ? initial : !initial)
             }
+
             second(originalTrackId)
             expect(controller.pendingSharedTrackMix().get(originalTrackId)).toEqual({
               muted: !initial,
               soloed: !initial,
             })
+
             if (!separated) {
               // loadSnapshot flushes pending writes, so do not read it here.
               expect(history).toHaveLength(0)
             }
+
             await Bun.sleep(200)
             expect(history).toHaveLength(2)
             const saved = (await repository.loadSnapshot()).tracks[0]
@@ -93,6 +101,7 @@ describe('useTimelineMixerController browser reactivity', () => {
             expect(saved?.soloed).toBe(!initial)
             expect(failures).toEqual([])
             expect(new Set(history.map((entry) => entry.type))).toEqual(new Set(['track-mute', 'track-solo']))
+
             for (const entry of history) {
               if (entry.type !== 'track-mute' && entry.type !== 'track-solo') throw new Error('Unexpected history entry')
               expect(entry.data).toMatchObject({ scope: 'shared', from: initial, to: !initial })
@@ -127,16 +136,20 @@ describe('useTimelineMixerController browser reactivity', () => {
       const open = indexedDB.open
       indexedDB.open = (...args: Parameters<IDBFactory['open']>) => {
         if (args[0] === failingDbName) throw new Error('Local mix write failed.')
+
         return open.apply(indexedDB, args)
       }
+
       const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
       let dispose: () => void = () => undefined
       const history: HistoryEntry[] = []
       const failures: Array<{ projectId: string; message: string }> = []
       const [projectId, setProjectId] = createSignal(projectA)
+
       try {
         const controller = createRoot((cleanup) => {
           dispose = cleanup
+
           return useTimelineMixerController({
             projectId,
             userId: () => '',
@@ -154,9 +167,13 @@ describe('useTimelineMixerController browser reactivity', () => {
             serverTrackState: () => null,
           })
         })
+
         await Bun.sleep(0)
+
         if (write === 'volume') controller.setTrackVolume(originalTrackId, 0.4)
+
         if (write === 'mute') controller.handleToggleTrackMute(originalTrackId)
+
         if (write === 'routing') controller.updateTrackSends(originalTrackId, [{ targetId: returnTrackId, amount: 0.5 }])
         // Switching flushes the debounced project-A write; its failure settles after B is current.
         setProjectId(projectB)
@@ -176,17 +193,20 @@ describe('useTimelineMixerController browser reactivity', () => {
     await new Promise<void>((resolve, reject) => createRoot((dispose) => {
       const [tracks, setTracks] = createSignal<Track[]>([track(originalTrackId)])
       const [optimisticTrackIds, setOptimisticTrackIds] = createSignal<Set<Track['id']>>(new Set([originalTrackId]))
+
       const [serverTrackState, setServerTrackState] = createSignal({
         serverVolumes: new Map<Track['id'], number>([[originalTrackId, 0.8]]),
         serverMuted: new Map<Track['id'], boolean>(),
         serverSoloed: new Map<Track['id'], boolean>(),
         serverRouting: new Map(),
       })
+
       const localMix = {
         byTrackId: () => ({}),
         apply: (_trackId: Track['id'], _patch: LocalMixPatch) => undefined,
         persist: (_trackId: Track['id'], _patch: LocalMixPatch) => undefined,
       }
+
       const controller = useTimelineMixerController({
         projectId: () => 'project:local-mixer-retention',
         userId: () => 'user:local',

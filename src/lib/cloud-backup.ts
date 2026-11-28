@@ -42,12 +42,15 @@ const cloudAssetDeleteKeyRange = () => IDBKeyRange.bound(CLOUD_ASSET_DELETE_PREF
 
 const readPendingDeletedCloudAssetRows = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
+
   return await db.getAll('syncState', cloudAssetDeleteKeyRange())
 }
 
 const readPendingDeletedCloudAssetKey = (row: LocalProjectSyncStateRow): string | null => {
   const cloudKey = z.string().safeParse(row.value)
+
   if (cloudKey.success) return cloudKey.data
+
   return isCloudIdMappingValue(row.value) ? row.value.cloudId : null
 }
 
@@ -58,16 +61,19 @@ const readNumber = (value: JsonValue): number | undefined => (
 const readStringRecord = (value: JsonValue): Record<string, string> | undefined => {
   if (!isJsonObject(value)) return undefined
   const result: Record<string, string> = {}
+
   for (const [key, entry] of Object.entries(value)) {
     if (!key || !isJsonString(entry) || !entry) return undefined
     result[key] = entry
   }
+
   return result
 }
 
 const readStringArray = (value: JsonValue): string[] | undefined => {
   if (!Array.isArray(value)) return undefined
   const result = value.filter((entry): entry is string => isJsonString(entry) && entry.length > 0)
+
   return result.length === value.length ? result : undefined
 }
 
@@ -79,6 +85,7 @@ const readBackupConflict = (value: JsonValue): BackupResult['conflict'] | undefi
   const cloudEntityCount = readNumber(value.cloudEntityCount)
   const localAssetCount = readNumber(value.localAssetCount)
   const cloudAssetCount = readNumber(value.cloudAssetCount)
+
   if (
     localUpdatedAt === undefined ||
     cloudUpdatedAt === undefined ||
@@ -89,6 +96,7 @@ const readBackupConflict = (value: JsonValue): BackupResult['conflict'] | undefi
   ) {
     return undefined
   }
+
   return {
     localUpdatedAt,
     cloudUpdatedAt,
@@ -102,21 +110,30 @@ const readBackupConflict = (value: JsonValue): BackupResult['conflict'] | undefi
 const readBackupResult = (value: JsonValue): BackupResult | null => {
   if (!isJsonObject(value) || !isJsonBoolean(value.ok)) return null
   const result: BackupResult = { ok: value.ok }
+
   if (isJsonString(value.manifestVersion)) result.manifestVersion = value.manifestVersion
   const uploadedAssetKeys = readStringRecord(value.uploadedAssetKeys)
+
   if (uploadedAssetKeys) result.uploadedAssetKeys = uploadedAssetKeys
   const deletedAssetKeys = readStringArray(value.deletedAssetKeys)
+
   if (deletedAssetKeys) result.deletedAssetKeys = deletedAssetKeys
   const conflict = readBackupConflict(value.conflict)
+
   if (conflict) result.conflict = conflict
+
   if (isJsonString(value.error)) result.error = value.error
+
   if (value.ok && value.uploadedAssetKeys !== undefined && !uploadedAssetKeys) return null
+
   if (!value.ok && value.conflict !== undefined && !conflict) return null
+
   return result
 }
 
 const readCloudBackupSnapshot = (value: JsonValue): CloudBackupSnapshot | null => {
   if (!isJsonObject(value) || !isJsonString(value.manifestVersion)) return null
+
   try {
     return {
       manifest: normalizeProjectManifest(value.manifest),
@@ -135,6 +152,7 @@ const readLastBackedUpProjectUpdatedAt = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY)
   const parsed = finiteNumberSchema.safeParse(row?.value)
+
   return parsed.success ? parsed.data : undefined
 }
 
@@ -142,12 +160,14 @@ const readLastBackedUpManifestVersion = async (projectId: string) => {
   const db = await openLocalProjectDb(projectId)
   const row = await db.get('syncState', LAST_BACKED_UP_MANIFEST_VERSION_KEY)
   const parsed = z.string().safeParse(row?.value)
+
   return parsed.success ? parsed.data : undefined
 }
 
 const readPendingDeletedCloudAssetKeys = async (projectId: string): Promise<string[]> => {
   return (await readPendingDeletedCloudAssetRows(projectId)).flatMap((row) => {
     const cloudKey = readPendingDeletedCloudAssetKey(row)
+
     return cloudKey === null ? [] : [cloudKey]
   })
 }
@@ -158,8 +178,10 @@ export const disableProjectBackup = async (projectId: string) => {
 
 const cloudAssetSourceRows = (manifest: ProjectManifest): LocalProjectSyncStateRow[] => {
   const updatedAt = Date.now()
+
   return manifest.assets.flatMap((asset) => {
     if (!asset.cloudKey) return []
+
     return [{
       key: `cloud-source:asset:${asset.id}`,
       value: asset.cloudKey,
@@ -179,6 +201,7 @@ const backupBookkeepingRows = (
   manifestVersion: string,
 ): LocalProjectSyncStateRow[] => {
   const updatedAt = Date.now()
+
   return [
     {
       key: LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY,
@@ -228,6 +251,7 @@ const applyCloudBackupCommit = async (
       : []),
     ...pendingDeletedRows.flatMap((row) => {
       const cloudKey = readPendingDeletedCloudAssetKey(row)
+
       return cloudKey && deleted.has(cloudKey) ? [tx.objectStore('syncState').delete(row.key)] : []
     }),
     tx.done,
@@ -248,13 +272,16 @@ const restoreSyncRows = (
 
 const restoredExternalPluginArtifacts = (manifest: ProjectManifest) => {
   const updatedAt = Date.now()
+
   return manifest.externalPluginArtifacts.map((artifact) => ({ ...artifact, updatedAt }))
 }
 
 const fetchCloudBackupSnapshot = async (projectId: string): Promise<CloudBackupSnapshot> => {
   const response = await fetch(`/api/cloud-backups/${encodeURIComponent(projectId)}`)
   const snapshot = readCloudBackupSnapshot(await response.json().catch(() => null))
+
   if (!response.ok || !snapshot) throw new Error('Cloud backup could not be loaded.')
+
   return snapshot
 }
 
@@ -263,6 +290,7 @@ export const restoreCloudBackupToLocalProject = async (
 ): Promise<string> => {
   const { manifest, manifestVersion } = await fetchCloudBackupSnapshot(projectId)
   const assets = manifest.assets.map(({ cloudKey: _cloudKey, ...asset }) => asset)
+
   const project = {
     ...createRestoredProjectEntry(manifest),
     id: projectId,
@@ -270,6 +298,7 @@ export const restoreCloudBackupToLocalProject = async (
     updatedAt: manifest.updatedAt,
     lastOpenedAt: Date.now(),
   }
+
   await replaceLocalProject(project, {
     entities: manifest.entities,
     assets,
@@ -277,6 +306,7 @@ export const restoreCloudBackupToLocalProject = async (
     syncState: restoreSyncRows(manifest, manifestVersion, { linkAssetsForBackup: true }),
     externalPluginArtifacts: restoredExternalPluginArtifacts(manifest),
   })
+
   return projectId
 }
 
@@ -287,12 +317,14 @@ export const duplicateCloudBackupAsLocalProject = async (
   const localProjectId = createProjectId()
   const duplicatedManifest = { ...manifest, projectId: localProjectId }
   const assets = duplicatedManifest.assets.map(({ cloudKey: _cloudKey, ...asset }) => asset)
+
   const project = {
     ...createRestoredProjectEntry(duplicatedManifest, `${manifest.name} Copy`),
     id: localProjectId,
     mode: 'local-only' as const,
     updatedAt: manifest.updatedAt,
   }
+
   await importLocalProject(project, {
     entities: duplicatedManifest.entities,
     assets,
@@ -300,17 +332,21 @@ export const duplicateCloudBackupAsLocalProject = async (
     syncState: cloudAssetSourceRows(manifest),
     externalPluginArtifacts: restoredExternalPluginArtifacts(duplicatedManifest),
   })
+
   return localProjectId
 }
 
 const appendProjectAssets = async (form: FormData, projectId: string, manifest: ProjectManifest): Promise<void> => {
   const assets = manifest.assets.filter((asset) => !asset.missing && !asset.cloudKey)
+
   for (let index = 0; index < assets.length; index += 2) {
     await Promise.all(assets.slice(index, index + 2).map(async (asset) => {
       const result = await readLocalAssetBytes(projectId, asset.id)
+
       if (result.status !== 'ready') {
         throw new Error(`Could not read asset ${asset.id} for backup.`)
       }
+
       form.append(`asset:${asset.id}`, result.file)
     }))
   }
@@ -326,6 +362,7 @@ export const runProjectBackup = async (
     assertProjectManifestPublishIntegrity(manifest)
     const baseManifestVersion = await readLastBackedUpManifestVersion(projectId)
     const pendingDeletedCloudKeys = await readPendingDeletedCloudAssetKeys(projectId)
+
     if (
       options.skipIfUnchanged &&
       pendingDeletedCloudKeys.length === 0 &&
@@ -334,31 +371,40 @@ export const runProjectBackup = async (
     ) {
       return { ok: true }
     }
+
     const form = new FormData()
     form.set('projectId', projectId)
     form.set('manifest', JSON.stringify(manifest))
     form.set('conflictAction', conflictAction)
+
     if (baseManifestVersion) form.set('baseManifestVersion', baseManifestVersion)
+
     if (pendingDeletedCloudKeys.length > 0) {
       form.set('pendingDeletedCloudKeys', JSON.stringify(pendingDeletedCloudKeys))
     }
+
     await appendProjectAssets(form, projectId, manifest)
 
     for (let attempt = 0; attempt < 4; attempt++) {
       try {
         const response = await fetch('/api/cloud-backups', { method: 'POST', body: form })
         const data = readBackupResult(await response.json().catch(() => null))
+
         if (response.status === 409 && data?.conflict) return data
+
         if (!response.ok || !data?.ok) throw new Error(data?.error ?? 'Backup failed.')
         await applyCloudBackupCommit(projectId, manifest, data)
+
         return data
       } catch (error) {
         if (attempt === 3) {
           return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }
         }
+
         await sleep(Math.min(8000, 500 * 2 ** attempt))
       }
     }
+
     return { ok: false, error: 'Backup failed.' }
   } catch (error) {
     return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }

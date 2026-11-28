@@ -10,6 +10,7 @@ describe('master FX publication recovery transitions', () => {
     const f = createFxTransitionHarness('master')
     let fail = false
     const subscription = { unsubscribe: () => {} }
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -39,6 +40,7 @@ describe('master FX publication recovery transitions', () => {
     let fail = false
     const subscription = { unsubscribe: () => {} }
     const frames: number[] = []
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -48,6 +50,7 @@ describe('master FX publication recovery transitions', () => {
           fail = false
           throw new Error('Later meter reset failed.')
         }
+
         frames.push(frame.gainReductionDb)
       })
       await f.set([h, eqInstance(0, 'e')])
@@ -57,6 +60,7 @@ describe('master FX publication recovery transitions', () => {
       f.timers.run()
       expect((await f.set(next)).disposition).toBe('applied')
       const onmessage = f.audio.workletNode(1)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 7 } }))
       expect(frames).toContain(7)
@@ -69,6 +73,7 @@ describe('master FX publication recovery transitions', () => {
 
   test('preserves the publication mark when a pending reconnect throws after an in-place edit', async () => {
     const f = createFxTransitionHarness('master')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), staticGateInstance(-40, 4, 'h'), eqInstance(0, 'e')])
       f.timers.run()
@@ -88,6 +93,7 @@ describe('master FX publication recovery transitions', () => {
 
   test('fault bypass drains retirement owned by the superseded reconnect', async () => {
     const f = createFxTransitionHarness('master')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), staticGateInstance(-40, 4, 'h')])
       f.timers.run()
@@ -105,6 +111,7 @@ describe('master FX publication recovery transitions', () => {
     const f = createFxTransitionHarness('master')
     let fail = false
     const subscription = { unsubscribe: () => {} }
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -132,6 +139,7 @@ describe('master FX publication recovery transitions', () => {
     let fail = false
     const subscription = { unsubscribe: () => {} }
     const frames: number[] = []
+
     try {
       const h = staticGateInstance(-40, 4, 'h')
       await f.set([staticGateInstance(-40, 4, 'g'), h, eqInstance(0, 'e')])
@@ -141,6 +149,7 @@ describe('master FX publication recovery transitions', () => {
           fail = false
           throw new Error('Meter rebind reset failed.')
         }
+
         frames.push(frame.gainReductionDb)
       })
       fail = true
@@ -148,6 +157,7 @@ describe('master FX publication recovery transitions', () => {
       expect((await f.set([h, eqInstance(6, 'e')])).disposition).toBe('applied')
       f.timers.run()
       const onmessage = f.audio.workletNode(1)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 7 } }))
       expect(frames).toContain(7)
@@ -160,6 +170,7 @@ describe('master FX publication recovery transitions', () => {
 
   test('a fade-in ramp failure preserves the pending publication for an equal retry', async () => {
     const f = createFxTransitionHarness('master')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -174,6 +185,7 @@ describe('master FX publication recovery transitions', () => {
 
   test('a fade-out ramp failure keeps the publication retryable', async () => {
     const f = createFxTransitionHarness('master')
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g'), eqInstance(0, 'e')])
       f.timers.run()
@@ -215,13 +227,17 @@ describe('master effect chain delivery', () => {
     const audio = createFxTestAudio()
     const timers = captureFxTransitions()
     const counting = createCountingBudget(refuseCommit)
+
     const workletBudget = ignoreBudgetCurrency
       ? { ...counting.budget, isCurrent: () => true, commit: () => true }
       : counting.budget
+
     const runtime = createMasterFxRuntime({ getFaultGeneration: () => 0, workletBudget, transitionScheduler: timers.scheduler })
     cleanups.push(audio.restore, runtime.close, timers.restore)
+
     const set = (instances: Parameters<typeof runtime.setFxInstances>[3]) =>
       runtime.setFxInstances(audio.context, audio.masterInput, audio.context.destination, instances)
+
     return { audio, runtime, set, begins: counting.begins, refuseCommits: counting.refuseCommits, timers }
   }
 
@@ -237,6 +253,7 @@ describe('master effect chain delivery', () => {
 
   test('a chain over the worklet limit rejects and keeps the installed chain', async () => {
     const f = createFxTransitionHarness('master')
+
     try {
       await f.set([eqInstance(0, 'e')])
       const gates = Array.from({ length: 9 }, (_, index) => staticGateInstance(-40, 4, `g${index}`))
@@ -251,10 +268,12 @@ describe('master effect chain delivery', () => {
     const f = createFxTransitionHarness('master')
     const frames: number[] = []
     const unsubscribe = f.master.subscribeGateMeter('g', (frame) => frames.push(frame.gainReductionDb))
+
     try {
       await f.set([staticGateInstance(-40, 4, 'g')])
       f.timers.run()
       const onmessage = f.audio.workletNode(0)?.port.onmessage
+
       if (!onmessage) throw new Error('No meter port callback.')
       onmessage(new MessageEvent('message', { data: { type: 'meter', gainReductionDb: 5 } }))
       expect(frames).toContain(5)
@@ -320,6 +339,7 @@ describe('master effect chain delivery', () => {
     const rampsBeforeReconnect = audio.gainRampCount()
     const oldGate = audio.workletNode(0)
     const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
     if (!oldGate || !input) throw new Error('Missing connected gate input.')
 
     expect(await set([eqInstance(0, 'eq')])).toMatchObject({ disposition: 'applied' })
@@ -352,6 +372,7 @@ describe('master effect chain delivery', () => {
     const { audio, runtime, set, timers } = createChainRuntime()
     await set([staticGateInstance(-40, 4, 'gate'), eqInstance(0, 'eq')])
     timers.run()
+
     try {
       expect((await set([eqInstance(0, 'eq')])).disposition).toBe('applied')
       const rampsAfterRequest = audio.gainRampCount()
@@ -496,6 +517,7 @@ describe('master effect chain delivery', () => {
       test(`${name}: a write that fails partway is repaired by returning to the previous value`, async () => {
         const { audio, runtime, set, timers } = createChainRuntime()
         const edit = cases(audio, runtime).find((entry) => entry.name === name)
+
         if (!edit) throw new Error(`No case ${name}`)
         await set([edit.before])
         edit.arm()
@@ -510,6 +532,7 @@ describe('master effect chain delivery', () => {
       test(`${name}: a write that fails partway is repaired by retrying the new value`, async () => {
         const { audio, runtime, set } = createChainRuntime()
         const edit = cases(audio, runtime).find((entry) => entry.name === name)
+
         if (!edit) throw new Error(`No case ${name}`)
         await set([edit.before])
         edit.arm()
@@ -555,6 +578,7 @@ describe('master effect chain delivery', () => {
       const { audio, set, timers } = createChainRuntime()
       const gate = staticGateInstance(-40, 4, 'gate')
       const delay = syncedDelayInstance('delay')
+
       if (delay.kind !== 'delay') throw new Error('Expected delay fixture.')
       await set([gate, delay])
       await set([delay])
@@ -591,6 +615,7 @@ describe('master effect chain delivery', () => {
       timers.run()
       const oldGate = audio.workletNode(0)
       const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
       if (!oldGate || !input) throw new Error('Missing connected gate input.')
 
       audio.failNextParameterWrite(audio.biquads[2]?.gain)
@@ -615,13 +640,16 @@ describe('master effect chain delivery', () => {
           failRamp = false
           throw new Error('Routing ramp failed.')
         }
+
         return node
       }
+
       try {
         await set([staticGateInstance(-40, 4, 'gate'), eqInstance(0, 'eq')])
         timers.run()
         const oldGate = audio.workletNode(0)
         const input = audio.connections().find((connection) => connection.target === oldGate)?.source
+
         if (!oldGate || !input) throw new Error('Missing connected gate input.')
         failRamp = true
 
@@ -640,6 +668,7 @@ describe('master effect chain delivery', () => {
       const { audio, runtime, set } = createChainRuntime()
       const delay = syncedDelayInstance('delay')
       const gate = staticGateInstance(-20, 8, 'gate')
+
       if (delay.kind !== 'delay') throw new Error('Expected delay fixture.')
       await set([staticGateInstance(-40, 4, 'gate'), delay])
       await set([delay])
@@ -683,14 +712,17 @@ describe('master effect chain delivery', () => {
         const { audio, runtime, set } = createChainRuntime()
         const first = syncedDelayInstance('first')
         const second = syncedDelayInstance('second')
+
         if (first.kind !== 'delay' || second.kind !== 'delay') throw new Error('Expected delay fixtures.')
         const initial = wholeChain ? [first, second] : [first]
+
         const requested = wholeChain
           ? [
             { ...first, params: { ...first.params, feedback: 0.7 } },
             { ...second, params: { ...second.params, feedback: 0.7 } },
           ]
           : [{ ...first, params: { ...first.params, feedback: 0.7 } }]
+
         await set(initial)
         const pending = set(requested)
         audio.failNextParameterWrite(audio.delays[1]?.delayTime)
@@ -706,6 +738,7 @@ describe('master effect chain delivery', () => {
 
     test('one delay tempo failure does not stop other instances from updating', async () => {
       const { audio, runtime, set } = createChainRuntime()
+
       try {
         await set([syncedDelayInstance('failed'), syncedDelayInstance('healthy')])
         audio.failNextParameterWrite(audio.delays[1]?.delayTime)
@@ -738,6 +771,7 @@ describe('master effect chain delivery', () => {
     const awaitingContext = () => {
       const harness = createChainRuntime()
       const replay = () => harness.runtime.applyPending(harness.audio.context, harness.audio.masterInput, harness.audio.context.destination)
+
       return { ...harness, replay }
     }
 

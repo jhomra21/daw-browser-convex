@@ -59,6 +59,7 @@ export function useTimelineSelectionState(
 
   createEffect(() => {
     const nextTracks = options.tracks()
+
     const currentSelection: TimelineSelectionState = {
       selectedTrackId: selectedTrackId(),
       selectedClip: selectedClip(),
@@ -66,10 +67,13 @@ export function useTimelineSelectionState(
       selectedFXTarget: selectedFXTarget(),
       rangeSelection: rangeSelection(),
     }
+
     const reconciledSelection = reconcileTimelineSelection(nextTracks, currentSelection)
+
     const nextSelection = !reconciledSelection.selectedTrackId && reconciledSelection.selectedFXTarget !== 'master' && nextTracks.length > 0
       ? { ...reconciledSelection, selectedTrackId: nextTracks[0].id }
       : reconciledSelection
+
     if (isTimelineSelectionEqual(currentSelection, nextSelection)) return
     batch(() => {
       setSelectedTrackId(nextSelection.selectedTrackId)
@@ -83,14 +87,19 @@ export function useTimelineSelectionState(
   let lastFxTargetForPanel: string | null = null
   createEffect(() => {
     const panel = options.effectsPanel
+
     if (!panel) return
     const fx = selectedFXTarget()
     const currentSelectedClip = selectedClip()
     const changed = fx !== lastFxTargetForPanel
     lastFxTargetForPanel = fx
+
     if (panel.isOpen() || !changed) return
+
     if (!fx || fx === 'master') return
+
     if (!currentSelectedClip) return
+
     if (currentSelectedClip.trackId === fx) {
       panel.setOpen(true)
     }

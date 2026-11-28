@@ -66,6 +66,7 @@ test('bounds an extreme-zoom selection overlay to the viewport', () => {
     viewportWidthPx: 1000,
     pixelsPerSecond: 480_000,
   })
+
   expect(projection?.leftPx).toBe(0)
   expect(projection?.widthPx).toBeCloseTo(1000)
   expect(projection?.widthPx).toBeLessThanOrEqual(1000)
@@ -78,6 +79,7 @@ test('bounds a collapsed long clip overlay to the viewport', () => {
     viewportWidthPx: 800,
     pixelsPerSecond: 480_000,
   })
+
   expect(projection).toEqual({ leftPx: 0, widthPx: 800 })
   expect(projection?.widthPx).toBeLessThanOrEqual(800)
 })

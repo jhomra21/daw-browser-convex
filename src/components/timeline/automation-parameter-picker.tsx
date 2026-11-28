@@ -24,31 +24,40 @@ const selectionKey = (target: AutomationTarget, selection: AutomationParameterSe
 
 const groupParameterOptions = (parameterOptions: ReturnType<typeof getAutomationParameterOptionsForTarget>) => {
   const groups: Array<{ group: string; devices: Array<{ device: string; options: typeof parameterOptions }> }> = []
+
   for (const option of parameterOptions) {
     let group = groups.find((entry) => entry.group === option.group)
+
     if (!group) {
       group = { group: option.group, devices: [] }
       groups.push(group)
     }
+
     let device = group.devices.find((entry) => entry.device === option.device)
+
     if (!device) {
       device = { device: option.device, options: [] }
       group.devices.push(device)
     }
+
     device.options.push(option)
   }
+
   return groups
 }
 
 export default function AutomationParameterPicker(props: AutomationParameterPickerProps) {
   const [open, setOpen] = createSignal(false)
   let rootRef: HTMLDivElement | undefined
+
   const parameterOptions = createMemo(() => getAutomationParameterOptionsForTarget(
     props.effects,
     props.target.kind === 'track' ? props.target.trackId : undefined,
   ))
+
   const groupedParameterOptions = createMemo(() => groupParameterOptions(parameterOptions()))
   const selectedTargetKey = createMemo(() => selectionKey(props.target, props.value))
+
   const selectedOption = createMemo(() => parameterOptions().find(
     (option) => selectionKey(props.target, option) === selectedTargetKey(),
   ))
@@ -102,6 +111,7 @@ export default function AutomationParameterPicker(props: AutomationParameterPick
                         {(option) => {
                           const targetKey = () => selectionKey(props.target, option)
                           const automated = () => props.automatedTargetKeys?.has(targetKey()) ?? false
+
                           return (
                             <button
                               type="button"

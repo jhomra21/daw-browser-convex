@@ -8,11 +8,14 @@ export function pruneMapToKeys<TId extends string, T>(
   existingKeys: Set<TId>,
 ) {
   let next: Map<TId, T> | null = null
+
   for (const [key] of current) {
     if (existingKeys.has(key)) continue
+
     if (!next) next = new Map(current)
     next.delete(key)
   }
+
   return next ?? current
 }
 
@@ -22,13 +25,17 @@ export function reuseMapIfEqual<TId extends string, T>(
   areEqual: (left: T, right: T | undefined) => boolean,
 ) {
   if (!previous) return next
+
   if (previous.size !== next.size) return next
+
   for (const [key, value] of previous) {
     const nextValue = next.get(key)
+
     if (!next.has(key) || !areEqual(value, nextValue)) {
       return next
     }
   }
+
   return previous
 }
 

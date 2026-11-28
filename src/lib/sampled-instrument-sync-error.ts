@@ -18,6 +18,7 @@ const followReplacement = async (sync: Promise<EngineDisposition>): Promise<Engi
   } catch (cause) {
     if (!(cause instanceof SampledInstrumentSyncSupersededError)) throw cause
     await cause.replacement
+
     return 'superseded'
   }
 }
@@ -32,12 +33,15 @@ export const replaceSampledInstrumentSync = (
   register?: (replacement: Promise<EngineDisposition>) => void,
 ): Promise<EngineDisposition> => {
   let start = () => {}
+
   const replacement = followReplacement(new Promise<EngineDisposition>((resolve, reject) => {
     start = () => { void run().then(resolve, reject) }
   }))
+
   register?.(replacement)
   previous?.abort(new SampledInstrumentSyncSupersededError(replacement))
   start()
+
   return replacement
 }
 

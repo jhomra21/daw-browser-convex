@@ -8,11 +8,14 @@ type Port = {
   postMessage: (message: PortMessage) => void
   close: () => void
 }
+
 type Processor = {
   port: Port
   process: (inputs: Float32Array[][], outputs: Float32Array[][], parameters: Record<string, Float32Array>) => boolean
 }
+
 type ProcessorConstructor = new () => Processor
+
 type UtilityState = {
   enabled: boolean
   polarity: string
@@ -21,16 +24,19 @@ type UtilityState = {
   swap: boolean
   dcBlock: boolean
 }
+
 type GateState = {
   enabled: boolean
   mode: string
   detector: string
   sidechain: { enabled: boolean; frequencyHz: number; q: number }
 }
+
 type WorkletMessage =
   | { type: 'configure'; version: number; revision: number; state: UtilityState | GateState }
   | { type: 'metering'; version: number; enabled: boolean }
   | { type: 'reset'; version: number }
+
 type PortMessage =
   | WorkletMessage
   | { type: 'fault'; version: number; code: string }
@@ -41,6 +47,7 @@ const publicRoot = new URL('../../../../public/', import.meta.url)
 const loadProcessor = async (modulePath: string, processorName: string, sampleRate: number) => {
   const source = await Bun.file(new URL(modulePath, publicRoot)).text()
   const registered = new Map<string, ProcessorConstructor>()
+
   class FakeAudioWorkletProcessor {
     port: Port = {
       onmessage: null,
@@ -50,24 +57,29 @@ const loadProcessor = async (modulePath: string, processorName: string, sampleRa
       close: () => { this.port.closed = true },
     }
   }
+
   new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
     FakeAudioWorkletProcessor,
     (name: string, processor: ProcessorConstructor) => registered.set(name, processor),
     sampleRate,
   )
   const Constructor = registered.get(processorName)
+
   if (!Constructor) throw new Error(`${processorName} did not register.`)
+
   return new Constructor()
 }
 
 const configure = (processor: Processor, state: UtilityState | GateState) => {
   const onmessage = processor.port.onmessage
+
   if (!onmessage) throw new Error('Processor message handler is unavailable.')
   onmessage({ data: { type: 'configure', version: 1, revision: 1, state } })
 }
 
 const message = (processor: Processor, data: WorkletMessage) => {
   const onmessage = processor.port.onmessage
+
   if (!onmessage) throw new Error('Processor message handler is unavailable.')
   onmessage({ data })
 }
@@ -120,12 +132,15 @@ const renderUtility = async (
   configure(processor, state)
   const output = [new Float32Array(left.length), new Float32Array(left.length)]
   processor.process([[left, ...(right ? [right] : [])]], [output], params)
+
   return { processor, output }
 }
 
 const maxError = (actual: Float32Array, expected: Float32Array) => {
   let result = 0
+
   for (let index = 0; index < actual.length; index += 1) result = Math.max(result, Math.abs(actual[index] - expected[index]))
+
   return result
 }
 

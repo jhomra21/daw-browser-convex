@@ -1,4 +1,5 @@
 export type ExportAudioFormat = 'wav' | 'mp3' | 'ogg-opus' | 'flac'
+
 export type LossyExportAudioFormat = 'mp3' | 'ogg-opus'
 
 type ExportAudioFormatMetadata = {

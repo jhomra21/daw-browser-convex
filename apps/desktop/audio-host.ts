@@ -80,7 +80,9 @@ export const nativeHostConfigurationIdentityFor = (
   host: { pid?: number; generation: number },
 ) => {
   if (host.pid === undefined) return undefined
+
   if (previous?.pid === host.pid && previous.generation === host.generation) return previous
+
   return { pid: host.pid, generation: host.generation, configurationGeneration: 0 }
 }
 
@@ -147,6 +149,7 @@ const {
   vstScheduleAutomationEnable: vstScheduleAutomationEnableType,
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
+
 const requiredHostCapabilities = 0x000003ff
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
@@ -161,17 +164,25 @@ export const isNativeOfflineTelemetryFrame = (frameType: number) => (
 
 const deviceState = (value: number): AudioHostHello["deviceState"] | undefined => {
   if (value === 0) return "idle"
+
   if (value === 1) return "configured"
+
   if (value === 2) return "running"
+
   if (value === 3) return "faulted"
+
   return undefined
 }
 
 const readinessReason = (value: number): AudioHostHello["readinessReason"] | undefined => {
   if (value === 0) return "ready"
+
   if (value === 1) return "device-not-configured"
+
   if (value === 2) return "graph-not-prepared"
+
   if (value === 3) return "transport-not-prepared"
+
   return undefined
 }
 
@@ -180,17 +191,20 @@ const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 
 const writeUnsigned32 = (value: number) => {
   const bytes = Buffer.alloc(4)
   bytes.writeUInt32BE(value)
+
   return bytes
 }
 
 const writeUnsigned64 = (value: bigint) => {
   const bytes = Buffer.alloc(8)
   bytes.writeBigUInt64BE(value)
+
   return bytes
 }
 
 const serializeDeviceConfiguration = (input: NativeHostDeviceConfiguration) => {
   const deviceId = Buffer.from(input.deviceId, "utf8")
+
   if (
     deviceId.byteLength === 0
     || deviceId.byteLength > maximumDeviceIdBytes
@@ -200,6 +214,7 @@ const serializeDeviceConfiguration = (input: NativeHostDeviceConfiguration) => {
     || !unsigned32(input.channelCount) || input.channelCount === 0
     || !unsigned32(input.revision) || input.revision === 0
   ) return undefined
+
   return Buffer.concat([
     writeUnsigned32(input.sampleRateHz),
     writeUnsigned32(input.maxFramesPerBlock),
@@ -239,6 +254,7 @@ const serializeTransport = (input: NativeHostTransport) => {
   output.writeUInt32BE(input.timeSignatureDenominator ?? 0, 40)
   output.writeDoubleBE(input.cycleStartSec ?? 0, 48)
   output.writeDoubleBE(input.cycleEndSec ?? 0, 56)
+
   return output
 }
 
@@ -248,16 +264,21 @@ export type NativeRecordingSpoolConfiguration = {
   rootInode: bigint
   token: string
 }
+
 export type NativeMainRecordingStatus = NativeHostRecordingStatus & { fileDevice: bigint; fileInode: bigint }
+
 // Mirrors kHeaderBytes in native/audio-host-macos/src/main.cpp: the fixed fields, then the device UID and the root path.
 const recordingConfigurationHeaderBytes = 152
+
 const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration, spool: NativeRecordingSpoolConfiguration) => {
   if (!spool || !/^[a-f0-9]{64}$/.test(spool.token) || !path.isAbsolute(spool.rootPath)
     || spool.rootPath.includes("\0") || spool.rootDevice < 0n || spool.rootInode <= 0n
     || spool.rootDevice > 0xffff_ffff_ffff_ffffn || spool.rootInode > 0xffff_ffff_ffff_ffffn) return undefined
   const root = Buffer.from(spool.rootPath, "utf8")
+
   if (root.byteLength > 4096) return undefined
   const deviceUid = Buffer.from(input.deviceUid, "utf8")
+
   if (
     !unsigned32(input.generation) || input.generation === 0
     || input.sessionId <= 0n || input.sessionId > 0xffff_ffff_ffff_ffffn
@@ -293,6 +314,7 @@ const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration
   output.writeBigUInt64BE(input.targetNodeId, 144)
   output.set(deviceUid, recordingConfigurationHeaderBytes)
   output.set(root, recordingConfigurationHeaderBytes + deviceUid.byteLength)
+
   return output
 }
 
@@ -305,6 +327,7 @@ const nativeBinaryPayload = (payload: Uint8Array, minimumBytes: number) => (
 const serializeAssetInstall = (input: NativeHostPcmAsset) => {
   const hash = input.contentHashPrefix ?? new Uint8Array(8)
   const expectedPcmBytes = input.frameCount * input.channelCount * 4
+
   if (
     !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
     || !unsigned32(input.frameCount) || input.frameCount === 0 || input.frameCount > maximumAssetFrames
@@ -322,6 +345,7 @@ const serializeAssetInstall = (input: NativeHostPcmAsset) => {
   output.writeUInt32BE(input.channelCount, 12)
   output.set(hash, 16)
   output.set(input.planarPcm, assetInstallHeaderBytes)
+
   return output
 }
 
@@ -361,6 +385,7 @@ const fingerprintBytes = (value: string) => /^[a-f0-9]{64}$/.test(value) ? Buffe
 
 const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   const strings = [input.instanceId, input.classId, input.vendorId]
+
   if (
     !strings.every((value) => Buffer.byteLength(value, "utf8") > 0 && Buffer.byteLength(value, "utf8") <= maximumVstStringBytes)
     || !input.canonicalBundlePath || !input.canonicalExecutablePath
@@ -394,12 +419,15 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   ) return undefined
   const bundleFingerprint = fingerprintBytes(input.bundleFingerprint)
   const binaryFingerprint = fingerprintBytes(input.binaryFingerprint)
+
   if (!bundleFingerprint || !binaryFingerprint || bundleFingerprint.byteLength !== vstAttachFingerprintBytes || binaryFingerprint.byteLength !== vstAttachFingerprintBytes) {
     return undefined
   }
+
   const encodedStrings = [...strings, input.canonicalBundlePath, input.canonicalExecutablePath].map((value) => Buffer.from(value, "utf8"))
   const stateBytes = input.initialState?.bytes ?? new Uint8Array()
   const stateHash = input.initialState?.sha256 ?? ""
+
   if (
     stateBytes.byteLength > 512 * 1024
     || (stateBytes.byteLength === 0 && stateHash !== "" && !/^[a-f0-9]{64}$/.test(stateHash))
@@ -407,20 +435,25 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
     || (input.initialParameterValues?.length ?? 0) > 2_048
   ) return undefined
   const parameterBytes = Buffer.alloc((input.initialParameterValues?.length ?? 0) * 12)
+
   for (const [index, parameter] of (input.initialParameterValues ?? []).entries()) {
     if (!unsigned32(parameter.id) || !Number.isFinite(parameter.value) || parameter.value < 0 || parameter.value > 1) return undefined
     parameterBytes.writeUInt32BE(parameter.id, index * 12)
     parameterBytes.writeDoubleBE(parameter.value, index * 12 + 4)
   }
+
   const parameterIds = input.parameterIds ?? []
+
   if (
     new Set(parameterIds).size !== parameterIds.length
     || parameterIds.some((parameterId) => !unsigned32(parameterId))
   ) return undefined
   const parameterIdBytes = Buffer.alloc(parameterIds.length * 4)
+
   for (const [index, parameterId] of parameterIds.entries()) {
     parameterIdBytes.writeUInt32BE(parameterId, index * 4)
   }
+
   return Buffer.concat([
     ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
     writeUnsigned32(input.stageIndex),
@@ -460,9 +493,11 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
 // Only the attach record, whose fields are all big-endian, carries its own id big-endian.
 const serializeVstInstanceId = (instanceId: string) => {
   const value = Buffer.from(instanceId, "utf8")
+
   if (value.byteLength === 0 || value.byteLength > maximumVstStringBytes) return undefined
   const length = Buffer.alloc(4)
   length.writeUInt32LE(value.byteLength)
+
   return Buffer.concat([length, value])
 }
 
@@ -479,6 +514,7 @@ const serializeVstEditor = (input: {
   const height = input.height ?? 0
   const anchor = input.anchor
   const hasAnchor = anchor === undefined ? 0 : 1
+
   if (
     !command
     || instanceIdBytes.byteLength === 0
@@ -499,6 +535,7 @@ const serializeVstEditor = (input: {
   output.writeInt32BE(anchor?.x ?? 0, 16)
   output.writeInt32BE(anchor?.y ?? 0, 20)
   output.writeUInt32LE(instanceIdBytes.byteLength, 24)
+
   return Buffer.concat([output, instanceIdBytes])
 }
 
@@ -513,6 +550,7 @@ export type AudioHostHello = NativeAudioHostParkingLimits & {
 }
 
 export type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
+
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 
 type NativeWorkerNotificationBase = {
@@ -544,14 +582,18 @@ type NativeAudioHostTerminationTimers = {
 }
 
 export type NativeVstEditorCommand = "open" | "close" | "focus" | "resize" | "status"
+
 export type NativeVstEditorAnchor = { x: number; y: number }
+
 export const nativeVstEditorOwnershipProbe = (instanceId: string): NativeVstEditorOwnershipProbe => ({
   instanceId,
   command: "status",
 })
+
 const coreAudioDeviceId = (value: string): value is `coreaudio:${string}` => (
   value.startsWith("coreaudio:") && value.length > "coreaudio:".length
 )
+
 const nativeVstInstanceId = (value: string): boolean => (
   /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
 )
@@ -578,6 +620,7 @@ export class NativeAudioHostCommandError extends Error {
     this.detail = this.requestName === "instrumentStates" ? message.slice(0, 256) : undefined
   }
 }
+
 export class NativeRecordingConfigureError extends Error {
   readonly phase: "request" | "readiness"
   constructor(phase: "request" | "readiness", error: Error) {
@@ -618,6 +661,7 @@ const encodeOfflineConfigure = (plan: NativeOfflineRenderPlan) => {
   output.writeUInt32BE(plan.blockFrames, 4)
   output.writeUInt32BE(plan.channelCount, 8)
   output.writeUInt32BE(1, 12)
+
   return output
 }
 
@@ -626,6 +670,7 @@ const encodeOfflineStart = (plan: NativeOfflineRenderPlan) => {
   output.writeBigUInt64BE(BigInt(plan.totalFrames), 0)
   output.writeUInt32BE(plan.blockFrames, 8)
   output.writeUInt32BE(plan.channelCount, 12)
+
   return output
 }
 
@@ -656,33 +701,43 @@ export const createNativeOfflineStdoutPump = (input: NativeOfflineStdoutPumpInpu
   const pump = () => {
     if (stopped || sinkBusy || pumping) return
     pumping = true
+
     try {
       while (!stopped && !sinkBusy && buffer.byteLength >= headerBytes) {
         const payloadBytes = buffer.readUInt32BE(12)
+
         if (payloadBytes > maximumPayloadBytes) {
           stopped = true
           input.onError(new Error("The native offline renderer returned an oversized frame."))
+
           return
         }
+
         if (buffer.byteLength < headerBytes + payloadBytes) return
         const frame = buffer.subarray(0, headerBytes + payloadBytes)
         buffer = buffer.subarray(frame.byteLength)
+
         if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) {
           stopped = true
           input.onError(new Error("The native offline renderer returned an invalid frame."))
+
           return
         }
+
         if (!input.isPcmFrame(frame)) {
           input.onFrame(frame)
           continue
         }
+
         sinkBusy = true
         input.pause()
         void Promise.resolve().then(() => input.onPcmFrame(frame)).then(
           () => {
             sinkBusy = false
+
             if (stopped) return
             pump()
+
             if (!sinkBusy && !stopped) input.resume()
           },
           (error) => {
@@ -733,19 +788,26 @@ export const createNativeOfflineFrameMailbox = () => {
       const resolve = resolveNext
       resolveNext = undefined
       rejectNext = undefined
+
       if (resolve) {
         resolve(frame)
+
         return true
       }
+
       if (frames.length >= maximumOfflineQueuedFrames) return false
       frames.push(frame)
+
       return true
     },
     next() {
       if (terminalError) return Promise.reject<Buffer>(terminalError)
+
       if (closedError) return Promise.reject<Buffer>(closedError)
       const queued = frames.shift()
+
       if (queued) return Promise.resolve(queued)
+
       return new Promise<Buffer>((resolve, reject) => {
         resolveNext = resolve
         rejectNext = reject
@@ -793,51 +855,66 @@ export const renderNativeOffline = async (input: {
     || input.plan.schedule.byteLength === 0
   )) throw new Error("The native offline render plan is invalid.")
   input.signal.throwIfAborted()
+
   const child = spawn(input.hostPath, [], {
     env: { PATH: "/usr/bin:/bin" },
     stdio: ["pipe", "pipe", "pipe"],
   })
+
   let finished = false
   const mailbox = createNativeOfflineFrameMailbox()
   let refreshCompletionWatchdog: (() => void) | undefined
   const schedule = input.schedule ?? ((callback, delayMs) => setTimeout(callback, delayMs))
   const cancelScheduled = input.cancelScheduled ?? ((timer) => clearTimeout(timer))
   const completionInactivityMs = input.completionInactivityMs ?? nativeOfflineCompletionInactivityTimeoutMs
+
   const terminate = () => {
     if (!child.killed) child.kill()
   }
+
   const closed = new Promise<void>((resolve) => child.once("close", () => resolve()))
   let stderr = Buffer.alloc(0)
   let stderrTruncated = false
+
   const stderrText = () => {
     const text = stderr.toString("utf8").trim()
+
     return stderrTruncated ? `${text}\n[native stderr truncated]` : text
   }
+
   const withStderr = (message: string) => {
     const diagnostic = stderrText()
+
     return diagnostic ? `${message} Native stderr: ${diagnostic}` : message
   }
+
   let stopPump = () => {}
   const pendingMappedPagePromises = new Set<Promise<NativeHostMappedAssetPage>>()
   const pendingMappedPageRejectors = new Map<Promise<NativeHostMappedAssetPage>, (error: Error) => void>()
+
   const fail = (error: Error) => {
     if (finished) return
     finished = true
     mailbox.fail(error)
+
     for (const reject of pendingMappedPageRejectors.values()) reject(error)
     stopPump()
     terminate()
   }
+
   const nextFrame = () => {
     return mailbox.next()
   }
+
   const consumeOfflinePcmChunk = (frame: Buffer) => {
     const payload = frame.subarray(headerBytes)
+
     if (payload.byteLength < 16) throw new Error("The native offline renderer returned an invalid PCM chunk.")
     const startFrame = Number(frame.readBigUInt64BE(headerBytes))
     const frameCount = frame.readUInt32BE(headerBytes + 8)
     const channelCount = frame.readUInt32BE(headerBytes + 12)
     const sampleBytes = frameCount * channelCount * 4
+
     if (
       channelCount !== input.plan.channelCount
       || frameCount === 0
@@ -845,20 +922,26 @@ export const renderNativeOffline = async (input: {
       || startFrame + frameCount > input.plan.totalFrames
     ) throw new Error("The native offline renderer returned an invalid PCM chunk.")
     const samples = new Float32Array(frameCount * channelCount)
+
     for (let index = 0; index < samples.length; index += 1) {
       samples[index] = payload.readFloatBE(16 + index * Float32Array.BYTES_PER_ELEMENT)
     }
+
     const planes = Array.from({ length: channelCount }, (_, channel) => (
       samples.subarray(channel * frameCount, (channel + 1) * frameCount)
     ))
+
     return input.onChunk({ startFrame, frameCount, channelCount, planes })
   }
+
   const onStdoutFrame = (frame: Buffer) => {
     if (isNativeOfflineTelemetryFrame(frame.readUInt32BE(8))) return
+
     if (!mailbox.push(frame)) {
       fail(new Error("The native offline renderer produced frames faster than they could be consumed."))
     }
   }
+
   const pump = createNativeOfflineStdoutPump({
     onFrame: onStdoutFrame,
     onPcmFrame: async (frame) => {
@@ -870,22 +953,29 @@ export const renderNativeOffline = async (input: {
     pause: () => child.stdout.pause(),
     resume: () => child.stdout.resume(),
   })
+
   stopPump = pump.stop
   child.stdout.on("data", pump.push)
   child.stderr.on("data", (chunk: Buffer) => {
     if (stderr.byteLength >= maximumOfflineStderrBytes) {
       stderrTruncated = true
+
       return
     }
+
     const remaining = maximumOfflineStderrBytes - stderr.byteLength
+
     if (chunk.byteLength > remaining) {
       stderr = Buffer.concat([stderr, chunk.subarray(0, remaining)])
       stderrTruncated = true
+
       return
     }
+
     stderr = Buffer.concat([stderr, chunk])
   })
   const onError = (error: Error) => fail(error)
+
   const onClose = (code: number | null, signal: NodeJS.Signals | null) => {
     if (!finished) {
       fail(new Error(withStderr(
@@ -893,17 +983,23 @@ export const renderNativeOffline = async (input: {
       )))
     }
   }
+
   child.on("error", onError)
   child.on("close", onClose)
+
   const abort = () => {
     if (!finished) fail(new DOMException("Native offline rendering canceled.", "AbortError"))
   }
+
   input.signal.addEventListener("abort", abort, { once: true })
+
   const send = (type: number, payload: Uint8Array | Buffer = Buffer.alloc(0)) => {
     const frame = encodeNativeAudioHostControlFrame(type, payload)
+
     if (!frame || !child.stdin.writable) throw new Error("The native offline renderer is unavailable.")
     child.stdin.write(frame)
   }
+
   const waitFor = async (
     type: number,
     acknowledgedType: number | undefined,
@@ -913,29 +1009,39 @@ export const renderNativeOffline = async (input: {
     let rejectTimeout: ((error: Error) => void) | undefined
     const isCompletion = stage === "offline completion"
     const timeoutDelay = isCompletion ? completionInactivityMs : nativeOfflineStageTimeoutMs
+
     const timeout = new Promise<never>((_, reject) => {
       rejectTimeout = reject
       timer = schedule(() => reject(new NativeOfflineRenderTimeoutError(stage)), timeoutDelay)
     })
+
     const refresh = () => {
       if (!isCompletion || rejectTimeout === undefined) return
+
       if (timer !== undefined) cancelScheduled(timer)
       timer = schedule(() => rejectTimeout?.(new NativeOfflineRenderTimeoutError(stage)), completionInactivityMs)
     }
+
     if (isCompletion) refreshCompletionWatchdog = refresh
+
     const receive = async () => {
       while (true) {
         const frame = await nextFrame()
         const frameType = frame.readUInt32BE(8)
+
         if (frameType === type && frameType !== ackType) return frame
+
         if (frameType === offlineErrorType) {
           const payload = frame.subarray(headerBytes)
+
           if (payload.byteLength < 4) throw new Error("The native offline renderer failed.")
           const length = payload.readUInt32BE(0)
           throw new Error(withStderr(payload.subarray(4, 4 + Math.min(length, 256)).toString("utf8")))
         }
+
         if (frameType === ackType) {
           if (acknowledgedType === undefined) continue
+
           if (frame.byteLength > headerBytes + 8 && frame.byteLength <= headerBytes + 264
             && frame.readUInt32BE(headerBytes) === acknowledgedType
             && (frame.readUInt32BE(headerBytes + 4) === nativeAudioHostAckStatus.refused
@@ -945,6 +1051,7 @@ export const renderNativeOffline = async (input: {
               ? `Native export could not schedule playback: ${reason}. Reload the project and retry; no export was completed.`
               : reason)
           }
+
           if (frame.subarray(headerBytes).byteLength !== 8
             || frame.readUInt32BE(headerBytes) !== acknowledgedType
             || frame.readUInt32BE(headerBytes + 4) !== nativeAudioHostAckStatus.accepted) {
@@ -952,32 +1059,42 @@ export const renderNativeOffline = async (input: {
               ? "Native export could not prepare instrument samples. Reload the instrument samples and retry; no export was completed."
               : `Native export failed during ${stage}. Reload the source audio and retry; no export was completed.`)
           }
+
           return frame
         }
+
         if (frameType === offlineCompleteType && type === offlineCompleteType) return frame
       }
     }
+
     try {
       return await Promise.race([receive(), timeout])
     } finally {
       if (timer !== undefined) cancelScheduled(timer)
+
       if (isCompletion && refreshCompletionWatchdog === refresh) refreshCompletionWatchdog = undefined
     }
   }
+
   try {
     send(hostHelloType)
     const capabilities = readResponse(await waitFor(hostCapabilitiesType, undefined, "host handshake"))
+
     if (!capabilities || !isCompatibleAudioHostHello(capabilities)) {
       throw new Error("The native offline renderer has an incompatible host contract.")
     }
+
     send(offlineConfigureType, encodeOfflineConfigure(input.plan))
     await waitFor(ackType, offlineConfigureType, "offline configuration")
+
     for (const asset of input.plan.assets) {
       const payload = serializeAssetInstall(asset)
+
       if (!payload) throw new Error("The native offline asset is invalid.")
       send(assetInstallType, payload)
       await waitFor(ackType, assetInstallType, "asset installation")
     }
+
     for (const asset of input.plan.mappedAssets ?? []) {
       const createPayload = Buffer.alloc(28)
       createPayload.writeUInt32BE(asset.sessionAssetId, 0)
@@ -987,15 +1104,19 @@ export const renderNativeOffline = async (input: {
       createPayload.writeBigUInt64BE(0n, 20)
       send(mappedAssetCreateType, createPayload)
       await waitFor(ackType, mappedAssetCreateType, "mapped asset creation")
+
       for (const range of asset.ranges) {
         const pageFrames = Math.min(
           range.frameCount,
           defaultDecodedAudioPageFrames,
           Math.floor((maximumPayloadBytes - 16) / (asset.channelCount * Float32Array.BYTES_PER_ELEMENT)),
         )
+
         for (let startFrame = range.startFrame; startFrame < range.startFrame + range.frameCount; startFrame += pageFrames) {
           const frameCount = Math.min(pageFrames, range.startFrame + range.frameCount - startFrame)
+
           if (!input.onMappedPage) throw new Error("The native offline mapped page provider is unavailable.")
+
           const request = {
             jobId: input.jobId ?? "offline",
             requestId: crypto.randomUUID(),
@@ -1003,25 +1124,32 @@ export const renderNativeOffline = async (input: {
             startFrame,
             frameCount,
           }
+
           const pagePromise = Promise.resolve().then(() => input.onMappedPage?.(request, input.signal)
             ?? Promise.reject(new Error("The native offline mapped page provider is unavailable.")))
+
           let rejectPage: ((error: Error) => void) | undefined
+
           const pendingPage = new Promise<NativeHostMappedAssetPage>((resolve, reject) => {
             rejectPage = reject
             void pagePromise.then(resolve, reject)
           })
+
           pendingMappedPagePromises.add(pendingPage)
           pendingMappedPageRejectors.set(pendingPage, (error) => rejectPage?.(error))
+
           const page = await pendingPage.finally(() => {
             pendingMappedPagePromises.delete(pendingPage)
             pendingMappedPageRejectors.delete(pendingPage)
           })
+
           if (page.sessionAssetId !== asset.sessionAssetId
             || page.startFrame !== startFrame
             || page.frameCount !== frameCount
             || page.planarPcm.byteLength !== frameCount * asset.channelCount * Float32Array.BYTES_PER_ELEMENT) {
             throw new Error("The native offline mapped page provider returned invalid audio.")
           }
+
           const pagePayload = Buffer.alloc(16 + page.planarPcm.byteLength)
           pagePayload.writeUInt32BE(page.sessionAssetId, 0)
           pagePayload.writeBigUInt64BE(BigInt(page.startFrame), 4)
@@ -1030,6 +1158,7 @@ export const renderNativeOffline = async (input: {
           send(mappedAssetWritePageType, pagePayload)
           await waitFor(ackType, mappedAssetWritePageType, "mapped asset page")
         }
+
         const preparePayload = Buffer.alloc(20)
         preparePayload.writeUInt32BE(asset.sessionAssetId, 0)
         preparePayload.writeBigUInt64BE(BigInt(range.startFrame), 4)
@@ -1038,26 +1167,34 @@ export const renderNativeOffline = async (input: {
         await waitFor(ackType, mappedAssetPrepareRangeType, "mapped asset range")
       }
     }
+
     for (const attachment of input.vstAttachments ?? []) {
       const payload = serializeVstAttachment(attachment)
+
       if (!payload) throw new Error("The native offline VST attachment is invalid.")
       send(vstAttachType, payload)
       await waitFor(ackType, vstAttachType, "VST attachment")
     }
+
     send(graphSnapshotType, input.plan.graph)
     await waitFor(ackType, graphSnapshotType, "graph snapshot")
+
     if (input.plan.instrumentStates) {
       send(instrumentStatesType, input.plan.instrumentStates)
       await waitFor(ackType, instrumentStatesType, "instrument state")
     }
+
     const transport = serializeTransport(input.plan.transport)
+
     if (!transport) throw new Error("The native offline transport is invalid.")
     send(transportType, transport)
     await waitFor(ackType, transportType, "transport")
+
     for (const schedule of input.plan.scheduleWindows ?? [input.plan.schedule]) {
       send(scheduleWindowType, schedule)
       await waitFor(ackType, scheduleWindowType, "schedule window")
     }
+
     send(offlineStartType, encodeOfflineStart(input.plan))
     await waitFor(ackType, offlineStartType, "offline start")
     await waitFor(offlineCompleteType, undefined, "offline completion")
@@ -1066,9 +1203,11 @@ export const renderNativeOffline = async (input: {
     finished = true
     mailbox.close()
     input.signal.removeEventListener("abort", abort)
+
     for (const reject of pendingMappedPageRejectors.values()) {
       reject(new Error("The native offline mapped page callback was canceled."))
     }
+
     await Promise.allSettled(pendingMappedPagePromises)
     stopPump()
     child.stdout.removeListener("data", pump.push)
@@ -1090,25 +1229,33 @@ const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
   && bytes.readUInt32BE(8) === hostCapabilitiesType
   && bytes.readUInt32BE(headerBytes) === protocolVersion)) return undefined
   let offset = headerBytes + 12
+
   const readString = () => {
     if (offset + 4 > bytes.byteLength) return undefined
     const length = bytes.readUInt32BE(offset)
     offset += 4
+
     if (length === 0 || offset + length > bytes.byteLength) return undefined
     const value = bytes.subarray(offset, offset + length).toString("utf8")
     offset += length
+
     return value
   }
+
   const processorContractHash = readString()
   const graphContractHash = readString()
   const artifactId = readString()
+
   if (!processorContractHash || !graphContractHash || !artifactId || offset + 16 !== bytes.byteLength) return undefined
   const parsedDeviceState = deviceState(bytes.readUInt32BE(offset))
   const parsedReadinessReason = readinessReason(bytes.readUInt32BE(offset + 4))
+
   if (!parsedDeviceState || !parsedReadinessReason) return undefined
   const maximumParkedInstances = bytes.readUInt32BE(offset + 8)
   const parkedAgeMs = bytes.readUInt32BE(offset + 12)
+
   if (parkedAgeMs === 0) return undefined
+
   return {
     capabilities: bytes.readUInt32BE(headerBytes + 4),
     abiVersion: bytes.readUInt32BE(headerBytes + 8),
@@ -1140,25 +1287,32 @@ export const runAudioHostDiagnostic = async (hostPath: string): Promise<{ ok: tr
   } catch {
     return { ok: false, error: "The native audio host is unavailable." }
   }
+
   const request = encodeNativeAudioHostControlFrame(hostHelloType)
+
   if (!request) return { ok: false, error: "The native audio host protocol is unavailable." }
+
   return new Promise((resolve) => {
     const child = spawn(hostPath, [], { env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "ignore"] })
     const chunks: Buffer[] = []
     let size = 0
     let settled = false
+
     const finish = (result: { ok: true; hello: AudioHostHello } | { ok: false; error: string }) => {
       if (settled) return
       settled = true
       clearTimeout(timer)
       resolve(result)
     }
+
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
       finish({ ok: false, error: "The native audio host diagnostic timed out." })
     }, 2_000)
+
     child.stdout.on("data", (chunk: Buffer) => {
       size += chunk.byteLength
+
       if (size > headerBytes + maximumPayloadBytes) child.kill("SIGKILL")
       else chunks.push(chunk)
     })
@@ -1185,12 +1339,18 @@ export const decodeNativeProcessorPatchStatus = (payload: Buffer): NativeProcess
   const refusalCode = payload.readUInt32BE(4)
   const coreResult = payload.readUInt32BE(8)
   const token = payload.readBigUInt64BE(12)
+
   if (outcome === 1) return refusalCode === 0 && coreResult === 0 && token === 0n ? { outcome: "applied" } : undefined
+
   if (outcome === 3) return refusalCode === 0 && coreResult === 0 && token !== 0n ? { outcome: "claimed", token } : undefined
   const refusal = outcome === 2 ? patchRefusals[refusalCode] : undefined
+
   if (!refusal) return undefined
+
   if ((token !== 0n) !== (refusal === "claim-pending")) return undefined
+
   if (coreResult !== 0 && refusal !== "stage-failed" && refusal !== "apply-failed") return undefined
+
   return token === 0n ? { outcome: "refused", refusal, coreResult } : { outcome: "refused", refusal, coreResult, token }
 }
 
@@ -1203,6 +1363,7 @@ export const nativeDeliveryFailureKind = (thrown: unknown) => {
   if (thrown instanceof NativeAudioHostCommandError) {
     return thrown.reason
   }
+
   return thrown === undefined || thrown instanceof NativeAudioHostNotSentError ? "unavailable" as const : "unconfirmed" as const
 }
 
@@ -1219,8 +1380,10 @@ export const nativeSessionFailure = (thrown?: unknown) => ({
 /** The renderer reply for a patch status. A u64 token can exceed Number.MAX_SAFE_INTEGER, so it crosses IPC as decimal text. */
 export const nativeProcessorPatchReply = (status: NativeProcessorPatchStatus) => {
   if (status.outcome === "applied") return { ok: true as const, outcome: "applied" as const }
+
   if (status.outcome === "claimed") return { ok: true as const, outcome: "claimed" as const, token: status.token.toString() }
   const refused = { ok: true as const, outcome: "refused" as const, refusal: status.refusal, coreResult: status.coreResult }
+
   return status.token === undefined ? refused : { ...refused, token: status.token.toString() }
 }
 
@@ -1307,10 +1470,12 @@ export const createNativeAudioHostSupervisor = (
   options: NativeAudioHostSupervisorOptions = {},
 ): NativeAudioHostSupervisor => {
   const evidence = options.evidence
+
   const defaultSpawnHost: SpawnHost = (executable) => spawn(executable, [], {
     env: { PATH: "/usr/bin:/bin", ...options.hostEnvironment },
     stdio: ["pipe", "pipe", "pipe"],
   })
+
   let child: ChildProcessWithoutNullStreams | undefined
   let hello: AudioHostHello | undefined
   let buffer = Buffer.alloc(0)
@@ -1349,6 +1514,7 @@ export const createNativeAudioHostSupervisor = (
   const spectrumFrameListeners = new Set<(frame: NativeHostSpectrumFrame) => void>()
   const scheduleProgressListeners = new Set<(progress: NativeScheduleProgress) => void>()
   const workerNotificationListeners = new Set<(notification: NativeWorkerNotification) => void>()
+
   const broker = createNativeRequestBroker({
     get child() { return child },
     get generation() { return lifecycleGeneration },
@@ -1360,6 +1526,7 @@ export const createNativeAudioHostSupervisor = (
     markRecordingFinishDispatched: () => { if (recordingFinish) recordingFinish.dispatched = true },
     lost: (message, source) => lost(message, source),
   })
+
   const lost = (message: string, source = child) => {
     if (!source || child !== source) return
     console.error("[native-audio-host-termination-request]", JSON.stringify({
@@ -1380,7 +1547,9 @@ export const createNativeAudioHostSupervisor = (
     const error = new Error(message)
     recordingAdmitted = false
     recordingReady?.reject(error)
+
     if (recordingFinish) { recordingFinish.pending = false; recordingFinish.reject(error) }
+
     broker.rejectPending(error, false)
     child = undefined
     hello = undefined
@@ -1395,27 +1564,36 @@ export const createNativeAudioHostSupervisor = (
     evidenceTerminationCauses.set(currentChild, `supervisor-terminated: ${message.replace(/[\r\n\t]+/g, " ").slice(0, 256)}`)
     currentChild?.kill()
     broker.rejectQueued(error)
+
     for (const listener of lossListeners) listener(error)
   }
+
   const terminateDetachedChild = (current: ChildProcessWithoutNullStreams) => new Promise<void>((resolve, reject) => {
     let settled = false
     const timers: NativeAudioHostTerminationTimers = {}
+
     const finish = (error?: Error) => {
       if (settled) return
       settled = true
+
       if (timers.graceful) cancelScheduled(timers.graceful)
+
       if (timers.sigterm) cancelScheduled(timers.sigterm)
+
       if (timers.killObservation) cancelScheduled(timers.killObservation)
+
       if (error) {
         terminationFailure = error
         reject(error)
       }
       else resolve()
     }
+
     current.once("close", () => finish())
     // An error does not prove that the child has closed. Keep the bounded
     // termination sequence alive until close is observed or it hard-fails.
     current.once("error", () => undefined)
+
     const kill = (signal: "SIGTERM" | "SIGKILL") => {
       console.error("[native-audio-host-termination-request]", JSON.stringify({
         reason: signal === "SIGTERM" ? "suspend-graceful-termination" : "suspend-forced-termination",
@@ -1426,12 +1604,14 @@ export const createNativeAudioHostSupervisor = (
         signal,
         pendingRequest: broker.pendingRequestName(),
       }))
+
       try {
         return options.kill?.(current, signal) ?? current.kill(signal)
       } catch {
         return false
       }
     }
+
     timers.graceful = schedule(() => {
       kill("SIGTERM")
       timers.sigterm = schedule(() => {
@@ -1446,10 +1626,13 @@ export const createNativeAudioHostSupervisor = (
       }, sigtermTerminationMs)
     }, gracefulTerminationMs)
   })
+
   const decodeWorkerNotification = (frame: Buffer): NativeWorkerNotification | undefined => {
     const payload = frame.subarray(headerBytes)
+
     if (payload.byteLength < 24) return undefined
     const kindValue = payload.readUInt32BE(0)
+
     const kind = kindValue === 1 ? "latency"
       : kindValue === 2 ? "buses"
       : kindValue === 3 ? "restart"
@@ -1460,12 +1643,14 @@ export const createNativeAudioHostSupervisor = (
       : kindValue === 8 ? "tail"
       : kindValue === 9 ? "editor-state"
       : undefined
+
     if (kind === "parameter-edit") {
       if (payload.byteLength < 32) return undefined
       const parameterId = payload.readUInt32BE(16)
       const normalizedValue = payload.readDoubleBE(20)
       const instanceBytes = payload.readUInt32BE(28)
       const instanceId = payload.subarray(32).toString("utf8")
+
       if (parameterId > 0xffff_ffff
         || !Number.isFinite(normalizedValue)
         || normalizedValue < 0
@@ -1474,6 +1659,7 @@ export const createNativeAudioHostSupervisor = (
         || instanceBytes > maximumVstStringBytes
         || payload.byteLength !== 32 + instanceBytes
         || !nativeVstInstanceId(instanceId)) return undefined
+
       return {
         kind,
         graphRevision: payload.readUInt32BE(4),
@@ -1483,9 +1669,12 @@ export const createNativeAudioHostSupervisor = (
         instanceId,
       }
     }
+
     const instanceBytes = payload.readUInt32BE(20)
+
     if (!kind || instanceBytes === 0 || instanceBytes > maximumVstStringBytes
       || payload.byteLength !== 24 + instanceBytes) return undefined
+
     return {
       kind,
       graphRevision: payload.readUInt32BE(4),
@@ -1494,8 +1683,10 @@ export const createNativeAudioHostSupervisor = (
       instanceId: payload.subarray(24).toString("utf8"),
     }
   }
+
   const deviceStringReader = (payload: Buffer, start: number) => {
     let offset = start
+
     return {
       offset: () => offset,
       advance: (bytes: number) => { offset += bytes },
@@ -1503,25 +1694,32 @@ export const createNativeAudioHostSupervisor = (
         if (offset + 4 > payload.byteLength) return undefined
         const length = payload.readUInt32BE(offset)
         offset += 4
+
         if (length === 0 || offset + length > payload.byteLength) return undefined
         const value = payload.subarray(offset, offset + length).toString("utf8")
         offset += length
+
         return value
       },
     }
   }
+
   const decodeDeviceInventory = (frame: Buffer): NativeAudioDevice[] | undefined => {
     const payload = frame.subarray(headerBytes)
+
     if (payload.byteLength < 4) return undefined
     const count = payload.readUInt32BE(0)
     const reader = deviceStringReader(payload, 4)
     const devices: NativeAudioDevice[] = []
+
     for (let index = 0; index < count; index += 1) {
       const deviceId = reader.string()
       const name = reader.string()
       const offset = reader.offset()
+
       if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 > payload.byteLength) return undefined
       const availability = payload.readUInt32BE(offset + 12)
+
       if (availability !== 0 && availability !== 1) return undefined
       devices.push({
         deviceId,
@@ -1533,27 +1731,37 @@ export const createNativeAudioHostSupervisor = (
       })
       reader.advance(16)
     }
+
     return reader.offset() === payload.byteLength ? devices : undefined
   }
+
   const decodeOutputDevice = (frame: Buffer): NativeOutputDevice | null | undefined => {
     const payload = frame.subarray(headerBytes)
+
     if (payload.byteLength === 4 && payload.readUInt32BE(0) === 0) return null
+
     if (payload.byteLength < 4 || payload.readUInt32BE(0) !== 1) return undefined
     const reader = deviceStringReader(payload, 4)
     const deviceId = reader.string()
     const name = reader.string()
     const offset = reader.offset()
+
     if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 !== payload.byteLength) return undefined
     const nominalSampleRateHz = payload.readUInt32BE(offset)
     const outputChannelCount = payload.readUInt32BE(offset + 4)
     const maximumFramesPerBlock = payload.readUInt32BE(offset + 8)
     const availability = payload.readUInt32BE(offset + 12)
+
     if (availability !== 0 && availability !== 1) return undefined
+
     return { deviceId, name, nominalSampleRateHz, outputChannelCount, maximumFramesPerBlock, available: availability === 1 }
   }
+
   const decodeInputDevice = (frame: Buffer): NativeInputDevice | null | undefined => {
     const device = decodeOutputDevice(frame)
+
     if (device === undefined || device === null) return device
+
     return {
       deviceId: device.deviceId,
       name: device.name,
@@ -1563,9 +1771,12 @@ export const createNativeAudioHostSupervisor = (
       available: device.available,
     }
   }
+
   const safeUnsigned64 = (value: bigint) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined
+
   const decodeRecordingStatus = (frame: Buffer): NativeMainRecordingStatus | undefined => {
     const payload = frame.subarray(headerBytes)
+
     if (payload.byteLength !== 120) return undefined
     const timelineFrame = payload.readBigInt64BE(12)
     const capturedFrames = safeUnsigned64(payload.readBigUInt64BE(20))
@@ -1575,6 +1786,7 @@ export const createNativeAudioHostSupervisor = (
     const peak = payload.readFloatBE(52)
     const availableBlocks = payload.readUInt32BE(40)
     const queuedBlocks = payload.readUInt32BE(44)
+
     if (
       timelineFrame < 0 || timelineFrame > BigInt(Number.MAX_SAFE_INTEGER)
       || capturedFrames === undefined || droppedFrames === undefined
@@ -1593,14 +1805,17 @@ export const createNativeAudioHostSupervisor = (
     const fileInode = payload.readBigUInt64BE(104)
     const sampleRateHz = payload.readUInt32BE(112)
     const channelCount = payload.readUInt32BE(116)
+
     if (state > 4 || error > 13 || systemError < 0 || writtenFrames === undefined || writtenBytes === undefined
       || writtenBlocks === undefined || (channelCount !== 1 && channelCount !== 2)
       || sampleRateHz > 384000 || (state === 1 && sampleRateHz === 0)) return undefined
+
     if (state === 2 && (error !== 0 || systemError !== 0 || (flags & 8) === 0 || (flags & 19) !== 0
       || queuedBlocks !== 0 || sampleRateHz === 0
       || fileInode === 0n || writtenFrames !== capturedFrames || droppedFrames !== 0
       || payload.readUInt32BE(36) !== 0 || writtenBytes !== 4 * writtenBlocks + 4 * writtenFrames * channelCount
       || !Number.isSafeInteger(4 * writtenBlocks + 4 * writtenFrames * channelCount))) return undefined
+
     return {
       fileDevice, fileInode,
       spool: { state, error, systemError, writtenFrames, writtenBytes, writtenBlocks,
@@ -1620,39 +1835,54 @@ export const createNativeAudioHostSupervisor = (
       configured: (flags & 4) !== 0,
     }
   }
+
   const decode = (chunk: Buffer) => {
     buffer = Buffer.concat([buffer, chunk])
+
     while (buffer.byteLength >= headerBytes) {
       const payloadBytes = buffer.readUInt32BE(12)
+
       if (payloadBytes > maximumPayloadBytes || buffer.byteLength < headerBytes + payloadBytes) return
       const frame = buffer.subarray(0, headerBytes + payloadBytes)
       buffer = buffer.subarray(headerBytes + payloadBytes)
       const pending = broker.pending()
+
       if (frame.readUInt32BE(0) !== magic || frame.readUInt32BE(4) !== protocolVersion) return lost("The native audio host returned an invalid control frame.")
+
       if (frame.readUInt32BE(8) === recordingBlockType) {
         return lost("Reserved recording PCM frame is not valid in native host v23.")
       } else if (frame.readUInt32BE(8) === recordingStatusType) {
         const status = decodeRecordingStatus(frame)
+
         if (!status) return lost("The native audio host returned invalid recording status.")
+
         if (recordingConfiguration && status.generation === recordingConfiguration.generation
           && status.sessionId === recordingConfiguration.sessionId) {
           if (status.spool?.state === 1 && status.configured) recordingReady?.resolve(status)
           else if (status.spool && status.spool.state >= 3) recordingReady?.reject(new Error("Native recording preparation failed."))
+
           if (recordingFinish && status.spool && status.spool.state >= 2) {
             recordingFinish.pending = false
+
             if (status.spool.state === 2) recordingFinish.resolve()
             else recordingFinish.reject(new Error("Native recording persistence failed; source retained for recovery."))
           }
+
           if (status.spool && status.spool.state >= 2) recordingAdmitted = false
         }
+
         for (const listener of recordingStatusListeners) listener(status)
       } else if (frame.readUInt32BE(8) === meterBatchType) {
         const batch = decodeMeterBatch(frame)
+
         if (!batch) return lost("The native audio host returned an invalid meter batch.")
+
         for (const listener of meterBatchListeners) listener(batch)
       } else if (frame.readUInt32BE(8) === spectrumFrameType) {
         const spectrum = decodeSpectrumFrame(frame)
+
         if (!spectrum) return lost("The native audio host returned an invalid spectrum frame.")
+
         for (const listener of spectrumFrameListeners) listener(spectrum)
       } else if (frame.readUInt32BE(8) === diagnosticsType
         && decodeDiagnostics(frame)?.state === "faulted") {
@@ -1662,29 +1892,38 @@ export const createNativeAudioHostSupervisor = (
         return lost("Audio output device was disconnected. Select an available device in Audio Settings.")
       } else if (frame.readUInt32BE(8) === scheduleProgressType) {
         const progress = decodeScheduleProgress(frame)
+
         if (!progress || progress.revision === 0 || progress.epoch === 0
           || progress.progressSequence === 0n) {
           return lost("The native audio host returned invalid schedule progress.")
         }
+
         for (const listener of scheduleProgressListeners) listener(progress)
       } else if (frame.readUInt32BE(8) === notificationType) {
         const notification = decodeWorkerNotification(frame)
+
         if (!notification) return lost("The native audio host returned an invalid worker notification.")
+
         for (const listener of workerNotificationListeners) listener(notification)
       } else if (frame.readUInt32BE(8) === hostCapabilitiesType && !hello) {
         const parsed = readResponse(frame)
+
         if (!parsed || !isCompatibleAudioHostHello(parsed)) {
           return lost("The native audio host returned an incompatible protocol response.")
         }
+
         hello = parsed
+
         if (pending) {
           broker.settle(pending)
+
           if (pending.reply.kind === "ack") pending.reply.resolve()
         }
       } else if (frame.readUInt32BE(8) === diagnosticsType && pending?.reply.kind === "diagnostics") {
         const current = pending
         const reply = pending.reply
         const diagnostic = decodeDiagnostics(frame)
+
         if (!diagnostic) {
           broker.rejectPending(new Error("The native audio host returned an invalid diagnostics response."))
         } else {
@@ -1695,6 +1934,7 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const device = decodeOutputDevice(frame)
+
         if (device === undefined) return lost("The native audio host returned an invalid device response.")
         broker.settle(current)
         reply.resolve(device)
@@ -1702,6 +1942,7 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const device = decodeInputDevice(frame)
+
         if (device === undefined) return lost("The native audio host returned an invalid input device response.")
         broker.settle(current)
         reply.resolve(device)
@@ -1709,6 +1950,7 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const devices = decodeDeviceInventory(frame)
+
         if (devices === undefined) return lost("The native audio host returned an invalid device inventory response.")
         broker.settle(current)
         reply.resolve(devices)
@@ -1716,8 +1958,11 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const status = decodeGraphRevisionStatus(frame)
+
         if (!status) return lost("The native audio host returned an invalid graph revision status.")
+
         if (status.requestedRevision !== reply.requestedRevision) continue
+
         if (current.requestType === graphRevisionStatusType) evidence?.("inspect-reply-received", { pid: child?.pid ?? null, revision: status.requestedRevision })
         broker.settle(current)
         reply.resolve(status)
@@ -1729,24 +1974,30 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const payload = frame.subarray(headerBytes)
+
         const rejectState = (message: string) => {
           broker.rejectPending(new NativeAudioHostCommandError(vstStateGetType, message))
         }
+
         if (payload.byteLength < 4) {
           rejectState("The native audio host returned an invalid VST state response.")
           continue
         }
+
         const instanceBytes = payload.readUInt32LE(0)
         const instanceEnd = 4 + instanceBytes
+
         if (instanceBytes === 0 || instanceBytes > maximumVstStringBytes || payload.byteLength < instanceEnd + 8) {
           rejectState("The native audio host returned an invalid VST state response.")
           continue
         }
+
         const instanceId = payload.subarray(4, instanceEnd).toString("utf8")
         const stateBytes = payload.readUInt32LE(instanceEnd)
         const hashBytes = payload.readUInt32LE(instanceEnd + 4)
         const start = instanceEnd + 8
         const sha256 = payload.subarray(start + stateBytes).toString("utf8")
+
         if (
           instanceId !== reply.instanceId
           || hashBytes !== 64
@@ -1757,13 +2008,16 @@ export const createNativeAudioHostSupervisor = (
           rejectState("The native audio host returned an invalid VST state response.")
           continue
         }
+
         const bytes = Uint8Array.from(payload.subarray(start, start + stateBytes))
         broker.settle(current)
+
         if (!reply.cancelled) reply.resolve({ bytes, sha256 })
       } else if (frame.readUInt32BE(8) === vstEditorStatusType && pending?.reply.kind === "editor") {
         const current = pending
         const reply = pending.reply
         const status = decodeVstEditorStatus(frame)
+
         if (!status) return lost("The native audio host returned an invalid VST editor response.")
         broker.settle(current)
         reply.resolve(status)
@@ -1771,6 +2025,7 @@ export const createNativeAudioHostSupervisor = (
         const current = pending
         const reply = pending.reply
         const status = decodeNativeProcessorPatchStatus(frame.subarray(headerBytes))
+
         if (!status) return lost("The native audio host returned an invalid processor patch status.")
         broker.settle(current)
         reply.resolve(status)
@@ -1789,6 +2044,7 @@ export const createNativeAudioHostSupervisor = (
       ) {
         const current = pending
         const status = frame.readUInt32BE(headerBytes + 4)
+
         if (
           status !== nativeAudioHostAckStatus.refused
           && status !== nativeAudioHostAckStatus.accepted
@@ -1796,6 +2052,7 @@ export const createNativeAudioHostSupervisor = (
         ) return lost("The native audio host returned an invalid control acknowledgement.")
         const accepted = status === nativeAudioHostAckStatus.accepted
         broker.settle(current, accepted)
+
         if (accepted) {
           if (current.reply.kind === "ack") current.reply.resolve()
         } else {
@@ -1814,6 +2071,7 @@ export const createNativeAudioHostSupervisor = (
       } else return lost("The native audio host rejected a control request.")
     }
   }
+
   const ownerForToken = (token: string | undefined) => (
     token !== undefined
     && token.length <= 128
@@ -1822,16 +2080,21 @@ export const createNativeAudioHostSupervisor = (
       ? transactionOwner
       : undefined
   )
+
   const assertTransactionAccess = (token: string | undefined) => {
     if (transactionOwner === undefined) {
       if (token !== undefined) throw new Error("The native audio host transaction token is stale.")
+
       return undefined
     }
+
     if (token === undefined || ownerForToken(token) !== transactionOwner) {
       throw new Error("The native audio host transaction token is invalid.")
     }
+
     return transactionOwner
   }
+
   const send = (
     type: NativeHostRequestType,
     payload?: NativeControlPayload,
@@ -1841,19 +2104,25 @@ export const createNativeAudioHostSupervisor = (
   ) => new Promise<void>((resolve, reject) => {
     if (!broker.admits(owner, allowDuringTeardown)) {
       reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
+
       return
     }
+
     const queued = broker.submit({
       type, payload, owner, allowDuringTeardown, reject, reason,
       reply: { kind: "ack", expectedAckType: type, resolve },
     })
+
     if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(type)))
   })
+
   const enqueueTransaction = <T>(operation: () => Promise<T>) => {
     const result = transactionTail.then(operation)
     transactionTail = result.then(() => undefined, () => undefined)
+
     return result
   }
+
   // Failing to start or to gain transaction access happens before anything is written.
   const admitStarted = (token: string | undefined) => {
     try {
@@ -1862,52 +2131,68 @@ export const createNativeAudioHostSupervisor = (
       throw new NativeAudioHostNotSentError(error instanceof Error ? error.message : "The native audio host is unavailable.")
     }
   }
+
   const admit = async (token: string | undefined) => {
     try {
       await supervisor.start()
     } catch (error) {
       throw new NativeAudioHostNotSentError(error instanceof Error ? error.message : "The native audio host is unavailable.")
     }
+
     return admitStarted(token)
   }
+
   const request = async (type: NativeHostRequestType, payload?: NativeControlPayload, token?: string, reason?: string) => {
     await send(type, payload, await admit(token), false, reason)
   }
+
   const requestEditor = async (
     payload: Buffer,
     owner?: symbol,
   ): Promise<NativeVstEditorStatus> => {
     await supervisor.start()
+
     return new Promise((resolve, reject) => {
       if (!broker.admits(owner, false)) {
         reject(new Error("The native audio host is unavailable."))
+
         return
       }
+
       const queued = broker.submit({ type: vstEditorType, payload, owner, reject, reply: { kind: "editor", resolve } })
+
       if (!queued) reject(new Error("The native host request queue is full."))
     })
   }
+
   const requestPatchStatus = async (payload: Buffer, token?: string): Promise<NativeProcessorPatchStatus> => {
     const owner = await admit(token)
+
     return new Promise((resolve, reject) => {
       if (!broker.admits(owner, false)) {
         reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
+
         return
       }
+
       const queued = broker.submit({
         type: processorStatePatchType, payload, owner, reject, reply: { kind: "patchStatus", resolve },
       })
+
       if (!queued) reject(new NativeAudioHostNotSentError("The native audio host request queue is full."))
     })
   }
+
   const requestGraphRevision = (type: NativeHostRequestType, payload: Buffer, token?: string) =>
     new Promise<NativeGraphRevisionStatus>((resolve, reject) => {
       // Nothing is sent here: these are `unavailable`, never an unconfirmed request.
       // A busy control slot queues the request like a processor patch.
       const owner = admitStarted(token)
+
       if (!hello || !broker.admits(owner, false)) {
         throw new NativeAudioHostNotSentError("The native audio host is unavailable.")
       }
+
       const queued = broker.submit({
         type,
         payload,
@@ -1921,33 +2206,46 @@ export const createNativeAudioHostSupervisor = (
             : payload.readUInt32BE(0),
         },
       })
+
       if (!queued) throw new NativeAudioHostNotSentError("The native audio host request queue is full.")
     })
+
   const attachVst = async (input: ResolvedVst3Attachment, token?: string, owner?: symbol) => {
     const payload = serializeVstAttachment(input)
+
     if (!payload) throw new Error("The native VST attachment is invalid.")
     await supervisor.start()
     await send(vstAttachType, payload, owner ?? assertTransactionAccess(token))
   }
+
   const supervisor: NativeAudioHostSupervisor = {
     start() {
       if (suspended) {
         if (resumePromise) return resumePromise.then(() => supervisor.start())
+
         return Promise.reject(new Error("The native audio host is suspended."))
       }
+
       if (terminationFailure) return Promise.reject(terminationFailure)
+
       if (childTerminationPromise) return childTerminationPromise.then(() => supervisor.start())
+
       if (teardownPromise) return Promise.reject(new Error("The native audio host is tearing down."))
+
       if (hello) return Promise.resolve(hello)
+
       if (startPromise) return startPromise
       const generation = lifecycleGeneration
       let spawned: ChildProcessWithoutNullStreams | undefined
+
       const attempt = (async () => {
         if (childTerminationPromise) await childTerminationPromise
         await access(hostPath)
+
         if (generation !== lifecycleGeneration || teardownPromise) {
           throw new Error("The native audio host startup was cancelled.")
         }
+
         spawned = (spawnHost ?? defaultSpawnHost)(hostPath)
         runtimeRevision = 0
         child = spawned
@@ -1968,9 +2266,11 @@ export const createNativeAudioHostSupervisor = (
           evidence?.("host-exit", { pid: spawned?.pid ?? null, lifecycleGeneration: generation,
             code, signal, cause: spawned ? evidenceTerminationCauses.get(spawned) ?? "crash" : "spawn-failure" })
           const requestType = broker.pending()?.requestType
+
           const pendingRequest = requestType === undefined
             ? undefined
             : `${nativeAudioHostRequestName(requestType)} request ${requestType}`
+
           console.error("[native-vst3] native audio host closed", JSON.stringify({
             code,
             signal,
@@ -1982,14 +2282,17 @@ export const createNativeAudioHostSupervisor = (
             pendingRequestType: requestType,
             pendingRequestName: requestType === undefined ? undefined : nativeAudioHostRequestName(requestType),
           }))
+
           if (teardownPromise && child === spawned && !recordingFinish?.pending) {
             // A child that exits during planned teardown has crossed the physical
             // shutdown boundary even if its final ACK never reaches the pipe.
             // Only settle teardown here; pending Finish/other operation failures
             // continue through the real loss path and remain observable.
             broker.resolveTeardownOnExit()
+
             return
           }
+
           lost(
             pendingRequest
               ? `The native audio host stopped during ${pendingRequest}.`
@@ -2004,10 +2307,13 @@ export const createNativeAudioHostSupervisor = (
           if (child === spawned) decode(chunk)
         })
         await send(hostHelloType)
+
         if (child !== spawned || !hello) throw new Error("The native audio host did not complete its handshake.")
         evidence?.("hostHello", { pid: spawned.pid ?? null, lifecycleGeneration: generation })
+
         return hello
       })()
+
       startPromise = attempt
       void attempt.then(
         () => {
@@ -2015,30 +2321,38 @@ export const createNativeAudioHostSupervisor = (
         },
         () => {
           if (startPromise === attempt) startPromise = undefined
+
           if (spawned && child === spawned) lost("The native audio host could not start.", spawned)
         },
       )
+
       return attempt
     },
     runTransaction(operation) {
       return enqueueTransaction(async () => {
         const generation = lifecycleGeneration
         await supervisor.start()
+
         if (generation !== lifecycleGeneration || teardownPromise) {
           throw new Error("The native audio host transaction was cancelled.")
         }
+
         if (transactionOwner) throw new Error("The native audio host transaction is unavailable.")
         const owner = Symbol("native-audio-host-transaction")
         transactionOwner = owner
         let transactionOpen = false
+
         try {
           await send(transactionBeginType, undefined, owner)
           transactionOpen = true
+
           const value = await operation({
             attachVst: (input) => attachVst(input, undefined, owner),
           })
+
           await send(transactionCommitType, undefined, owner)
           transactionOpen = false
+
           return value
         } catch (error) {
           if (transactionOpen) {
@@ -2048,6 +2362,7 @@ export const createNativeAudioHostSupervisor = (
               // The original transaction failure remains authoritative.
             }
           }
+
           throw error
         } finally {
           if (transactionOwner === owner) transactionOwner = undefined
@@ -2057,18 +2372,22 @@ export const createNativeAudioHostSupervisor = (
     async configure(input, transactionToken) {
       evidence?.("structural-rebuild", { pid: child?.pid ?? null, lifecycleGeneration, cause: "device-configure" })
       const payload = serializeDeviceConfiguration(input)
+
       if (!payload) throw new Error("The native audio host configuration is invalid.")
       await request(deviceConfigureType, payload, transactionToken)
       runtimeRevision = Math.max(runtimeRevision, input.revision)
     },
     async beginTransaction() {
       const invalidationVersion = manualTransactionInvalidationVersion
+
       return enqueueTransaction(async () => {
         if (invalidationVersion !== manualTransactionInvalidationVersion || transactionOwner) {
           throw new Error("The native audio host transaction is unavailable.")
         }
+
         const generation = lifecycleGeneration
         await supervisor.start()
+
         if (
           invalidationVersion !== manualTransactionInvalidationVersion
           || generation !== lifecycleGeneration
@@ -2081,15 +2400,18 @@ export const createNativeAudioHostSupervisor = (
         manualTransactionToken = token
         manualTransactionGeneration = generation
         let nativeTransactionOpen = false
+
         try {
           await send(transactionBeginType, undefined, owner)
           nativeTransactionOpen = true
+
           if (
             invalidationVersion !== manualTransactionInvalidationVersion
             || generation !== lifecycleGeneration
             || transactionOwner !== owner
             || manualTransactionToken !== token
           ) throw new Error("The native audio host transaction was cancelled.")
+
           return token
         } catch (error) {
           if (nativeTransactionOpen) {
@@ -2099,26 +2421,32 @@ export const createNativeAudioHostSupervisor = (
               // A lost host may reject the best-effort cleanup.
             }
           }
+
           if (transactionOwner === owner && manualTransactionToken === token) {
             transactionOwner = undefined
             manualTransactionToken = undefined
             manualTransactionGeneration = -1
           }
+
           throw error
         }
       })
     },
     async invalidateManualTransaction() {
       manualTransactionInvalidationVersion += 1
+
       if (manualInvalidationPromise) return manualInvalidationPromise
       const owner = transactionOwner
       const token = manualTransactionToken
+
       if (!owner || !token) return
       const generation = manualTransactionGeneration
       manualTransactionToken = undefined
       manualTransactionGeneration = -1
+
       const operation = transactionTail.then(async () => {
         const current = child
+
         const shouldRollback = (
           generation === lifecycleGeneration
           && current !== undefined
@@ -2127,6 +2455,7 @@ export const createNativeAudioHostSupervisor = (
           && teardownPromise === undefined
           && transactionOwner === owner
         )
+
         try {
           if (shouldRollback) {
             try {
@@ -2139,6 +2468,7 @@ export const createNativeAudioHostSupervisor = (
           if (transactionOwner === owner) transactionOwner = undefined
         }
       })
+
       manualInvalidationPromise = operation
       transactionTail = operation.then(() => undefined, () => undefined)
       void operation.then(
@@ -2149,15 +2479,20 @@ export const createNativeAudioHostSupervisor = (
           if (manualInvalidationPromise === operation) manualInvalidationPromise = undefined
         },
       )
+
       return operation
     },
     async commitTransaction(transactionToken) {
       const invalidationVersion = manualTransactionInvalidationVersion
+
       return enqueueTransaction(async () => {
         const owner = assertTransactionAccess(transactionToken)
+
         if (!owner) throw new Error("The native audio host transaction is unavailable.")
+
         try {
           await send(transactionCommitType, undefined, owner)
+
           if (
             invalidationVersion !== manualTransactionInvalidationVersion
             || manualTransactionToken !== transactionToken
@@ -2168,6 +2503,7 @@ export const createNativeAudioHostSupervisor = (
             } catch {
               lost("The native audio host transaction was committed after renderer invalidation.")
             }
+
             throw new Error("The native audio host transaction was cancelled.")
           }
         } finally {
@@ -2181,11 +2517,15 @@ export const createNativeAudioHostSupervisor = (
     },
     async rollbackTransaction(transactionToken) {
       const invalidationVersion = manualTransactionInvalidationVersion
+
       return enqueueTransaction(async () => {
         const owner = assertTransactionAccess(transactionToken)
+
         if (!owner) throw new Error("The native audio host transaction is unavailable.")
+
         try {
           await send(transactionRollbackType, undefined, owner)
+
           if (
             invalidationVersion !== manualTransactionInvalidationVersion
             || manualTransactionToken !== transactionToken
@@ -2207,14 +2547,18 @@ export const createNativeAudioHostSupervisor = (
     },
     async getVstState(instanceId, transactionToken, signal) {
       const payload = serializeVstInstanceId(instanceId)
+
       if (!payload) throw new Error("The native VST state request is invalid.")
       signal?.throwIfAborted()
       await supervisor.start()
+
       if (!child) throw new Error("The native audio host is unavailable.")
       signal?.throwIfAborted()
       const owner = assertTransactionAccess(transactionToken)
+
       if (owner) throw new Error("The native audio host transaction token is invalid.")
       let queued: QueuedRequest | undefined
+
       const requestPromise = new Promise<{ bytes: Uint8Array; sha256: string }>((resolve, reject) => {
         queued = broker.submit({
           type: vstStateGetType,
@@ -2222,15 +2566,20 @@ export const createNativeAudioHostSupervisor = (
           reject,
           reply: { kind: "vstState", resolve, instanceId, cancelled: false },
         })
+
         if (!queued) reject(new Error("The native host request queue is full."))
       })
+
       if (!signal) return requestPromise
+
       return new Promise((resolve, reject) => {
         const abort = () => {
           const abortError = new DOMException("Native VST state capture canceled.", "AbortError")
+
           if (!queued || !broker.cancelQueued(queued, abortError)) broker.cancelPendingVstState(instanceId, abortError)
           reject(abortError)
         }
+
         signal.addEventListener("abort", abort, { once: true })
         requestPromise.then(
           (value) => {
@@ -2246,30 +2595,38 @@ export const createNativeAudioHostSupervisor = (
     },
     async detachVst(instanceId, transactionToken) {
       const payload = serializeVstInstanceId(instanceId)
+
       if (!payload) throw new Error("The native VST attachment is invalid.")
+
       try {
         await request(vstDetachType, payload, transactionToken)
+
         return { status: "detached" }
       } catch (error) {
         if (error instanceof NativeAudioHostCommandError && error.reason === "refused") {
           return { status: "refused" }
         }
+
         throw error
       }
     },
     async executeVstEditorCommand(input, transactionToken) {
       const payload = serializeVstEditor(input)
+
       if (!payload) throw new Error("The native VST editor command is invalid.")
+
       return requestEditor(payload, assertTransactionAccess(transactionToken))
     },
     async installAsset(input, transactionToken) {
       const payload = serializeAssetInstall(input)
+
       if (!payload) throw new Error("The native audio host asset is invalid.")
       evidence?.("asset-install", { pid: child?.pid ?? null, sessionAssetId: input.sessionAssetId })
       await request(assetInstallType, payload, transactionToken)
     },
     async createMappedAsset(input, transactionToken) {
       const hash = input.contentHashPrefix ?? 0n
+
       if (
         !unsigned32(input.sessionAssetId) || input.sessionAssetId === 0
         || !Number.isSafeInteger(input.frameCount) || input.frameCount <= 0
@@ -2324,78 +2681,97 @@ export const createNativeAudioHostSupervisor = (
     },
     async publishGraph(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 13)
+
       if (!payload) throw new Error("The native audio host graph payload is invalid.")
       await request(graphSnapshotType, payload, transactionToken)
       runtimeRevision = Math.max(runtimeRevision, Number(payload.readBigUInt64BE(0)))
     },
     async configureInstrumentStates(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 4)
+
       if (!payload) throw new Error("The native audio host instrument state payload is invalid.")
       await request(instrumentStatesType, payload, transactionToken)
     },
     async prepareGraphRevision(bytes, requestedPublicationFrame = 0n, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 13)
+
       if (!payload) throw new NativeAudioHostNotSentError("The native audio host graph payload is invalid.")
       runtimeRevision = Math.max(runtimeRevision, Number(payload.readBigUInt64BE(0)))
+
       if (requestedPublicationFrame < 0n || requestedPublicationFrame > 0x7fff_ffff_ffff_ffffn) {
         throw new NativeAudioHostNotSentError("The native graph publication frame is invalid.")
       }
+
       const request = Buffer.alloc(20 + payload.byteLength - 12)
       request.writeBigUInt64BE(requestedPublicationFrame, 0)
       request.writeBigUInt64BE(payload.readBigUInt64BE(0), 8)
       request.writeUInt32BE(payload.readUInt32BE(8), 16)
       payload.copy(request, 20, 12)
+
       return requestGraphRevision(graphPrepareType, request, transactionToken)
     },
     allocateRuntimeRevision() {
       if (!child || !hello || runtimeRevision >= 0xffff_ffff)
         throw new NativeAudioHostNotSentError("The native runtime revision allocator is unavailable or exhausted.")
+
       return ++runtimeRevision
     },
     async inspectGraphRevision(revision, transactionToken) {
       if (!unsigned32(revision) || revision === 0) throw new NativeAudioHostNotSentError("The native audio host graph revision is invalid.")
+
       return requestGraphRevision(graphRevisionStatusType, writeUnsigned32(revision), transactionToken)
     },
     async publishGraphRevision(revision, requestedPublicationFrame = 0n, transactionToken) {
       if (!unsigned32(revision) || revision === 0) throw new NativeAudioHostNotSentError("The native audio host graph revision is invalid.")
+
       if (requestedPublicationFrame < 0n || requestedPublicationFrame > 0x7fff_ffff_ffff_ffffn) {
         throw new NativeAudioHostNotSentError("The native graph publication frame is invalid.")
       }
+
       const payload = Buffer.alloc(12)
       payload.writeUInt32BE(revision, 0)
       payload.writeBigUInt64BE(requestedPublicationFrame, 4)
+
       return requestGraphRevision(graphPublishType, payload, transactionToken)
     },
     async rollbackGraphRevision(revision, transactionToken) {
       if (!unsigned32(revision) || revision === 0) throw new NativeAudioHostNotSentError("The native audio host graph revision is invalid.")
+
       return requestGraphRevision(graphRollbackType, writeUnsigned32(revision), transactionToken)
     },
     async retireGraphRevision(revision, transactionToken) {
       if (!unsigned32(revision) || revision === 0) throw new NativeAudioHostNotSentError("The native audio host graph revision is invalid.")
+
       return requestGraphRevision(graphRetireType, writeUnsigned32(revision), transactionToken)
     },
     async queueParameterEvents(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 4)
+
       if (!payload) throw new NativeAudioHostNotSentError("The native audio host parameter payload is invalid.")
       await request(parameterEventsType, payload, transactionToken)
     },
     async queueProcessorStatePatch(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 56)
+
       if (!payload) throw new NativeAudioHostNotSentError("The native audio host processor state patch is invalid.")
+
       return requestPatchStatus(payload, transactionToken)
     },
     async queueVstParameterEvents(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 8)
+
       if (!payload) throw new Error("The native VST parameter payload is invalid.")
       await request(vstParameterEventsType, payload, transactionToken)
     },
     async queueInstrumentEvents(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 4)
+
       if (!payload) throw new NativeAudioHostNotSentError("The native audio host instrument payload is invalid.")
       await request(midiEventsType, payload, transactionToken)
     },
     async queueScheduleWindow(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 56)
+
       if (!payload) throw new Error("The native schedule window payload is invalid.")
       // Header offsets 0 and 56 of serializeNativeScheduleWindow: the revision and the processor automation (lane) event count.
       evidence?.("schedule-window", { revision: payload.readUInt32LE(0), processorAutomationEvents: payload.readUInt32LE(56) })
@@ -2403,18 +2779,22 @@ export const createNativeAudioHostSupervisor = (
     },
     async reenableVstScheduleAutomation(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 8)
+
       if (!payload) throw new Error("The native VST schedule automation enable payload is invalid.")
       await request(vstScheduleAutomationEnableType, payload, transactionToken)
     },
     async queueSourceEvents(bytes, transactionToken) {
       const payload = nativeBinaryPayload(bytes, 4)
+
       if (!payload) throw new Error("The native audio host source payload is invalid.")
       await request(sourceEventsType, payload, transactionToken)
     },
     async setTransport(input, transactionToken) {
       const transitionId = input.transitionId ?? (nextTransportTransitionId + 1n)
+
       if (transitionId > nextTransportTransitionId) nextTransportTransitionId = transitionId
       const payload = serializeTransport({...input, transitionId})
+
       if (!payload) throw new Error("The native audio host transport is invalid.")
       await request(transportType, payload, transactionToken)
     },
@@ -2422,12 +2802,16 @@ export const createNativeAudioHostSupervisor = (
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
+
       if (!current || broker.pending() || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
         throw new Error("The native audio host device request is invalid.")
       }
+
       const payload = preferredDeviceId === undefined ? undefined : Buffer.from(preferredDeviceId, "utf8")
       const frame = encodeNativeAudioHostControlFrame(deviceListType, payload)
+
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
+
       return new Promise<NativeOutputDevice | null>((resolve, reject) => {
         broker.startDirect(current, deviceListType, frame, { kind: "outputDevice", resolve }, reject,
           "The native audio host device request timed out.")
@@ -2437,12 +2821,16 @@ export const createNativeAudioHostSupervisor = (
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
+
       if (!current || broker.pending() || (preferredDeviceId !== undefined && !coreAudioDeviceId(preferredDeviceId))) {
         throw new Error("The native audio host input device request is invalid.")
       }
+
       const payload = preferredDeviceId === undefined ? undefined : Buffer.from(preferredDeviceId, "utf8")
       const frame = encodeNativeAudioHostControlFrame(recordingDeviceQueryType, payload)
+
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
+
       return new Promise<NativeInputDevice | null>((resolve, reject) => {
         broker.startDirect(current, recordingDeviceQueryType, frame, { kind: "inputDevice", resolve }, reject,
           "The native audio host input device request timed out.")
@@ -2451,12 +2839,16 @@ export const createNativeAudioHostSupervisor = (
     async listDevices() {
       assertTransactionAccess(undefined)
       await supervisor.start()
+
       return new Promise<NativeAudioDevice[]>((resolve, reject) => {
         if (!broker.admits(undefined)) {
           reject(new NativeAudioHostNotSentError("The native audio host is unavailable."))
+
           return
         }
+
         const queued = broker.submit({ type: deviceInventoryQueryType, reject, reply: { kind: "deviceInventory", resolve } })
+
         if (!queued) reject(new NativeAudioHostNotSentError(broker.queueFullMessage(deviceInventoryQueryType)))
       })
     },
@@ -2471,6 +2863,7 @@ export const createNativeAudioHostSupervisor = (
         || Buffer.byteLength(reason, "utf8") > 120) {
         throw new Error("The native audio stop reason is invalid.")
       }
+
       await supervisor.waitForRecordingFinish()
       const reasonBytes = Buffer.from(reason, "utf8")
       const payload = Buffer.alloc(4 + reasonBytes.byteLength)
@@ -2482,9 +2875,12 @@ export const createNativeAudioHostSupervisor = (
       assertTransactionAccess(undefined)
       await supervisor.start()
       const current = child
+
       if (!current || broker.pending()) throw new Error("The native audio host is unavailable.")
       const frame = encodeNativeAudioHostControlFrame(diagnosticsType)
+
       if (!frame) throw new Error("The native audio host protocol is unavailable.")
+
       return new Promise<NativeHostDiagnostics>((resolve, reject) => {
         broker.startDirect(current, diagnosticsType, frame, { kind: "diagnostics", resolve }, reject,
           "The native audio host diagnostics timed out.")
@@ -2492,8 +2888,11 @@ export const createNativeAudioHostSupervisor = (
     },
     async configureRecording(input, spool) {
       const payload = serializeRecordingConfiguration(input, spool)
+
       if (!payload) throw new Error("The native recording configuration is invalid.")
+
       if (recordingFinish?.pending) throw new Error("Native recording is finishing.")
+
       if (recordingAdmitted) throw new Error("Native recording is already admitted.")
       recordingAdmitted = true
       recordingConfiguration = input
@@ -2503,10 +2902,12 @@ export const createNativeAudioHostSupervisor = (
       const promise = new Promise<NativeHostRecordingStatus>((yes, no) => { resolve = yes; reject = no })
       void promise.catch(() => undefined)
       recordingReady = { promise, resolve, reject }
+
       try {
         try { await request(recordingConfigureType, payload) }
         catch (error) { throw new NativeRecordingConfigureError("request",
           error instanceof Error ? error : new Error("Native recording configure request failed.")) }
+
         try { return await promise }
         catch (error) { throw new NativeRecordingConfigureError("readiness",
           error instanceof Error ? error : new Error("Native recording readiness failed.")) }
@@ -2525,6 +2926,7 @@ export const createNativeAudioHostSupervisor = (
       if (stopFrame !== undefined && (!Number.isSafeInteger(stopFrame) || stopFrame < 0)) {
         throw new Error("The native recording stop frame is invalid.")
       }
+
       if (recordingFinish?.pending) throw new Error("Native recording is already finishing.")
       let resolve: () => void = () => {}
       let reject: (error: Error) => void = () => {}
@@ -2533,7 +2935,9 @@ export const createNativeAudioHostSupervisor = (
       const finish = { pending: true, dispatched: false, promise, resolve, reject }
       recordingFinish = finish
       let payload: Buffer | undefined
+
       if (stopFrame !== undefined) { payload = Buffer.alloc(8); payload.writeBigInt64BE(BigInt(stopFrame)) }
+
       try { await request(recordingStopType, payload) }
       catch (error) {
         finish.pending = false
@@ -2547,6 +2951,7 @@ export const createNativeAudioHostSupervisor = (
     },
     async teardownSession() {
       if (!child && !startPromise) return
+
       if (!hello) await supervisor.start()
       await request(teardownType)
     },
@@ -2558,18 +2963,22 @@ export const createNativeAudioHostSupervisor = (
     recordingFinalizationPending: () => recordingFinish?.pending === true,
     teardown() {
       evidence?.("host-teardown-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "application-shutdown" })
+
       if (teardownPromise) return teardownPromise
       lifecycleGeneration += 1
       lifecycleIntentVersion += 1
       const current = child
+
       if (current) evidenceTerminationCauses.set(current, "application-shutdown")
       const hadPending = broker.pending() !== undefined
       const pendingRequestName = broker.pendingRequestName()
       const termination = childTerminationPromise
+
       const stopping = (async () => {
         // No unconditional microtask while cancelling an ordinary handshake:
         // invalidate it synchronously. A real pending Finish still owns a barrier.
         if (recordingFinish?.pending) await supervisor.waitForRecordingFinish()
+
         try {
           if (termination) await termination
           else if (hadPending) broker.rejectPending(new Error("The native audio host is tearing down."))
@@ -2579,10 +2988,12 @@ export const createNativeAudioHostSupervisor = (
           transactionOwner = undefined
           manualTransactionToken = undefined
           manualTransactionGeneration = -1
+
           if (child === current) child = undefined
           recordingAdmitted = false
           hello = undefined
           buffer = Buffer.alloc(0)
+
           if (current) console.error("[native-audio-host-termination-request]", JSON.stringify({
             reason: "application-shutdown",
             timestamp: Date.now(),
@@ -2594,6 +3005,7 @@ export const createNativeAudioHostSupervisor = (
           current?.kill()
         }
       })()
+
       teardownPromise = stopping
       void stopping.then(
         () => {
@@ -2603,20 +3015,28 @@ export const createNativeAudioHostSupervisor = (
           if (teardownPromise === stopping) teardownPromise = undefined
         },
       )
+
       return stopping
     },
     suspend() {
       evidence?.("host-suspend-request", { pid: child?.pid ?? null, lifecycleGeneration, cause: "quit-or-suspend" })
+
       if (child && evidence) evidenceTerminationCauses.set(child, "quit")
+
       if (recordingSuspendPromise) return recordingSuspendPromise
+
       if (recordingFinish?.pending) {
         const finishing = supervisor.waitForRecordingFinish().then(() => {
           recordingSuspendPromise = undefined
+
           return supervisor.suspend()
         })
+
         recordingSuspendPromise = finishing
+
         return finishing
       }
+
       if (suspended && !resumePromise) return childTerminationPromise ?? (terminationFailure
         ? Promise.reject(terminationFailure)
         : Promise.resolve())
@@ -2624,6 +3044,7 @@ export const createNativeAudioHostSupervisor = (
       lifecycleIntentVersion += 1
       lifecycleGeneration += 1
       const current = child
+
       if (current) evidenceTerminationCauses.set(current, "app-suspend")
       const error = new Error("The native audio host was suspended.")
       // Install the boundary before settling anything: rejected work must not
@@ -2639,12 +3060,15 @@ export const createNativeAudioHostSupervisor = (
       buffer = Buffer.alloc(0)
       broker.rejectPending(error, false)
       broker.rejectQueued(error)
+
       if (current) {
         try {
           const frame = encodeNativeAudioHostControlFrame(teardownType)
+
           if (frame) current.stdin.write(frame)
         } catch {}
       }
+
       const termination = childTerminationPromise ?? (current ? terminateDetachedChild(current) : Promise.resolve())
       childTerminationPromise = termination
       void termination.then(
@@ -2655,21 +3079,27 @@ export const createNativeAudioHostSupervisor = (
           if (childTerminationPromise === termination) childTerminationPromise = undefined
         },
       )
+
       return termination
     },
     resume() {
       if (recordingSuspendPromise) {
         return recordingSuspendPromise.then(() => supervisor.resume())
       }
+
       if (teardownPromise) return teardownPromise
+
       if (resumePromise) return resumePromise
+
       if (terminationFailure) return Promise.reject(terminationFailure)
       const requestedIntentVersion = lifecycleIntentVersion + 1
       lifecycleIntentVersion = requestedIntentVersion
       const termination = childTerminationPromise ?? Promise.resolve()
+
       const next = termination.then(() => {
         if (lifecycleIntentVersion === requestedIntentVersion) suspended = false
       })
+
       resumePromise = next
       void next.then(
         () => {
@@ -2679,6 +3109,7 @@ export const createNativeAudioHostSupervisor = (
           if (resumePromise === next) resumePromise = undefined
         },
       )
+
       return next
     },
     status: () => ({ running: child !== undefined && hello !== undefined, hello: hello ? hello : undefined,
@@ -2686,14 +3117,17 @@ export const createNativeAudioHostSupervisor = (
     transactionOpen: () => transactionOwner !== undefined,
     onLoss(listener) {
       lossListeners.add(listener)
+
       return () => lossListeners.delete(listener)
     },
     onRecordingStatus(listener) {
       recordingStatusListeners.add(listener)
+
       return () => recordingStatusListeners.delete(listener)
     },
     onMeterBatch(listener) {
       meterBatchListeners.add(listener)
+
       return () => meterBatchListeners.delete(listener)
     },
     async setSpectrumNode(nodeId) {
@@ -2702,17 +3136,21 @@ export const createNativeAudioHostSupervisor = (
     },
     onSpectrumFrame(listener) {
       spectrumFrameListeners.add(listener)
+
       return () => spectrumFrameListeners.delete(listener)
     },
     onScheduleProgress(listener) {
       scheduleProgressListeners.add(listener)
+
       return () => scheduleProgressListeners.delete(listener)
     },
     onWorkerNotification(listener) {
       workerNotificationListeners.add(listener)
+
       return () => workerNotificationListeners.delete(listener)
     },
   }
+
   return supervisor
 }
 
@@ -2722,6 +3160,7 @@ export const probeNativeAudioOutputDevice = async (
   createSupervisor: (hostPath: string) => NativeAudioHostSupervisor = createNativeAudioHostSupervisor,
 ): Promise<NativeOutputDevice | null> => {
   const probe = createSupervisor(hostPath)
+
   try {
     return await probe.resolveOutputDevice(preferredDeviceId)
   } finally {

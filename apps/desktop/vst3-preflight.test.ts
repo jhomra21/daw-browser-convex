@@ -65,6 +65,7 @@ const hello: NativeVst3WorkerHello = {
 const withScript = async (source: string, operation: (script: string) => Promise<void>) => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-vst3-preflight-"))
   const script = path.join(directory, "worker.mjs")
+
   try {
     await writeFile(script, source)
     await operation(script)
@@ -86,6 +87,7 @@ test("uses the pinned worker artifact name for packaged launches", () => {
 
 test("accepts a bounded worker hello from the dedicated preflight mode", async () => {
   const body = JSON.stringify(hello)
+
   const script = `
 const body = ${JSON.stringify(body)}
 const frame = Buffer.alloc(4 + Buffer.byteLength(body))
@@ -93,6 +95,7 @@ frame.writeUInt32BE(Buffer.byteLength(body), 0)
 frame.write(body, 4)
 process.stdout.write(frame)
 `
+
   await withScript(script, async (scriptPath) => {
     const result = await preflightNativeVst3Worker({
       workerPath: "/packaged/daw-vst3-worker",
@@ -101,7 +104,9 @@ process.stdout.write(frame)
       accessWorker: async () => undefined,
       spawnWorker: spawnScript(scriptPath),
     })
+
     expect(result.status).toBe("available")
+
     if (result.status === "available") expect(result.hello).toEqual(hello)
   })
 })
@@ -115,6 +120,7 @@ test("fails closed when the worker crashes or exceeds its deadline", async () =>
       accessWorker: async () => undefined,
       spawnWorker: spawnScript(scriptPath),
     })
+
     expect(result).toMatchObject({ status: "unavailable", code: "worker-crashed" })
   })
   await withScript("setTimeout(() => undefined, 10_000)", async (scriptPath) => {
@@ -126,6 +132,7 @@ test("fails closed when the worker crashes or exceeds its deadline", async () =>
       accessWorker: async () => undefined,
       spawnWorker: spawnScript(scriptPath),
     })
+
     expect(result).toMatchObject({ status: "unavailable", code: "worker-timeout" })
   })
 })

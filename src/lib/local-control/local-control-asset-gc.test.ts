@@ -21,32 +21,40 @@ const createExpiredAssetRecovery = async () => {
     updatedAt: 1,
   })
   const service = createLocalControlService({ actor })
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: 'deleted-asset' } }],
   }
+
   const approval = await service.requestApproval(request)
+
   const result = await service.commit({
     ...request,
     idempotencyKey: `delete-${crypto.randomUUID()}`,
     approvalToken: approval.approvalToken,
   })
+
   const recovery = result.recoveries[0]
+
   if (!recovery) throw new Error('Expected asset recovery.')
   const jobId = `local-asset-gc:${recovery.id}`
   const job = await db.get('controlAssetGc', jobId)
   const recoveryRow = await db.get('controlRecoveries', recovery.id)
+
   if (!job || !recoveryRow) throw new Error('Expected GC job and recovery.')
   const expiredAt = Date.now() - 1
   await db.put('controlAssetGc', { ...job, eligibleAt: expiredAt })
   await db.put('controlRecoveries', { ...recoveryRow, expiresAt: expiredAt })
+
   return { project, db, jobId, recoveryId: recovery.id, service }
 }
 
 test('never claims malformed or live-referenced asset GC jobs', async () => {
   const { project, db, jobId } = await createExpiredAssetRecovery()
   const job = await db.get('controlAssetGc', jobId)
+
   if (!job) throw new Error('Expected GC job.')
   await db.put('assets', {
     id: 'replacement-asset',
@@ -79,6 +87,7 @@ test('does not reclaim an active asset GC lease or accept wrong recovery linkage
   const { project, db, jobId, recoveryId } = await createExpiredAssetRecovery()
   const job = await db.get('controlAssetGc', jobId)
   const recovery = await db.get('controlRecoveries', recoveryId)
+
   if (!job || !recovery) throw new Error('Expected GC job and recovery.')
   await db.put('controlAssetGc', {
     ...job,
@@ -94,6 +103,7 @@ test('does not reclaim an active asset GC lease or accept wrong recovery linkage
 test('retains an expired recovery until its linked GC job finalizes', async () => {
   const { project, db, jobId, recoveryId, service } = await createExpiredAssetRecovery()
   const job = await db.get('controlAssetGc', jobId)
+
   if (!job) throw new Error('Expected GC job.')
   await db.put('controlAssetGc', { ...job, eligibleAt: Date.now() + 60_000 })
   await service.commit({

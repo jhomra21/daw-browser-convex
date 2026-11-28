@@ -42,14 +42,18 @@ const formatFrequency = (value: number) => formatDeviceFrequency(value, 1)
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 const normalizeLowCut = (value: number, highCutHz: number) => Math.round(clamp(value, DELAY_LOW_CUT_HZ_MIN, Math.min(DELAY_LOW_CUT_HZ_MAX, highCutHz - 1)))
 const normalizeHighCut = (value: number, lowCutHz: number) => Math.round(clamp(value, Math.max(DELAY_HIGH_CUT_HZ_MIN, lowCutHz + 1), DELAY_HIGH_CUT_HZ_MAX) / 100) * 100
+
 const frequencyX = (value: number, min: number, max: number) => {
   const normalized = (Math.log10(value) - Math.log10(min)) / (Math.log10(max) - Math.log10(min))
+
   return clamp(normalized, 0, 1) * 180
 }
+
 const pointToFrequency = (x: number) => {
   const normalized = clamp(x / 180, 0, 1)
   const logMin = Math.log10(DELAY_LOW_CUT_HZ_MIN)
   const logMax = Math.log10(DELAY_HIGH_CUT_HZ_MAX)
+
   return 10 ** (logMin + normalized * (logMax - logMin))
 }
 
@@ -77,9 +81,11 @@ function DelayValueStrip(props: {
       const logMax = Math.log10(props.max)
       const normalizedStart = (Math.log10(startValue) - logMin) / (logMax - logMin)
       const normalizedNext = clamp(normalizedStart + deltaY * 0.005, 0, 1)
+
       return 10 ** (logMin + normalizedNext * (logMax - logMin))
     },
   })
+
   const handleDoubleClick = () => {
     if (!props.disabled) control.commitValue(props.resetValue)
   }
@@ -115,6 +121,7 @@ function DelayFilterGraph(props: {
 }) {
   const lowX = () => frequencyX(props.params.lowCutHz, DELAY_LOW_CUT_HZ_MIN, DELAY_HIGH_CUT_HZ_MAX)
   const highX = () => frequencyX(props.params.highCutHz, DELAY_LOW_CUT_HZ_MIN, DELAY_HIGH_CUT_HZ_MAX)
+
   const onLowCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => props.onLowCutChange(props.params.lowCutHz + 10),
     ArrowUp: () => props.onLowCutChange(props.params.lowCutHz + 10),
@@ -125,6 +132,7 @@ function DelayFilterGraph(props: {
     Home: () => props.onLowCutChange(DELAY_LOW_CUT_HZ_MIN),
     End: () => props.onLowCutChange(DELAY_LOW_CUT_HZ_MAX),
   })
+
   const onHighCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
     ArrowRight: () => props.onHighCutChange(props.params.highCutHz + 100),
     ArrowUp: () => props.onHighCutChange(props.params.highCutHz + 100),
@@ -135,8 +143,10 @@ function DelayFilterGraph(props: {
     Home: () => props.onHighCutChange(DELAY_HIGH_CUT_HZ_MIN),
     End: () => props.onHighCutChange(DELAY_HIGH_CUT_HZ_MAX),
   })
+
   const filterPath = () => {
     if (!props.params.filterEnabled) return 'M 0 30 L 180 30'
+
     return `M 0 48 C ${lowX()} 48 ${lowX()} 30 ${lowX() + 28} 30 L ${highX() - 28} 30 C ${highX()} 30 ${highX()} 48 180 48`
   }
 
@@ -175,18 +185,23 @@ function DelayFilterGraph(props: {
 export default function Delay(props: DelayProps) {
   const timeMode = () => props.params.mode === 'time'
   const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+
   const changeAutomated = (parameterId: string, updates: Partial<DelayParams>) => {
     props.onManualAutomationOverride?.(parameterId)
     props.onChange(updates)
   }
+
   const updateAutomatedLowCut = (value: number) => {
     const lowCutHz = normalizeLowCut(value, props.params.highCutHz)
+
     if (lowCutHz === props.params.lowCutHz) return
     props.onManualAutomationOverride?.('delay.lowCutHz')
     props.onChange({ lowCutHz })
   }
+
   const updateAutomatedHighCut = (value: number) => {
     const highCutHz = normalizeHighCut(value, props.params.lowCutHz)
+
     if (highCutHz === props.params.highCutHz) return
     props.onManualAutomationOverride?.('delay.highCutHz')
     props.onChange({ highCutHz })

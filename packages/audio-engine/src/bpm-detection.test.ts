@@ -9,15 +9,19 @@ const createPulseLoop = (bpm: number, bars: number) => {
   const channel = new Float32Array(Math.round(durationSec * sampleRate))
   const framesPerBeat = Math.round((60 / bpm) * sampleRate)
   const pulseFrames = Math.round(0.025 * sampleRate)
+
   for (let beat = 0; beat < beats; beat++) {
     const start = beat * framesPerBeat
     const accent = beat % 4 === 0 ? 0.95 : 0.6
+
     for (let offset = 0; offset < pulseFrames; offset++) {
       const frame = start + offset
+
       if (frame >= channel.length) break
       channel[frame] = accent * (1 - offset / pulseFrames)
     }
   }
+
   return channel
 }
 
@@ -29,9 +33,11 @@ const isEquivalentTempo = (actual: number, expected: number) => (
 
 const arraysEqual = (left: Float32Array, right: Float32Array) => {
   if (left.length !== right.length) return false
+
   for (let index = 0; index < left.length; index++) {
     if (left[index] !== right[index]) return false
   }
+
   return true
 }
 
@@ -43,6 +49,7 @@ describe('detectLoopBpm', () => {
     })
 
     expect(result === null).toBe(false)
+
     if (!result) return
     expect(isEquivalentTempo(result.bpm, 128)).toBe(true)
     expect(result.confidence).toBeGreaterThan(0.35)
@@ -68,6 +75,7 @@ describe('detectLoopBpm', () => {
     expect(arraysEqual(left, beforeLeft)).toBe(true)
     expect(arraysEqual(right, beforeRight)).toBe(true)
     expect(result === null).toBe(false)
+
     if (!result) return
     expect(isEquivalentTempo(result.bpm, 90)).toBe(true)
     expect(Math.abs(result.alternatives[0].bpm - result.bpm)).toBeLessThan(1)

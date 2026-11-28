@@ -20,15 +20,18 @@ type Deferred<T = void> = {
   resolve: (value: T) => void
   reject: (error: Error) => void
 }
+
 type BufferMetrics = { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number; deliveryWorst?: { returnedAtEpochMs: number; receivedAtEpochMs: number } }
 
 const deferred = <T = void>(): Deferred<T> => {
   let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
+
   const promise = new Promise<T>((onResolve, onReject) => {
     resolve = onResolve
     reject = onReject
   })
+
   return { promise, resolve, reject }
 }
 
@@ -47,22 +50,27 @@ export const createPortableRecordingWriter = (input: {
 }) => {
   const worker = input.worker ?? createBrowserRecordingWriter()
   const bufferBytes = RECORDER_BLOCK_FRAMES * input.channelCount * Float32Array.BYTES_PER_ELEMENT
+
   const available = Array.from(
     { length: RECORDER_MAX_QUEUED_BLOCKS },
     () => new ArrayBuffer(bufferBytes),
   )
+
   const queuedFrameCounts: number[] = []
   const postedAt: number[] = []
   const now = input.now ?? (() => performance.timeOrigin + performance.now())
   let returned = 0
+
   const reportBuffers = (latencyMs: number, deliveryMs = 0, deliveryWorst: { returnedAtEpochMs: number; receivedAtEpochMs: number } | null = null) => {
     const metrics: BufferMetrics = {
       returned, latencyMs, deliveryMs, outstanding: postedAt.length,
       oldestAgeMs: postedAt.length > 0 ? Math.max(0, now() - postedAt[0]!) : 0,
     }
+
     if (deliveryWorst) metrics.deliveryWorst = deliveryWorst
     input.onBufferMetrics?.(metrics)
   }
+
   let queuedFrames = 0
   let state: 'starting' | 'open' | 'closing' | 'closed' | 'failed' = 'starting'
   let nextBlockId = 0
@@ -106,21 +114,28 @@ export const createPortableRecordingWriter = (input: {
   worker.setMessageHandler((message) => {
     if (!message) {
       fail('Malformed portable recording writer message.')
+
       return
     }
+
     if (message.generation !== input.generation || message.sessionId !== input.sessionId) return
+
     if (message.type === 'ready') {
       if (state !== 'starting') return fail('Unexpected portable recording writer ready message.')
       clearDeadline()
       state = 'open'
       ready.resolve()
+
       return
     }
+
     if (message.type === 'return') {
       if ((state !== 'open' && state !== 'closing') || queuedFrameCounts.length === 0) {
         fail('Unexpected portable recording buffer return.')
+
         return
       }
+
       available.push(message.buffer)
       queuedFrames -= queuedFrameCounts.shift()!
       const sentAt = postedAt.shift()
@@ -132,27 +147,38 @@ export const createPortableRecordingWriter = (input: {
           : { returnedAtEpochMs: message.returnedAtMs, receivedAtEpochMs: receivedAt })
       input.onQueuedFrames?.(queuedFrames)
       requestWriterFinalize()
+
       return
     }
+
     if (message.type === 'failure') {
       if (message.timing) updateRecordingDiagnostics({ writerTiming: message.timing })
       fail(message.reason)
+
       return
     }
+
     if (message.type === 'boot') {
       fail('Unexpected SAB boot response in portable recording writer.')
+
       return
     }
+
     if (state !== 'closing' || !completion) {
       fail('Unexpected portable recording writer terminal response.')
+
       return
     }
+
     if ((terminalRequest === 'finalize' && message.type !== 'finalized')
       || (terminalRequest === 'abort' && message.type !== 'aborted')) {
       fail('Portable recording writer returned the wrong terminal response.')
+
       return
     }
+
     const pending = completion
+
     if (message.timing) updateRecordingDiagnostics({ writerTiming: message.timing })
     clearDeadline()
     completion = undefined
@@ -176,20 +202,27 @@ export const createPortableRecordingWriter = (input: {
     if (state !== 'open' || block.channelCount !== input.channelCount || block.planes.length !== input.channelCount) {
       throw new Error('Portable recording block arrived outside an open compatible session.')
     }
+
     const buffer = available.pop()
+
     if (!buffer) {
       reportBuffers(0)
       throw new Error('Portable recording writer queue exceeded its hard bound.')
     }
+
     const samples = new Float32Array(buffer)
+
     for (let channel = 0; channel < input.channelCount; channel += 1) {
       const plane = block.planes[channel]
+
       if (!plane || plane.length !== block.frameCount) {
         available.push(buffer)
         throw new Error('Portable recording block payload is invalid.')
       }
+
       samples.set(plane, channel * RECORDER_BLOCK_FRAMES)
     }
+
     const message: RecorderBlockMessage = {
       type: 'block',
       generation: input.generation,
@@ -200,6 +233,7 @@ export const createPortableRecordingWriter = (input: {
       channelCount: block.channelCount,
       buffer,
     }
+
     nextBlockId += 1
     queuedFrameCounts.push(block.frameCount)
     postedAt.push(now())
@@ -210,6 +244,7 @@ export const createPortableRecordingWriter = (input: {
 
   const finalize = async (capturedFrames: number) => {
     await ready.promise
+
     if (state !== 'open') throw new Error('Portable recording writer is not open.')
     state = 'closing'
     terminalRequest = 'finalize'
@@ -217,11 +252,13 @@ export const createPortableRecordingWriter = (input: {
     requestedCapturedFrames = capturedFrames
     completion = deferred<{ capturedFrames: number }>()
     requestWriterFinalize()
+
     return completion.promise
   }
 
   const abort = (): Promise<void> => {
     if (state === 'starting') return ready.promise.then(abort, () => undefined)
+
     if (state !== 'open') return Promise.resolve()
     state = 'closing'
     terminalRequest = 'abort'
@@ -233,6 +270,7 @@ export const createPortableRecordingWriter = (input: {
       generation: input.generation,
       sessionId: input.sessionId,
     } satisfies WriterInboundMessage)
+
     return completion.promise.then(() => undefined, () => undefined)
   }
 
@@ -254,6 +292,7 @@ export const createPortableRecordingWriter = (input: {
 
 const createBrowserRecordingWriter = (): WorkerEndpoint => {
   const worker = new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
+
   return {
     postMessage: (message, transfer = []) => worker.postMessage(message, [...transfer]),
     setMessageHandler: (handler) => {

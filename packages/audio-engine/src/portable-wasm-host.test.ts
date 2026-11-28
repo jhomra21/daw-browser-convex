@@ -5,15 +5,19 @@ import { encodeEqProcessorState, encodeLimiterProcessorState, encodeSpectralProc
 
 const hostV2Url = new URL('../../../public/audio-worklets/daw-portable-audio-core-host-v2.js', import.meta.url)
 const wasmUrl = new URL('../../../native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm', import.meta.url)
+
 type InstrumentHostStatus = Omit<Extract<PortableWasmStatusMessage, { type: 'instrument-events-applied' }>, 'version'> & { version: number }
+
 type HostControl<Type extends PortableWasmControlMessage['type']> = Omit<Extract<PortableWasmControlMessage, { type: Type }>, 'version'> & { version: number }
 
 test('the v2 host preserves a full scheduled block and acknowledge live parameters only after rendering', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: Array<PortableWasmStatusMessage | InstrumentHostStatus> = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined,
   })
+
   Object.assign(host, {
     ready: true, revision: 1, maxFramesPerBlock: 128, transportEpoch: 1,
     memory: { buffer: new ArrayBuffer(65536) }, malloc: () => 8, free: () => undefined,
@@ -39,12 +43,15 @@ test('the v2 host preserves a full scheduled block and acknowledge live paramete
   let notes = 0
   host.coreProcess = () => {
     const view = host.scheduleInstrumentEventView
+
     for (let index = 0; index < view.getUint32(0, true); index += 1) {
       if (view.getUint32(4 + index * 48 + 32, true) === 5) rendered.push(view.getFloat32(4 + index * 48 + 44, true))
       else notes += 1
     }
+
     return 0
   }
+
   host.transportRunning = true
   host.process([], [[new Float32Array(128), new Float32Array(128)]])
   expect(notes).toBe(256)
@@ -80,11 +87,14 @@ test('the v2 host replays pending and applied parameter values under a new epoch
   host.coreProcess = () => {
     if (host.instrumentEventByteCount > 4) {
       const deliveredEpoch = host.instrumentEventView.getUint32(28, true)
+
       if (deliveredEpoch !== host.transportEpoch) return 1
       epochs.push(deliveredEpoch)
     }
+
     return 0
   }
+
   host.process([], [[new Float32Array(128), new Float32Array(128)]])
   host.process([], [[new Float32Array(128), new Float32Array(128)]])
   host.handleMessage({ version: 2, type: 'transport', requestId: 10, epoch: 3, running: true, frame: 256 })
@@ -98,11 +108,13 @@ const createTransportHost = async (
 ) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   host.ready = true
   host.revision = 1
   host.maxFramesPerBlock = 8
@@ -115,19 +127,23 @@ const createTransportHost = async (
   host.coreProcess = () => {
     host.leftOutput.fill(host.transportRunning ? 0.25 : 0)
     host.rightOutput.fill(host.transportRunning ? -0.125 : 0)
+
     return 0
   }
+
   return { host, messages }
 }
 
 test('the v2 host exposes the same explicit API to worklet and Worker callers', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const statuses: unknown[] = []
+
   const createHost = () => new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => statuses.push(message),
     close: () => {},
   })
+
   const workletHost = createHost()
   const workerHost = createHost()
 
@@ -175,21 +191,26 @@ test('the v2 host passes curved fade values and defaults to Wasm', async () => {
     fadeOutCurve: -0.5,
     fadeOutCurvePosition: 0.8,
   }
+
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const calls: unknown[][] = []
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   host.ready = true
   host.revision = 1
   host.transportEpoch = 1
   host.sourceSchedule = (...args: unknown[]) => {
     calls.push(args)
+
     return 0
   }
+
   host.assets = new Map([['asset', { handle: { value: 1n } }]])
   host.scheduleSources({
     version: 2,
@@ -263,8 +284,10 @@ test('the v2 host acknowledges transport only after its rendered quantum reaches
 
 test('the v2 host lets the latest successful transport command supersede a pending acknowledgement', async () => {
   const calls: [number, number, bigint][] = []
+
   const { host, messages } = await createTransportHost((epoch, running, frame) => {
     calls.push([epoch, running, frame])
+
     return 0
   })
 
@@ -298,8 +321,10 @@ test('the v2 host lets the latest successful transport command supersede a pendi
 
 test('the v2 host preserves a pending transport when a newer core command fails', async () => {
   let callCount = 0
+
   const { host, messages } = await createTransportHost(() => {
     callCount += 1
+
     return callCount === 1 ? 0 : 1
   })
 
@@ -334,11 +359,13 @@ test('the v2 host preserves a pending transport when a newer core command fails'
 test('the portable host captures bounded planar PCM only when explicitly configured', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
   host.handleMessage({
@@ -378,11 +405,13 @@ test('the portable host captures bounded planar PCM only when explicitly configu
 test('the actual portable Wasm host renders built-in effects without native hooks', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
 
@@ -480,6 +509,7 @@ const portableMixerTargets = [
   { id: 'mixer.mute', target: 28, minValue: 0, maxValue: 1 },
   { id: 'mixer.solo', target: 29, minValue: 0, maxValue: 1 },
 ]
+
 const portableTrackGraph = (trackIds: readonly string[]) => ({
   version: 1,
   revision: 1,
@@ -499,30 +529,37 @@ const portableTrackGraph = (trackIds: readonly string[]) => ({
     version: 1, id: `${id}-master`, fromNodeId: id, toNodeId: 'master', gain: 1, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0,
   })),
 })
+
 const startPortableTracks = async (trackIds: readonly string[], graph: { revision: number } = portableTrackGraph(trackIds), maxFramesPerBlock = 128) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock })).toBe(true)
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-prepared', requestId: 1, result: 'prepared' }))
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: graph.revision })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 2, result: 'published' }))
+
   return { host, messages }
 }
+
 // The controller creates its session with the capacity of 8192 frames; the position cadence follows the quanta rendered.
 test('the position report cadence is 50 ms of rendered frames whatever the block capacity', async () => {
   const { host, messages } = await startPortableTracks(['track'], undefined, 8_192)
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+
   for (let block = 0; block < 100; block += 1) host.process([], [[new Float32Array(128), new Float32Array(128)]])
   const frames = messages.flatMap((message) => message.type === 'transport-position' ? [message.frame] : [])
   const gaps = frames.slice(1).map((frame, index) => frame - frames[index])
   expect({ reports: frames.length, shortest: Math.min(...gaps), longest: Math.max(...gaps) }).toEqual({ reports: 6, shortest: 2_432, longest: 2_432 })
 })
+
 // Plays a constant on each listed source through a registered PCM asset and a
 // scheduled sample source, as the product feeds clips: portable sources never
 // read the worklet's live input.
@@ -535,6 +572,7 @@ const playConstantSources = (
 ) => {
   const frames = 48_000
   const requestId = 1_000 + revision
+
   for (const { value } of sources) host.handleMessage({
     version, type: 'register-asset', requestId, generation: 0,
     asset: { version: 1, assetId: `constant-${value}`, frameCount: frames, sampleRateHz: 48_000, channelCount: 2 },
@@ -563,6 +601,7 @@ test('the v2 host prepares and renders one source per audio track on the built c
 
 test('the v2 host hears the recording input once, only when monitoring, and still captures it on the built core', async () => {
   const heard: unknown[] = []
+
   for (const trackCount of [1, 3]) {
     for (const monitoring of [false, true]) {
       const trackIds = Array.from({ length: trackCount }, (_, index) => `track-${index}`)
@@ -585,6 +624,7 @@ test('the v2 host hears the recording input once, only when monitoring, and stil
       }))
     }
   }
+
   expect(heard).toEqual([
     [1, false, [0.5], [0.5]], [1, true, [0.75], [0.5]],
     [3, false, [0.5], [0.5]], [3, true, [0.75], [0.5]],
@@ -600,11 +640,14 @@ test('the v2 host holds a scheduled mixer set-point across blocks on the built c
   } })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'schedule-installed', result: 'installed' }))
   playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+
   const render = () => {
     const left = new Float32Array(8)
     host.process([], [[left, new Float32Array(8)]])
+
     return Array.from(left)
   }
+
   expect(render()).toEqual([1, 1, 0.25, 0.25, 0.25, 0.25, 0.25, 0.25])
   expect(render()).toEqual(Array.from({ length: 8 }, () => 0.25))
   expect(render()).toEqual(Array.from({ length: 8 }, () => 0.25))
@@ -615,27 +658,33 @@ test('the v2 host ramps a product mute, unmute and solo flip published while pla
   const { host, messages } = await startPortableTracks(trackIds)
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   let revision = 1
+
   const installSchedule = () => {
     host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 2 + 2, schedule: {
       version: 1, revision, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [],
     } })
     expect(messages).toContainEqual(expect.objectContaining({ type: 'schedule-installed', revision, result: 'installed' }))
   }
+
   installSchedule()
   playConstantSources(host, messages, 2, 1, trackIds.map((nodeId) => ({ nodeId, value: 1 })))
   const fade = 240
   const composite = (2 * fade - 1) / (fade * fade)
   let previous = 2
+
   const render = () => {
     const left = new Float32Array(128)
     host.process([], [[left, new Float32Array(128)]])
+
     return Array.from(left)
   }
+
   // Each track as the product compiles it (resolve-routing.ts): a mute zeroes the
   // fader and the output edge; a solo elsewhere zeroes only the output edge.
   const publish = (tracks: ReadonlyArray<{ gain: number, muted: boolean, edgeGain: number }>, target: number, bound: number) => {
     revision += 1
     const graph = portableTrackGraph(trackIds)
+
     const snapshot = {
       ...graph,
       revision,
@@ -643,20 +692,24 @@ test('the v2 host ramps a product mute, unmute and solo flip published while pla
         ? { ...node, mixer: { ...node.mixer, gain: tracks[index].gain, muted: tracks[index].muted } } : node),
       edges: graph.edges.map((edge, index) => ({ ...edge, gain: tracks[index].edgeGain })),
     }
+
     host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 2, snapshot })
     host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 2 + 1, revision })
     expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', revision, result: 'published' }))
     installSchedule()
     const samples = [...render(), ...render()]
     let step = 0
+
     for (const sample of samples) {
       step = Math.max(step, Math.abs(sample - previous))
       previous = sample
     }
+
     expect([revision, step <= bound + 1e-6 ? 'within bound' : step, samples[fade - 1], samples.at(-1)])
       .toEqual([revision, 'within bound', target, target])
     expect(render()).toEqual(Array.from({ length: 128 }, () => target))
   }
+
   expect(render()).toEqual(Array.from({ length: 128 }, () => 2))
   const open = { gain: 1, muted: false, edgeGain: 1 }
   publish([{ gain: 0, muted: true, edgeGain: 0 }, open], 1, composite)
@@ -682,24 +735,31 @@ test('the v2 host keeps rendering a published revision whose schedule has not ar
   host.coreProcess = (...args: unknown[]) => {
     const result = coreProcess(...args)
     results.push(result)
+
     return result
   }
+
   const render = () => {
     const left = new Float32Array(128)
     host.process([], [[left, new Float32Array(128)]])
+
     return Array.from(left)
   }
+
   const blocks = [render(), render(), render()]
   expect([results, blocks.map((block) => block.filter((sample) => sample === 0.5).length)]).toEqual([[0, 0, 0], [128, 128, 128]])
 })
+
 test('the portable host drains one block per acknowledgement before finalizing', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   const wasmBytes = await Bun.file(wasmUrl).arrayBuffer()
   expect(await host.initialize({ wasmBytes, contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
   host.handleMessage({
@@ -715,9 +775,11 @@ test('the portable host drains one block per acknowledgement before finalizing',
     punchStartFrame: 0,
     punchEndFrame: null,
   })
+
   for (let block = 0; block < 17; block += 1) {
     host.process([[new Float32Array(128)]], [[new Float32Array(128), new Float32Array(128)]])
   }
+
   host.handleMessage({ version: 2, type: 'recording-capture-finalize', stopFrame: 128 })
   expect(messages.filter((message) => message.type === 'recording-capture-block')).toHaveLength(1)
   expect(messages).not.toContainEqual(expect.objectContaining({
@@ -736,11 +798,13 @@ test('the portable host drains one block per acknowledgement before finalizing',
 test('installed schedules advance bounded cursors across half-open blocks and seeks', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: (message: PortableWasmStatusMessage) => messages.push(message),
     close: () => undefined,
   })
+
   host.ready = true
   host.revision = 1
   host.transportEpoch = 1
@@ -814,16 +878,19 @@ test('installed schedules advance bounded cursors across half-open blocks and se
 
   const materialize = (startFrame: number, frameCount: number) => {
     expect(host.materializeSchedule(startFrame, frameCount)).toBe(true)
+
     const parameterEvents = Array.from(
       { length: host.scheduleEventView.getUint32(0, true) },
       (_, index) => {
         const offset = 4 + index * 20
+
         return [
           startFrame + host.scheduleEventView.getUint32(offset + 12, true),
           host.scheduleEventView.getFloat32(offset + 16, true),
         ]
       },
     )
+
     return {
       parameterEvents,
       instrumentCount: host.scheduleInstrumentEventView.getUint32(0, true),
@@ -853,11 +920,13 @@ test('installed schedules advance bounded cursors across half-open blocks and se
 
 test('process stages only live buses, clears removed buses, and preserves recording channel mapping', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
+
   const host = new DawPortableAudioCoreHost({
     sampleRate: 48_000,
     postMessage: () => undefined,
     close: () => undefined,
   })
+
   host.ready = true
   host.maxFramesPerBlock = 8
   host.inputPlanes = Array.from({ length: 128 }, () => new Float32Array(8))
@@ -870,8 +939,10 @@ test('process stages only live buses, clears removed buses, and preserves record
   const recordingPlaneCounts: number[] = []
   host.coreProcess = (_frames: number, inputBusCount: number) => {
     inputBusCounts.push(inputBusCount)
+
     return 0
   }
+
   const output = [[new Float32Array(2), new Float32Array(2)]]
   host.process([
     [Float32Array.from([1, 2])],
@@ -887,8 +958,10 @@ test('process stages only live buses, clears removed buses, and preserves record
   host.recordingInputBusCount = 2
   host.recordingCaptureProcessMonitor = (_inputOffset: number, planeCount: number) => {
     recordingPlaneCounts.push(planeCount)
+
     return 0
   }
+
   host.process([[Float32Array.from([7, 8])]], output)
   expect(inputBusCounts.at(-1)).toBe(2)
   expect(recordingPlaneCounts).toEqual([4])
@@ -897,11 +970,14 @@ test('process stages only live buses, clears removed buses, and preserves record
 // An adoption publish (requireContinuity) on the same playing core, as the portable controller sends it: prepare the
 // next revision, stage its schedule, then publish. Nothing renders between the three messages.
 type HostSchedule = HostControl<'install-schedule'>['schedule']
+
 type HostScheduleEvent = HostSchedule['events'][number]
+
 type AdoptionMessage =
   | { version: number; type: 'prepare-graph'; requestId: number; snapshot: { revision: number } }
   | { version: number; type: 'install-schedule'; requestId: number; schedule: HostSchedule }
   | { version: number; type: 'publish-graph'; requestId: number; revision: number; requireContinuity: true; publicationFrame?: number; sources?: { epoch: number; ordinary: readonly object[]; prepared: readonly object[] } }
+
 const adoptRevision = <Snapshot extends { revision: number }>(
   host: { handleMessage: (message: AdoptionMessage) => void },
   messages: readonly PortableWasmStatusMessage[],
@@ -915,16 +991,20 @@ const adoptRevision = <Snapshot extends { revision: number }>(
   const schedule: HostSchedule = { revision, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events }
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: revision * 10 + 1, schedule })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: revision * 10 + 2, revision, requireContinuity: true, publicationFrame })
+
   return {
     installed: messages.flatMap((message) => message.type === 'schedule-installed' && message.requestId === revision * 10 + 1 ? [message.result] : [])[0],
     published: messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])[0],
   }
 }
+
 const renderLeft = (host: { process: (inputs: Float32Array[][], outputs: Float32Array[][]) => boolean }, frames = 128) => {
   const left = new Float32Array(frames)
   host.process([], [[left, new Float32Array(frames)]])
+
   return Array.from(left)
 }
+
 const gainSet = (frame: number, sequence: number, value: number, trackId = 'track'): HostScheduleEvent => ({
   frame, sequence, type: 'parameter-set', target: { kind: 'parameter', scope: 'track', trackId, parameterId: 'mixer.gain' }, value,
 })
@@ -951,19 +1031,24 @@ const rampGain = (trackId: string, sequence: number, startFrame: number, endFram
   frame: startFrame, sequence, type: 'parameter-ramp', target: { kind: 'parameter', scope: 'track', trackId, parameterId: 'mixer.gain' },
   startFrame, endFrame, interpolation: 'linear', startValue, endValue,
 })
+
 const playRamps = async (events: readonly HostScheduleEvent[]) => {
   const { host, messages } = await startPortableTracks(['a', 'b', 'c'])
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events } })
   playConstantSources(host, messages, 2, 1, [{ nodeId: 'a', value: 1 }, { nodeId: 'b', value: 0.5 }, { nodeId: 'c', value: 0.25 }])
+
   return Array.from({ length: 12 }, () => renderLeft(host))
 }
+
 // The sources hold 1, 0.5 and 0.25. a's gain falls from 1 to 0 over ten blocks and b's rises from 0 to 1 over five; c's holds 1
 // until `cDropFrame` and is 0.5 from there.
 const rampedSum = (frame: number, cDropFrame: number) =>
   (1 - Math.min(frame / 1280, 1)) + 0.5 * Math.min(frame / 640, 1) + 0.25 * (frame < cDropFrame ? 1 : 0.5)
+
 const rampEvents = [rampGain('a', 1, 0, 1280, 1, 0), rampGain('b', 2, 0, 640, 0, 1)]
+
 const rampsStayAudibleAndLand = (blocks: readonly number[][], cDropFrame: number) => [
   Math.max(...blocks.flatMap((block, index) => block.map((sample, frame) => Math.abs(sample - rampedSum(index * 128 + frame, cDropFrame))))) < 0.004,
   blocks.every((block) => Math.min(...block.map(Math.abs)) > 0.3),
@@ -992,11 +1077,14 @@ const fadeThrough = async (fadeFrames: number, wave: (frame: number) => number) 
     sourceFrameCount: 48_000, gain: 1, fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: 48_000, fadeOutEndFrame: 48_000 }] })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
   const rendered = Array.from({ length: Math.ceil(fadeFrames / 128) }, () => renderLeft(host)).flat().slice(0, fadeFrames)
+
   return { rendered, dropped: droppedProcessorEvents(host, messages) }
 }
+
 const droppedProcessorEvents = (host: { handleMessage: (message: { version: 2, type: 'diagnostics' }) => void }, messages: readonly PortableWasmStatusMessage[]) => {
   host.handleMessage({ version: 2, type: 'diagnostics' })
   const health = messages.findLast((message) => message.type === 'health')
+
   return health?.type === 'health' ? health.droppedProcessorEvents : undefined
 }
 
@@ -1061,8 +1149,10 @@ test('B6f5 the v2 host adopts a latency change at a seam and keeps rendering on 
   host.coreProcess = (...args: number[]) => {
     const result = coreProcess(...args)
     results.push(result)
+
     return result
   }
+
   const blocks = [renderLeft(host), renderLeft(host)]
   expect([adoption.published, messages.findLast((message) => message.type === 'graph-continuity')?.result, host.revision, results,
     blocks.map((block) => block.every(Number.isFinite))]).toEqual(['published', 'accepted', 2, [0, 0], [true, true]])
@@ -1078,10 +1168,12 @@ test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption p
   utilityView.setUint32(0, 1, true)
   utilityView.setFloat32(24, 1, true)
   const base = portableTrackGraph(['track'])
+
   const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, processorOrder: [{
     id: 'track-utility', instanceId: 31, kind: 'utility', kindId: 1, stateVersion: 1, state: utilityState,
     parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0,
   }] } : node) })
+
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
@@ -1094,10 +1186,10 @@ test('B6f5 the v2 host keeps a pending live acknowledgement across an adoption p
   host.handleMessage({ version: 2, type: 'processor-events', requestId: 9, revision: 1, epoch: 1, sequence: 1,
     events: [{ processorInstanceId: 31, parameterTarget: 1, frameOffset: 0, value: -6 }] })
   const adoption = adoptRevision(host, messages, graph(2), [])
-  const acknowledgedBeforeRender = messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)
+  const acknowledgedBeforeRender = messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])
   const blocks = [renderLeft(host), renderLeft(host), renderLeft(host)]
   expect([adoption.published, acknowledgedBeforeRender,
-    messages.filter((message) => message.type === 'processor-events-applied').map((message) => message.result)])
+    messages.flatMap((message) => message.type === 'processor-events-applied' ? [message.result] : [])])
     .toEqual(['published', [], ['applied']])
   expect(blocks[2].at(-1)).toBeCloseTo(10 ** (-6 / 20), 3)
 })
@@ -1124,13 +1216,16 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
   const synth = heldSynth
   const base = portableTrackGraph(['track'])
+
   const graph = (revision: number) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track'
     ? { ...node, kind: 'instrument', instrument: synth } : node) })
+
   // Note-on before the adoption, note-off after it, as the schedule compiled at the active time origin carries them.
   const notes: HostScheduleEvent[] = [
     { frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 },
     { frame: 2048, sequence: 2, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72 },
   ]
+
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1) })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
@@ -1154,20 +1249,24 @@ test('B6f5 a sounding Synth note survives an adoption publish and ends at its no
 test('B6f5 m1 a held Synth note keeps a live gain through a publication that differs elsewhere only when it carries the value on the built core', async () => {
   const liveGain = 0.1
   const synth = { ...heldSynth, parameterTargets: [{ id: 'synth.outputGain', target: 1 }] }
+
   const play = async (publishedGain: number) => {
     const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
     const messages: PortableWasmStatusMessage[] = []
     const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
     expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
     const base = portableTrackGraph(['track'])
+
     const graph = (revision: number, instrument: typeof heldSynth) => ({ ...base, revision, nodes: base.nodes.map((node) => node.id === 'track'
       ? { ...node, kind: 'instrument', instrument } : node) })
+
     const notes: HostScheduleEvent[] = [{ frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 72, velocity: 0.8 }]
     host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, synth) })
     host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
     host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
     host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
       revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes } })
+
     for (let block = 0; block < 20; block += 1) renderLeft(host)
     // Target 1 is synth.outputGain.
     host.handleMessage({ version: 2, type: 'instrument-parameters', requestId: 100, revision: 1, sequence: 1, epoch: 1,
@@ -1176,8 +1275,10 @@ test('B6f5 m1 a held Synth note keeps a live gain through a publication that dif
     expect(adoptRevision(host, messages, graph(2, { ...synth, filterCutoffHz: 3000, outputGain: publishedGain }), notes))
       .toEqual({ installed: 'installed', published: 'published' })
     const after = Array.from({ length: 40 }, () => peakOf(renderLeft(host))).at(-1) ?? 0
+
     return { live, after }
   }
+
   const carried = await play(liveGain)
   const stale = await play(0.8)
   expect([carried.live > 0.01, Math.abs(carried.after - carried.live) < carried.live * 0.05, stale.after > stale.live * 3])
@@ -1191,6 +1292,7 @@ test('B6f5 m1 a held Synth note keeps a live gain through a publication that dif
 // sounding), since its grains are scattered.
 const heldNoteKeys = [48, 49, 50, 51, 52, 53, 54, 55]
 const sineFrames = 48_000
+
 const heldSynth: Extract<AudioCoreInstrumentState, { kind: 'synth' }> = {
   version: 1, kind: 'synth', voiceCapacity: 8, outputLayout: 'stereo', parameterTargets: [],
   oscillators: [
@@ -1202,6 +1304,7 @@ const heldSynth: Extract<AudioCoreInstrumentState, { kind: 'synth' }> = {
   ampAttackMs: 0, ampDecayMs: 0, ampSustain: 0.8, ampReleaseMs: 1, lfoEnabled: false, lfoWaveform: 0, lfoRateHz: 1,
   lfoPitchCents: 0, lfoFilterOctaves: 0, lfoAmplitude: 0, lfoPan: 0, outputGain: 0.8, outputPan: 0,
 }
+
 const heldSampler = (
   kind: 'sampler' | 'drum-rack', zoneGain: number, voiceCapacity: number, filterCutoffHz = 8000, filterMode: 'lowpass' | 'highpass' = 'lowpass',
 ): AudioCoreInstrumentState => ({
@@ -1215,6 +1318,7 @@ const heldSampler = (
     loopStartFrame: 0, loopEndFrame: sineFrames, crossfadeFrameCount: 0, chokeGroup: 0,
   })),
 })
+
 // Renders 20 blocks of the first configuration, adopts each later one in turn rendering `blocksPerState` blocks after each
 // (a lone configuration renders `blocksPerState` more), with `keys` held from frame 0. Returns the left channel from the first
 // publication frame on.
@@ -1229,43 +1333,55 @@ const playDragged = async (
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+
   if (paddingByte) {
     // Sets the padding of every state the host hands the core (a granular state's bytes 4..8 and 60..64, each sample zone's
     // last four) before each configuration: a heap's leftovers, or a clean heap.
     let configurations = 0
+
     const pad = (bytes: Uint8Array, offsets: readonly number[]) => {
       configurations += 1
       offsets.forEach((offset) => { bytes[offset] = paddingByte(configurations) })
     }
+
     const configureGranular = host.granularConfigure
     host.granularConfigure = (node: bigint, state: number) => {
       pad(new Uint8Array(host.memory.buffer, state, 64), [4, 5, 6, 7, 60, 61, 62, 63])
+
       return configureGranular(node, state)
     }
+
     const configureSampler = host.samplerConfigure
     host.samplerConfigure = (node: bigint, state: number, zones: number) => {
       const zoneCount = new DataView(host.memory.buffer).getUint32(state + 4, true)
       pad(new Uint8Array(host.memory.buffer, zones, zoneCount * 80), Array.from({ length: zoneCount * 4 }, (_, index) => Math.floor(index / 4) * 80 + 76 + index % 4))
+
       return configureSampler(node, state, zones)
     }
   }
+
   const sine = new Float32Array(sineFrames).map((_, frame) => Math.sin(0.05 * frame))
   host.handleMessage({ version: 2, type: 'register-asset', requestId: 900, generation: 0,
     asset: { version: 1, assetId: 'held-sine', frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [sine, sine] })
   const base = portableTrackGraph(['track'])
+
   const graph = (revision: number, instrument: AudioCoreInstrumentState) => ({ ...base, revision,
     nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument } : node) })
+
   const notes: HostScheduleEvent[] = keys.map((pitch, index) => ({
     frame: 0, sequence: index + 1, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: index + 1, pitch, velocity: 0.8 }))
+
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, states[0]) })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   expect([states[0].kind, messages.findLast((message) => message.type === 'graph-published')?.result]).toEqual([states[0].kind, 'published'])
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: notes } })
+
   for (let block = 0; block < 20; block += 1) renderLeft(host)
   const rendered: number[][] = []
   const renderBlocks = () => { for (let block = 0; block < blocksPerState; block += 1) rendered.push(renderLeft(host)) }
+
   if (states.length === 1 && liveCutoffs.length === 0) renderBlocks()
   states.slice(1).forEach((state, index) => {
     expect(adoptRevision(host, messages, graph(index + 2, state), notes)).toEqual({ installed: 'installed', published: 'published' })
@@ -1277,16 +1393,20 @@ const playDragged = async (
       events: [{ nodeId: 'track', type: 'parameter', noteId: 1, sequence: index + 1, frameOffset: 0, channel: 0, note: 3, value }] })
     renderBlocks()
   })
+
   return rendered.flat()
 }
+
 const playHeldNotes = (
   states: readonly [AudioCoreInstrumentState, AudioCoreInstrumentState],
   keys: readonly number[],
   adopt: boolean,
   blocks = 12,
 ) => playDragged(adopt ? states : [states[0]], keys, blocks)
+
 const settledDeviation = (edited: readonly number[], reference: readonly number[], from = 2 * 128) =>
   Math.max(...edited.slice(from).map((sample, index) => Math.abs(sample - reference[index + from])))
+
 const peakOf = (signal: readonly number[]) => Math.max(...signal.map(Math.abs))
 
 // Discrete edits (a waveform or filter mode no knob can slew) replace the instrument; the values that move in a knob drag
@@ -1319,6 +1439,7 @@ test('B6f5 phase 6i polyphony 8 to 2 leaves the two newest voices of the chord o
 // once 40 blocks have passed, where a replacement would have settled in two.
 test('B6f5 phase 6i a sampler zone gain edit reaches a held note on the built core', async () => {
   const settled = 40 * 128
+
   for (const kind of ['sampler', 'drum-rack'] as const) {
     const edited = await playHeldNotes([heldSampler(kind, 1, 8), heldSampler(kind, 0.5, 8)], [52], true, 60)
     const reference = await playHeldNotes([heldSampler(kind, 0.5, 8), heldSampler(kind, 0.5, 8)], [52], false, 60)
@@ -1333,6 +1454,7 @@ test('B6f5 phase 6i a sampler zone gain edit reaches a held note on the built co
 // changes them, so the comparison can fail.
 const zoneGainAt = (state: AudioCoreInstrumentState, key: number, gain: number): AudioCoreInstrumentState =>
   state.kind === 'sampler' ? { ...state, zones: state.zones.map((zone) => zone.keyLow === key ? { ...zone, gain } : zone) } : state
+
 test('B6f5 phase 6i a Sampler edit that keeps the asset key renders the held voice\'s PCM bit for bit across the adoption on the built core', async () => {
   const steady = heldSampler('sampler', 1, 8)
   const reference = await playHeldNotes([steady, steady], [52], false, 60)
@@ -1351,39 +1473,53 @@ const dragStepBlocks = 5
 const dragSettleBlocks = 40
 const heldDragKey = 84
 const largestStep = (signal: readonly number[]) => Math.max(...signal.slice(1).map((sample, index) => Math.abs(sample - signal[index])))
+
 // The widest ratio between neighbouring cycles, from interpolated upward zero crossings.
 const widestPeriodStep = (signal: readonly number[]) => {
   let lastCross = -1
   let lastPeriod = 0
   let widest = 1
+
   for (let index = 1; index < signal.length; index += 1) {
     if (!(signal[index - 1] < 0 && signal[index] >= 0)) continue
     const cross = index - 1 + -signal[index - 1] / (signal[index] - signal[index - 1])
+
     if (lastCross >= 0) {
       const period = cross - lastCross
+
       if (lastPeriod > 0) widest = Math.max(widest, period / lastPeriod, lastPeriod / period)
       lastPeriod = period
     }
+
     lastCross = cross
   }
+
   return widest
 }
+
 // The values published one after another (the last held for the settle blocks), and what each steady instrument plays over the same span.
 // The mean cycle length over the last 20 blocks (a glide has changed the phase, so only the pitch it arrived at is comparable).
 const arrivedPeriod = (signal: readonly number[]) => {
   const crosses = signal.flatMap((sample, index) => index >= signal.length - 20 * 128 && signal[index - 1] < 0 && sample >= 0
     ? [index - 1 + -signal[index - 1] / (sample - signal[index - 1])] : [])
+
   return (crosses[crosses.length - 1] - crosses[0]) / (crosses.length - 1)
 }
+
 type DragInstrument = (value: number, index?: number) => AudioCoreInstrumentState
+
 const dragged = (values: readonly number[], instrument: DragInstrument) => {
   const publications = [...values, ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(values[values.length - 1])]
+
   return playDragged(publications.map(instrument), [heldDragKey], dragStepBlocks)
 }
+
 const steady = (value: number, values: readonly number[], instrument: DragInstrument) =>
   playDragged([instrument(value)], [heldDragKey], dragStepBlocks * (values.length - 1) + dragSettleBlocks)
+
 // Resonance 25 with the cutoff above the tone, so the peak never crosses it.
 const cutoffSynth = (filterCutoffHz: number): typeof heldSynth => ({ ...heldSynth, filterEnabled: true, filterResonance: 25, filterCutoffHz })
+
 const transposedSynth = (semitone: number): typeof heldSynth => ({
   ...heldSynth, oscillators: [
     { enabled: true, waveform: 0, level: 0.8, octave: 0, semitone, detuneCents: 0 },
@@ -1393,6 +1529,7 @@ const transposedSynth = (semitone: number): typeof heldSynth => ({
 // The longest run of exact zeros: what a cloud that went quiet leaves.
 const longestSilence = (signal: readonly number[]) => signal.reduce((state, sample) => {
   const run = sample === 0 ? state.run + 1 : 0
+
   return { run, longest: Math.max(state.longest, run) }
 }, { run: 0, longest: 0 }).longest
 
@@ -1417,6 +1554,7 @@ test('B6f5 phase 6i a granular or sampler drag keeps its instrument whatever byt
     ['granular grain size', [20, 30, 40, 50, 60, 60, 60, 60, 60].map((size) => granularCloud('hann', 0.5, size))],
     ['sampler zone gain', [1, 0.8, 0.6, 0.4, 0.2, 0.2, 0.2, 0.2, 0.2].map((gain) => heldSampler('sampler', gain, 8))],
   ]
+
   for (const [name, states] of drags) {
     const key = states[0].kind === 'sampler' ? 52 : 60
     const dirty = await playDragged(states, [key], dragStepBlocks, [], (configuration) => 0xA5 ^ configuration)
@@ -1436,8 +1574,10 @@ test('B6f5 phase 6i a cutoff drag through repeated publications does not step be
 
 test('B6f5 phase 6i a cutoff drag through live events does not step beyond the steady instruments on the built core', async () => {
   const cutoffs = [12000, 6000, 3000, 1800]
+
   const live = (filterCutoffHz: number): typeof heldSynth => ({
     ...cutoffSynth(filterCutoffHz), parameterTargets: [{ id: 'synth.filterCutoffHz', target: 3 }] })
+
   const events = [...cutoffs.slice(1), ...Array<number>(dragSettleBlocks / dragStepBlocks).fill(1800)]
   const drag = await playDragged([live(cutoffs[0])], [heldDragKey], dragStepBlocks, events)
   const steepest = Math.max(...await Promise.all(cutoffs.map(async (cutoff) => largestStep(await steady(cutoff, cutoffs, live)))))
@@ -1474,40 +1614,55 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
   const utilityState = new Uint8Array(40)
   new DataView(utilityState.buffer).setUint32(0, 1, true)
   new DataView(utilityState.buffer).setFloat32(24, 1, true)
+
   type GraphNode = AudioCoreGraphSnapshot['nodes'][number]
+
   type GraphEdge = AudioCoreGraphSnapshot['edges'][number]
+
   const maximumGraph = (revision: number): AudioCoreGraphSnapshot => {
     let instanceId = 1000
+
     const utility = (id: string): GraphNode['processorOrder'][number] => ({ id, instanceId: instanceId++, kind: 'utility', kindId: 1, stateVersion: 1,
       state: utilityState, parameterTargets: [{ id: 'gainDb', target: 1 }], bypassed: false, latencyFrames: 0, tailFrames: 0 })
+
     const node = (id: string, kind: GraphNode['kind'], fx: number, mixerId: number, gain: number): GraphNode => ({ id, kind,
       inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: Array.from({ length: fx }, (_, index) => utility(`${id}-fx${index}`)),
       mixer: { instanceId: mixerId, gain, pan: 0, muted: false, soloed: false, parameterTargets: mixerParameterRegistry } })
+
     const edge = (from: string, to: string, kind: GraphEdge['kind'], gain: number): GraphEdge => ({ version: 1, id: `${from}>${to}`, fromNodeId: from,
       toNodeId: to, gain, kind, tap: 'post-fader', sidechain: false, pdcDelayFrames: 0 })
+
     const tracks = Array.from({ length: 60 }, (_, index) => node(`t${index}`, 'source', 8, 100 + index, (revision + index) % 2 ? 1 : 0.5))
     const groups = Array.from({ length: 3 }, (_, index) => node(`group${index}`, 'group', 1, 500 + index, 1))
+
     return { version: 1, revision, contractHash: 'test-contract', masterNodeId: 'master', assets: [],
       nodes: [...tracks, ...groups, node('master', 'master', 0, 900, 1)],
       edges: [...tracks.flatMap((track) => [edge(track.id, 'master', 'output', 1), ...groups.map((group) => edge(track.id, group.id, 'send', 0.3))]),
         ...groups.map((group) => edge(group.id, 'master', 'output', 1))] }
   }
+
   const prepare = (revision: number) => {
     const snapshot = maximumGraph(revision)
     const envelope = encodePortableGraphEnvelope(snapshot)
     const started = performance.now()
     host.handleMessage({ version: 2, type: 'prepare-graph', requestId: revision * 10, snapshot, envelope })
+
     return performance.now() - started
   }
+
   const largest = maximumGraph(1)
   prepare(1)
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
+
   const schedule = (revision: number): HostSchedule => ({ revision, transportEpoch: 1, sampleRateHz: 44_100, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
     events: Array.from({ length: 256 }, (_, index) => gainSet(index * 64, index + 1, 0.25 + (index % 3) * 0.2, `t${index % 60}`)) })
+
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: schedule(1) })
+
   for (let block = 0; block < 8; block += 1) renderLeft(host)
   const timings = { prepare: new Array<number>(), install: new Array<number>(), publish: new Array<number>(), adoption: new Array<number>() }
+
   for (let revision = 2; revision < 42; revision += 1) {
     const prepareMs = prepare(revision)
     let started = performance.now()
@@ -1524,9 +1679,12 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
     renderLeft(host)
     renderLeft(host)
   }
+
   const quantile = (values: number[], q: number) => [...values].sort((left, right) => left - right)[Math.min(values.length - 1, Math.floor(q * values.length))] ?? Infinity
+
   const summary = Object.fromEntries(Object.entries(timings).map(([name, values]) => [name,
     { p50: +quantile(values, 0.5).toFixed(3), p95: +quantile(values, 0.95).toFixed(3), max: +quantile(values, 1).toFixed(3) }]))
+
   console.log('B6F5-R1-TIMING', JSON.stringify({ nodes: largest.nodes.length, processors: largest.nodes.reduce((count, node) => count + node.processorOrder.length, 0),
     edges: largest.edges.length, budgetMs: +(128 / 44_100 * 1000).toFixed(3), ...summary }))
   expect([largest.nodes.length, largest.nodes.reduce((count, node) => count + node.processorOrder.length, 0), largest.edges.length]).toEqual([64, 483, 243])
@@ -1538,7 +1696,9 @@ test('B6f5 R1 an adoption at the core maximum graph stays inside the audio-threa
 // locate (D4). Each is `test.failing` until its implementing step flips it to `test`.
 const publishedResults = (messages: readonly PortableWasmStatusMessage[], revision: number) =>
   messages.flatMap((message) => message.type === 'graph-published' && message.requestId === revision * 10 + 2 ? [message.result] : [])
+
 const renderBlocks = (host: Parameters<typeof renderLeft>[0], blocks: number) => Array.from({ length: blocks }, () => renderLeft(host)).flat()
+
 const m1Playing = async () => {
   const { host, messages } = await startPortableTracks(['track'])
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
@@ -1547,10 +1707,13 @@ const m1Playing = async () => {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [gainSet(200, 1, 0.5), gainSet(400, 2, 0.75)],
   } })
   playConstantSources(host, messages, 2, 1, [{ nodeId: 'track', value: 1 }])
+
   return { host, messages }
 }
+
 // B takes over at frame 256: A plays every event before it and none from it on.
 const m1Next = [gainSet(256, 1, 0.25), gainSet(600, 2, 0.125)]
+
 // The core eases the gain from 0.5 to 0.25 over the 240 frames after the swap (the same with an immediate publish), so that
 // stretch is bounded rather than exact.
 const m1Expected = (frame: number) => frame < 200 ? 1 : frame < 256 ? 0.5 : frame < 600 ? 0.25 : 0.125
@@ -1670,12 +1833,15 @@ test('W-M1d a note-off between an early publish and its swap frame still plays, 
 // the seam on. The seam sits 55 blocks in, where the sampler's sine is a whole number of periods from its start, so a second
 // voice would add in phase. Returns the peak of the sounding note before the seam and the peaks of the next ten blocks.
 const noteSeam = 7_040
+
 const seamNoteOn = (frame: number, sequence: number): HostScheduleEvent => ({
   frame, sequence, type: 'note-on', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 52, velocity: 0.8,
 })
+
 const seamNoteOff = (frame: number, sequence: number): HostScheduleEvent => ({
   frame, sequence, type: 'note-off', target: { kind: 'instrument', trackId: 'track' }, noteId: 1, pitch: 52,
 })
+
 const playAcrossSeam = async (instrument: AudioCoreInstrumentState, events: readonly HostScheduleEvent[]) => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
@@ -1693,8 +1859,10 @@ const playAcrossSeam = async (instrument: AudioCoreInstrumentState, events: read
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [seamNoteOn(0, 1)] } })
   const before = peakOf(renderBlocks(host, noteSeam / 128).slice(-1280))
   expect(adoptRevision(host, messages, graph(2), events, noteSeam).installed).toBe('installed')
+
   return { before, after: Array.from({ length: 10 }, () => peakOf(renderLeft(host))), published: publishedResults(messages, 2) }
 }
+
 const seamInstruments = [['synth', heldSynth], ['sampler', heldSampler('sampler', 1, 8)]] as const
 
 // A note that survives the edit keeps its voice: the reconciled schedule carries only its note-off. Repeating the note-on
@@ -1747,11 +1915,13 @@ test('W-E3-3 a note held across a transport epoch change decays through its rele
 // unchanged clip continues past it only through the swapped-in table.
 const rampFrames = 4_096
 const rampAsset = new Float32Array(rampFrames).map((_, frame) => Math.fround(frame * 1e-4))
+
 const rampSource = (sequence: number, startFrame: number, stopFrame: number, gain = 1, sourceNodeId = 'track') => ({
   version: 1, epoch: 1, sequence, sourceNodeId, assetId: 'ramp', startFrame, stopFrame, sourceOffsetFrame: startFrame,
   sourceFrameCount: stopFrame - startFrame, gain, fadeInStartFrame: startFrame, fadeInEndFrame: startFrame,
   fadeOutStartFrame: stopFrame, fadeOutEndFrame: stopFrame,
 })
+
 const playRamp = async (trackIds: readonly string[] = ['track'], running = true, oldTable: readonly ReturnType<typeof rampSource>[] = [rampSource(1, 0, 512)]) => {
   const { host, messages } = await startPortableTracks(trackIds)
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running, frame: 0 })
@@ -1759,8 +1929,10 @@ const playRamp = async (trackIds: readonly string[] = ['track'], running = true,
     asset: { version: 1, assetId: 'ramp', frameCount: rampFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [rampAsset, rampAsset] })
   host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1, events: oldTable })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
+
   return { host, messages }
 }
+
 const publishWithSources = (
   host: { handleMessage: (message: AdoptionMessage) => void },
   trackIds: readonly string[],
@@ -1774,24 +1946,30 @@ const publishWithSources = (
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 22, revision: 2, requireContinuity: true, publicationFrame,
     sources: { epoch: 1, ordinary: sources, prepared } })
 }
+
 // A prepared (paged) source plays a range of a paged asset, as the controller ships a Stretch artifact.
 const pagedRampSource = (sequence: number, preparationId: number, startFrame: number, stopFrame: number) => ({
   version: 1, epoch: 1, sequence, preparationId, sourceNodeId: 'track', startFrame, stopFrame, sourceOffsetFrame: startFrame,
   sourceFrameCount: stopFrame - startFrame, gain: 1, fadeInStartFrame: startFrame, fadeInEndFrame: startFrame,
   fadeOutStartFrame: stopFrame, fadeOutEndFrame: stopFrame,
 })
+
 // A framed publish is answered by the block that applies it.
 const sourcePublication = (messages: readonly PortableWasmStatusMessage[]) =>
   messages.flatMap((message) => message.type === 'graph-published' && message.requestId === 22 ? [message.result] : [])
+
 const rampLevel = (frame: number, gain = 1) => Math.fround(rampAsset[frame] * gain)
+
 const matchesRamp = (rendered: readonly number[], expected: (frame: number) => number) =>
   rendered.every((sample, frame) => Math.abs(sample - expected(frame)) < 1e-6)
 
 // The swap is not a cut: a source the new table does not retain fades out over 6 ms (288 frames at 48 kHz) from the
 // block that publishes, and the sources that replace it fade in over the same span, so the sum is a linear crossfade.
 const blendFrames = 288
+
 const crossfade = (seamFrame: number, oldGain: number, newGain: number) => (frame: number) => {
   const entered = Math.min(1, Math.max(0, (frame - seamFrame) / blendFrames))
+
   return rampLevel(frame, oldGain * (1 - entered) + newGain * entered)
 }
 
@@ -1905,6 +2083,7 @@ test('W-C9-clip-3g a publish while paused applies its sources at once, in the or
 // released once nothing plays from it, and `release-asset` says so while something still does.
 const releaseAnswer = (host: { handleMessage: (message: { version: number; type: 'release-asset'; requestId: number; generation: number; assetId: string }) => void }, messages: readonly PortableWasmStatusMessage[], requestId: number, assetId: string) => {
   host.handleMessage({ version: 2, type: 'release-asset', requestId, generation: 0, assetId })
+
   return messages.flatMap((message) => message.type === 'asset-released' && message.requestId === requestId ? [message.result] : [])[0]
 }
 
@@ -1922,6 +2101,7 @@ test('W-C9-asset-5 a clip asset swapped at the seam crossfades to the new audio,
   expect({ published: sourcePublication(messages),
     crossfaded: matchesRamp(rendered, (frame) => {
       const entered = Math.min(1, Math.max(0, (frame - 384) / blendFrames))
+
       return rampLevel(frame, 1 - entered + 2 * entered)
     }), duringTail, afterTail })
     .toEqual({ published: ['published'], crossfaded: true, duringTail: 'asset-in-use', afterTail: 'released' })
@@ -1930,24 +2110,32 @@ test('W-C9-asset-5 a clip asset swapped at the seam crossfades to the new audio,
 // The Sampler's zones name the asset, so the publish reconfigures the instrument from the registry: the new sample is
 // registered first. The held note is released by the note-off at the seam and the spanning note-on starts the new sample.
 const zeroCrossings = (signal: readonly number[]) => signal.slice(1).filter((sample, index) => (signal[index] < 0) !== (sample < 0)).length
+
 test('W-C9-asset-6 a Sampler zone sample swapped at the seam releases the old voice and starts the new sample on the spanning note-on', async () => {
   const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+
   const register = (requestId: number, assetId: string, step: number) => {
     const plane = new Float32Array(sineFrames).map((_, frame) => Math.sin(step * frame))
     host.handleMessage({ version: 2, type: 'register-asset', requestId, generation: 0,
       asset: { version: 1, assetId, frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [plane, plane] })
   }
+
   register(900, 'held-sine', 0.05)
+
   const sampler = (assetId: string): AudioCoreInstrumentState => {
     const state = heldSampler('sampler', 1, 8)
+
     return state.kind === 'sampler' ? { ...state, zones: state.zones.map((zone) => ({ ...zone, assetId })) } : state
   }
+
   const base = portableTrackGraph(['track'])
+
   const graph = (revision: number, assetId: string) => ({ ...base, revision,
     nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument: sampler(assetId) } : node) })
+
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, 'held-sine') })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
@@ -1974,6 +2162,7 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
   const { host, messages } = await playRamp(['track'], true, [])
   const pageFrames = 16_384
   const answers = (type: 'paged-asset-registered' | 'asset-range-prepared', requestId: number) => messages.flatMap((message) => message.type === type && message.requestId === requestId ? [message] : [])[0]
+
   const pagedArtifact = (assetId: string, scale: number, requestId: number) => {
     const plane = new Float32Array(pageFrames).map((_, frame) => Math.fround(frame * 1e-4 * scale))
     host.handleMessage({ version: 2, type: 'register-paged-asset', requestId, generation: 0,
@@ -1981,10 +2170,13 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
     host.handleMessage({ version: 2, type: 'write-asset-page', requestId: requestId + 1, generation: 0, assetId, pageIndex: 0, validFrames: pageFrames, planes: [plane, plane] })
     host.handleMessage({ version: 2, type: 'prepare-asset-range', requestId: requestId + 2, generation: 0, assetId, sourceOffsetFrame: 0, sourceFrameCount: pageFrames, interpolationGuardFrames: 0 })
     const prepared = answers('asset-range-prepared', requestId + 2)
+
     return { registered: answers('paged-asset-registered', requestId)?.result, preparationId: prepared?.result === 'prepared' ? prepared.preparationId : undefined }
   }
+
   const old = pagedArtifact('stretch-old', 1, 100)
   const fresh = pagedArtifact('stretch-new', 2, 110)
+
   if (old.preparationId === undefined || fresh.preparationId === undefined) throw new Error('the paged artifacts were not prepared')
   host.handleMessage({ version: 2, type: 'schedule-prepared-sources', requestId: 120, revision: 1, epoch: 1, events: [pagedRampSource(1, old.preparationId, 0, 1_024)] })
   const rendered = renderBlocks(host, 1)
@@ -1998,6 +2190,7 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
   expect({ registered: [old.registered, fresh.registered], published: sourcePublication(messages),
     crossfaded: matchesRamp(rendered, (frame) => {
       const entered = Math.min(1, Math.max(0, (frame - 384) / blendFrames))
+
       return rampLevel(frame, 1 - entered + 2 * entered)
     }), duringTail, afterTail })
     .toEqual({ registered: ['registered', 'registered'], published: ['published'], crossfaded: true, duringTail: 'asset-in-use', afterTail: 'released' })
@@ -2007,6 +2200,7 @@ test('W-C9-warp-7 a warped clip swapped to the new-tempo artifact at the seam cr
 // 5 ms (D-3, shared with native); the sources it played fade with it and end with it, and a voice held on it ends with it.
 // The tracks that remain are untouched. A track added plays its clip from the seam: W-C9-clip-3c.
 const ghostFrames = 240
+
 test('W-C9-track-8 a deleted track fades out over its 5 ms ghost with no step while the remaining track plays on exactly', async () => {
   const { host, messages } = await playRamp(['track', 'gone'], true, [rampSource(1, 0, 1_024), rampSource(2, 0, 1_024, 1, 'gone')])
   const rendered = renderBlocks(host, 1)
@@ -2032,6 +2226,7 @@ const playHeldOnGone = async () => {
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 },
     events: [{ frame: 0, sequence: 1, type: 'note-on', target: { kind: 'instrument', trackId: 'gone' }, noteId: 1, pitch: 72, velocity: 0.8 }] } })
+
   return { host, messages, held: peakOf(renderBlocks(host, 10).slice(-1280)) }
 }
 
@@ -2043,8 +2238,10 @@ test('W-C9-track-9 a note held on a deleted track ends with its ghost and withou
   const fading = peakOf(renderBlocks(silent.host, 2))
   const after = peakOf(renderBlocks(silent.host, 20))
   const released = await playHeldOnGone()
+
   const rejected = adoptRevision(released.host, released.messages, { ...portableTrackGraph(['keep']), revision: 2 }, [
     { frame: 1_280, sequence: 1, type: 'note-off', target: { kind: 'instrument', trackId: 'gone' }, noteId: 1, pitch: 72 }], 1_280).installed
+
   expect({ held: silent.held > 0.02, published: publishedResults(silent.messages, 2), fading: fading > 0.001, after: after < 1e-6, rejected })
     .toEqual({ held: true, published: ['published'], fading: true, after: true, rejected: 'rejected' })
 })
@@ -2057,8 +2254,10 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
     const nodes = base.nodes.map((node) => node.id === 'a' ? { ...node, latencyFrames: 64 } : node)
     // Convergence at the master: each route waits for the slowest path, as resolveMixerTiming gives it.
     const edges = base.edges.map((edge) => ({ ...edge, pdcDelayFrames: edge.fromNodeId === 'a' || !trackIds.includes('a') ? 0 : 64 }))
+
     return { ...base, revision, nodes, edges }
   }
+
   const attempt = async (before: readonly string[], after: readonly string[]) => {
     const { DawPortableAudioCoreHost } = await import(hostV2Url.href)
     const messages: PortableWasmStatusMessage[] = []
@@ -2069,14 +2268,17 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
     expect(messages).toContainEqual(expect.objectContaining({ type: 'graph-published', requestId: 41, result: 'published' }))
     host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 60, snapshot: withLatency(after, 6) })
     host.handleMessage({ version: 2, type: 'publish-graph', requestId: 61, revision: 6, requireContinuity: true })
+
     return messages.flatMap((message) => message.type === 'graph-continuity' && message.revision === 6 ? [message.result] : [])[0] === 'accepted'
   }
+
   const results = {
     deleteLatencyFree: await attempt(['a', 'b'], ['a']),
     deleteLatencyBearing: await attempt(['a', 'b'], ['b']),
     addLatencyFree: await attempt(['a'], ['a', 'b']),
     addLatencyFreeWithoutLatencyElsewhere: await attempt(['b'], ['b', 'c']),
   }
+
   expect(results).toEqual({ deleteLatencyFree: true, deleteLatencyBearing: true, addLatencyFree: true, addLatencyFreeWithoutLatencyElsewhere: true })
 })
 
@@ -2087,21 +2289,29 @@ test('W-C9-track-10 a track added or deleted where a latency-bearing node delays
 const fxProcessor = (id: string, instanceId: number, kind: string, kindId: number, state: Uint8Array, latencyFrames = 0) => ({
   id, instanceId, kind, kindId, stateVersion: 1, state, parameterTargets: [], bypassed: false, latencyFrames, tailFrames: 0,
 })
+
 const fxUtility = (id: string, instanceId: number, gainDb: number, latencyFrames = 0) =>
   fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames)
+
 const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'peaking') => fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
   enabled: true, channelMode: 'stereo',
   bands: Array.from({ length: 8 }, (_, index) => ({ enabled: index === 0, type, frequency: 1_000, gainDb: 12, q: 1 })),
 }))
+
 type FxProcessor = ReturnType<typeof fxUtility>
+
 const fxGraph = (revision: number, chains: Record<string, readonly FxProcessor[]>) => {
   const base = portableTrackGraph(Object.keys(chains))
+
   return { ...base, revision, nodes: base.nodes.map((node) => {
     const processorOrder = chains[node.id] ?? []
+
     return { ...node, processorOrder, latencyFrames: processorOrder.reduce((sum, processor) => sum + processor.latencyFrames, 0) }
   }) }
 }
+
 const fxSine = new Float32Array(48_000).map((_, frame) => Math.fround(Math.sin(2 * Math.PI * 1_000 * frame / 48_000)))
+
 const playSineThrough = async (chains: Record<string, readonly FxProcessor[]>) => {
   const { host, messages } = await startPortableTracks(Object.keys(chains), fxGraph(1, chains))
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
@@ -2110,31 +2320,41 @@ const playSineThrough = async (chains: Record<string, readonly FxProcessor[]>) =
   host.handleMessage({ version: 2, type: 'schedule-sources', requestId: 6, revision: 1, epoch: 1,
     events: Object.keys(chains).map((nodeId, index) => ({ ...rampSource(index + 1, 0, 48_000, 1, nodeId), assetId: 'sine' })) })
   expect(messages).toContainEqual(expect.objectContaining({ type: 'sources-scheduled', requestId: 6, result: 'scheduled' }))
+
   return { host, messages }
 }
+
 const fxSeam = 1_664
+
 // `before` plays 12 blocks, then the adoption of `after` publishes at frame 1664 and 8 more blocks render.
 const adoptEffects = async (before: readonly FxProcessor[], after: readonly FxProcessor[], blocksAfter = 8) => {
   const { host, messages } = await playSineThrough({ track: before })
   const rendered = renderBlocks(host, 12)
   const { installed } = adoptRevision(host, messages, fxGraph(2, { track: after }), [], fxSeam)
   rendered.push(...renderBlocks(host, blocksAfter))
+
   // A framed publish is answered by the block that applies it.
   return { rendered, adoption: { installed, published: publishedResults(messages, 2) } }
 }
+
 const referenceThrough = async (chain: readonly FxProcessor[], blocks = 20) => renderBlocks((await playSineThrough({ track: chain })).host, blocks)
+
 // How much of `signal`'s departure from `base` the `rendered` signal has over `[from, from + length)`: 1 is `signal`, 0 is `base`.
 const weightOf = (rendered: readonly number[], base: readonly number[], signal: readonly number[], from: number, length = 48) => {
   let along = 0
   let power = 0
+
   for (let frame = from; frame < from + length; frame += 1) {
     along += (rendered[frame] - base[frame]) * (signal[frame] - base[frame])
     power += (signal[frame] - base[frame]) ** 2
   }
+
   return along / power
 }
+
 const largestDifference = (left: readonly number[], right: readonly number[], from: number, to: number) =>
   Math.max(...left.slice(from, to).map((sample, index) => Math.abs(sample - right[from + index])))
+
 const adopted: ReturnType<typeof adoptRevision> = { installed: 'installed', published: 'published' }
 const adoptedAtSeam: Awaited<ReturnType<typeof adoptEffects>>['adoption'] = { installed: 'installed', published: ['published'] }
 
@@ -2198,13 +2418,16 @@ test('W-C9-spectral-1 a Spectral FFT size change at the seam is adopted: the old
 // `b` plays the sine: the core moves b's read head, so b's output is its own signal delayed by the effect's latency.
 const fxLimiter = (id: string, instanceId: number) => fxProcessor(id, instanceId, 'limiter', 12, encodeLimiterProcessorState(
   { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }), 240)
+
 const adoptDelaying = async (before: readonly FxProcessor[], after: readonly FxProcessor[]) => {
   const withLatency = (revision: number, chain: readonly FxProcessor[]) => {
     const graph = fxGraph(revision, { a: chain, b: [] })
     const latencyFrames = chain.reduce((sum, processor) => sum + processor.latencyFrames, 0)
+
     return { ...graph, nodes: graph.nodes.map((node) => node.id === 'a' ? { ...node, latencyFrames } : node),
       edges: graph.edges.map((edge) => ({ ...edge, pdcDelayFrames: edge.fromNodeId === 'b' ? latencyFrames : 0 })) }
   }
+
   const { host, messages } = await startPortableTracks(['a', 'b'], withLatency(1, before))
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   host.handleMessage({ version: 2, type: 'register-asset', requestId: 5, generation: 0,
@@ -2214,9 +2437,11 @@ const adoptDelaying = async (before: readonly FxProcessor[], after: readonly FxP
   const rendered = renderBlocks(host, 12)
   const { installed } = adoptRevision(host, messages, withLatency(2, after), [], fxSeam)
   rendered.push(...renderBlocks(host, 20))
+
   return { rendered, adoption: { installed, published: publishedResults(messages, 2) },
     continuity: messages.findLast((message) => message.type === 'graph-continuity')?.result }
 }
+
 // How closely `rendered` is the sine delayed by `delay` frames over `[from, to)`.
 const delayedSineError = (rendered: readonly number[], delay: number, from: number, to: number) =>
   Math.max(...rendered.slice(from, to).map((sample, index) => Math.abs(sample - fxSine[from + index - delay])))
@@ -2240,6 +2465,7 @@ test('W-C9-fx-9 a limiter removed at the seam is adopted and the other track kee
 test('W-C9-fx-7 a removal of more than 128 effects inside one ghost fade is refused at its prepare and the retry one position report later succeeds', async () => {
   const chains = (kept: readonly string[]) => Object.fromEntries(['a', 'b', 'c', 'd', 'e'].map((id, node) => [id,
     kept.includes(id) ? Array.from({ length: 32 }, (_, index) => fxUtility(`${id}-${index}`, 1_000 + node * 32 + index, -1)) : []]))
+
   const { host, messages } = await playSineThrough(chains(['a', 'b', 'c', 'd', 'e']))
   renderBlocks(host, 12)
   const first = adoptRevision(host, messages, fxGraph(2, chains(['d', 'e'])), [])
@@ -2261,30 +2487,38 @@ const startInstrumentHost = async (first: AudioCoreInstrumentState, noteOnFrame:
   const messages: PortableWasmStatusMessage[] = []
   const host = new DawPortableAudioCoreHost({ sampleRate: 48_000, postMessage: (message: PortableWasmStatusMessage) => messages.push(message), close: () => undefined })
   expect(await host.initialize({ wasmBytes: await Bun.file(wasmUrl).arrayBuffer(), contractHash: 'test-contract', maxFramesPerBlock: 128 })).toBe(true)
+
   for (const [requestId, assetId, step] of [[900, 'held-sine', 0.05], [901, 'held-sine-fast', 0.1]] as const) {
     const plane = new Float32Array(sineFrames).map((_, frame) => Math.sin(step * frame))
     host.handleMessage({ version: 2, type: 'register-asset', requestId, generation: 0,
       asset: { version: 1, assetId, frameCount: sineFrames, sampleRateHz: 48_000, channelCount: 2 }, planes: [plane, plane] })
   }
+
   const base = portableTrackGraph(['track'])
+
   const graph = (revision: number, instrument: AudioCoreInstrumentState) => ({ ...base, revision,
     nodes: base.nodes.map((node) => node.id === 'track' ? { ...node, kind: 'instrument', instrument } : node) })
+
   host.handleMessage({ version: 2, type: 'prepare-graph', requestId: 1, snapshot: graph(1, first) })
   host.handleMessage({ version: 2, type: 'publish-graph', requestId: 2, revision: 1 })
   host.handleMessage({ version: 2, type: 'transport', requestId: 3, epoch: 1, running: true, frame: 0 })
   host.handleMessage({ version: 2, type: 'install-schedule', requestId: 4, schedule: {
     revision: 1, transportEpoch: 1, sampleRateHz: 48_000, bpm: 120, timeOrigin: { timelineSec: 0, frame: 0 }, events: [seamNoteOn(noteOnFrame, 1)] } })
+
   return { host, messages, graph }
 }
+
 // The output of `first` playing the note from `noteOnFrame`, or of `first` replaced by `replacement` at the seam, from frame 0.
 const playInstrumentRun = async (first: AudioCoreInstrumentState, noteOnFrame: number, replacement?: AudioCoreInstrumentState) => {
   const { host, messages, graph } = await startInstrumentHost(first, noteOnFrame)
   const rendered = renderBlocks(host, noteSeam / 128)
   const adoption = replacement ? adoptRevision(host, messages, graph(2, replacement), [seamNoteOff(noteSeam, 1), seamNoteOn(noteSeam, 2)], noteSeam) : undefined
   rendered.push(...renderBlocks(host, 14))
+
   // A framed publish is answered by the block that applies it.
   return { rendered, adoption: adoption && { installed: adoption.installed, published: publishedResults(messages, 2) } }
 }
+
 const replacedInstrumentWeights = (replaced: readonly number[], old: readonly number[], fresh: readonly number[]) =>
   Array.from({ length: 6 }, (_, window) => weightOf(replaced, old, fresh, noteSeam + 48 * window))
 
@@ -2331,12 +2565,15 @@ test('W-C9-proc-3 a non-live EQ band type edit at the seam is continuous and set
 test('W-C9-inst-5 a ninth replacement inside one blend window has its publish rejected and publishes once the blends have run', async () => {
   const { host, messages, graph } = await startInstrumentHost(heldSynth, noteSeam)
   const replaced = (revision: number): AudioCoreInstrumentState => ({ ...heldSynth, oscillators: [{ enabled: true, waveform: revision % 2 === 0 ? 1 : 2, level: 0.8, octave: 0, semitone: 0, detuneCents: 0 }, ...heldSynth.oscillators?.slice(1) ?? []] })
+
   // Replacements 16 frames apart: the first eight are all inside the 288 frame blend of the first.
   const adoptAfter = (revision: number, frames: number) => {
     adoptRevision(host, messages, graph(revision, replaced(revision)), [])
     renderLeft(host, frames)
+
     return publishedResults(messages, revision)
   }
+
   const first8 = Array.from({ length: 8 }, (_, index) => adoptAfter(index + 2, 16))
   const ninth = adoptAfter(10, 16)
   renderBlocks(host, 4)

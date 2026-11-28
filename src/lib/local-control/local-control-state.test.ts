@@ -42,17 +42,20 @@ test('serializes reconciliation after an independent connection changes semantic
     withLocalControlTransaction(project.id, 'readonly', (result) => result.state),
     withLocalControlTransaction(project.id, 'readonly', (result) => result.state),
   ])
+
   expect(left.revision).toBe(1)
   expect(right.revision).toBe(1)
   expect(left.digest).toBe(right.digest)
 
   const secondConnection = await openNativeDb(getProjectDbName(project.id))
   const readTransaction = secondConnection.transaction('controlState', 'readonly')
+
   const result = await new Promise<unknown>((resolve, reject) => {
     const request = readTransaction.objectStore('controlState').get('snapshot')
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
+
   secondConnection.close()
   expect(result).toEqual(expect.objectContaining({
     value: expect.objectContaining({ revision: 1, digest: left.digest }),
@@ -81,6 +84,7 @@ test('aborts callback failures and thenables without advancing the control revis
 test('fails closed when an existing control state row is malformed', async () => {
   const project = await createLocalProject(`Control corruption ${crypto.randomUUID()}`)
   const db = await openLocalProjectDb(project.id)
+
   const valid = {
     key: 'snapshot',
     value: {

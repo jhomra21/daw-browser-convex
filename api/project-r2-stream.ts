@@ -15,12 +15,15 @@ export const streamProjectR2Object = async (
   },
 ) => {
   if (!input.key) return c.json({ error: 'Missing key query parameter' }, 400)
+
   if (!input.key.startsWith(input.keyPrefix)) return c.json({ error: 'Invalid key' }, 400)
+
   if (!await requireProjectRoleForApi(c, input.projectId, input.roles)) {
     return c.json({ error: 'Forbidden' }, 403)
   }
 
   const object = await input.bucket.get(input.key)
+
   if (!object) return c.json({ error: 'Not found' }, 404)
 
   return createR2ObjectResponse(object, input.cacheControl)

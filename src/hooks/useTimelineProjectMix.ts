@@ -15,6 +15,7 @@ type UseTimelineProjectMixOptions = {
 
 const loadProjectMixState = async (projectId: string): Promise<ProjectMixState | undefined> => {
   const loaded = await loadLocalProjectState<ProjectMixState>(projectId, 'projectMix')
+
   return loaded ? normalizeProjectMixState(loaded) : undefined
 }
 
@@ -42,6 +43,7 @@ export function useTimelineProjectMix(options: UseTimelineProjectMixOptions) {
       const masterVolume = normalizeMasterVolume(volume)
       persistedState.setValue((current) => {
         if (normalizeMasterVolume(current.masterVolume) === masterVolume) return current
+
         return { ...current, masterVolume }
       })
     },

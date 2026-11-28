@@ -71,13 +71,16 @@ const createFileCapabilityManager = (
 const createTemporaryDirectory = async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-file-capabilities-"))
   temporaryDirectories.push(directory)
+
   return realpath(directory)
 }
 
 const createDeterministicRandom = () => {
   let value = 0
+
   return (length: number) => {
     value += 1
+
     return new Uint8Array(length).fill(value)
   }
 }
@@ -104,6 +107,7 @@ const expectCapabilityError = async (
     throw new Error(`Expected a ${code} file capability error.`)
   } catch (error) {
     expect(error).toBeInstanceOf(FileCapabilityError)
+
     if (error instanceof FileCapabilityError) expect(error.code).toBe(code)
   }
 }
@@ -126,10 +130,12 @@ describe("desktop file capability manager", () => {
   test("limits mixdown pickers to the requested format and rejects mismatches", async () => {
     const directory = await createTemporaryDirectory()
     const selectedPath = path.join(directory, "mix.mp3")
+
     const manager = createFileCapabilityManager({
       dialog: createDialog([], [{ canceled: false, filePath: selectedPath }]),
       randomBytes: createDeterministicRandom(),
     })
+
     await expectCapabilityError(manager.pickOutputFile(scope, "wav"), "unsupported-file")
     expect(manager.activeCapabilityCount()).toBe(0)
   })
@@ -139,6 +145,7 @@ describe("desktop file capability manager", () => {
     const filePath = path.join(directory, "kick.WAV")
     const contents = new Uint8Array([1, 2, 3, 4])
     await writeFile(filePath, contents)
+
     const manager = createFileCapabilityManager({
       dialog: createDialog([{ canceled: false, filePaths: [filePath] }]),
       randomBytes: createDeterministicRandom(),
@@ -147,6 +154,7 @@ describe("desktop file capability manager", () => {
     const result = await manager.pickReadFiles(scope)
 
     expect(result.canceled).toBe(false)
+
     if (result.canceled) throw new Error("Expected a selected file.")
     const descriptor = result.files[0]
     expect(Object.keys(descriptor).sort()).toEqual(["basename", "byteLength", "mime", "token"])
@@ -196,6 +204,7 @@ describe("desktop file capability manager", () => {
     const handle = await open(filePath, "w")
     await handle.truncate(byteLength)
     await handle.close()
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       randomBytes: createDeterministicRandom(),
@@ -217,11 +226,13 @@ describe("desktop file capability manager", () => {
     const filePath = path.join(directory, "sliding.wav")
     await writeFile(filePath, "audio")
     let now = 100
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       now: () => now,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantReadFile(scope, filePath)
 
     now += 4 * 60 * 60 * 1_000 - 1
@@ -241,12 +252,15 @@ describe("desktop file capability manager", () => {
       if (options?.bigint === true) return nodeFileSystem.stat(targetPath, options)
       const status = await nodeFileSystem.stat(targetPath)
       status.size = Number.MAX_SAFE_INTEGER + 1
+
       return status
     }
+
     const fileSystem: NonNullable<Parameters<typeof createNativeFileCapabilityManager>[0]["fileSystem"]> = {
       ...nodeFileSystem,
       stat: unsafeStat,
     }
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       fileSystem,
@@ -258,12 +272,16 @@ describe("desktop file capability manager", () => {
 
   test("expires capabilities after four hours and enforces the active limit", async () => {
     const directory = await createTemporaryDirectory()
+
     const filePaths = await Promise.all(Array.from({ length: 17 }, async (_unused, index) => {
       const filePath = path.join(directory, `${index}.wav`)
       await writeFile(filePath, `${index}`)
+
       return filePath
     }))
+
     let now = 100
+
     const manager = createFileCapabilityManager({
       dialog: createDialog([
         { canceled: false, filePaths: filePaths.slice(0, 16) },
@@ -276,11 +294,13 @@ describe("desktop file capability manager", () => {
 
     const concurrent = await Promise.allSettled(filePaths.map((filePath, index) =>
       manager.grantReadFile({ ...scope, requestId: `request-${index}` }, filePath)))
+
     const first = concurrent.flatMap((result) => result.status === "fulfilled" ? [result.value] : [])
     expect(first).toHaveLength(16)
     const rejected = concurrent.flatMap((result) => result.status === "rejected" ? [result.reason] : [])
     expect(rejected).toHaveLength(1)
     expect(rejected[0]).toBeInstanceOf(FileCapabilityError)
+
     if (rejected[0] instanceof FileCapabilityError) expect(rejected[0].code).toBe("capacity-exceeded")
     expect(manager.activeCapabilityCount()).toBe(16)
     await expectCapabilityError(manager.grantReadFile(scope, filePaths[16]), "capacity-exceeded")
@@ -295,11 +315,14 @@ describe("desktop file capability manager", () => {
   test("writes ordered bounded chunks through an exclusive temporary file and commits", async () => {
     const directory = await createTemporaryDirectory()
     const outputPath = path.join(directory, "mix.flac")
+
     const manager = createFileCapabilityManager({
       dialog: createDialog([], [{ canceled: false, filePath: outputPath }]),
       randomBytes: createDeterministicRandom(),
     })
+
     const selection = await manager.pickOutputFile(scope)
+
     if (selection.canceled) throw new Error("Expected an output selection.")
 
     const { writerId } = await manager.beginWrite(scope, selection.file.token)
@@ -344,6 +367,7 @@ describe("desktop file capability manager", () => {
     const finalOffset = formerLimit + 2 * chunkSize
     const writes: { offset: number; length: number }[] = []
     const temporaryFileFlags = constants.O_CREAT | constants.O_EXCL | constants.O_RDWR | (constants.O_NOFOLLOW ?? 0)
+
     const fileSystem: NonNullable<Parameters<typeof createNativeFileCapabilityManager>[0]["fileSystem"]> = {
       ...nodeFileSystem,
       open: async (
@@ -353,6 +377,7 @@ describe("desktop file capability manager", () => {
       ): Promise<FileHandle> => {
         if (flags === temporaryFileFlags) {
           const backing = await open("/dev/null", "r+")
+
           const write = async <TBuffer extends NodeJS.ArrayBufferView>(
             buffer: TBuffer,
             offset?: number | null,
@@ -360,33 +385,44 @@ describe("desktop file capability manager", () => {
             position?: number | null,
           ) => {
             const bytesWritten = length ?? buffer.byteLength - (offset ?? 0)
+
             if (position !== null) writes.push({ offset: position ?? 0, length: bytesWritten })
+
             return { buffer, bytesWritten }
           }
+
           return new Proxy(backing, {
             get: (target, property) => {
               if (property === "write") return write
+
               if (property === "close") return target.close.bind(target)
+
               if (property === "sync") return target.sync.bind(target)
+
               return undefined
             },
           })
         }
+
         return await nodeFileSystem.open(filePath, flags, mode)
       },
     }
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       fileSystem,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantOutputFile(scope, outputPath)
     const writer = await manager.beginWrite(scope, capability.token)
     const chunk = new Uint8Array(chunkSize)
+
     try {
       for (let offset = 0; offset < finalOffset; offset += chunkSize) {
         await manager.writeChunk(scope, writer.writerId, offset, chunk)
       }
+
       expect(writes.at(-1)).toEqual({ offset: finalOffset - chunkSize, length: chunkSize })
       expect(writes).toHaveLength(finalOffset / chunkSize)
       expect(await readdir(directory)).toEqual([])
@@ -397,19 +433,23 @@ describe("desktop file capability manager", () => {
 
   test("rejects unsafe, empty, oversized, holed, and revoked output chunks", async () => {
     const directory = await createTemporaryDirectory()
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       randomBytes: createDeterministicRandom(),
     })
+
     const expectInvalidChunk = async (offset: number, chunk: Uint8Array) => {
       const capability = await manager.grantOutputFile(
         { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
         path.join(directory, `invalid-${Math.abs(offset)}-${chunk.byteLength}.wav`),
       )
+
       const writer = await manager.beginWrite(
         { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
         capability.token,
       )
+
       await expectCapabilityError(
         manager.writeChunk(
           { ...scope, requestId: `chunk-${offset}-${chunk.byteLength}` },
@@ -432,14 +472,17 @@ describe("desktop file capability manager", () => {
     await expectInvalidChunk(1, new Uint8Array([1]))
 
     const revokedRequestId = "revoked-chunk"
+
     const capability = await manager.grantOutputFile(
       { ...scope, requestId: revokedRequestId },
       path.join(directory, "revoked-chunk.wav"),
     )
+
     const writer = await manager.beginWrite(
       { ...scope, requestId: revokedRequestId },
       capability.token,
     )
+
     await manager.writeChunk(
       { ...scope, requestId: revokedRequestId },
       writer.writerId,
@@ -462,11 +505,14 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const nestedDirectory = path.join(directory, "nested")
     await mkdir(nestedDirectory)
+
     const manager = createFileCapabilityManager({
       dialog: createDialog([{ canceled: false, filePaths: [directory] }]),
       randomBytes: createDeterministicRandom(),
     })
+
     const selection = await manager.pickDirectory(scope)
+
     if (selection.canceled) throw new Error("Expected a directory selection.")
 
     await expectCapabilityError(
@@ -483,6 +529,7 @@ describe("desktop file capability manager", () => {
       selection.directory.token,
       path.join("nested", "first.ogg"),
     )
+
     await manager.writeChunk(scope, first.writerId, 0, new Uint8Array([1]))
     await manager.abortWrite(scope, first.writerId)
     expect(await readdir(nestedDirectory)).toEqual([])
@@ -492,6 +539,7 @@ describe("desktop file capability manager", () => {
       selection.directory.token,
       path.join("nested", "second.webm"),
     )
+
     await manager.writeChunk(scope, second.writerId, 0, new Uint8Array([2]))
     await manager.revoke(selection.directory.token)
     expect(await readdir(nestedDirectory)).toEqual([])
@@ -503,6 +551,7 @@ describe("desktop file capability manager", () => {
     const existingPath = path.join(directory, "existing.mp3")
     const availablePath = path.join(directory, "available.m4a")
     await writeFile(existingPath, "existing")
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(
         [{ canceled: false, filePaths: [directory] }],
@@ -529,6 +578,7 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const alias = path.join(directory, "alias")
     await symlink(directory, alias)
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       randomBytes: createDeterministicRandom(),
@@ -549,14 +599,17 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const filePath = path.join(directory, "input.wav")
     await writeFile(filePath, "audio")
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       randomBytes: createDeterministicRandom(),
     })
+
     for (let index = 0; index < 16; index += 1) {
       const capability = await manager.grantReadFile({ ...scope, requestId: `request-${index}` }, filePath)
       await manager.revoke(capability.token)
     }
+
     expect(manager.activeCapabilityCount()).toBe(0)
   })
 
@@ -566,17 +619,21 @@ describe("desktop file capability manager", () => {
     await writeFile(filePath, "audio")
     let releaseSelection: () => void = () => {}
     let markSelectionStarted: () => void = () => {}
+
     const selectionGate = new Promise<void>((resolve) => {
       releaseSelection = resolve
     })
+
     const selectionStarted = new Promise<void>((resolve) => {
       markSelectionStarted = resolve
     })
+
     const manager = createFileCapabilityManager({
       dialog: {
         showOpenDialog: async () => {
           markSelectionStarted()
           await selectionGate
+
           return { canceled: false, filePaths: [filePath] }
         },
         showSaveDialog: async () => ({ canceled: true }),
@@ -587,9 +644,11 @@ describe("desktop file capability manager", () => {
     const grant = manager.pickReadFiles(scope)
     await selectionStarted
     let revokeSettled = false
+
     const revoke = manager.revokeRequest(scope).then(() => {
       revokeSettled = true
     })
+
     await Promise.resolve()
     expect(revokeSettled).toBe(false)
 
@@ -605,13 +664,16 @@ describe("desktop file capability manager", () => {
     const filePath = path.join(directory, "pending.wav")
     await writeFile(filePath, "audio")
     let releaseSelection: () => void = () => {}
+
     const selectionGate = new Promise<void>((resolve) => {
       releaseSelection = resolve
     })
+
     const manager = createFileCapabilityManager({
       dialog: {
         showOpenDialog: async () => {
           await selectionGate
+
           return { canceled: false, filePaths: [filePath] }
         },
         showSaveDialog: async () => ({ canceled: true }),
@@ -679,11 +741,13 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const privateTemp = path.join(directory, "private")
     const outputPath = path.join(directory, "poisoned.wav")
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       privateTempDirectory: privateTemp,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantOutputFile(scope, outputPath)
     const writer = await manager.beginWrite(scope, capability.token)
 
@@ -705,12 +769,15 @@ describe("desktop file capability manager", () => {
     let commitFinished = false
     let releaseCommit: () => void = () => {}
     let markCommitStarted: () => void = () => {}
+
     const commitGate = new Promise<void>((resolve) => {
       releaseCommit = resolve
     })
+
     const commitStarted = new Promise<void>((resolve) => {
       markCommitStarted = resolve
     })
+
     const delayedHelper: NativeFileCapabilityHelper = {
       ...nativeHelper,
       commitFile: async () => {
@@ -720,12 +787,14 @@ describe("desktop file capability manager", () => {
         commitFinished = true
       },
     }
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       nativeHelper: delayedHelper,
       privateTempDirectory: privateTemp,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantOutputFile(scope, outputPath)
     const writer = await manager.beginWrite(scope, capability.token)
     await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([1]))
@@ -733,9 +802,11 @@ describe("desktop file capability manager", () => {
     const commit = manager.commitWrite(scope, writer.writerId)
     await commitStarted
     let revokeSettled = false
+
     const revoke = manager.revoke(capability.token).then(() => {
       revokeSettled = true
     })
+
     await Promise.resolve()
 
     expect(revokeSettled).toBe(false)
@@ -753,17 +824,20 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const outputPath = path.join(directory, "revoked.wav")
     let commitCalls = 0
+
     const observingHelper: NativeFileCapabilityHelper = {
       ...nativeHelper,
       commitFile: async () => {
         commitCalls += 1
       },
     }
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       nativeHelper: observingHelper,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantOutputFile(scope, outputPath)
     const writer = await manager.beginWrite(scope, capability.token)
 
@@ -780,6 +854,7 @@ describe("desktop file capability manager", () => {
     const directory = await createTemporaryDirectory()
     const outputPath = path.join(directory, "indeterminate.wav")
     const privateTemp = path.join(directory, "private")
+
     const indeterminateHelper: NativeFileCapabilityHelper = {
       ...nativeHelper,
       commitFile: async () => {
@@ -787,12 +862,14 @@ describe("desktop file capability manager", () => {
         throw new NativeFileCapabilityError("commit-indeterminate")
       },
     }
+
     const manager = createFileCapabilityManager({
       dialog: createDialog(),
       nativeHelper: indeterminateHelper,
       privateTempDirectory: privateTemp,
       randomBytes: createDeterministicRandom(),
     })
+
     const capability = await manager.grantOutputFile(scope, outputPath)
     const writer = await manager.beginWrite(scope, capability.token)
     await manager.writeChunk(scope, writer.writerId, 0, new Uint8Array([1]))

@@ -1,6 +1,7 @@
 import { createSignal, onCleanup } from 'solid-js'
 
 type Point = { x: number; y: number }
+
 type DragCancelReason = 'cancel' | 'dispose'
 
 type UseDragOptions = {
@@ -33,6 +34,7 @@ export function useDrag(options: UseDragOptions = {}) {
     captureTarget?.removeEventListener('lostpointercapture', handleLostPointerCapture)
     captureTarget = null
     document.body.classList.remove('select-none')
+
     if (options.dragCursorClass) document.body.classList.remove(options.dragCursorClass)
   }
 
@@ -44,12 +46,15 @@ export function useDrag(options: UseDragOptions = {}) {
 
   const abortDrag = (reason: DragCancelReason = 'cancel') => {
     const pointerId = activePointerId
+
     if (pointerId === null) return
     const target = captureTarget
     cancelDrag()
+
     if (pointerId !== null && target?.hasPointerCapture(pointerId)) {
       target.releasePointerCapture(pointerId)
     }
+
     void options.onDragCancel?.(reason)
   }
 
@@ -85,16 +90,21 @@ export function useDrag(options: UseDragOptions = {}) {
 
   const onPointerDown = (event: PointerEvent) => {
     if (options.disabled?.()) return
+
     if (activePointerId !== null) return
+
     if (options.preventDefaultOnPointerDown !== false) event.preventDefault()
+
     if (event.currentTarget instanceof HTMLElement) {
       event.currentTarget.setPointerCapture(event.pointerId)
       captureTarget = event.currentTarget
       captureTarget.addEventListener('lostpointercapture', handleLostPointerCapture)
     }
+
     activePointerId = event.pointerId
     setIsDragging(true)
     document.body.classList.add('select-none')
+
     if (options.dragCursorClass) document.body.classList.add(options.dragCursorClass)
     window.addEventListener('pointermove', handlePointerMove)
     window.addEventListener('pointerup', handlePointerUp, { capture: true })

@@ -26,16 +26,21 @@ const modules = {
 
 const owner = "phase-3b1-owner";
 const newTest = () => convexTest(schema, modules);
+
 type TestConvex = ReturnType<typeof newTest>;
 
 const upsertTrackEffectRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeTrackEffectRow>[2]) =>
   await withProjectEdit(ctx, input.projectId, (edit) => writeTrackEffectRow(ctx, edit, input));
+
 const removeAudioEffectRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeRemoveAudioEffectRow>[2]) =>
   await withProjectEdit(ctx, input.projectId, (edit) => writeRemoveAudioEffectRow(ctx, edit, input));
+
 const reorderAudioEffectRows = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeReorderAudioEffectRows>[2]) =>
   await withProjectEdit(ctx, input.projectId, (edit) => writeReorderAudioEffectRows(ctx, edit, input));
+
 const setTrackInstrumentRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeTrackInstrumentRow>[2]) =>
   await withProjectEdit(ctx, input.projectId, (edit) => writeTrackInstrumentRow(ctx, edit, input));
+
 const setArpeggiatorRow = async (ctx: Parameters<typeof withProjectEdit>[0], input: Parameters<typeof writeArpeggiatorRow>[2]) =>
   await withProjectEdit(ctx, input.projectId, (edit) => writeArpeggiatorRow(ctx, edit, input));
 
@@ -49,11 +54,13 @@ const seedTrack = async (t: TestConvex, projectId: string) => await t.run(async 
     name: "Device row track",
     index: 0,
   });
+
   await ctx.db.insert("ownerships", {
     projectId,
     ownerUserId: owner,
     trackId,
   });
+
   return trackId;
 });
 
@@ -76,7 +83,9 @@ test("device row mutations stamp rows and advance the project once per edit", as
     instanceId: "utility-1",
     params: utilityParams,
   }));
+
   expect(utility).toMatchObject({ changed: true, status: "created" });
+
   if (utility.status === "invalid") throw new Error("Expected a written row.");
 
   const gate = await t.run(async (ctx) => await upsertTrackEffectRow(ctx, {
@@ -86,6 +95,7 @@ test("device row mutations stamp rows and advance the project once per edit", as
     instanceId: "gate-1",
     params: gateParams,
   }));
+
   expect(gate).toMatchObject({ changed: true, status: "created" });
 
   expect(await t.run(async (ctx) => await reorderAudioEffectRows(ctx, {
@@ -148,12 +158,15 @@ test("device row mutations stamp rows and advance the project once per edit", as
     const rows = await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect();
     const arpeggiator = rows.find((row) => row.type === "arpeggiator");
     const gateRow = rows.find((row) => row.instanceId === "gate-1");
+
     const automation = await ctx.db.query("automationEnvelopes")
       .withIndex("by_project", (q) => q.eq("projectId", projectId))
       .collect();
+
     const sidechains = await ctx.db.query("sidechainRoutes")
       .withIndex("by_target", (q) => q.eq("targetTrackId", trackId))
       .collect();
+
     return {
       arpeggiatorParams: arpeggiator?.params,
       gateIndex: gateRow?.index,
@@ -213,6 +226,7 @@ test("device setters consolidate canonical, legacy, and duplicate device rows", 
       params: {},
       createdAt: 1,
     });
+
     for (const index of [2, 3]) {
       await ctx.db.insert("effects", {
         projectId,
@@ -231,11 +245,13 @@ test("device setters consolidate canonical, legacy, and duplicate device rows", 
     trackId,
     instrument: { kind: "synth", instanceId: "canonical-instrument", params: {} },
   }));
+
   const arpeggiator = await t.run(async (ctx) => await setArpeggiatorRow(ctx, {
     projectId,
     trackId,
     params: { enabled: true, pattern: "up", rate: "1/8", octaves: 1, gate: 0.8, hold: false },
   }));
+
   expect(instrument).toMatchObject({ changed: true, effectId: expect.anything() });
   expect(arpeggiator).toMatchObject({ changed: true, effectId: expect.anything() });
   expect(await t.run(async (ctx) => (await ctx.db.query("effects")
@@ -261,6 +277,7 @@ test("automation row helpers stay revision-free while owning mutations version w
     instanceId: "gate-1",
     params: gateParams,
   }));
+
   const input = {
     projectId,
     targetKind: "track" satisfies "track",
@@ -302,6 +319,7 @@ const effectRevisions = async (t: TestConvex, trackId: Parameters<typeof upsertT
   const rows = await t.run(async (ctx) => (
     await ctx.db.query("effects").withIndex("by_track", (q) => q.eq("trackId", trackId)).collect()
   ));
+
   return rows
     .map((row) => [row.instanceId ?? row.type, row.revision] as const)
     .sort((left, right) => left[0].localeCompare(right[0]));
@@ -321,6 +339,7 @@ test("a project edit stamps all effect rows and advances the project once", asyn
       projectId, trackId, type: "gate", instanceId: "gate-1", params: AUDIO_EFFECT_CONTRACTS.gate.createDefaultParams(),
     }),
   ]));
+
   expect(utility).toMatchObject({ changed: true, status: "created", revision: 1 });
   expect(gate).toMatchObject({ changed: true, status: "created", revision: 1 });
   expect(await projectRevision(t, projectId)).toBe(1);
@@ -328,6 +347,7 @@ test("a project edit stamps all effect rows and advances the project once", asyn
 
   await t.run(async (ctx) => {
     const project = await ctx.db.query("projects").withIndex("by_room", (q) => q.eq("projectId", projectId)).unique();
+
     if (project) await ctx.db.patch(project._id, { revision: 5 });
   });
   expect(await t.run(async (ctx) => await upsertTrackEffectRow(ctx, {
@@ -348,10 +368,12 @@ test("a caller cannot supply the stamp a helper writes", async () => {
   const projectId = "phase-3b1-writer-derives";
   await createProject(t, projectId);
   const trackId = await seedTrack(t, projectId);
+
   const input = {
     projectId, trackId, type: "utility" as const, instanceId: "utility-1",
     params: AUDIO_EFFECT_CONTRACTS.utility.createDefaultParams(), revision: 99,
   };
+
   const result = await t.run(async (ctx) => await upsertTrackEffectRow(ctx, input));
   expect(result).toMatchObject({ status: "created", revision: 1 });
   expect(await effectRevisions(t, trackId)).toEqual([["utility-1", 1]]);

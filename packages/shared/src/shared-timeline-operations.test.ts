@@ -31,6 +31,7 @@ describe('shared timeline operations', () => {
         },
       },
     })
+
     expect(expanded?.kind === 'clips.create' ? expanded.payload.midi : undefined).toMatchObject({
       inputChannel: 2,
       notes: [{ id: 'note-1', channel: 2 }],
@@ -60,6 +61,7 @@ describe('shared timeline operations', () => {
         midi: { wave: 'legacy-wave', gain: 4, notes: Array.from({ length: 501 }, (_, pitch) => ({ beat: pitch, length: 1, pitch: pitch % 128 })) },
       },
     }
+
     expect(parseSharedTimelineOperation(legacy)).toBeNull()
     expect(parseDurableSharedTimelineOperation(legacy)?.kind).toBe('clips.create')
   })
@@ -76,6 +78,7 @@ describe('shared timeline operations', () => {
         }],
       },
     }
+
     expect(parseSharedTimelineOperation(legacy)).toBeNull()
     expect(parseDurableSharedTimelineOperation(legacy)).toMatchObject({
       kind: 'clips.createMany',
@@ -90,6 +93,7 @@ describe('shared timeline operations', () => {
         fades: { fadeInSec: 1, fadeOutSec: 2, fadeInCurve: 0.2, fadeOutCurve: -0.2 },
       },
     })
+
     expect(operation).toEqual({
       kind: 'clips.setFades',
       payload: {
@@ -106,12 +110,14 @@ describe('shared timeline operations', () => {
         },
       },
     })
+
     if (!operation) throw new Error('Expected fade operation to parse')
     expect(readSharedTimelineOperationTargets(operation).clipIds).toEqual(new Set(['clip-1']))
     expect(parseSharedTimelineOperation({
       kind: 'clips.setFades',
       payload: { clipId: 'clip-1', fades: { fadeInSec: 1 } },
     })).toBeNull()
+
     const full = parseSharedTimelineOperation({
       kind: 'clips.setFades',
       payload: {
@@ -128,6 +134,7 @@ describe('shared timeline operations', () => {
         },
       },
     })
+
     expect(full?.kind === 'clips.setFades' ? full.payload.fades : undefined).toEqual({
       fadeInStartSec: 0.2,
       fadeInSec: 1,
@@ -152,6 +159,7 @@ describe('shared timeline operations', () => {
         },
       },
     })
+
     expect(midi).toEqual({
       kind: 'clips.setMidi',
       payload: {
@@ -171,6 +179,7 @@ describe('shared timeline operations', () => {
         },
       },
     })
+
     if (!midi) throw new Error('Expected MIDI operation to parse')
     expect(readSharedTimelineOperationTargets(midi).clipIds).toEqual(new Set(['clip-1']))
     expect(parseSharedTimelineOperation({
@@ -182,10 +191,12 @@ describe('shared timeline operations', () => {
       kind: 'instruments.removeTrackInstrument',
       payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
     })
+
     const removeArpeggiator = parseSharedTimelineOperation({
       kind: 'effects.removeArpeggiator',
       payload: { trackId: 'track-1', operationId: 'arp-remove-1' },
     })
+
     expect(removeInstrument).toEqual({
       kind: 'instruments.removeTrackInstrument',
       payload: { trackId: 'track-1', operationId: 'instrument-remove-1' },
@@ -211,6 +222,7 @@ describe('shared timeline operations', () => {
         midi,
       },
     })
+
     expect(create({
       wave: 'sine',
       notes: Array.from({ length: 501 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
@@ -234,6 +246,7 @@ describe('shared timeline operations', () => {
         params: { wave1: 'sine', wave2: 'square' },
       },
     }
+
     expect(parseSharedTimelineOperation(operation)).toMatchObject({
       kind: 'effects.setSynthParams',
       payload: {
@@ -282,6 +295,7 @@ describe('shared timeline operations', () => {
       kind: 'effects.setUtilityParams',
       payload: { trackId: 'track-1', instanceId: 'utility-1', params: { version: 1, state: { gainDb: 3 } } },
     }
+
     expect(parseSharedTimelineOperation(utility)).toEqual({
       kind: 'effects.setUtilityParams',
       payload: {
@@ -312,6 +326,7 @@ describe('shared timeline operations', () => {
         params: { version: 1, state: { cutoffHz: 740, envelope: { amount: 0.4 }, lfo: { rateHz: 2 } } },
       },
     })
+
     const second = parseSharedTimelineOperation({
       kind: 'effects.setModulationParams',
       payload: {
@@ -321,9 +336,11 @@ describe('shared timeline operations', () => {
         params: { version: 1, state: { cutoffHz: 2400 } },
       },
     })
+
     expect(first?.kind === 'effects.setModulationParams' ? first.payload.instanceId : undefined).toBe('autofilter-a')
     expect(second?.kind === 'effects.setModulationParams' ? second.payload.instanceId : undefined).toBe('autofilter-b')
     expect(first).not.toEqual(second)
+
     if (!first) throw new Error('Expected autofilter operation to parse')
     expect(readSharedTimelineOperationTargets(first)).toEqual({
       trackIds: new Set(['track-1']),
@@ -378,6 +395,7 @@ describe('shared timeline operations', () => {
         },
       },
     }
+
     expect(parseSharedTimelineOperation(operation)).toEqual({
       kind: 'effects.setSpectralParams',
       payload: {
@@ -421,6 +439,7 @@ describe('shared timeline operations', () => {
         effectInstanceId: 'compressor-2',
       },
     }
+
     expect(parseSharedTimelineOperation(operation)).toEqual(operation)
     expect(readSharedTimelineOperationTargets(operation)).toEqual({
       trackIds: new Set(['source', 'target']),
@@ -461,10 +480,12 @@ describe('shared timeline operations', () => {
       kind: 'tracks.create',
       payload: { name: 'Named group', index: 2, kind: 'audio', channelRole: 'group', collapsed: true, color: '#22c55e', operationId: 'op-1' },
     })
+
     const expanded = parseSharedTimelineOperation({
       kind: 'tracks.create',
       payload: { index: 2, kind: 'audio', channelRole: 'track', collapsed: false, operationId: 'op-2' },
     })
+
     expect(expanded?.kind === 'tracks.create' ? expanded.payload.collapsed : undefined).toBe(false)
   })
 
@@ -522,6 +543,7 @@ describe('shared timeline operations', () => {
       }],
       automation: [],
     }
+
     expect(parseSharedTimelineOperation({
       kind: 'tracks.restoreUngroup',
       payload,
@@ -557,6 +579,7 @@ describe('shared timeline operations', () => {
         effectInstanceId: 'compressor-restored-group',
       }],
     }
+
     expect(parseSharedTimelineOperation({
       kind: 'tracks.restoreUngroup',
       payload,
@@ -587,10 +610,12 @@ describe('shared timeline operations', () => {
       kind: 'tracks.ungroup',
       payload: { groupId: 'group-1', operationId: 'operation-1' },
     })
+
     expect(operation).toEqual({
       kind: 'tracks.ungroup',
       payload: { groupId: 'group-1', operationId: 'operation-1' },
     })
+
     if (!operation) throw new Error('Expected tracks.ungroup operation to parse')
     expect(readSharedTimelineOperationTargets(operation).trackIds.size).toBe(0)
   })
@@ -599,6 +624,7 @@ describe('shared timeline operations', () => {
     const limiter = { version: 1, state: createDefaultLimiterParams() }
     const lofi = { version: 1, state: createDefaultLoFiParams() }
     const spectral = { version: 1, state: createDefaultSpectralParams() }
+
     const ungroup = parseSharedTimelineOperation({
       kind: 'tracks.restoreUngroup',
       payload: {
@@ -612,6 +638,7 @@ describe('shared timeline operations', () => {
         automation: [],
       },
     })
+
     expect(ungroup?.kind).toBe('tracks.restoreUngroup')
 
     const restored = parseSharedTimelineOperation({
@@ -626,6 +653,7 @@ describe('shared timeline operations', () => {
         ],
       },
     })
+
     expect(restored).toEqual({
       kind: 'effects.restoreChain',
       payload: {

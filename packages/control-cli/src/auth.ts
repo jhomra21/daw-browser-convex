@@ -42,6 +42,7 @@ export const persistLoginCredentials = async (
   credentials: ControlCredentials,
 ) => {
   const lock = await store.acquireRefreshLock()
+
   try {
     await store.write(credentials)
   } finally {
@@ -54,6 +55,7 @@ const oauthResourceMetadataSchema = z.object({
   authorization_servers: z.array(z.string()),
   scopes_supported: z.array(z.string()),
 }).passthrough()
+
 const oauthAuthorizationMetadataSchema = z.object({
   issuer: z.string(),
   authorization_endpoint: z.string().url(),
@@ -66,6 +68,7 @@ const oauthAuthorizationMetadataSchema = z.object({
   code_challenge_methods_supported: z.array(z.string()),
   scopes_supported: z.array(z.string()),
 }).passthrough()
+
 const oauthTokenSchema = z.object({
   access_token: z.string().min(1),
   refresh_token: z.string().min(1),
@@ -73,12 +76,14 @@ const oauthTokenSchema = z.object({
   expires_in: z.number().finite().positive(),
   scope: z.string().optional(),
 }).passthrough()
+
 const oauthErrorSchema = z.object({ error: z.string() }).passthrough()
 const oauthRegistrationSchema = z.object({ client_id: z.string().min(1) }).passthrough()
 
 const secureRandom = (bytes: number) => {
   const value = new Uint8Array(bytes)
   crypto.getRandomValues(value)
+
   return Buffer.from(value).toString("base64url")
 }
 
@@ -90,7 +95,9 @@ export const normalizeBaseUrl = normalizeControlOrigin
 
 const urlAtOrigin = (value: string, origin: string, field: string) => {
   const url = new URL(value)
+
   if (url.origin !== origin || url.protocol !== new URL(origin).protocol) throw new Error(`OAuth metadata has an invalid ${field}.`)
+
   return url.toString()
 }
 
@@ -99,19 +106,25 @@ const metadata = async (origin: string, requestFetch: FetchLike): Promise<Author
     requestFetch(`${origin}/.well-known/oauth-protected-resource/api`),
     requestFetch(`${origin}/.well-known/oauth-authorization-server`),
   ])
+
   if (!resourceResponse.ok || !authorizationResponse.ok) throw new Error("OAuth metadata discovery failed.")
+
   const [resourceResult, authorizationResult] = await Promise.all([
     resourceResponse.json().then((body) => oauthResourceMetadataSchema.safeParse(body)),
     authorizationResponse.json().then((body) => oauthAuthorizationMetadataSchema.safeParse(body)),
   ])
+
   if (!resourceResult.success || resourceResult.data.resource !== `${origin}/api`) throw new Error("OAuth protected resource metadata is invalid.")
   const resource = resourceResult.data
   const authorization = authorizationResult.success ? authorizationResult.data : undefined
+
   if (!resource.authorization_servers.length || resource.authorization_servers.length !== 1 || resource.authorization_servers[0] !== origin
     || !requestedScopes.every((scope) => resource.scopes_supported.includes(scope))) {
     throw new Error("OAuth protected resource metadata is unsupported.")
   }
+
   if (!authorization || authorization.issuer !== origin) throw new Error("OAuth authorization metadata is invalid.")
+
   if (!authorization.response_types_supported.includes("code")
     || !authorization.grant_types_supported.includes("authorization_code")
     || !authorization.grant_types_supported.includes("refresh_token")
@@ -120,6 +133,7 @@ const metadata = async (origin: string, requestFetch: FetchLike): Promise<Author
     || !requestedScopes.every((scope) => authorization.scopes_supported.includes(scope))) {
     throw new Error("OAuth authorization metadata is unsupported.")
   }
+
   return {
     issuer: origin,
     authorizationEndpoint: urlAtOrigin(authorization.authorization_endpoint, origin, "authorization_endpoint"),
@@ -131,14 +145,19 @@ const metadata = async (origin: string, requestFetch: FetchLike): Promise<Author
 
 const parseToken = async (response: Response, expectedScopes: string[]): Promise<OAuthToken> => {
   const body = await response.json().catch(() => undefined)
+
   if (!response.ok) {
     if (oauthErrorSchema.safeParse(body).data?.error === "invalid_grant") throw new OAuthRefreshRejectedError()
     throw new Error("OAuth token request failed.")
   }
+
   const parsed = oauthTokenSchema.safeParse(body)
+
   if (!parsed.success) throw new Error("OAuth token response is invalid.")
   const scopes = (parsed.data.scope ?? expectedScopes.join(" ")).split(" ").filter(Boolean)
+
   if (!expectedScopes.every((scope) => scopes.includes(scope))) throw new Error("OAuth token response has insufficient scopes.")
+
   return {
     accessToken: parsed.data.access_token,
     refreshToken: parsed.data.refresh_token,
@@ -159,6 +178,7 @@ const tokenRequest = async (
     body: new URLSearchParams(values),
     credentials: "omit",
   })
+
   return parseToken(response, expectedScopes)
 }
 
@@ -181,10 +201,13 @@ const registerClient = async (
     }),
     credentials: "omit",
   })
+
   const body = oauthRegistrationSchema.safeParse(await response.json().catch(() => undefined))
+
   if (!response.ok || !body.success) {
     throw new Error("OAuth client registration failed.")
   }
+
   return body.data.client_id
 }
 
@@ -194,20 +217,27 @@ const startCallback = async (state: string) => {
   const path = `/${secureRandom(24)}`
   let resolveCallback: (value: Callback) => void = () => undefined
   const callback = new Promise<Callback>((resolve) => { resolveCallback = resolve })
+
   const server = Bun.serve({
     hostname: "127.0.0.1",
     port: 0,
     fetch(request) {
       const url = new URL(request.url)
+
       if (url.pathname !== path) return new Response("Not found.", { status: 404 })
+
       if (url.searchParams.get("state") !== state || url.searchParams.get("error") || !url.searchParams.get("code")) {
         resolveCallback({ error: true })
+
         return new Response("Authorization failed. You can close this window.", { status: 400 })
       }
+
       resolveCallback({ code: url.searchParams.get("code") ?? "" })
+
       return new Response("Authorization complete. You can close this window.")
     },
   })
+
   return {
     redirectUri: `http://127.0.0.1:${server.port}${path}`,
     callback,
@@ -232,6 +262,7 @@ export const login = async (
   const verifier = secureRandom(64)
   const callback = await startCallback(state)
   let timeout: ReturnType<typeof setTimeout> | undefined
+
   try {
     const clientId = await registerClient(discovered.registrationEndpoint, callback.redirectUri, requestFetch)
     const authorizationUrl = new URL(discovered.authorizationEndpoint)
@@ -246,12 +277,16 @@ export const login = async (
       code_challenge_method: "S256",
     }).toString()
     options.writeStderr?.(`${authorizationUrl}\n`)
+
     const timedOut = new Promise<Callback>((resolve) => {
       // OAuth is interactive; a bounded timer prevents a callback listener from leaking indefinitely.
       timeout = setTimeout(() => resolve({ error: true }), options.timeoutMs ?? 300_000)
     })
+
     const result = await Promise.race([callback.callback, timedOut])
+
     if ("error" in result) throw new Error("OAuth authorization failed or timed out.")
+
     const token = await tokenRequest(discovered.tokenEndpoint, {
       grant_type: "authorization_code",
       code: result.code,
@@ -260,6 +295,7 @@ export const login = async (
       client_id: clientId,
       resource: `${origin}/api`,
     }, requestFetch, requestedScopes)
+
     await persistLoginCredentials(store, {
       version: "v1",
       baseUrl: origin,
@@ -281,49 +317,67 @@ export const createAccessTokenProvider = (
   requestFetch: FetchLike = fetch,
 ) => {
   let refreshing: Promise<string> | undefined
+
   return async () => {
     const credentials = await store.read()
+
     if (!credentials) throw new Error("Run daw-control auth login first.")
+
     if (!sameCredentialIdentity(identity, credentials)) throw new CredentialIdentityChangedError()
+
     if (credentials.expiresAt > Date.now() + refreshSkewMs) return credentials.accessToken
     refreshing ??= (async () => {
       let lock: Awaited<ReturnType<typeof store.acquireRefreshLock>> | undefined
       let refreshToken: string | undefined
+
       try {
         lock = await store.acquireRefreshLock()
         const current = await store.read()
+
         if (!current) throw new Error("Run daw-control auth login first.")
+
         if (!sameCredentialIdentity(identity, current)) throw new CredentialIdentityChangedError()
+
         if (current.expiresAt > Date.now() + refreshSkewMs) return current.accessToken
         refreshToken = current.refreshToken
+
         const token = await tokenRequest(current.tokenEndpoint, {
           grant_type: "refresh_token",
           refresh_token: refreshToken,
           client_id: current.clientId,
           resource: current.resource,
         }, requestFetch, current.scopes)
+
         const latest = await store.read()
+
         if (!latest) throw new Error("Run daw-control auth login first.")
+
         if (!sameCredentialIdentity(identity, latest)) throw new CredentialIdentityChangedError()
+
         if (latest.refreshToken !== refreshToken) {
           if (latest.expiresAt > Date.now() + refreshSkewMs) return latest.accessToken
           throw new Error("Credential refresh generation changed. Restart or log in again.")
         }
+
         const next: ControlCredentials = { ...latest, ...token }
         await store.write(next)
+
         return next.accessToken
       } catch (error) {
         if (error instanceof CredentialIdentityChangedError) throw error
+
         if (error instanceof OAuthRefreshRejectedError && refreshToken) {
           await store.removeIfRefreshTokenMatches(refreshToken)
           throw new Error("OAuth credentials are no longer valid. Run daw-control auth login.")
         }
+
         throw new Error("OAuth credential refresh failed. Try again.")
       } finally {
         await lock?.release()
         refreshing = undefined
       }
     })()
+
     return refreshing
   }
 }
@@ -333,10 +387,13 @@ export const logout = async (
   requestFetch: FetchLike = fetch,
 ) => {
   const lock = await store.acquireRefreshLock()
+
   try {
     const credentials = await store.read()
+
     if (!credentials) return { revoked: false }
     const identity = credentialIdentity(credentials)
+
     const revoke = async (token: string) => {
       const response = await requestFetch(credentials.revocationEndpoint, {
         method: "POST",
@@ -345,10 +402,13 @@ export const logout = async (
         credentials: "omit",
         signal: AbortSignal.timeout(10_000),
       })
+
       return response.ok
     }
+
     const results = await Promise.allSettled([revoke(credentials.refreshToken), revoke(credentials.accessToken)])
     await store.removeIfMatches(identity, credentials.refreshToken, credentials.accessToken)
+
     return { revoked: results.every((result) => result.status === "fulfilled" && result.value) }
   } finally {
     await lock.release()

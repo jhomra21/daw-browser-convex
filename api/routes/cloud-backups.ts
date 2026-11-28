@@ -29,24 +29,32 @@ const deleteUploadedBackupAssetsBestEffort = async (bucket: R2Bucket, keys: stri
 const validateBackupAssetUploads = (form: FormData, manifest: ProjectManifest): BackupAssetUploadValidation => {
   const manifestAssetIds = new Set(manifest.assets.map((asset) => asset.id))
   const uploadedAssetIds = new Set<string>()
+
   const isExistingCloudAsset = (asset: ProjectManifest['assets'][number]) => (
     Boolean(asset.cloudKey?.startsWith(`projects/${manifest.projectId}/assets/${asset.id}/`))
   )
+
   for (const [key, value] of form.entries()) {
     if (!key.startsWith('asset:') || !(value instanceof File)) continue
     const assetId = key.slice('asset:'.length)
+
     if (!manifestAssetIds.has(assetId)) continue
+
     if (uploadedAssetIds.has(assetId)) {
       return { ok: false, error: 'Duplicate backup asset upload' }
     }
+
     uploadedAssetIds.add(assetId)
   }
+
   if (manifest.assets.some((asset) => !asset.missing && !asset.cloudKey && !uploadedAssetIds.has(asset.id))) {
     return { ok: false, error: 'Missing backup asset upload' }
   }
+
   if (manifest.assets.some((asset) => !asset.missing && asset.cloudKey && !isExistingCloudAsset(asset))) {
     return { ok: false, error: 'Invalid backup asset cloud key' }
   }
+
   return { ok: true, manifestAssetIds }
 }
 
@@ -57,14 +65,18 @@ const cloudProjectCreateBodySchema = z.object({
 const readPendingDeletedCloudKeys = (value: string | null, projectId: string) => {
   if (value === null) return []
   let parsed
+
   try {
     parsed = JSON.parse(value)
   } catch {
     return null
   }
+
   const keysResult = z.array(z.string()).safeParse(parsed)
+
   if (!keysResult.success) return null
   const keys = [...new Set(keysResult.data)]
+
   return keys.every((key) => isValidCloudBackupAssetKey(projectId, key)) ? keys : null
 }
 
@@ -76,20 +88,25 @@ const ensureCloudProjectWritable = async (input: {
     const role = await input.convex.query(convexApi.projectAccess.roleForUser, {
       projectId: input.projectId,
     })
+
     return role === 'owner' || role === 'editor'
   }
+
   if (await input.convex.query(convexApi.projects.exists, { projectId: input.projectId })) {
     return { writable: await canWrite(), created: false }
   }
+
   try {
     const result = await input.convex.mutation(convexApi.projects.createOwnedRoom, {
       projectId: input.projectId,
     })
+
     return { writable: true, created: result.status === 'created' }
   } catch (error) {
     if (await input.convex.query(convexApi.projects.exists, { projectId: input.projectId })) {
       return { writable: await canWrite(), created: false }
     }
+
     throw error
   }
 }
@@ -104,9 +121,11 @@ const uploadBackupAssets = async (input: {
 }) => {
   const uploadedAssetKeys: Record<string, string> = {}
   const uploadedR2Keys: string[] = []
+
   for (const [key, value] of input.form.entries()) {
     if (!key.startsWith('asset:') || !(value instanceof File)) continue
     const assetId = key.slice('asset:'.length)
+
     if (!input.manifestAssetIds.has(assetId)) continue
     const hash = await hashFile(value)
     const ext = value.name.includes('.') ? value.name.slice(value.name.lastIndexOf('.')) : ''
@@ -124,6 +143,7 @@ const uploadBackupAssets = async (input: {
     uploadedAssetKeys[assetId] = r2Key
     uploadedR2Keys.push(r2Key)
   }
+
   return {
     manifest: withProjectManifestAssetKeys(input.manifest, uploadedAssetKeys),
     uploadedAssetKeys,
@@ -135,17 +155,23 @@ export function registerCloudBackupRoutes(app: App) {
   app.post('/api/cloud-projects', async (c) => {
   try {
     const access = await requireAuthenticatedConvexForApi(c)
+
     if (!access) return c.json({ error: 'Unauthorized' }, 401)
     const body = await parseJsonBody(c, cloudProjectCreateBodySchema)
+
     if (!body) return c.json({ error: 'Invalid body' }, 400)
+
     const projectWrite = await ensureCloudProjectWritable({
       convex: access.convex,
       projectId: body.projectId,
     })
+
     if (!projectWrite.writable) return c.json({ error: 'Forbidden' }, 403)
+
     return c.json({ ok: true })
   } catch (err) {
     console.error('Cloud project create error', err)
+
     return c.json({ error: 'Failed to create cloud project' }, 500)
   }
 })
@@ -153,53 +179,68 @@ export function registerCloudBackupRoutes(app: App) {
   app.post('/api/cloud-backups', async (c) => {
   try {
     const access = await requireAuthenticatedConvexForApi(c)
+
     if (!access) return c.json({ error: 'Unauthorized' }, 401)
     const form = await c.req.formData()
     const projectId = form.get('projectId')?.toString()
     const manifestRaw = form.get('manifest')?.toString()
     const conflictAction = form.get('conflictAction') === 'overwrite' ? 'overwrite' : 'detect'
     const baseManifestVersion = form.get('baseManifestVersion')?.toString()
+
     if (!projectId || !manifestRaw) return c.json({ error: 'Missing projectId or manifest' }, 400)
     const pendingDeletedCloudKeysEntry = z.string().nullable().safeParse(form.get('pendingDeletedCloudKeys'))
+
     if (!pendingDeletedCloudKeysEntry.success) return c.json({ error: 'Invalid pending delete keys' }, 400)
     const pendingDeletedCloudKeys = readPendingDeletedCloudKeys(pendingDeletedCloudKeysEntry.data, projectId)
+
     if (!pendingDeletedCloudKeys) return c.json({ error: 'Invalid pending delete keys' }, 400)
 
     let manifest: ProjectManifest
+
     try {
       manifest = parseProjectManifest(manifestRaw)
       assertProjectManifestPublishIntegrity(manifest)
     } catch {
       return c.json({ error: 'Invalid manifest' }, 400)
     }
+
     if (manifest.projectId !== projectId) {
       return c.json({ error: 'Manifest projectId mismatch' }, 400)
     }
+
     const uploadValidation = validateBackupAssetUploads(form, manifest)
+
     if (!uploadValidation.ok) {
       return c.json({ error: uploadValidation.error }, 400)
     }
+
     const { convex, user } = access
     const uploadedAssetKeys: Record<string, string> = {}
     const uploadedR2Keys: string[] = []
     let createdCloudProject = false
+
     try {
       const projectWrite = await ensureCloudProjectWritable({
         convex,
         projectId,
       })
+
       createdCloudProject = projectWrite.created
+
       if (!projectWrite.writable) {
         return c.json({ error: 'Forbidden' }, 403)
       }
+
       if (conflictAction === 'detect') {
         const conflict = await convex.query(convexApi.cloudBackups.checkConflict, {
           projectId,
           manifest,
           baseManifestVersion,
         })
+
         if (conflict) return c.json({ ok: false, conflict }, 409)
       }
+
       const upload = await uploadBackupAssets({
         bucket: c.env.daw_audio_samples,
         form,
@@ -208,6 +249,7 @@ export function registerCloudBackupRoutes(app: App) {
         projectId,
         uploadedBy: user.id,
       })
+
       manifest = upload.manifest
       Object.assign(uploadedAssetKeys, upload.uploadedAssetKeys)
       uploadedR2Keys.push(...upload.uploadedR2Keys)
@@ -219,10 +261,13 @@ export function registerCloudBackupRoutes(app: App) {
         baseManifestVersion,
         pendingDeletedCloudKeys,
       })
+
       if (result.conflict) {
         await deleteUploadedBackupAssetsBestEffort(c.env.daw_audio_samples, uploadedR2Keys)
+
         return c.json({ ok: false, conflict: result.conflict }, 409)
       }
+
       const cleanup = await drainR2DeleteQueue({
         c,
         user,
@@ -230,9 +275,12 @@ export function registerCloudBackupRoutes(app: App) {
         projectId,
       }).catch((cleanupError) => {
         console.warn('Failed to drain queued R2 deletes', cleanupError)
+
         return null
       })
+
       const cleanupKeys = new Set(result.queuedDeletedCloudKeys)
+
       return c.json({
         ok: true,
         manifestVersion: result.manifestVersion,
@@ -241,6 +289,7 @@ export function registerCloudBackupRoutes(app: App) {
       })
     } catch (err) {
       await deleteUploadedBackupAssetsBestEffort(c.env.daw_audio_samples, uploadedR2Keys)
+
       if (createdCloudProject) {
         try {
           await convex.mutation(convexApi.projects.prepareCloudRoomDeleteAsOwner, {
@@ -253,10 +302,12 @@ export function registerCloudBackupRoutes(app: App) {
           console.warn('Failed to roll back newly-created cloud project after backup failure', rollbackError)
         }
       }
+
       throw err
     }
   } catch (err) {
     console.error('Cloud backup error', err)
+
     return c.json({ error: 'Failed to back up project' }, 500)
   }
 })
@@ -265,14 +316,19 @@ export function registerCloudBackupRoutes(app: App) {
   try {
     const projectId = c.req.param('projectId')
     const access = await requireAuthenticatedConvexForApi(c)
+
     if (!access) return c.json({ error: 'Unauthorized' }, 401)
+
     const row = await access.convex.query(convexApi.cloudBackups.getLatest, {
       projectId,
     })
+
     if (!row) return c.json({ error: 'Not found' }, 404)
+
     return c.json({ manifest: row.manifest, manifestVersion: row.manifestVersion })
   } catch (err) {
     console.error('Cloud backup fetch error', err)
+
     return c.json({ error: 'Failed to fetch backup' }, 500)
   }
 })
@@ -281,32 +337,41 @@ export function registerCloudBackupRoutes(app: App) {
   try {
     const projectId = c.req.param('projectId')
     const access = await requireAuthenticatedConvexForApi(c)
+
     if (!access) return c.json({ error: 'Unauthorized' }, 401)
+
     const result = await access.convex.mutation(convexApi.projects.leaveCloudRoomAccess, {
       projectId,
     })
+
     return c.json({ ok: true, result })
   } catch (err) {
     console.error('Cloud project leave error', err)
+
     return c.json({ error: 'Failed to leave cloud project' }, 500)
   }
 })
 
   app.delete('/api/cloud-projects/:projectId', async (c) => {
   let preparedDelete: { convex: ApiConvexClient; projectId: string } | undefined
+
   try {
     const projectId = c.req.param('projectId')
     const access = await requireProjectDeleteOwnerContextForApi(c, projectId)
+
     if (!access) return c.json({ error: 'Forbidden' }, 403)
     const { convex, user } = access
     await convex.mutation(convexApi.projects.prepareCloudRoomDeleteAsOwner, {
       projectId,
     })
     preparedDelete = { convex, projectId }
+
     const result = await convex.mutation(convexApi.projects.finalizeCloudRoomDeleteAsOwner, {
       projectId,
     })
+
     preparedDelete = undefined
+
     try {
       await drainProjectPrefixDelete({
         c,
@@ -324,6 +389,7 @@ export function registerCloudBackupRoutes(app: App) {
     } catch (cleanupError) {
       console.warn('Failed to delete cloud project assets after Convex delete; queued retry will continue', cleanupError)
     }
+
     return c.json({ ok: true, result })
   } catch (err) {
     if (preparedDelete) {
@@ -335,7 +401,9 @@ export function registerCloudBackupRoutes(app: App) {
         console.warn('Failed to clear pending cloud project delete', rollbackError)
       }
     }
+
     console.error('Cloud project delete error', err)
+
     return c.json({ error: 'Failed to delete cloud project' }, 500)
   }
 })

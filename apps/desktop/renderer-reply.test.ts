@@ -66,6 +66,7 @@ describe("desktop renderer reply boundary", () => {
       actionIndex: undefined,
       details: undefined,
     }
+
     const normalizedError = {
       version: error.version,
       code: error.code,
@@ -80,6 +81,7 @@ describe("desktop renderer reply boundary", () => {
       "external-1",
       "v1",
     )
+
     expect(desktopReplySchemaV1.parse(v1Reply)).toEqual({
       version: "v1",
       type: "reply",
@@ -94,6 +96,7 @@ describe("desktop renderer reply boundary", () => {
       "external-1",
       "v2",
     )
+
     expect(desktopReplySchemaV2.parse(v2Reply)).toEqual({
       version: "v2",
       type: "reply",

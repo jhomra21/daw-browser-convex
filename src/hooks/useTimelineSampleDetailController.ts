@@ -33,6 +33,7 @@ type Options = {
 
 export const isTimelineAudioClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => {
   if (!clip || clip.midi) return false;
+
   return Boolean(
     clip.sampleUrl ||
       clip.sourceAssetKey ||
@@ -49,19 +50,27 @@ const isTimelineClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => (
 
 export function useTimelineSampleDetailController(options: Options) {
   const [markerDragging, setMarkerDragging] = createSignal(false);
+
   const selectedClip = createMemo(() => {
     const selected = options.selection.selectedClip();
+
     if (!selected) return undefined;
     const match = options.trackLookup().clipEntryById.get(selected.clipId);
+
     if (!match || match.trackId !== selected.trackId) return undefined;
+
     return isTimelineClipDetailClip(match.clip) ? match.clip : undefined;
   });
+
   const selectedAudioClip = createMemo(() => {
     const clip = selectedClip();
+
     return isTimelineAudioClipDetailClip(clip) ? clip : undefined;
   });
+
   const selectedMidiClip = createMemo(() => {
     const clip = selectedClip();
+
     return isTimelineMidiClipDetailClip(clip) ? clip : undefined;
   });
 
@@ -72,8 +81,10 @@ export function useTimelineSampleDetailController(options: Options) {
 
   const openClipDetail = (clipId: string) => {
     const match = options.trackLookup().clipEntryById.get(clipId);
+
     if (!match || !isTimelineClipDetailClip(match.clip)) return;
     const selected = options.selection.selectedClip();
+
     if (
       selected?.clipId === clipId &&
       selected.trackId === match.trackId &&
@@ -87,6 +98,7 @@ export function useTimelineSampleDetailController(options: Options) {
 
   createEffect(() => {
     if (options.mode() !== "clip-detail") return;
+
     if (selectedClip()) return;
     close();
   });
@@ -94,25 +106,32 @@ export function useTimelineSampleDetailController(options: Options) {
   createEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || options.mode() !== "clip-detail") return;
+
       // The MIDI editor owns Escape (deselect, cancel drag); it never closes the clip view.
       if (isEditableKeyboardTarget(event.target) || isLocalTimelineKeyboardTarget(event.target)) return;
+
       if (markerDragging()) return;
       event.preventDefault();
       close();
     };
+
     window.addEventListener("keydown", handleKeyDown, { capture: true });
     onCleanup(() => window.removeEventListener("keydown", handleKeyDown, { capture: true }));
   });
 
   const changeGain = async (clip: Clip, gain: number) => {
     const project = options.projectId();
+
     if (!project || !options.canWriteClip(clip.id)) return false;
     const normalizedGain = normalizeClipGain(gain);
+
     if (normalizedGain === (clip.gain ?? 1)) return true;
+
     const applied = await createTimelineClipWriteAdapter({
       projectId: project,
       userId: options.userId(),
     }).setGain(clip.id, normalizedGain);
+
     if (!applied) return false;
     options.projection.commitClipGain(clip.id, normalizedGain);
     options.rescheduleChangedClips([clip.id]);
@@ -122,6 +141,7 @@ export function useTimelineSampleDetailController(options: Options) {
       from: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: clip.gain ?? 1 },
       to: { startSec: clip.startSec, duration: clip.duration, leftPadSec: clip.leftPadSec, bufferOffsetSec: clip.bufferOffsetSec, midiOffsetBeats: clip.midiOffsetBeats, gain: normalizedGain },
     }));
+
     return true;
   };
 

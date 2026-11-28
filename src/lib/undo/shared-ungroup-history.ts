@@ -46,6 +46,7 @@ const readSendTap = (value: JsonValue): 'pre-fx' | 'pre-fader' | 'post-fader' | 
 export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult | null => {
   if (!isJsonObject(value) || value.status !== 'applied' || !isJsonObject(value.group) || !Array.isArray(value.children)) return null
   const group = value.group
+
   if (
     (group.name !== undefined && !isJsonString(group.name))
     || !isJsonNumber(group.index)
@@ -54,21 +55,26 @@ export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult |
     || !isJsonBoolean(group.soloed)
     || !Array.isArray(group.sends)
   ) return null
+
   const children = value.children.flatMap((child) => (
     isJsonObject(child) && isJsonString(child.trackId)
       ? [{ trackId: child.trackId, nextOutputTargetId: isJsonString(child.nextOutputTargetId) ? child.nextOutputTargetId : undefined }]
       : []
   ))
+
   const sends = group.sends.flatMap((send) => (
     isJsonObject(send) && isJsonString(send.targetId) && isJsonNumber(send.amount)
       && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
       ? [{ targetId: send.targetId, amount: send.amount, tap: readSendTap(send.tap) }]
       : []
   ))
+
   const effects = normalizeSharedUngroupRestoreEffects(value.effects)
   const automation = normalizeSharedUngroupRestoreAutomation(value.automation)
   const sidechainRouteInput = value.sidechainRoutes === undefined ? [] : value.sidechainRoutes
+
   if (!Array.isArray(sidechainRouteInput)) return null
+
   const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
     isJsonObject(route)
     && isJsonString(route.sourceTrackId)
@@ -85,6 +91,7 @@ export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult |
         }]
       : []
   ))
+
   if (
     children.length !== value.children.length
     || sends.length !== group.sends.length
@@ -92,6 +99,7 @@ export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult |
     || !automation
     || sidechainRoutes.length !== sidechainRouteInput.length
   ) return null
+
   return {
     status: 'applied',
     group: {
@@ -124,18 +132,22 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
   result: SharedUngroupResult
 }): Extract<HistoryEntry, { type: 'track-ungroup' }> => {
   const localAudioEffects = input.effects.audioEffects ?? []
+
   const audioEffects = input.result.effects.flatMap((effect) => {
     const local = localAudioEffects.find((candidate) => (
       candidate.effect === effect.type && candidate.instanceId === effect.instanceId
     ))
+
     return local ? [{ ...local, index: effect.index ?? local.index }] : []
   })
+
   const effects: TrackEffectSnapshot = {
     audioEffects,
     instrument: input.result.effects.some((effect) => effect.type === 'instrument') ? input.effects.instrument : undefined,
     synth: input.result.effects.some((effect) => effect.type === 'synth') ? input.effects.synth : undefined,
     arp: input.result.effects.some((effect) => effect.type === 'arpeggiator') ? input.effects.arp : undefined,
   }
+
   const automationByTargetKey = new Map(input.automation.map((envelope) => [
     automationTargetKey(
       createAutomationTarget({ kind: 'track', trackId: input.groupTrack.id }, envelope.target.effectInstanceId),
@@ -143,15 +155,18 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
     ),
     envelope,
   ]))
+
   const automation = input.result.automation.flatMap((committed) => {
     const local = automationByTargetKey.get(automationTargetKey(
       createAutomationTarget({ kind: 'track', trackId: input.groupTrack.id }, committed.effectInstanceId),
       committed.parameterId,
     ))
+
     const target: AutomationEnvelope['target'] = createAutomationTarget(
       { kind: 'track', trackId: input.groupTrack.id },
       committed.effectInstanceId,
     )
+
     return local ? [{
       ...local,
       target,
@@ -161,6 +176,7 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
       updatedAt: committed.updatedAt,
     }] : []
   })
+
   const groupTrack: Track = {
     ...input.groupTrack,
     name: input.result.group.name ?? input.groupTrack.name,
@@ -175,6 +191,7 @@ export const buildCommittedSharedUngroupHistoryEntry = (input: {
     outputTargetId: input.result.group.outputTargetId,
     sends: input.result.group.sends,
   }
+
   return buildTrackUngroupHistoryEntry({
     projectId: input.projectId,
     tracks: input.tracks,

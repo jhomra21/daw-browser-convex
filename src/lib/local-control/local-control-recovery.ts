@@ -88,14 +88,17 @@ export const localExternalRecoveryUsage = (
   bundles: readonly LocalExternalProcessorRecoveryBundle[],
 ) => {
   const artifactCount = bundles.reduce((count, bundle) => count + bundle.artifacts.length, 0)
+
   const byteLength = bundles.reduce(
     (total, bundle) => total + bundle.artifacts.reduce((bytes, artifact) => bytes + artifact.byteLength, 0),
     0,
   )
+
   if (
     artifactCount > maxLocalRecoveryExternalArtifactCount
     || byteLength > maxLocalRecoveryExternalArtifactBytes
   ) throw new Error('Recovery external artifact limits exceeded.')
+
   return { artifactCount, byteLength }
 }
 
@@ -111,6 +114,7 @@ const validateLocalExternalProcessorRecoveryArtifact = (
   if (!(artifact.payload instanceof Uint8Array)) {
     throw new Error(`Local external processor recovery artifact "${artifact.id}" is invalid.`)
   }
+
   const metadata = opaquePluginStateMetadataSchema.parse({
     artifactId: artifact.id,
     sha256: artifact.sha256,
@@ -121,6 +125,7 @@ const validateLocalExternalProcessorRecoveryArtifact = (
     bucket: artifact.bucket,
     location: artifact.location,
   })
+
   if (
     metadata.artifactKind !== 'plugin-state'
     || metadata.bucket !== 'local'
@@ -128,9 +133,11 @@ const validateLocalExternalProcessorRecoveryArtifact = (
     || metadata.byteLength > maxVst3WorkerStateBytes
   ) throw new Error(`Local external processor recovery artifact "${artifact.id}" metadata is invalid.`)
   const bytes = validateLocalVstStateBytes(artifact.payload, metadata.sha256)
+
   if (bytes.bytes.byteLength !== metadata.byteLength) {
     throw new Error(`Local external processor recovery artifact "${artifact.id}" length is invalid.`)
   }
+
   return { ...artifact, payload: bytes.bytes }
 }
 
@@ -153,6 +160,7 @@ export const localRecoveryArtifactsMatch = (
   ) return false
   const leftPayload = left.payload
   const rightPayload = right.payload
+
   return leftPayload.every((byte, index) => byte === rightPayload[index])
 }
 
@@ -163,25 +171,34 @@ const validateLocalExternalProcessorRecoveryBundle = (
   if (bundle.version !== 1) {
     throw new Error('Local external processor recovery bundle version is invalid.')
   }
+
   if (bundle.entity.kind !== externalPluginEntityKind) {
     throw new Error('Local external processor recovery entity kind is invalid.')
   }
+
   const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(bundle.entity.value))
+
   if (!parsed.success) throw new Error(`Local external processor recovery row "${bundle.entity.id}" is invalid.`)
   const processor = pathFreeExternalProcessor(externalProcessorSchema.parse(parsed.data))
+
   if (bundle.entity.id !== `external-plugin:${processor.instanceId}`) {
     throw new Error('Local external processor recovery entity identity is invalid.')
   }
+
   const artifacts = new Map<string, LocalProjectExternalPluginArtifactRow>()
+
   for (const artifact of bundle.artifacts) {
     if (artifacts.has(artifact.id)) {
       throw new Error(`Local external processor recovery artifact "${artifact.id}" is duplicated.`)
     }
+
     artifacts.set(artifact.id, validateLocalExternalProcessorRecoveryArtifact(artifact))
   }
+
   for (const metadata of externalProcessorStateMetadata(processor)) {
     if (metadata.bucket !== 'local') continue
     const artifact = artifacts.get(metadata.artifactId) ?? allArtifacts.get(metadata.artifactId)
+
     if (!artifact
       || artifact.sha256 !== metadata.sha256
       || artifact.byteLength !== metadata.byteLength
@@ -191,6 +208,7 @@ const validateLocalExternalProcessorRecoveryBundle = (
       || artifact.location !== metadata.location
     ) throw new Error(`Local external processor recovery artifact "${metadata.artifactId}" does not match its processor.`)
   }
+
   return {
     version: 1,
     entity: { ...bundle.entity, value: processor },
@@ -202,25 +220,31 @@ export const validateLocalExternalProcessorRecoveryBundles = (
   bundles: readonly LocalExternalProcessorRecoveryBundle[],
 ) => {
   const allArtifacts = new Map<string, LocalProjectExternalPluginArtifactRow>()
+
   for (const bundle of bundles) {
     for (const artifact of bundle.artifacts) {
       if (allArtifacts.has(artifact.id)) {
         throw new Error(`Local external processor recovery artifact "${artifact.id}" is duplicated.`)
       }
+
       allArtifacts.set(artifact.id, validateLocalExternalProcessorRecoveryArtifact(artifact))
     }
   }
+
   const validated = bundles.map((bundle) => validateLocalExternalProcessorRecoveryBundle(bundle, allArtifacts))
   const entityIds = new Set<string>()
   const artifactIds = new Set<string>()
+
   for (const bundle of validated) {
     if (entityIds.has(bundle.entity.id)) throw new Error('Local external processor recovery entities must be unique.')
     entityIds.add(bundle.entity.id)
+
     for (const artifact of bundle.artifacts) {
       if (artifactIds.has(artifact.id)) throw new Error('Local external processor recovery artifacts must be unique.')
       artifactIds.add(artifact.id)
     }
   }
+
   return validated
 }
 
@@ -231,17 +255,23 @@ export const captureLocalExternalProcessorRecoveryBundles = (input: {
   artifacts: readonly LocalProjectExternalPluginArtifactRow[]
 }) => {
   const rootId = input.action.kind === 'track.delete' ? input.action.track : input.action.group
+
   if (rootId.source !== 'persisted') return []
   const root = input.snapshot.tracks.find((track) => track.id === rootId.id)
+
   if (!root) return []
+
   const selected = input.action.kind === 'track.ungroup'
     ? new Set([root.id])
     : collectLocalDeletedTrackIds(input.snapshot.tracks, root.id)
+
   const entityById = new Map(input.entities
     .filter((row) => row.kind === externalPluginEntityKind)
     .map((row) => [row.id, row]))
+
   const artifactById = new Map(input.artifacts.map((artifact) => [artifact.id, artifact]))
   const capturedArtifactIds = new Set<string>()
+
   const bundles: LocalExternalProcessorRecoveryBundle[] = input.snapshot.processors.flatMap((entry) => {
     if (
       entry.processor.kind !== 'external-vst3'
@@ -249,28 +279,37 @@ export const captureLocalExternalProcessorRecoveryBundles = (input: {
       || !selected.has(entry.target.trackId)
     ) return []
     const entity = entityById.get(entry.id)
+
     if (!entity) throw new Error(`Local external processor row "${entry.id}" is missing.`)
     const parsed = parseExternalProcessorValue(parseExternalPluginJsonValue(entity.value))
+
     if (!parsed.success) throw new Error(`Local external processor row "${entry.id}" is invalid.`)
+
     const artifacts = externalProcessorStateMetadata(pathFreeExternalProcessor(parsed.data)).flatMap((metadata) => {
       if (metadata.bucket !== 'local' || capturedArtifactIds.has(metadata.artifactId)) return []
       const artifact = artifactById.get(metadata.artifactId)
+
       if (!artifact) throw new Error(`Local external processor artifact "${metadata.artifactId}" is missing.`)
       capturedArtifactIds.add(metadata.artifactId)
+
       return [artifact]
     })
+
     return [{
       version: 1,
       entity: { ...entity, value: pathFreeExternalProcessor(parsed.data) },
       artifacts,
     }]
   })
+
   return validateLocalExternalProcessorRecoveryBundles(bundles)
 }
 
 const ownership = (projectId: string, localActorSubject: string) => ({ projectId, localActorSubject })
+
 const recoveryAssetRow = (asset: Extract<CapturedRecoveryPayloadV2, { kind: 'asset.delete' }>['data']['asset']): LocalProjectAssetRow => {
   if (!('storagePath' in asset)) throw new Error('Cloud recovery assets cannot be restored locally.')
+
   return {
     id: asset.assetKey,
     name: asset.name,
@@ -297,14 +336,17 @@ export const resolveLocalRecoveryAssets = (
   recoveries: ReadonlyMap<string, { payload: CapturedRecoveryPayloadV2 }>,
 ) => {
   const assets = new Map(persistedAssets.map((asset) => [asset.id, asset]))
+
   for (const recovery of recoveries.values()) {
     if (recovery.payload.kind === 'asset.delete') {
       const asset = recoveryAssetRow(recovery.payload.data.asset)
       assets.set(asset.id, asset)
     }
   }
+
   return snapshot.assets.flatMap((asset) => {
     const metadata = assets.get(asset.id)
+
     return metadata === undefined ? [] : [metadata]
   })
 }
@@ -334,6 +376,7 @@ const clipPayload = (
   midi: clip.midi,
   midiOffsetBeats: clip.midiOffsetBeats,
 })
+
 const trackPayload = (projectId: string, track: ProjectSnapshotV2['tracks'][number], actorSubject: string) => ({
   id: track.id,
   track: {
@@ -359,6 +402,7 @@ const trackPayload = (projectId: string, track: ProjectSnapshotV2['tracks'][numb
   },
   ownership: ownership(projectId, actorSubject),
 })
+
 const effectPayload = (projectId: string, effect: ProjectSnapshotV2['processors'][number]) => ({
   id: effect.id,
   effect: {
@@ -370,6 +414,7 @@ const effectPayload = (projectId: string, effect: ProjectSnapshotV2['processors'
     createdAt: 0,
   },
 })
+
 const automationPayload = (projectId: string, entry: ProjectSnapshotV2['automation'][number], id: string) => ({
   id,
   automation: {
@@ -384,6 +429,7 @@ const automationPayload = (projectId: string, entry: ProjectSnapshotV2['automati
     updatedAt: 0,
   },
 })
+
 const sidechainPayload = (projectId: string, entry: ProjectSnapshotV2['sidechains'][number], id: string) => ({
   id,
   sidechain: {
@@ -393,15 +439,18 @@ const sidechainPayload = (projectId: string, entry: ProjectSnapshotV2['sidechain
     effectInstanceId: entry.effectInstanceId,
   },
 })
+
 const effectBundle = (
   projectId: string,
   snapshot: ProjectSnapshotV2,
   effects: readonly ProjectSnapshotV2['processors'][number][],
 ) => {
   const effectInstanceIds = new Set(effects.flatMap((effect) => effect.instanceId === undefined ? [] : [effect.instanceId]))
+
   const targets = new Set(effects.map((effect) => (
     'master' in effect.target ? 'master' : effect.target.trackId
   )))
+
   return {
     effects: effects.map((effect) => effectPayload(projectId, effect)),
     automation: snapshot.automation.flatMap((entry) => (
@@ -430,14 +479,17 @@ const instrumentAutomation = (
 ) => {
   const instanceIds = new Set(effects.flatMap((effect) => {
     const params = jsonValueSchema.safeParse(effect.processor.params)
+
     return params.success && isJsonObject(params.data) && isJsonString(params.data.instanceId)
       ? [params.data.instanceId]
       : []
   }))
+
   return snapshot.automation.flatMap((entry) => {
     const identity = parseInstrumentAutomationKey(entry.parameterId)
       ?? parseGranularAutomationKey(entry.parameterId)
       ?? parseSynthAutomationKey(entry.parameterId)
+
     return identity && instanceIds.has(identity.instanceId)
       ? [automationPayload(projectId, entry, automationTargetKey(
         'master' in entry.target
@@ -448,6 +500,7 @@ const instrumentAutomation = (
       : []
   })
 }
+
 export const captureLocalRecoveryPayload = (input: {
   projectId: string
   actorSubject: string
@@ -460,11 +513,14 @@ export const captureLocalRecoveryPayload = (input: {
 }): CapturedRecoveryPayloadV2 | undefined => {
   const { action, snapshot } = input
   let raw: Parameters<typeof recoveryCapturedPayloadSchemaV2.safeParse>[0]
+
   if (action.kind === 'timeline.range.delete') {
     const trackIds = action.tracks.flatMap((track) => (
       track.source === 'persisted' ? [track.id] : []
     ))
+
     if (trackIds.length !== action.tracks.length) return undefined
+
     const patch = buildTimelineRangeDeletePatchV1(
       snapshot,
       trackIds,
@@ -472,6 +528,7 @@ export const captureLocalRecoveryPayload = (input: {
       action.endSec,
       input.actionIndex,
     )
+
     const clipById = new Map(snapshot.clips.map((clip) => [clip.id, clip]))
     raw = {
       version: 2,
@@ -504,6 +561,7 @@ export const captureLocalRecoveryPayload = (input: {
               : { kind: 'track', trackId: entry.before.target.trackId, effectInstanceId: entry.before.effectInstanceId },
             entry.before.parameterId,
           )
+
           return {
             id,
             before: automationPayload(input.projectId, entry.before, id).automation,
@@ -514,6 +572,7 @@ export const captureLocalRecoveryPayload = (input: {
     }
   } else if (action.kind === 'clip.delete') {
     const clipRef = action.clip
+
     if (clipRef.source !== 'persisted') return undefined
     const clip = snapshot.clips.find((entry) => entry.id === clipRef.id)
     raw = clip ? {
@@ -546,13 +605,16 @@ export const captureLocalRecoveryPayload = (input: {
     const target = action.target.kind === 'master'
       ? { master: true }
       : action.target.track.source === 'persisted' ? { trackId: action.target.track.id } : undefined
+
     const effectId = action.effect?.source === 'persisted' ? action.effect.id : undefined
     const effect = effectId === undefined ? undefined : snapshot.processors.find((entry) => entry.id === effectId)
+
     const entry = snapshot.automation.find((candidate) => (
       target !== undefined && JSON.stringify(candidate.target) === JSON.stringify(target)
       && candidate.effectInstanceId === effect?.instanceId
       && candidate.parameterId === action.parameterId
     ))
+
     raw = entry ? {
       version: 2,
       kind: action.kind,
@@ -573,13 +635,17 @@ export const captureLocalRecoveryPayload = (input: {
     } : undefined
   } else if (action.kind === 'sidechain.remove') {
     const effectId = action.effect.source === 'persisted' ? action.effect.id : undefined
+
     const effect = effectId === undefined
       ? undefined
       : snapshot.processors.find((entry) => entry.id === effectId)
+
     const targetId = action.target.source === 'persisted' ? action.target.id : undefined
+
     const entry = targetId === undefined || effect?.instanceId === undefined ? undefined : snapshot.sidechains.find((candidate) => (
       candidate.targetTrackId === targetId && candidate.effectInstanceId === effect.instanceId
     ))
+
     raw = entry ? {
       version: 2,
       kind: action.kind,
@@ -596,15 +662,18 @@ export const captureLocalRecoveryPayload = (input: {
     const effectId = action.kind === 'effect.remove' && action.effect.source === 'persisted'
       ? action.effect.id
       : undefined
+
     const trackId = action.kind !== 'effect.remove' && action.target.track.source === 'persisted'
       ? action.target.track.id
       : undefined
+
     const effects = action.kind === 'effect.remove'
       ? effectId === undefined ? [] : snapshot.processors.filter((entry) => entry.id === effectId)
       : trackId === undefined ? [] : snapshot.processors.filter((entry) => (
         'trackId' in entry.target && entry.target.trackId === trackId
         && (action.kind === 'instrument.remove' ? entry.processor.kind === 'instrument' : entry.processor.kind === 'arpeggiator')
       ))
+
     if (effects.length > 0) {
       const bundle = effectBundle(input.projectId, snapshot, effects)
       raw = {
@@ -617,13 +686,18 @@ export const captureLocalRecoveryPayload = (input: {
     }
   } else if (action.kind === 'track.delete' || action.kind === 'track.ungroup') {
     const rootId = action.kind === 'track.delete' ? action.track : action.group
+
     if (rootId.source !== 'persisted') return undefined
     const root = snapshot.tracks.find((track) => track.id === rootId.id)
+
     if (!root) return undefined
+
     const selected = action.kind === 'track.delete'
       ? collectLocalDeletedTrackIds(snapshot.tracks, root.id)
       : new Set([root.id])
+
     const tracks = snapshot.tracks.filter((track) => selected.has(track.id))
+
     const bundle = {
       tracks: tracks.map((track) => trackPayload(input.projectId, track, input.actorSubject)),
       clips: snapshot.clips.filter((clip) => selected.has(clip.trackId)).map((clip) => ({
@@ -653,6 +727,7 @@ export const captureLocalRecoveryPayload = (input: {
           localSidechainRouteRowId(entry.targetTrackId, entry.effectInstanceId),
         )),
     }
+
     if (action.kind === 'track.delete') {
       const survivors = snapshot.tracks
         .filter((track) => !selected.has(track.id))
@@ -670,9 +745,12 @@ export const captureLocalRecoveryPayload = (input: {
               })),
             },
           }
+
           const before = trackPayload(input.projectId, track, input.actorSubject).track
+
           return JSON.stringify(before) === JSON.stringify(after) ? [] : [{ id: track.id, before, after }]
         })
+
       raw = { version: 2, kind: action.kind, data: { rootTrackId: root.id, ...bundle, survivors } }
     } else {
       if (root.channelRole !== 'group' || snapshot.clips.some((clip) => clip.trackId === root.id)) return undefined
@@ -699,11 +777,14 @@ export const captureLocalRecoveryPayload = (input: {
       }
     }
   }
+
   const parsed = recoveryCapturedPayloadSchemaV2.safeParse(raw)
+
   return parsed.success ? parsed.data : undefined
 }
 
 export const serializeLocalRecoveryPayload = (payload: CapturedRecoveryPayloadV2) => {
   const text = canonicalCapturedRecoveryPayloadV2(JSON.parse(JSON.stringify(payload)))
+
   return { payload: text, payloadHash: hashRecoveryPayloadSyncV1(text) }
 }

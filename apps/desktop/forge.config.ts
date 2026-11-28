@@ -20,6 +20,7 @@ import {
 } from "./native-release-artifacts"
 
 const run = promisify(execFile)
+
 type PluginHostReleaseArtifact = NativeReleaseArtifact
 
 const desktopDirectory = import.meta.dirname
@@ -62,25 +63,34 @@ export const validatePortableWasmReleaseAssets = async (
   const [wasmName, manifestName] = portableWasmReleaseAssetNames
   const wasmPath = path.join(publicDirectory, "audio-core", wasmName)
   const manifestPath = path.join(publicDirectory, "audio-core", manifestName)
+
   if (!await isFile(wasmPath)) throw new Error(`Required portable Wasm release asset is missing: ${wasmPath}`)
   let manifest: DesktopJsonValue
+
   try {
     manifest = JSON.parse(await readFile(manifestPath, "utf8"))
   } catch {
     throw new Error(`Required portable Wasm release asset is missing or invalid: ${manifestPath}`)
   }
+
   if (!isPortableWasmReleaseManifest(manifest)) {
     throw new Error(`Required portable Wasm release asset is invalid: ${manifestPath}`)
   }
+
   const sourceHash = await computePortableWasmSourceHash(sourceRepositoryRoot)
+
   if (manifest.sourceHash !== sourceHash) {
     throw new Error(`Portable Wasm release asset source hash is stale: ${manifestPath}`)
   }
+
   const size = (await stat(wasmPath)).size
+
   if (size !== manifest.sizeBytes || size > manifest.maximumBytes) {
     throw new Error(`Portable Wasm release asset exceeds or does not match its manifest size budget: ${wasmPath}`)
   }
+
   const hash = await sha256ReleaseArtifact(wasmPath)
+
   if (hash !== manifest.sha256) throw new Error(`Portable Wasm release asset hash does not match its manifest: ${wasmPath}`)
 }
 
@@ -91,9 +101,11 @@ export const getPluginHostReleaseArtifactPlan = (
   const scannerPath = environment.DAW_VST3_SCANNER_PATH
   const workerPath = environment.DAW_VST3_WORKER_PATH
   const audioHostPath = environment.DAW_AUDIO_HOST_PATH
+
   if (!scannerPath || !workerPath || !audioHostPath) {
     throw new Error("DAW_ENABLE_VST3_HOSTING=1 requires DAW_VST3_SCANNER_PATH, DAW_VST3_WORKER_PATH, and DAW_AUDIO_HOST_PATH.")
   }
+
   return [
     { sourcePath: path.resolve(scannerPath), name: nativeVst3ScannerArtifactName },
     { sourcePath: path.resolve(workerPath), name: nativeVst3WorkerArtifactId },
@@ -106,10 +118,13 @@ export const validatePluginHostReleaseArtifactPlan = async (
   manifestPath = process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH,
 ): Promise<void> => {
   if (plan.length === 0) return
+
   if (!manifestPath) throw new Error("DAW_ENABLE_VST3_HOSTING=1 requires DAW_NATIVE_ARTIFACT_MANIFEST_PATH.")
+
   if (path.basename(manifestPath) !== nativeReleaseArtifactManifestName) {
     throw new Error(`Native release artifact manifest must be named ${nativeReleaseArtifactManifestName}.`)
   }
+
   await validateNativeReleaseArtifacts(plan, path.resolve(manifestPath))
 }
 
@@ -128,6 +143,7 @@ const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | 
       keychain: environment.APPLE_NOTARY_KEYCHAIN ? environment.APPLE_NOTARY_KEYCHAIN : undefined,
     }
   }
+
   if (environment.APPLE_ID && environment.APPLE_APP_SPECIFIC_PASSWORD && environment.APPLE_TEAM_ID) {
     return {
       appleId: environment.APPLE_ID,
@@ -135,6 +151,7 @@ const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | 
       teamId: environment.APPLE_TEAM_ID,
     }
   }
+
   if (environment.APPLE_API_KEY && environment.APPLE_API_KEY_ID && environment.APPLE_API_ISSUER) {
     return {
       appleApiKey: environment.APPLE_API_KEY,
@@ -142,6 +159,7 @@ const notaryCredentials = (environment: NodeJS.ProcessEnv): NotaryCredentials | 
       appleApiIssuer: environment.APPLE_API_ISSUER,
     }
   }
+
   return undefined
 }
 
@@ -155,7 +173,9 @@ const vstWorkerEntitlements = path.join(entitlementsDirectory, "vst3-worker.plis
 export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = process.env) => {
   const identity = environment.APPLE_SIGNING_IDENTITY
   const notarize = notaryCredentials(environment)
+
   if (!identity || (!notarize && environment.DAW_SKIP_NOTARIZATION !== "1")) return undefined
+
   return {
     sign: {
       identity,
@@ -169,15 +189,19 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
         : undefined,
       optionsForFile: (filePath: string) => {
         const basename = path.basename(filePath)
+
         if (basename === nativeVst3WorkerArtifactId) {
           return { entitlements: vstWorkerEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
         }
+
         if (basename === nativeVst3ScannerArtifactName) {
           return { entitlements: vstScannerEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
         }
+
         if (basename === nativeAudioHostArtifactName) {
           return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
         }
+
         if (filePath.endsWith(".app")) {
           return {
             entitlements: filePath.includes(".app/") ? helperEntitlements : appEntitlements,
@@ -185,6 +209,7 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
             signatureFlags: ["runtime"],
           }
         }
+
         return { entitlements: nativeEntitlements, hardenedRuntime: true, signatureFlags: ["runtime"] }
       },
     },
@@ -194,12 +219,15 @@ export const getMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = proc
 
 export const requireMacReleaseConfiguration = (environment: NodeJS.ProcessEnv = process.env) => {
   const configuration = getMacReleaseConfiguration(environment)
+
   if (!environment.APPLE_SIGNING_IDENTITY) {
     throw new Error("macOS packaging requires APPLE_SIGNING_IDENTITY; ad-hoc release signing is not allowed.")
   }
+
   if (!configuration) {
     throw new Error("macOS packaging requires complete notarytool credentials or an APPLE_NOTARY_KEYCHAIN_PROFILE.")
   }
+
   return configuration
 }
 
@@ -231,9 +259,11 @@ const machOMagic = new Set([
 
 const isMachOFile = async (filePath: string) => {
   const handle = await open(filePath, "r")
+
   try {
     const header = Buffer.alloc(4)
     const { bytesRead } = await handle.read(header, 0, header.length, 0)
+
     return bytesRead === header.length && machOMagic.has(header.toString("hex"))
   } finally {
     await handle.close()
@@ -242,26 +272,34 @@ const isMachOFile = async (filePath: string) => {
 
 const signedCodeCandidates = async (root: string): Promise<string[]> => {
   const candidates: string[] = []
+
   for (const entry of await readdir(root, { withFileTypes: true })) {
     if (entry.isSymbolicLink()) continue
     const entryPath = path.join(root, entry.name)
+
     if (entry.isDirectory()) {
       candidates.push(...await signedCodeCandidates(entryPath))
+
       if ([".app", ".framework", ".xpc", ".bundle"].includes(path.extname(entryPath))) candidates.push(entryPath)
       continue
     }
+
     if (!entry.isFile()) continue
+
     if (await isMachOFile(entryPath)) candidates.push(entryPath)
   }
+
   return candidates
 }
 
 export const getPackagedMacResourcesPath = async (buildPath: string) => {
   const appBundles = (await readdir(buildPath, { withFileTypes: true }))
     .filter((entry) => entry.isDirectory() && entry.name.endsWith(".app"))
+
   if (appBundles.length !== 1) {
     throw new Error(`Expected exactly one packaged macOS app bundle in ${buildPath}.`)
   }
+
   return path.join(buildPath, appBundles[0].name, "Contents", "Resources")
 }
 
@@ -270,8 +308,10 @@ const signPackagedNativeReleaseArtifacts = async (
   configuration: NonNullable<ReturnType<typeof getMacReleaseConfiguration>>,
 ): Promise<void> => {
   const artifacts = getPackagedNativeReleaseArtifacts(resourcesPath)
+
   for (const artifact of artifacts) {
     const options = configuration.sign.optionsForFile(artifact.sourcePath)
+
     const arguments_ = [
       "--sign",
       configuration.sign.identity,
@@ -283,9 +323,11 @@ const signPackagedNativeReleaseArtifacts = async (
       options.entitlements,
       artifact.sourcePath,
     ]
+
     await run("codesign", arguments_)
     await run("codesign", ["--verify", "--strict", "--verbose=2", artifact.sourcePath])
   }
+
   await writePackagedNativeReleaseArtifactManifest(resourcesPath)
 }
 
@@ -293,11 +335,14 @@ const verifySignedPackage = async (appPath: string) => {
   if (pluginHostReleaseArtifacts.length > 0) {
     await verifyPackagedNativeReleaseArtifacts(path.join(appPath, "Contents", "Resources"))
   }
+
   const candidates = [...await signedCodeCandidates(appPath), appPath]
+
   for (const candidate of candidates) {
     await run("codesign", ["--verify", "--strict", "--verbose=2", candidate])
   }
 }
+
 const compileNativeFileCapabilityHelper = async () => {
   if (process.platform !== "darwin" && process.platform !== "linux") return
   const nativeDirectory = path.join(desktopDirectory, ".native")
@@ -326,8 +371,10 @@ const config: ForgeConfig = {
       ? [(buildPath, _electronVersion, platform, _arch, callback) => {
           if (platform !== "darwin") {
             callback()
+
             return
           }
+
           void getPackagedMacResourcesPath(buildPath)
             .then((resourcesPath) => signPackagedNativeReleaseArtifacts(resourcesPath, requireMacReleaseConfiguration()))
             .then(() => callback(), (error) => callback(
@@ -350,9 +397,11 @@ const config: ForgeConfig = {
     },
     postPackage: async (_config, packageResult) => {
       if (packageResult.platform !== "darwin" || !shouldVerifySignedMacPackage()) return
+
       const packageApps = (await Promise.all(packageResult.outputPaths.map(async (outputPath) =>
         (await readdir(outputPath)).filter((entry) => entry.endsWith(".app")).map((entry) => path.join(outputPath, entry)),
       ))).flat()
+
       await Promise.all(packageApps.map(verifySignedPackage))
     },
   },

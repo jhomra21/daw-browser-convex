@@ -13,9 +13,11 @@ export const logBandLevels = (frame: SpectrumFrame, count: number, out: Float32A
   const nyquist = frame.sampleRate / 2
   const ratio = SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ
   const binAt = (frequency: number) => Math.min(bins - 1, (frequency / nyquist) * (bins - 1))
+
   for (let band = 0; band < count; band++) {
     const low = binAt(SPECTRUM_MIN_HZ * ratio ** (band / count))
     const high = binAt(SPECTRUM_MIN_HZ * ratio ** ((band + 1) / count))
+
     if (high - low < 1) {
       const center = (low + high) / 2
       const lower = Math.floor(center)
@@ -23,10 +25,13 @@ export const logBandLevels = (frame: SpectrumFrame, count: number, out: Float32A
       out[band] = frame.data[lower] + (frame.data[upper] - frame.data[lower]) * (center - lower)
       continue
     }
+
     let peak = 0
+
     for (let bin = Math.floor(low); bin <= Math.ceil(high); bin++) peak = Math.max(peak, frame.data[bin])
     out[band] = peak
   }
+
   return out
 }
 
@@ -43,6 +48,7 @@ const HEAT_LUT = Uint8ClampedArray.from({ length: 256 * 3 }, (_, index) => {
   const position = (Math.floor(index / 3) / 255) * (HEAT_STOPS.length - 1)
   const lower = Math.min(HEAT_STOPS.length - 2, Math.floor(position))
   const mix = position - lower
+
   return HEAT_STOPS[lower][index % 3] * (1 - mix) + HEAT_STOPS[lower + 1][index % 3] * mix
 })
 
@@ -66,15 +72,18 @@ export const createSpectrogramHistory = () => {
     },
     push: (frame: SpectrumFrame) => {
       logBandLevels(frame, HISTORY_ROWS, rows)
+
       for (let row = 0; row < HISTORY_ROWS; row++) {
         levels[next * HISTORY_ROWS + row] = Math.round(Math.min(1, Math.max(0, rows[row])) * 255)
       }
+
       next = (next + 1) % HISTORY_COLUMNS
       columns = Math.min(HISTORY_COLUMNS, columns + 1)
     },
     paint: (context: CanvasRenderingContext2D, width: number, height: number) => {
       for (let x = 0; x < HISTORY_COLUMNS; x++) {
         const source = ((next + x) % HISTORY_COLUMNS) * HISTORY_ROWS
+
         for (let y = 0; y < HISTORY_ROWS; y++) {
           const level = levels[source + HISTORY_ROWS - 1 - y] * 3
           const target = (y * HISTORY_COLUMNS + x) * 4
@@ -84,6 +93,7 @@ export const createSpectrogramHistory = () => {
           image.data[target + 3] = 255
         }
       }
+
       stripContext?.putImageData(image, 0, 0)
       context.imageSmoothingEnabled = true
       context.drawImage(strip, 0, 0, width, height)
@@ -103,12 +113,15 @@ export const drawSpectrumCurve = (
   context.strokeStyle = colors.grid
   context.lineWidth = 1
   context.beginPath()
+
   for (const frequency of [100, 1000, 10000]) {
     const x = Math.round((Math.log(frequency / SPECTRUM_MIN_HZ) / Math.log(SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ)) * width) + 0.5
     context.moveTo(x, 0)
     context.lineTo(x, height)
   }
+
   context.stroke()
+
   if (!frame) return
   const bands = logBandLevels(frame, Math.max(2, Math.floor(width)))
   context.strokeStyle = colors.line
@@ -116,6 +129,7 @@ export const drawSpectrumCurve = (
   context.beginPath()
   bands.forEach((level, x) => {
     const y = height - Math.min(1, Math.max(0, level)) * (height - 2) - 1
+
     if (x === 0) context.moveTo(x, y)
     else context.lineTo(x, y)
   })

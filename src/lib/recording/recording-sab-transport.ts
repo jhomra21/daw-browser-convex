@@ -46,10 +46,12 @@ type Deferred<T> = {
 const deferred = <T>(): Deferred<T> => {
   let resolve = (_value: T) => {}
   let reject = (_error: Error) => {}
+
   const promise = new Promise<T>((onResolve, onReject) => {
     resolve = onResolve
     reject = onReject
   })
+
   return { promise, resolve, reject }
 }
 
@@ -73,6 +75,7 @@ export const createRecordingSabTransport = (
     ready.reject(error)
     completion?.reject(error)
     completion = null
+
     if (shouldAbortWriter) {
       worker.postMessage({
         type: 'abort',
@@ -94,29 +97,42 @@ export const createRecordingSabTransport = (
     frameCounts: buffers.frameCounts,
     samples: buffers.samples,
   }
+
   worker.setMessageHandler((value) => {
     const message = readWriterOutboundMessage(value)
+
     if (!message) return fail('Malformed recording writer message.', false)
+
     if (message.generation !== options.generation || message.sessionId !== options.sessionId) return
+
     if (state === 'failed') {
       if (message.type === 'aborted' || message.type === 'failure') worker.terminate()
+
       return
     }
+
     if (message.type === 'boot') {
       if (state !== 'starting') return fail('Unexpected recording writer boot message.')
+
       return
     }
+
     if (message.type === 'ready') {
       if (state !== 'starting') return fail('Unexpected recording writer ready message.')
       state = 'open'
       ready.resolve()
+
       return
     }
+
     if (message.type === 'failure') return fail(message.reason, false)
+
     if (message.type === 'return') return fail('SAB writer returned a transferable block.')
+
     if (state !== 'closing' || !completion || !terminal) {
       return fail('Unexpected recording writer terminal response.')
     }
+
     if (
       (terminal === 'finalize' && message.type !== 'finalized') ||
       (terminal === 'abort' && message.type !== 'aborted')
@@ -139,17 +155,26 @@ export const createRecordingSabTransport = (
           sessionId: options.sessionId,
         })
       }
+
       return
     }
+
     const message = readRecorderOutboundMessage(value)
+
     if (!message) return fail('Malformed recorder worklet message.')
+
     if (message.generation !== options.generation || message.sessionId !== options.sessionId) return
+
     if (message.type === 'meter') return
+
     if (message.type === 'block') return fail('Recorder emitted a transferable block during SAB capture.')
+
     if (message.type === 'failure') return fail(message.reason)
+
     if (state !== 'closing' || terminal !== 'finalize' || !completion) {
       return fail('Unexpected recorder completion.')
     }
+
     worker.postMessage({
       type: 'finalize',
       generation: options.generation,
@@ -173,11 +198,14 @@ export const createRecordingSabTransport = (
 
   const finish = async (type: 'finalize' | 'abort') => {
     if (state === 'starting') await ready.promise
+
     if (state === 'failed' && terminalError) throw terminalError
+
     if (state !== 'open') throw new Error('Recording transport is not open.')
     state = 'closing'
     terminal = type
     completion = deferred<{ capturedFrames: number }>()
+
     if (type === 'finalize') {
       options.worklet.postMessage({
         type: 'finalize',
@@ -191,6 +219,7 @@ export const createRecordingSabTransport = (
         sessionId: options.sessionId,
       })
     }
+
     return completion.promise
   }
 
@@ -209,6 +238,7 @@ export const createRecordingSabTransport = (
 
 const createBrowserRecordingWriter = (): WorkerEndpoint => {
   const worker = new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
+
   return {
     postMessage: (message) => worker.postMessage(message),
     setMessageHandler: (handler) => {

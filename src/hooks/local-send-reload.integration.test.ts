@@ -59,6 +59,7 @@ describe('local send reload path', () => {
     const firstTrackId = 'track:first'
     const secondTrackId = 'track:second'
     const thirdTrackId = 'track:third'
+
     const tracks: Track[] = [
       { id: firstTrackId, name: 'Track 1', volume: 0.8, clips: [], channelRole: 'track' },
       { id: secondTrackId, name: 'Track 2', volume: 0.8, clips: [], channelRole: 'track' },
@@ -69,6 +70,7 @@ describe('local send reload path', () => {
     expect(resolveSendTargetId(thirdTrackId, thirdTrackId, getReturnSendTargets(tracks))).toBe('')
 
     const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
+
     try {
       const repository = createLocalTimelineRepository(noReturnProjectId)
       await Promise.all(tracks.map((track, index) => repository.createTrack({
@@ -79,10 +81,12 @@ describe('local send reload path', () => {
 
       await new Promise<void>((resolve, reject) => createRoot((dispose) => {
         const [writableTrackIds] = createSignal<Set<Track['id']>>(new Set(tracks.map((track) => track.id)))
+
         const localMix = useTimelineLocalMix({
           projectId: () => noReturnProjectId,
           writableTrackIds,
         })
+
         const controller = useTimelineMixerController({
           projectId: () => noReturnProjectId,
           userId: () => '',
@@ -123,6 +127,7 @@ describe('local send reload path', () => {
     await repository.createTrack({ id: sourceTrackId, index: 0 })
     await repository.createTrack({ id: returnTrackId, index: 1, channelRole: 'return' })
     const snapshot = await repository.loadSnapshot()
+
     const pendingVolumes = new Map<Track['id'], number>([
       [sourceTrackId, 0.35],
       [returnTrackId, 0.55],
@@ -130,6 +135,7 @@ describe('local send reload path', () => {
 
     const client = emptyClientState({})
     client.mix.pendingSharedTrackVolumes = pendingVolumes
+
     const resolvedTracks = resolveTimelineTracks({
       projectId: overlayProjectId,
       server: { localSnapshot: snapshot },
@@ -139,12 +145,14 @@ describe('local send reload path', () => {
         getMediaStatus: () => undefined,
       },
     })
+
     expect(resolvedTracks.find((track) => track.id === sourceTrackId)?.volume).toBe(0.35)
     expect(resolvedTracks.find((track) => track.id === returnTrackId)?.volume).toBe(0.55)
   })
 
   test('persists a send to a return created after controller setup, reloads it, and clears it', async () => {
     const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
+
     try {
       const repository = createLocalTimelineRepository(projectId)
       await repository.createTrack({ id: sourceTrackId, index: 0 })
@@ -152,10 +160,12 @@ describe('local send reload path', () => {
         [sourceTrackId]: { sends: [] },
       })
       const initialSnapshot = await repository.loadSnapshot()
+
       const sourceTrack: Track = {
         ...initialSnapshot.tracks[0],
         clips: [],
       }
+
       const initialTracks: Track[] = [sourceTrack]
       expect(getReturnSendTargets(initialTracks)).toEqual([])
 
@@ -163,10 +173,12 @@ describe('local send reload path', () => {
         const [renderTracks, setRenderTracks] = createSignal<Track[]>(initialTracks)
         const [mixerTracks, setMixerTracks] = createSignal<() => Track[]>(renderTracks)
         const [writableTrackIds] = createSignal<Set<Track['id']>>(new Set([sourceTrackId, returnTrackId]))
+
         const localMix = useTimelineLocalMix({
           projectId: () => projectId,
           writableTrackIds,
         })
+
         const controller = useTimelineMixerController({
           projectId: () => projectId,
           userId: () => '',
@@ -181,23 +193,28 @@ describe('local send reload path', () => {
 
         void (async () => {
           await new Promise((settle) => setTimeout(settle, 10))
+
           const returnRow = await repository.createTrack({
             id: returnTrackId,
             index: 1,
             channelRole: 'return',
           })
+
           const regularRow = await repository.createTrack({
             id: normalTargetTrackId,
             index: 2,
           })
+
           const returnTrack: Track = {
             ...returnRow,
             clips: [],
           }
+
           const regularTrack: Track = {
             ...regularRow,
             clips: [],
           }
+
           setRenderTracks([sourceTrack, returnTrack, regularTrack])
           setMixerTracks(() => renderTracks)
           expect(untrack(() => getReturnSendTargets(mixerTracks()()).map((track) => track.id))).toEqual([returnTrackId])
@@ -224,6 +241,7 @@ describe('local send reload path', () => {
               getMediaStatus: () => undefined,
             },
           })
+
           expect(reopened.find((track) => track.id === sourceTrackId)?.sends).toEqual(persistedSource?.sends)
 
           controller.updateTrackSends(sourceTrackId, [])
@@ -244,6 +262,7 @@ describe('local send reload path', () => {
 
   test('retains a durable return send instead of restoring a stale local mix overlay', async () => {
     const restoreWindow = installHermeticWindow({ clearTimeout, setTimeout })
+
     try {
       const repository = createLocalTimelineRepository('project:local-send-stale-local-mix')
       await repository.createTrack({ id: sourceTrackId, index: 0 })
@@ -256,6 +275,7 @@ describe('local send reload path', () => {
         [sourceTrackId]: { sends: [] },
       })
       const snapshot = await repository.loadSnapshot()
+
       const tracks: Track[] = snapshot.tracks.map((track) => ({
         id: track.id,
         name: track.name,
@@ -267,16 +287,20 @@ describe('local send reload path', () => {
         channelRole: track.channelRole,
         sends: track.sends,
       }))
+
       expect(getReturnSendTargets(tracks).map((track) => track.id)).toEqual([returnTrackId])
 
       await new Promise<void>((resolve, reject) => createRoot((dispose) => {
         const [writableTrackIds] = createSignal<Set<Track['id']>>(new Set([sourceTrackId, returnTrackId]))
+
         const localMix = useTimelineLocalMix({
           projectId: () => 'project:local-send-stale-local-mix',
           writableTrackIds,
         })
+
         void (async () => {
           await new Promise((resolve) => setTimeout(resolve, 10))
+
           const reopened = resolveTimelineTracks({
             projectId: 'project:local-send-stale-local-mix',
             server: { localSnapshot: snapshot },
@@ -286,6 +310,7 @@ describe('local send reload path', () => {
               getMediaStatus: () => undefined,
             },
           })
+
           expect(reopened.find((track) => track.id === sourceTrackId)?.sends).toEqual([{
             targetId: returnTrackId,
             amount: 0.25,
@@ -308,11 +333,13 @@ describe('local send reload path', () => {
     await repository.createTrack({ id: sourceTrackId, index: 0 })
     await repository.createTrack({ id: normalTargetTrackId, index: 1 })
     const snapshot = await repository.loadSnapshot()
+
     const staleDurableSend: TrackSend = {
       targetId: normalTargetTrackId,
       amount: 0.75,
       tap: 'post-fader',
     }
+
     const staleSnapshot = {
       ...snapshot,
       tracks: snapshot.tracks.map((track) => track.id === sourceTrackId
@@ -322,6 +349,7 @@ describe('local send reload path', () => {
           }
         : track),
     }
+
     const reopened = resolveTimelineTracks({
       projectId: staleSnapshot.projectId,
       server: { localSnapshot: staleSnapshot },

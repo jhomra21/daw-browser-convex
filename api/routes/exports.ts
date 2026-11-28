@@ -8,6 +8,7 @@ import { formatExportFileTimestamp, getExportAudioFormatMetadata, isExportAudioF
 
 const isExportMimeTypeAllowed = (format: ExportAudioFormat, mimeType: string) => {
   if (!mimeType) return true
+
   return mimeType === getExportAudioFormatMetadata(format).mimeType
 }
 
@@ -26,16 +27,21 @@ export function registerExportRoutes(app: App) {
     if (!projectId || !(file instanceof File)) {
       return c.json({ error: 'Missing projectId or file' }, 400)
     }
+
     if (!isExportAudioFormat(requestedFormat)) {
       return c.json({ error: 'Unsupported export format' }, 400)
     }
+
     const format = requestedFormat
     const metadata = getExportAudioFormatMetadata(format)
+
     if (!isExportMimeTypeAllowed(format, file.type)) {
       return c.json({ error: 'Export file type does not match format' }, 400)
     }
+
     const contentType = file.type || metadata.mimeType
     const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
+
     if (!access) return c.json({ error: 'Forbidden' }, 403)
 
     // Sanitize filename or generate one
@@ -43,6 +49,7 @@ export function registerExportRoutes(app: App) {
       const ts = formatExportFileTimestamp(new Date())
       name = `export_${ts}${metadata.fileExtension}`
     }
+
     const sanitized = sanitizeFileNameSegment(name, `export${metadata.fileExtension}`)
     const splitIdx = sanitized.lastIndexOf('.')
     const base = splitIdx > 0 ? sanitized.slice(0, splitIdx) : sanitized
@@ -69,6 +76,7 @@ export function registerExportRoutes(app: App) {
     const sampleRate = sampleRateStr ? Number(sampleRateStr) : undefined
     const sizeBytes = putRes.size
     let exportId: string
+
     try {
       exportId = await access.convex.mutation(convexApi.exports.create, {
         projectId,
@@ -86,6 +94,7 @@ export function registerExportRoutes(app: App) {
       })
       throw metadataError
     }
+
     return c.json({
       exportId,
       key,
@@ -97,6 +106,7 @@ export function registerExportRoutes(app: App) {
     })
   } catch (err) {
     console.error('Export upload error', err)
+
     return c.json({ error: 'Failed to upload export' }, 500)
   }
 })
@@ -104,12 +114,16 @@ export function registerExportRoutes(app: App) {
   app.delete('/api/exports/:exportId', async (c) => {
   try {
     const access = await requireAuthenticatedConvexForApi(c)
+
     if (!access) return c.json({ error: 'Unauthorized' }, 401)
     const exportId = c.req.param('exportId')
+
     if (!exportId) return c.json({ error: 'Missing exportId' }, 400)
+
     const result = await access.convex.mutation(convexApi.exports.remove, {
       exportId,
     })
+
     if (result) {
       await drainR2DeleteQueue({
         c,
@@ -120,9 +134,11 @@ export function registerExportRoutes(app: App) {
         console.warn('Failed to drain export R2 cleanup queue', cleanupError)
       })
     }
+
     return c.json({ ok: true })
   } catch (err) {
     console.error('Export delete error', err)
+
     return c.json({ error: 'Failed to delete export' }, 500)
   }
 })
@@ -132,6 +148,7 @@ export function registerExportRoutes(app: App) {
   try {
     const key = c.req.query('key')
     const projectId = c.req.param('projectId')
+
     return await streamProjectR2Object(c, {
       projectId,
       key,
@@ -142,6 +159,7 @@ export function registerExportRoutes(app: App) {
     })
   } catch (err) {
     console.error('Export fetch error', err)
+
     return c.json({ error: 'Failed to fetch export' }, 500)
   }
 })

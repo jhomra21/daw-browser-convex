@@ -61,6 +61,7 @@ test('assigns deterministic instance IDs to legacy built-in rows', () => {
   const rows = normalizeMixedEffectEntityRows([
     { kind: 'effect', id: 'legacy-row', value: { targetId: 'track-1', effect: 'delay', params: {} }, updatedAt: 1 },
   ])
+
   expect(rows[0]?.value).toMatchObject({ instanceId: 'legacy:legacy-row', index: 0 })
 })
 

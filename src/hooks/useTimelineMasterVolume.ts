@@ -27,15 +27,20 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
 
   const committedVolume = createMemo(() => {
     const projectId = options.projectId()
+
     if (isLocalId('project', projectId)) return options.projectMix.state().masterVolume
+
     return normalizeMasterVolume(options.fullViewData()?.mixerSettings.masterVolume ?? options.projectMix.state().masterVolume)
   })
 
   const volume = createMemo(() => pendingMasterVolume() ?? committedVolume())
+
   const canEdit = createMemo(() => {
     const projectId = options.projectId()
+
     if (isLocalId('project', projectId)) return true
     const role = options.currentProjectRole()
+
     return role === 'owner' || role === 'editor'
   })
 
@@ -52,12 +57,14 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
   createEffect(() => {
     const projectId = options.projectId()
     const mixerSettings = options.fullViewData()?.mixerSettings
+
     if (!projectId || isLocalId('project', projectId) || !mixerSettings || pendingMasterVolume() !== undefined) return
     options.projectMix.setMasterVolume(mixerSettings.masterVolume)
   })
 
   createEffect(() => {
     const pending = pendingMasterVolume()
+
     if (pending === undefined || pending !== committedVolume()) return
     setPendingMasterVolume(undefined)
   })
@@ -65,21 +72,28 @@ export function useTimelineMasterVolume(options: UseTimelineMasterVolumeOptions)
   const commitVolume = (nextVolumeInput: number) => {
     if (!canEdit()) return
     const nextVolume = normalizeMasterVolume(nextVolumeInput)
+
     if (nextVolume === volume()) return
     setPendingMasterVolume(nextVolume)
     options.audioEngine.setMasterVolume(nextVolume)
     const projectId = options.projectId()
+
     if (isLocalId('project', projectId)) {
       options.projectMix.setMasterVolume(nextVolume)
       setPendingMasterVolume(undefined)
+
       return
     }
+
     const userId = options.userId()
+
     if (!projectId || !userId || (options.currentProjectRole() !== 'owner' && options.currentProjectRole() !== 'editor')) {
       setPendingMasterVolume(undefined)
       options.audioEngine.setMasterVolume(committedVolume())
+
       return
     }
+
     options.projectMix.setMasterVolume(nextVolume)
     void publishDurableSharedTimelineOperation({
       projectId,

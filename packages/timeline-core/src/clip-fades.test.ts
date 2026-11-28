@@ -114,12 +114,16 @@ describe('clip fades', () => {
       { fadeInSec: Number.NaN, fadeOutSec: 20, fadeInCurve: 2, fadeOutCurve: -2 },
       { ...fades, fadeInSec: 8, fadeOutSec: 8 },
     ]
+
     for (const input of cases) {
       const normalized = normalizeClipFades(input, 10)
+
       for (const time of [0, 1, 5, 10]) {
         expect(normalizedFadeGainAtClipTime(normalized, 10, time)).toBeCloseTo(fadeGainAtClipTime(input, 10, time))
       }
+
       const sides: Array<'fadeIn' | 'fadeOut'> = ['fadeIn', 'fadeOut']
+
       for (const side of sides) {
         expect(getNormalizedClipFadeBezierControlPoint(normalized, 10, side))
           .toEqual(getClipFadeBezierControlPoint(input, 10, side))

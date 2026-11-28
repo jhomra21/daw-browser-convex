@@ -23,6 +23,7 @@ const failure = (
 
 const hasStereoMainBus = (buses: readonly { channels: number; enabled: boolean }[]) => {
   const enabled = buses.filter((bus) => bus.enabled)
+
   return enabled.length === 1 && enabled[0]?.channels === 2
 }
 
@@ -51,15 +52,19 @@ export const preflightVst3Insertion = async (input: {
       && candidate.vendor === input.request.reference.vendorId
     ))
   ))
+
   if (!classIsCataloged) return failure("untrusted-catalog", "The selected VST3 class is not in the trusted native catalog.")
   const resolved = resolveVst3Attachment(input.catalog, input.request.reference)
+
   if (!resolved) return failure("stale-catalog", "The selected VST3 catalog identity is stale or no longer trusted.")
   const instrument = resolved.role === "instrument"
+
   const workerTransport = {
     ...effectWorkerTransport,
     maximumFrames: input.maximumFramesPerBlock,
     inputChannels: instrument ? 0 : 2,
   }
+
   const attachment: ResolvedVst3Attachment & { stateRevision: number } = {
     graphNodeId: 1n,
     stageIndex: 0,
@@ -79,6 +84,7 @@ export const preflightVst3Insertion = async (input: {
     workerTransport,
     stateRevision: 0,
   }
+
   const result = await (input.preflight ?? preflightNativeVst3Worker)({
     workerPath: input.workerPath,
     sampleRateHz: input.sampleRateHz,
@@ -86,7 +92,9 @@ export const preflightVst3Insertion = async (input: {
     evidence: input.evidence,
     workerEnvironment: input.workerEnvironment,
   })
+
   if (result.status === "unavailable") return failure(result.code, result.message)
+
   if (
     result.hello.instanceId !== input.request.instanceId
     || result.hello.manifest.role !== resolved.role
@@ -99,7 +107,9 @@ export const preflightVst3Insertion = async (input: {
       ? "The VST3 instrument does not expose no enabled audio inputs and one supported stereo output bus."
       : "The VST3 plug-in does not expose one supported stereo input and output bus.")
   }
+
   input.rememberVerdict(attachment, result)
+
   return {
     ok: true,
     manifest: {

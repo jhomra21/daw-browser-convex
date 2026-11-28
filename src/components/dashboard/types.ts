@@ -8,6 +8,7 @@ const dashboardViews: readonly DashboardView[] = ["general", "audio", "account",
 
 export const parseDashboardView = (value: string | null): DashboardView | null => {
   if (!value) return null;
+
   return dashboardViews.find((view) => view === value) ?? null;
 };
 

@@ -88,6 +88,7 @@ export type ControlBearer = {
 const sha256 = async (value: string) => {
   const bytes = new TextEncoder().encode(value);
   const digest = await crypto.subtle.digest("SHA-256", bytes);
+
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 };
 
@@ -104,6 +105,7 @@ const hasSupportedScopes = (scopes: string[]) => scopes.every(isControlOAuthScop
 export const getControlOAuthOrigin = (baseUrl: string | undefined, requestUrl: string) => {
   const fallback = new URL(requestUrl);
   const configured = baseUrl ? new URL(baseUrl) : fallback;
+
   return configured.origin;
 };
 
@@ -118,6 +120,7 @@ const oauthError = (error: string, description: string, status = 400) => Respons
 
 const requestIpHash = async (request: Request) => {
   const ip = request.headers.get("cf-connecting-ip");
+
   return ip && ip.length <= 128 ? sha256(ip) : null;
 };
 
@@ -139,7 +142,9 @@ export const registrationRateHeaders = (count: number, windowStart: number) => (
 
 const formData = async (request: Pick<Request, "headers" | "text">) => {
   const contentType = request.headers.get("content-type") ?? "";
+
   if (!contentType.startsWith("application/x-www-form-urlencoded")) return null;
+
   return new URLSearchParams(await request.text());
 };
 
@@ -147,24 +152,33 @@ const isPkceVerifier = (value: string | null) => value !== null && /^[A-Za-z0-9\
 
 export const validateControlAuthorizationRequest = (url: URL, resource: string): string | null => {
   if (url.searchParams.getAll("resource").length !== 1 || url.searchParams.get("resource") !== resource) return "resource must be the control API";
+
   if (url.searchParams.getAll("code_challenge").length !== 1 || !url.searchParams.get("code_challenge")) return "S256 PKCE is required";
+
   if (url.searchParams.getAll("code_challenge_method").length !== 1 || url.searchParams.get("code_challenge_method") !== "S256") return "only S256 PKCE is supported";
+
   return null;
 };
 
 export const validateControlTokenRequest = (body: URLSearchParams, resource: string): string | null => {
   if (body.getAll("resource").length !== 1 || body.get("resource") !== resource) return "resource must be the control API";
   const grant = body.get("grant_type");
+
   if (grant !== "authorization_code" && grant !== "refresh_token") return "unsupported grant type";
+
   if (body.get("client_secret")) return "only public clients are supported";
+
   if (grant === "authorization_code" && (!body.get("client_id") || !isPkceVerifier(body.get("code_verifier")))) return "S256 PKCE is required";
+
   return null;
 };
 
 const supportedGrantTypes = (values: JsonValue | undefined) => {
   if (!Array.isArray(values)) return false;
   const grantTypes = values.filter(isJsonString);
+
   if (grantTypes.length !== values.length) return false;
+
   return grantTypes.length === 1 && grantTypes[0] === "authorization_code"
     || grantTypes.length === 2 && grantTypes[0] === "authorization_code" && grantTypes[1] === "refresh_token";
 };
@@ -182,8 +196,11 @@ const approvedHttpsOrigins = (value: string | undefined) => new Set(
 const validRedirectUri = (value: string, approvedOrigins: Set<string>) => {
   try {
     const url = new URL(value);
+
     if (url.username || url.password || url.hash) return false;
+
     if (url.protocol === "http:" && url.hostname === "127.0.0.1" && url.port !== "" && Number(url.port) > 0) return true;
+
     return url.protocol === "https:" && approvedOrigins.has(url.origin);
   } catch {
     return false;
@@ -195,29 +212,43 @@ export const validateControlClientRegistration = (
   approvedOrigins: Set<string>,
 ): string | null => {
   if (!isJsonObject(body)) return "metadata must be a JSON object";
+
   const allowedKeys = new Set([
     "client_name", "client_uri", "logo_uri", "contacts", "tos_uri", "policy_uri",
     "software_id", "software_version", "redirect_uris", "token_endpoint_auth_method",
     "grant_types", "response_types", "scope", "require_pkce",
   ]);
+
   if (Object.keys(body).some((key) => !allowedKeys.has(key))) return "unsupported client metadata";
+
   if (!Array.isArray(body.response_types) || body.response_types.length !== 1 || body.response_types[0] !== "code") return "response_types must be [\"code\"]";
+
   if (!supportedGrantTypes(body.grant_types)) return "unsupported grant_types";
+
   if (body.token_endpoint_auth_method !== "none") return "token_endpoint_auth_method must be none";
+
   if (body.require_pkce !== true) return "PKCE is required";
+
   if (!Array.isArray(body.redirect_uris) || body.redirect_uris.length === 0 || body.redirect_uris.length > 8) return "redirect_uris must contain 1-8 URIs";
   const redirectUris = body.redirect_uris.filter(isJsonString);
+
   if (redirectUris.length !== body.redirect_uris.length || redirectUris.some((uri) => uri.length > 2048 || !validRedirectUri(uri, approvedOrigins))) return "unsupported redirect URI";
+
   if (!isJsonString(body.scope) || body.scope.length === 0 || body.scope.length > 200 || !hasSupportedScopes(parseScopes(body.scope))) return "unsupported scope";
+
   for (const key of ["client_name", "client_uri", "logo_uri", "tos_uri", "policy_uri", "software_id", "software_version"]) {
     const value = body[key];
+
     if (value !== undefined && (!isJsonString(value) || value.length > 512)) return `invalid ${key}`;
   }
+
   if (body.contacts !== undefined) {
     if (!Array.isArray(body.contacts) || body.contacts.length > 8) return "invalid contacts";
     const contacts = body.contacts.filter(isJsonString);
+
     if (contacts.length !== body.contacts.length || contacts.some((item) => item.length > 320)) return "invalid contacts";
   }
+
   return null;
 };
 
@@ -225,6 +256,7 @@ const tokenResponse = async (response: Response): Promise<TokenResponse | null> 
   if (!response.ok) return null;
   const value = await response.clone().json().catch(() => null);
   const parsed = tokenResponseSchema.safeParse(value);
+
   return parsed.success ? parsed.data : null;
 };
 
@@ -235,9 +267,12 @@ export const normalizeVerifiedControlClaims = (
   resource: string,
 ): VerifiedControlClaims | null => {
   const parsed = verifiedControlClaimsSchema.safeParse(payload);
+
   if (!parsed.success || parsed.data.aud !== resource) return null;
   const scopes = parseScopes(parsed.data.scope);
+
   if (!hasSupportedScopes(scopes) || parsed.data.exp <= unixSeconds()) return null;
+
   return {
     userId: parsed.data.sub,
     clientId: parsed.data.azp,
@@ -257,9 +292,11 @@ const verifyControlAccessToken = async (
 ): Promise<VerifiedControlClaims | null> => {
   try {
     const { createAuth } = await import("./auth");
+
     const { payload } = await createAuth(env).api.verifyJWT({
       body: { token, issuer: origin },
     });
+
     return normalizeVerifiedControlClaims(payload, resource);
   } catch {
     return null;
@@ -315,9 +352,13 @@ const createBindingStatements = async (
   prior?: BindingRow,
 ) => {
   const claims = await verifyControlAccessToken(env, token.access_token, origin, resource);
+
   if (!claims || token.expires_in !== CONTROL_ACCESS_TOKEN_SECONDS || claims.expiresAt - claims.issuedAt !== CONTROL_ACCESS_TOKEN_SECONDS) return null;
+
   if (token.scope !== undefined && token.scope !== claims.scopes.join(" ")) return null;
+
   if (!await hasAuthoritativeIdentity(env, claims)) return null;
+
   if (prior && (
     claims.userId !== prior.userId
     || claims.clientId !== prior.clientId
@@ -330,6 +371,7 @@ const createBindingStatements = async (
   const accessTokenHash = await sha256(token.access_token);
   const refreshTokenHash = token.refresh_token ? await sha256(token.refresh_token) : null;
   const now = unixSeconds();
+
   const statement = db(env).prepare(
     `INSERT INTO controlOAuthTokenBinding (
       id, accessTokenHash, refreshTokenHash, familyId, userId, clientId, sessionId,
@@ -340,11 +382,13 @@ const createBindingStatements = async (
     claims.sessionId, resource, claims.scopes.join(" "), claims.issuer, claims.expiresAt,
     refreshTokenHash ? now + CONTROL_REFRESH_TOKEN_SECONDS : null, now, now,
   );
+
   const familyStatement = familyId ? null : db(env).prepare(
     `INSERT INTO controlOAuthTokenFamily (
       id, userId, clientId, createdAt, updatedAt
     ) VALUES (?, ?, ?, ?, ?)`,
   ).bind(resolvedFamilyId, claims.userId, claims.clientId, now, now);
+
   return { id, statement, familyStatement, claims };
 };
 
@@ -357,6 +401,7 @@ const getBindingByHash = async (env: ApiBindings["Bindings"], tokenHash: string)
        AND family.compromisedAt IS NULL
        AND family.revokedAt IS NULL`,
   ).bind(tokenHash).first<BindingRow>();
+
   return result ?? null;
 };
 
@@ -396,6 +441,7 @@ const hasAuthoritativeIdentity = async (env: ApiBindings["Bindings"], claims: Ve
       "SELECT id FROM session WHERE id = ? AND userId = ? AND expiresAt > ?",
     ).bind(claims.sessionId, claims.userId, unixSeconds() * 1000).first<{ id: string }>(),
   ]);
+
   return Boolean(client && user && session);
 };
 
@@ -405,18 +451,24 @@ export async function resolveControlBearer(
   requiredScope: ControlOAuthScope,
 ): Promise<ControlBearer | null> {
   const authorization = request.headers.get("authorization");
+
   if (!authorization) return null;
   const [scheme, token, extra] = authorization.split(" ");
+
   if (scheme !== "Bearer" || !token || extra) return null;
 
   const binding = await getBindingByHash(env, await sha256(token));
   const origin = getControlOAuthOrigin(env.BETTER_AUTH_URL, request.url);
   const resource = getControlOAuthResource(env.BETTER_AUTH_URL, request.url);
+
   if (!binding || !isActiveControlBinding(binding, resource, requiredScope, unixSeconds())) return null;
   const claims = await verifyControlAccessToken(env, token, origin, resource);
+
   if (!claims || !controlBindingMatchesClaims(binding, claims, resource)) return null;
   const scopes = parseScopes(binding.scopes);
+
   if (!await hasAuthoritativeIdentity(env, claims)) return null;
+
   return {
     userId: binding.userId,
     issuer: claims.issuer,
@@ -429,6 +481,7 @@ export async function resolveControlBearer(
 export const proxyWithoutCookies = (request: Request) => {
   const headers = new Headers(request.headers);
   headers.delete("cookie");
+
   return new Request(request, { headers });
 };
 
@@ -461,34 +514,43 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
     const url = new URL(c.req.url);
     const resource = getControlOAuthResource(c.env.BETTER_AUTH_URL, c.req.url);
     const invalid = validateControlAuthorizationRequest(url, resource);
+
     if (invalid) return oauthError(invalid === "resource must be the control API" ? "invalid_target" : "invalid_request", invalid);
     const response = await createAuth(c.env).handler(c.req.raw);
     const location = response.headers.get("location");
+
     if (!location) return response;
     const redirect = new URL(location, c.req.url);
+
     if (redirect.origin === getControlOAuthOrigin(c.env.BETTER_AUTH_URL, c.req.url) && redirect.pathname === "/oauth/consent") {
       redirect.searchParams.set("resource", resource);
       const headers = new Headers(response.headers);
       headers.set("location", redirect.toString());
+
       return new Response(response.body, { status: response.status, headers });
     }
+
     return response;
   });
 
   app.post("/api/auth/oauth2/register", async (c: Context<ApiBindings>) => {
     const ipHash = await requestIpHash(c.req.raw);
+
     if (!ipHash) return oauthError("invalid_request", "trusted client address is required");
     const now = unixSeconds();
     const windowStart = registrationRateWindow(now);
     const sql = registrationRateSql();
+
     const statements = [
       db(c.env).prepare(sql.cleanup).bind(windowStart),
       db(c.env).prepare(sql.increment).bind(ipHash, windowStart),
     ];
+
     const results = await db(c.env).batch<{ count: number }>(statements);
     const rate = results[1].results[0];
     const count = rate?.count;
     const rateHeaders = registrationRateHeaders(count ?? DCR_MAX_REQUESTS, windowStart);
+
     if (count === undefined || count > DCR_MAX_REQUESTS) {
       return new Response(JSON.stringify({
         error: "slow_down",
@@ -503,14 +565,19 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
         },
       });
     }
+
     const body = z.json().safeParse(await c.req.raw.clone().json().catch(() => null));
+
     const invalid = body.success
       ? validateControlClientRegistration(body.data, approvedHttpsOrigins(c.env.CONTROL_OAUTH_APPROVED_REDIRECT_ORIGINS))
       : "metadata must be valid JSON";
+
     if (invalid) return new Response(JSON.stringify({ error: "invalid_client_metadata", error_description: invalid }), { status: 400, headers: { ...rateHeaders, "Content-Type": "application/json", "Cache-Control": "no-store" } });
     const response = await createAuth(c.env).handler(proxyWithoutCookies(c.req.raw));
     const headers = new Headers(response.headers);
+
     for (const [key, value] of Object.entries(rateHeaders)) headers.set(key, value);
+
     return new Response(response.body, { status: response.status, headers });
   });
 
@@ -518,28 +585,36 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
     const request = proxyWithoutCookies(c.req.raw);
     const body = await formData(request.clone());
     const resource = getControlOAuthResource(c.env.BETTER_AUTH_URL, c.req.url);
+
     if (!body) return oauthError("invalid_request", "form encoding is required");
     const invalid = validateControlTokenRequest(body, resource);
+
     if (invalid) return oauthError(invalid === "resource must be the control API" ? "invalid_target" : invalid === "unsupported grant type" ? "unsupported_grant_type" : invalid === "only public clients are supported" ? "invalid_client" : "invalid_request", invalid);
+
     if (request.headers.has("authorization")) return oauthError("invalid_client", "only public clients are supported");
     const grant = body.get("grant_type");
 
     let prior: BindingRow | null = null;
+
     if (grant === "refresh_token") {
       const refresh = body.get("refresh_token");
+
       if (!refresh) return oauthError("invalid_request", "refresh_token is required");
       const refreshHash = await sha256(refresh);
       prior = await db(c.env).prepare(
         "SELECT * FROM controlOAuthTokenBinding WHERE refreshTokenHash = ?",
       ).bind(refreshHash).first<BindingRow>() ?? null;
+
       if (!prior) return oauthError("invalid_grant", "invalid refresh token");
       const now = unixSeconds();
+
       if (
         prior.clientId !== (body.get("client_id") ?? "")
         || prior.resource !== resource
         || prior.refreshExpiresAt === null
         || prior.refreshExpiresAt <= now
       ) return oauthError("invalid_grant", "invalid refresh token");
+
       const operations = await db(c.env).batch([
         db(c.env).prepare(
           `UPDATE controlOAuthTokenBinding
@@ -558,13 +633,17 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
              )`,
         ).bind(now, now, prior.id, body.get("client_id") ?? "", resource, now),
       ]).catch(() => null);
+
       if (!operations || operations[0]?.meta.changes !== 1) {
         await compromiseAndInvalidateControlFamily(c.env, prior, prior.familyId, now);
+
         return oauthError("invalid_grant", "invalid refresh token");
       }
     }
+
     const response = await createAuth(c.env).handler(request);
     const token = await tokenResponse(response);
+
     const binding = token ? await createBindingStatements(
       c.env,
       token,
@@ -573,12 +652,16 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
       prior?.familyId,
       prior ?? undefined,
     ) : null;
+
     if (!token || !binding) {
       if (prior) await compromiseAndInvalidateControlFamily(c.env, prior, prior.familyId, unixSeconds());
+
       return token ? oauthError("server_error", "token binding failed", 500) : response;
     }
+
     if (prior) {
       const now = unixSeconds();
+
       const operations = await db(c.env).batch([
         db(c.env).prepare(
           `INSERT INTO controlOAuthTokenBinding (
@@ -623,14 +706,17 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
              )`,
         ).bind(binding.id, now, prior.id, binding.id),
       ]).catch(() => null);
+
       if (!operations || operations[0]?.meta.changes !== 1 || operations[1]?.meta.changes !== 1) {
         await compromiseAndInvalidateControlFamily(c.env, prior, prior.familyId, now);
+
         return oauthError("invalid_grant", "refresh token family compromised");
       }
     } else {
       if (!binding.familyStatement) return oauthError("server_error", "token binding failed", 500);
       await db(c.env).batch([binding.familyStatement, binding.statement]);
     }
+
     return response;
   });
 
@@ -639,17 +725,22 @@ export const registerControlOAuthRoutes = (app: { get: Function; post: Function 
     const body = await formData(request.clone());
     const clientId = body?.get("client_id");
     const token = body?.get("token");
+
     if (body && clientId && token && !body.get("client_secret") && !request.headers.has("authorization")) {
       const tokenHash = await sha256(token);
+
       const binding = await db(c.env).prepare(
         "SELECT * FROM controlOAuthTokenBinding WHERE (accessTokenHash = ? OR refreshTokenHash = ?) AND clientId = ?",
       ).bind(tokenHash, tokenHash, clientId).first<BindingRow>();
+
       if (binding) {
         const now = unixSeconds();
         await compromiseAndInvalidateControlFamily(c.env, binding, binding.familyId, now);
       }
+
       await createAuth(c.env).handler(request).catch(() => null);
     }
+
     return new Response(null, { status: 200, headers: { "Cache-Control": "no-store" } });
   });
 };

@@ -24,20 +24,26 @@ function toAudioSourceMetadata(input: {
 
 export async function loadCachedDefaultSampleMetadata(assetKey: string): Promise<AudioSourceMetadata | null> {
   const record = await loadPeakAssetRecord(assetKey)
+
   if (!record) return null
+
   return toAudioSourceMetadata(record)
 }
 
 export async function ensureDefaultSampleMetadata(input: DefaultSampleCacheInput): Promise<AudioSourceMetadata | null> {
   const pending = pendingDefaultSampleMetadata.get(input.assetKey)
+
   if (pending) return await pending
 
   const task = (async () => {
     const cached = await loadCachedDefaultSampleMetadata(input.assetKey)
+
     if (cached) return cached
 
     const metadata = await inspectAudioSourceMetadata(input.url)
+
     if (metadata.durationSec === undefined) return null
+
     const source = createAudioPcmSourceDescriptor({
       identity: `default-sample:${input.assetKey}`,
       durationSec: metadata.durationSec,
@@ -46,16 +52,19 @@ export async function ensureDefaultSampleMetadata(input: DefaultSampleCacheInput
       channelCount: metadata.channelCount,
       source: input.url,
     })
+
     const primed = await primeClipSourceAsset({
       sourceAssetKey: input.assetKey,
       source,
     })
+
     if (!primed) return null
 
     return toAudioSourceMetadata(primed)
   })()
 
   pendingDefaultSampleMetadata.set(input.assetKey, task)
+
   try {
     return await task
   } finally {

@@ -82,21 +82,28 @@ export const normalizeWavEncodingSettings = <Value>(value: Value): WavEncodingSe
   if (!isWavEncodingInput(value)) return { codec: 'pcm-s16', dither: 'none' }
   const codec = value.codec
   const dither = value.dither
+
   if (codec === 'pcm-f32') return { codec, dither: 'none' }
+
   if (codec === 'pcm-s24') return { codec, dither: dither === 'tpdf' ? 'tpdf' : 'none' }
+
   return { codec: 'pcm-s16', dither: dither === 'tpdf' ? 'tpdf' : 'none' }
 }
 
 export const normalizeExportNormalization = <Value>(value: Value): ExportNormalization => {
   if (!isExportNormalizationInput(value)) return { mode: 'none' }
   const mode = value.mode
+
   if (mode === 'sample-peak') {
     const target = value.targetDbfs
+
     return { mode, targetDbfs: clamp(isNumber(target) ? target : 0, -120, 0) }
   }
+
   if (mode === 'loudness') {
     const target = value.targetLufs
     const ceiling = value.truePeakCeilingDbtp
+
     return {
       mode,
       targetLufs: clamp(isNumber(target) ? target : -14, -36, -5),
@@ -104,20 +111,25 @@ export const normalizeExportNormalization = <Value>(value: Value): ExportNormali
       limiting: value.limiting === 'true-peak' ? 'true-peak' : 'off',
     }
   }
+
   return { mode: 'none' }
 }
 
 export const normalizeExportTailPolicy = <Value>(value: Value): ExportTailPolicy => {
   if (!isExportTailPolicyInput(value)) return { mode: 'none' }
   const mode = value.mode
+
   if (mode === 'fixed') {
     const duration = value.durationSec
+
     return { mode, durationSec: clamp(isNumber(duration) ? duration : 0, 0, 60) }
   }
+
   if (mode === 'automatic') {
     const threshold = value.thresholdDbfs
     const hold = value.holdSec
     const maximum = value.maximumSec
+
     return {
       mode,
       thresholdDbfs: clamp(isNumber(threshold) ? threshold : -60, -120, -20),
@@ -125,6 +137,7 @@ export const normalizeExportTailPolicy = <Value>(value: Value): ExportTailPolicy
       maximumSec: clamp(isNumber(maximum) ? maximum : 10, 0.1, 120),
     }
   }
+
   return { mode: 'none' }
 }
 
@@ -141,30 +154,39 @@ export const findAutomaticTailEndFrame = (
   const threshold = linearFromDb(policy.thresholdDbfs)
   const holdFrames = Math.max(1, Math.ceil(policy.holdSec * buffer.sampleRate))
   let quietFrames = 0
+
   for (let frame = Math.max(0, sourceEndFrame); frame < buffer.length; frame += 1) {
     signal?.throwIfAborted()
     let peak = 0
+
     for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
       peak = Math.max(peak, Math.abs(buffer.getChannelData(channel)[frame]))
     }
+
     quietFrames = peak <= threshold ? quietFrames + 1 : 0
+
     if (quietFrames >= holdFrames) return frame + 1
   }
+
   return buffer.length
 }
 
 const getSamplePeak = (buffer: MutableAudioBuffer) => {
   let peak = 0
+
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const samples = buffer.getChannelData(channel)
+
     for (let frame = 0; frame < samples.length; frame += 1) peak = Math.max(peak, Math.abs(samples[frame]))
   }
+
   return peak
 }
 
 const applyGain = (buffer: MutableAudioBuffer, gain: number, signal?: AbortSignal) => {
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const samples = buffer.getChannelData(channel)
+
     for (let frame = 0; frame < samples.length; frame += 1) {
       if ((frame & 16383) === 0) signal?.throwIfAborted()
       samples[frame] *= gain
@@ -181,6 +203,7 @@ const predictLinkedTruePeak = (buffer: MutableAudioBuffer, frame: number) => {
     frame,
     sampleAt: (channel, sourceFrame) => {
       const samples = buffer.getChannelData(channel)
+
       return sourceFrame >= 0 && sourceFrame < samples.length ? samples[sourceFrame] ?? 0 : 0
     },
   })
@@ -197,29 +220,36 @@ export const limitTruePeakInPlace = (buffer: MutableAudioBuffer, ceilingDbtp: nu
   const releaseCoefficient = Math.exp(-1 / (Math.max(1, buffer.sampleRate * LIMITER_RELEASE_SEC)))
   let envelope = 1
   let limited = false
+
   for (let frame = 0; frame < buffer.length; frame += 1) {
     if ((frame & 4095) === 0) signal?.throwIfAborted()
     const predictionEnd = Math.min(buffer.length, frame + lookaheadFrames + 1)
+
     while (predictionFrame < predictionEnd) {
       const predicted = predictLinkedTruePeak(buffer, predictionFrame)
+
       while (dequeEnd > dequeStart && peakDequeValues[dequeEnd - 1] <= predicted) dequeEnd -= 1
       peakDequeFrames[dequeEnd] = predictionFrame
       peakDequeValues[dequeEnd] = predicted
       dequeEnd += 1
       predictionFrame += 1
     }
+
     while (dequeEnd > dequeStart && peakDequeFrames[dequeStart] < frame) dequeStart += 1
     const predictedPeak = dequeEnd > dequeStart ? peakDequeValues[dequeStart] : 0
     const requiredGain = predictedPeak > ceiling ? ceiling / predictedPeak : 1
     envelope = requiredGain < envelope
       ? requiredGain
       : 1 - (1 - envelope) * releaseCoefficient
+
     if (envelope < 1) limited = true
+
     for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
       const samples = buffer.getChannelData(channel)
       samples[frame] *= envelope
     }
   }
+
   return limited
 }
 
@@ -242,47 +272,61 @@ export const applyExportNormalization = (
 ): ExportAnalysisReport => {
   signal?.throwIfAborted()
   let gainDb = 0
+
   if (settings.mode === 'sample-peak') {
     const peak = getSamplePeak(buffer)
+
     if (peak > 0) gainDb = settings.targetDbfs - dbFromLinear(peak)
   }
+
   if (gainDb !== 0) applyGain(buffer, linearFromDb(gainDb), signal)
   let limited = false
   let after: LoudnessAnalysis
+
   if (settings.mode === 'loudness') {
     after = analyzeLoudness(buffer, signal)
+
     for (let pass = 0; pass < 4 && after.integratedLufs !== null; pass += 1) {
       const correctionDb = settings.targetLufs - after.integratedLufs
+
       if (Math.abs(correctionDb) <= 0.2) break
       applyGain(buffer, linearFromDb(correctionDb), signal)
       gainDb += correctionDb
+
       if (settings.limiting === 'true-peak') {
         limited = limitTruePeakInPlace(buffer, settings.truePeakCeilingDbtp, signal) || limited
       }
+
       after = analyzeLoudness(buffer, signal)
     }
   } else {
     after = analyzeLoudness(buffer, signal)
   }
+
   const ceilingConstrained = settings.mode === 'loudness'
     && after.integratedLufs !== null
     && Math.abs(after.integratedLufs - settings.targetLufs) > 0.2
     && settings.limiting === 'true-peak'
+
   if (settings.mode === 'loudness') {
     if (after.integratedLufs === null) {
       throw new Error(`Loudness normalization achieved no measurable LUFS, outside the 0.20 LU tolerance for ${settings.targetLufs.toFixed(2)} LUFS.`)
     }
+
     if (settings.limiting === 'true-peak' && after.truePeakDbtp !== null && after.truePeakDbtp > settings.truePeakCeilingDbtp + 0.1) {
       throw new Error(`Loudness normalization achieved ${after.truePeakDbtp.toFixed(2)} dBTP, above the ${settings.truePeakCeilingDbtp.toFixed(2)} dBTP ceiling (+0.10 dB tolerance).`)
     }
   }
+
   return toReport(after, getSamplePeak(buffer), gainDb, limited, ceilingConstrained)
 }
 
 const createSeededRandom = (seed: number) => {
   let state = seed >>> 0
+
   return () => {
     state = (state * 1664525 + 1013904223) >>> 0
+
     return state / 4294967296
   }
 }
@@ -294,8 +338,10 @@ export const createWavQuantizer = (
   if (settings.codec === 'pcm-f32') return (_sample: number) => _sample
   const levels = settings.codec === 'pcm-s16' ? 32768 : 8388608
   const random = createSeededRandom(seed)
+
   return (sample: number) => {
     const dither = settings.dither === 'tpdf' ? (random() - random()) / levels : 0
+
     return clamp(Math.round((sample + dither) * levels) / levels, -1, 1 - 1 / levels)
   }
 }
@@ -308,8 +354,10 @@ export const quantizeWavInPlace = (
 ): void => {
   if (settings.codec === 'pcm-f32') return
   const quantize = createWavQuantizer(settings, seed)
+
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const samples = buffer.getChannelData(channel)
+
     for (let frame = 0; frame < samples.length; frame += 1) {
       if ((frame & 16383) === 0) signal?.throwIfAborted()
       samples[frame] = quantize(samples[frame])

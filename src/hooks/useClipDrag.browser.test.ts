@@ -172,19 +172,25 @@ window.clipDragResults = async () => {
 test('clip creation continuations belong to one gesture and project', async () => {
   const directory = `/tmp/daw-clip-drag-${crypto.randomUUID()}`
   const session = `clip-drag-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await mkdir(directory, { recursive: true })
+
   try {
     const solidPath = new URL('../../node_modules/solid-js/dist/solid.js', import.meta.url).pathname
     await Bun.write(`${directory}/fixture.js`, fixture.replaceAll("'./use", `'${import.meta.dir}/use`))
+
     const build = await Bun.build({
       entrypoints: [`${directory}/fixture.js`],
       target: 'browser',
@@ -207,11 +213,14 @@ export const commitDuplicatedClipDrag = input => window.commitDuplicate(input)`,
         },
       }],
     })
+
     expect(build.success).toBe(true)
     await Bun.write(`${directory}/index.html`, `<!doctype html><body><script>${await build.outputs[0]!.text()}</script>`)
     await browser('open', `file://${directory}/index.html`)
+
     const output = z.object({ results: z.record(z.string(), z.boolean()), errors: z.array(z.string()) })
       .parse(JSON.parse(await browser('eval', 'window.clipDragResults()')))
+
     await Bun.write(`${directory}/results.json`, JSON.stringify(output, null, 2))
     console.log(`Clip drag evidence: ${directory}/results.json`)
     expect(output.errors).toEqual([])

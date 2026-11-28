@@ -9,6 +9,7 @@ import {
 test('settles recording before resolving a popstate project transition', async () => {
   const events: string[] = []
   let settle: (() => void) | undefined
+
   const transition = settlePopstateProjectTransition({
     currentProjectId: 'project-a',
     nextProjectId: 'project-b',
@@ -43,6 +44,7 @@ test('closes the dashboard only after a project is mounted, including the curren
   let dashboard: string | null = 'projects'
   const latestRequest = { current: 0 }
   const url = new URL('https://daw.test/?projectId=project-a&dashboard=projects')
+
   const closeDashboard = () => {
     dashboard = null
     url.searchParams.delete('dashboard')
@@ -87,6 +89,7 @@ test('closes the dashboard after successful creation but preserves it on failure
   let dashboard: string | null = 'projects'
   const latestRequest = { current: 0 }
   const url = new URL('https://daw.test/?dashboard=projects')
+
   const closeDashboard = () => {
     dashboard = null
     url.searchParams.delete('dashboard')
@@ -105,6 +108,7 @@ test('closes the dashboard after successful creation but preserves it on failure
     closeDashboard,
     latestRequest,
   })
+
   expect(outcome.status).toBe('success')
   expect(dashboard).toBeNull()
   expect(url.searchParams.has('dashboard')).toBe(false)
@@ -125,6 +129,7 @@ test('only the latest overlapping dashboard request may close the dashboard', as
     closeDashboard,
     latestRequest,
   })
+
   const openC = openProjectFromDashboard({
     nextProjectId: 'project-c',
     open: () => new Promise<void>((resolve) => { finishC = resolve }),
@@ -167,6 +172,7 @@ test('keeps the dashboard open when the latest overlapping open fails', async ()
     closeDashboard,
     latestRequest,
   })
+
   const openC = openProjectFromDashboard({
     nextProjectId: 'project-c',
     open: () => new Promise<void>((_resolve, reject) => { failC = reject }),
@@ -199,6 +205,7 @@ test('an overlapping New request supersedes an earlier Open request', async () =
     closeDashboard,
     latestRequest,
   })
+
   const create = createProjectFromDashboard({
     create: () => new Promise<{ status: 'error' }>((resolve) => { failCreate = resolve }),
     closeDashboard,

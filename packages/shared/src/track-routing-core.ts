@@ -29,11 +29,13 @@ type NormalizedRouting<TTrackId extends string = string> = {
 
 export function normalizeTrackChannelRole(value: string | undefined): RoutingTrackChannelRole {
   if (value === 'return' || value === 'group') return value
+
   return 'track'
 }
 
 function normalizeTrackSendAmount(value: number | undefined) {
   if (value === undefined || !Number.isFinite(value)) return 0
+
   return Math.max(0, Math.min(1, value))
 }
 
@@ -41,6 +43,7 @@ export function getTrackAcceptedClipKind(
   track: Pick<RoutingTrackLike, 'channelRole' | 'kind'> | null | undefined,
 ): RoutingClipKind | null {
   if (normalizeTrackChannelRole(track?.channelRole) !== 'track') return null
+
   return (track?.kind ?? 'audio') === 'instrument' ? 'midi' : 'audio'
 }
 
@@ -62,12 +65,16 @@ function buildRoutingIndex<TTrackId extends string>(
 ) {
   const groupIds = new Set<string>()
   const returnIds = new Set<string>()
+
   for (const track of tracks) {
     const role = normalizeTrackChannelRole(track.channelRole)
     const id = String(track.id)
+
     if (role === 'group') groupIds.add(id)
+
     if (role === 'return') returnIds.add(id)
   }
+
   return { groupIds, returnIds }
 }
 
@@ -77,14 +84,18 @@ function isAncestorGroup<TTrackId extends string>(
   candidateAncestorId: string,
 ): boolean {
   let cursor = tracksById.get(sourceId)?.groupId
+
   while (cursor) {
     const cursorId = String(cursor)
     const cursorTrack = tracksById.get(cursorId)
+
     if (cursorId === candidateAncestorId) {
       return normalizeTrackChannelRole(cursorTrack?.channelRole) === 'group'
     }
+
     cursor = cursorTrack?.groupId
   }
+
   return false
 }
 
@@ -98,16 +109,20 @@ export function normalizeTrackRouting<TTrackId extends string>(
   const tracksById = new Map(tracks.map((candidate) => [String(candidate.id), candidate]))
 
   const normalizedSends = new Map<string, RoutingSendLike<TTrackId>>()
+
   if (track && sourceRole === 'track' && Array.isArray(sends)) {
     for (const send of sends) {
       if (!send?.targetId) continue
       const targetId = String(send.targetId)
+
       if (targetId === sourceId || !returnIds.has(targetId)) continue
       const amount = normalizeTrackSendAmount(send.amount)
+
       if (amount <= 0.0001) {
         normalizedSends.delete(targetId)
         continue
       }
+
       const tap = send.tap === 'pre-fx' || send.tap === 'pre-fader' ? send.tap : undefined
       normalizedSends.set(targetId, { targetId: send.targetId, amount, tap })
     }
@@ -116,8 +131,11 @@ export function normalizeTrackRouting<TTrackId extends string>(
   const normalizedOutputTargetId = (() => {
     if (!track || !outputTargetId || String(outputTargetId) === sourceId) return undefined
     const targetId = String(outputTargetId)
+
     if (sourceRole === 'track') return groupIds.has(targetId) ? outputTargetId : undefined
+
     if (sourceRole === 'group') return isAncestorGroup(tracksById, sourceId, targetId) ? outputTargetId : undefined
+
     return undefined
   })()
 

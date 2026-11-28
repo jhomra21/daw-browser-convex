@@ -32,6 +32,7 @@ describe('resolveRendererApiUrl', () => {
       isDawProtocol: true,
       browserOrigin: 'daw://app',
     }
+
     expect(resolveRendererApiUrl(undefined, packaged, '/api/default-samples')).toBeNull()
     expect(resolveRendererApiUrl('http://example.test', packaged, '/api/default-samples')).toBeNull()
     expect(resolveRendererApiUrl('https://api.example.test', packaged, '/api/default-samples'))

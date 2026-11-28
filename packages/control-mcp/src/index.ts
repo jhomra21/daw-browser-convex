@@ -88,7 +88,9 @@ export const controlServiceFromCanonicalMethods = (
 })
 
 export type ControlMcpScope = "control:read" | "control:write"
+
 export type ControlMcpTarget = "cloud" | "host"
+
 export type ControlMcpHostService = () => Promise<{ service: ControlService; close: () => void }>
 
 type ControlMcpOptions = {
@@ -99,6 +101,7 @@ type ControlMcpOptions = {
 }
 
 type McpToolInput = CallToolRequest["params"]["arguments"]
+
 type ControlServiceResult =
   | ControlCapabilitiesV1
   | ControlCapabilitiesV2
@@ -111,6 +114,7 @@ type ControlServiceResult =
   | ControlRecoveriesResultV1
   | ProjectListResult
   | ProjectCurrentResult
+
 type McpStructuredContent = NonNullable<CallToolResult["structuredContent"]>
 
 const annotations = {
@@ -140,20 +144,27 @@ const invalidRequest = (toolName?: string, details?: NonNullable<ControlErrorV1[
     code: "invalid-request",
     message: toolName === undefined ? "Invalid control tool input." : `Invalid ${toolName} input.`,
   }
+
   if (details !== undefined) error.details = details
+
   return error
 }
+
 const hostUnavailable = (): ControlErrorV1 => ({
   version: "v1",
   code: "not-found",
   message: "A local desktop host is unavailable.",
 })
+
 const canonicalHostError = (cause: unknown): HostErrorV1 | undefined => {
   const v1 = hostErrorSchemaV1.safeParse(cause)
+
   if (v1.success) return v1.data
   const v2 = hostErrorSchemaV2.safeParse(cause)
+
   return v2.success ? { version: 'v1', code: v2.data.code, message: v2.data.message } : undefined
 }
+
 const hostTransportError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
   for (const candidate of [
     cause,
@@ -161,10 +172,13 @@ const hostTransportError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
     isRecord(cause) ? cause.errorData : undefined,
   ]) {
     const control = controlErrorSchemaV1.safeParse(candidate)
+
     if (control.success) return control.data
     const host = canonicalHostError(candidate)
+
     if (host) return host
   }
+
   return hostUnavailable()
 }
 
@@ -179,16 +193,20 @@ const serviceError = (cause: unknown): ControlErrorV1 | HostErrorV1 => {
     isRecord(cause) ? cause.errorData : undefined,
   ]) {
     const parsed = controlErrorSchemaV1.safeParse(candidate)
+
     if (parsed.success) return parsed.data
     const host = canonicalHostError(candidate)
+
     if (host) return host
   }
+
   return internalError()
 }
 
 const success = <Value extends object>(value: Value) => {
   const canonicalContent = JSON.parse(JSON.stringify(value))
   const structuredContent: McpStructuredContent = canonicalContent
+
   return {
     structuredContent,
     content: [{ type: "text" as const, text: canonicalJson(canonicalContent) }],
@@ -215,9 +233,11 @@ const execute = async <Output extends object>(
 const targetSchema = z.enum(["cloud", "host"]).default("cloud")
 const projectDiscoveryInputSchema = z.object({}).strict()
 const withTarget = <Schema extends z.ZodObject>(schema: Schema) => schema.extend({ target: targetSchema })
+
 const targetInput = (input: McpToolInput) => {
-  if (!isRecord(input)) throw new Error("Invalid control tool input.")
+  if (input === undefined || input === null || Array.isArray(input)) throw new Error("Invalid control tool input.")
   const { target, ...canonicalInput } = input
+
   return { target: targetSchema.parse(target), canonicalInput }
 }
 
@@ -249,33 +269,43 @@ const publicIssuePath = (issue: z.ZodIssue): string => {
   const path = issue.code === "unrecognized_keys" && issue.keys.length > 0
     ? [...issue.path, ...issue.keys]
     : issue.path
+
   const rendered = path.map(String).join(".")
+
   return rendered.length === 0 ? "$" : rendered.slice(0, 64)
 }
 
 const selectPublicIssues = (issues: readonly z.ZodIssue[]): z.ZodIssue[] => {
   const selected: z.ZodIssue[] = []
+
   for (const issue of issues) {
     if (issue.code !== "invalid_union") {
       selected.push(issue)
       continue
     }
+
     const branch = issue.errors
       .map((branchIssues) => selectPublicIssues(branchIssues))
       .sort((left, right) => left.length - right.length)[0]
+
     if (branch !== undefined) selected.push(...branch)
   }
+
   return selected
 }
 
 const publicValidationDetails = (error: z.ZodError): NonNullable<ControlErrorV1["details"]> => {
   const details: NonNullable<ControlErrorV1["details"]> = {}
+
   for (const issue of selectPublicIssues(error.issues)) {
     const key = publicIssuePath(issue)
+
     if (details[key] !== undefined) continue
     details[key] = publicIssueMessage(issue).slice(0, 1000)
+
     if (Object.keys(details).length >= controlLimitsV1.maxErrorDetails) break
   }
+
   return details
 }
 
@@ -293,7 +323,9 @@ export const createControlMcpServer = (
     { name: "daw-browser-control", version: "1.0.0" },
     { instructions },
   )
+
   const canWrite = async () => options.authorize === undefined || await options.authorize("control:write")
+
   const executeRouted = async <Input, Output extends object>(
     input: McpToolInput,
     toolName: string,
@@ -304,6 +336,7 @@ export const createControlMcpServer = (
   ) => {
     let target: ControlMcpTarget
     let parsedInput: Input
+
     try {
       const routing = targetInput(input)
       target = routing.target
@@ -311,8 +344,10 @@ export const createControlMcpServer = (
     } catch (error) {
       return failure(invalidInputFor(toolName, error))
     }
+
     if (target === "cloud") {
       let cloud: ControlService | undefined = service
+
       try {
         cloud = options.cloudService
           ? await options.cloudService(requiresWriteScope ? "control:write" : "control:read")
@@ -320,7 +355,9 @@ export const createControlMcpServer = (
       } catch (error) {
         return failure(serviceError(error))
       }
+
       if (!cloud) return failure(internalError())
+
       if (requiresWriteScope) {
         try {
           if (!await canWrite()) return failure(forbidden())
@@ -328,21 +365,26 @@ export const createControlMcpServer = (
           return failure(serviceError(error))
         }
       }
+
       return execute(() => invoke(cloud, parsedInput), parseOutput)
     }
+
     if (!options.hostService) return failure(hostUnavailable())
     let host: Awaited<ReturnType<ControlMcpHostService>>
+
     try {
       host = await options.hostService()
     } catch (error) {
       return failure(hostTransportError(error))
     }
+
     try {
       return await execute(() => invoke(host.service, parsedInput), parseOutput, hostTransportError)
     } finally {
       host.close()
     }
   }
+
   const capabilities = (input: McpToolInput) => executeRouted(input, "control_capabilities", controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilities(), controlCapabilitiesSchemaV1.parse, false)
   const capabilitiesV2 = (input: McpToolInput) => executeRouted(input, "control_capabilities_v2", controlCapabilitiesQuerySchemaV1.parse, (service_) => service_.capabilitiesV2(), controlCapabilitiesSchemaV2.parse, false)
   const snapshot = (input: McpToolInput) => executeRouted(input, "control_snapshot", controlSnapshotQuerySchemaV1.parse, (service_, value) => service_.snapshot(value), projectSnapshotSchemaV1.parse, false)
@@ -352,14 +394,18 @@ export const createControlMcpServer = (
   const requestApproval = (input: McpToolInput) => executeRouted(input, "control_request_approval", controlApprovalRequestSchemaV1.parse, (service_, value) => service_.requestApproval(value), controlApprovalResultSchemaV1.parse, true)
   const history = (input: McpToolInput) => executeRouted(input, "control_history", controlHistoryQuerySchemaV1.parse, (service_, value) => service_.history(value), controlHistoryResultSchemaV1.parse, false)
   const recoveries = (input: McpToolInput) => executeRouted(input, "control_recoveries", controlRecoveriesQuerySchemaV1.parse, (service_, value) => service_.recoveries(value), controlRecoveriesResultSchemaV1.parse, false)
+
   const projectsList = (input: McpToolInput) => executeRouted(input, "project_list", (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
     if (!service_.projects) throw new Error("Project discovery is unavailable.")
+
     return service_.projects.list()
   }, projectListResultSchema.parse, false)
+
   const projectCurrent = (input: McpToolInput) => {
     try {
       const routing = targetInput(input)
       projectDiscoveryInputSchema.parse(routing.canonicalInput)
+
       if (routing.target === "cloud") {
         return Promise.resolve(failure({
           version: "v1",
@@ -370,8 +416,10 @@ export const createControlMcpServer = (
     } catch (error) {
       return Promise.resolve(failure(invalidInputFor("project_current", error)))
     }
+
     return executeRouted(input, "project_current", (value) => projectDiscoveryInputSchema.parse(value), (service_) => {
       if (!service_.projects?.current) throw new Error("Current project discovery is unavailable.")
+
       return service_.projects.current()
     }, projectCurrentResultSchema.parse, false)
   }
@@ -453,20 +501,33 @@ export const createControlMcpServer = (
   server.server.removeRequestHandler("tools/call")
   server.server.setRequestHandler(CallToolRequestSchema, async (request) => {
     const input = request.params.arguments
+
     if (request.params.name === "control_capabilities") return capabilities(input)
+
     if (request.params.name === "control_snapshot") return snapshot(input)
+
     if (request.params.name === "control_capabilities_v2") return capabilitiesV2(input)
+
     if (request.params.name === "control_snapshot_v2") return snapshotV2(input)
+
     if (request.params.name === "control_preview") return preview(input)
+
     if (request.params.name === "control_commit") return commit(input)
+
     if (request.params.name === "control_request_approval") return requestApproval(input)
+
     if (request.params.name === "control_history") return history(input)
+
     if (request.params.name === "control_recoveries") return recoveries(input)
+
     if (request.params.name === "project_list") return projectsList(input)
+
     if (request.params.name === "project_current") return projectCurrent(input)
+
     if (options.hostTools) {
       return executeHostTool(request.params.name, input, options.hostTools)
     }
+
     return failure(invalidRequest())
   })
 

@@ -32,6 +32,7 @@ describe('waveform paint style', () => {
         color: '#4ade80',
         backingScaleY: dpr,
       })
+
       expect(style.minimumThicknessCssPx).toBe(2 / dpr)
     }
   })

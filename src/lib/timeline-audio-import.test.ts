@@ -26,20 +26,24 @@ class TestAudioBuffer implements AudioBuffer {
 
 const createAssetStorage = () => {
   const files = new Map<string, File>()
+
   const assets = {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name) ?? new File([], name),
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => { chunks.push(chunk) },
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -50,9 +54,11 @@ const createAssetStorage = () => {
       files.delete(name)
     },
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === 'assets' ? assets : root,
   }
+
   return { files, root }
 }
 
@@ -68,10 +74,12 @@ test('host audio import persists bytes and the canonical local asset identity', 
     const project = await createLocalProject(`Host import ${crypto.randomUUID()}`)
     const db = await openLocalProjectDb(project.id)
     const persistedTrack = (await createLocalTimelineRepository(project.id).loadSnapshot()).tracks[0]
+
     if (!persistedTrack) throw new Error('Expected a persisted track.')
     const track: Track = { ...persistedTrack, clips: [] }
     const inserted: Clip[] = []
     const decoded = new TestAudioBuffer()
+
     const transaction = createAudioImportTransaction({
       project: {
         projectId: () => project.id,
@@ -109,6 +117,7 @@ test('host audio import persists bytes and the canonical local asset identity', 
     })
 
     expect(result.status).toBe('created')
+
     if (result.status !== 'created') throw new Error('Expected a created local clip.')
     expect(inserted[0]).toMatchObject({
       id: result.clipId,
@@ -123,6 +132,7 @@ test('host audio import persists bytes and the canonical local asset identity', 
     })
     const retained = await readLocalAssetBytes(project.id, result.assetId)
     expect(retained.status).toBe('ready')
+
     if (retained.status === 'ready') {
       expect(await retained.file.text()).toBe('host-import-bytes')
     }
@@ -134,6 +144,7 @@ test('host audio import persists bytes and the canonical local asset identity', 
 
 test('rethrows an aborted cloud upload instead of converting it to a failed import', async () => {
   const controller = new AbortController()
+
   const track: Track = {
     id: 'cloud-track',
     historyRef: 'cloud-track',
@@ -141,16 +152,19 @@ test('rethrows an aborted cloud upload instead of converting it to a failed impo
     volume: 1,
     clips: [],
   }
+
   const inserted: Clip[] = []
   const removed: string[] = []
   const originalFetch = globalThis.fetch
   globalThis.fetch = Object.assign(
     async () => {
       controller.abort(new DOMException('Import canceled.', 'AbortError'))
+
       return new Response('request canceled', { status: 500 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   try {
     const transaction = createAudioImportTransaction({
       project: {

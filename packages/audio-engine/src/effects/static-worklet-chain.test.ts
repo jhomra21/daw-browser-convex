@@ -15,8 +15,10 @@ const testChain = (kind: 'spectral' | 'gate' = 'spectral') => {
     onmessage: null,
   }
   node.disconnect = () => { disconnectCount += 1 }
+
   node.onprocessorerror = null
   node.parameters = new Map()
+
   const chain = {
     kind,
     state: 'active',
@@ -25,6 +27,7 @@ const testChain = (kind: 'spectral' | 'gate' = 'spectral') => {
     revision: 0,
     gateMeterListeners: new Set(),
   } satisfies StaticWorkletNodeChain
+
   return { chain, messages, portCloseCount: () => portCloseCount, disconnectCount: () => disconnectCount }
 }
 

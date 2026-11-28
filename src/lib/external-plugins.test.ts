@@ -28,22 +28,26 @@ const identifiedStoredObjectSchema = z.object({ id: z.string() }).passthrough()
 
 test('persists and restores normalized Sampler and Drum Rack instruments', async () => {
   const project = await createLocalProject(`Instrument persistence ${crypto.randomUUID()}`)
+
   const sample: DrumRackPadSample = {
     assetKey: 'sample:persist',
     url: 'local-asset:sample:persist',
     sourceKind: 'upload',
     source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
   }
+
   const sampler = normalizeTrackInstrumentParams({
     kind: 'sampler',
     instanceId: 'instrument:sampler:persist',
     params: { ...createDefaultSamplerParams(), zones: [{ id: 'zone:persist', sample }] },
   })
+
   const drumRack = normalizeTrackInstrumentParams({
     kind: 'drum-rack',
     instanceId: 'instrument:drum-rack:persist',
     params: { ...createDefaultDrumRackParams(), pads: [{ sample }] },
   })
+
   if (!sampler || !drumRack) throw new Error('Expected normalized instruments.')
 
   await setLocalEffect(project.id, 'track:sampler', 'instrument', sampler)
@@ -52,6 +56,7 @@ test('persists and restores normalized Sampler and Drum Rack instruments', async
   expect((await getLocalEffect(project.id, 'track:drum-rack', 'instrument'))?.params).toEqual(drumRack)
 
   const legacyId = 'track:legacy-instrument'
+
   const legacyInstrument: TrackInstrumentParams = {
     kind: 'sampler',
     instanceId: 'instrument:sampler:legacy',
@@ -86,7 +91,9 @@ test('persists and restores normalized Sampler and Drum Rack instruments', async
       }],
     },
   }
+
   const db = await openLocalProjectDb(project.id)
+
   const legacyRow = {
     id: `${legacyId}:instrument`,
     targetId: legacyId,
@@ -94,6 +101,7 @@ test('persists and restores normalized Sampler and Drum Rack instruments', async
     params: legacyInstrument,
     updatedAt: Date.now(),
   }
+
   await db.put('entities', createLocalProjectEntityRow('effect', legacyRow.id, legacyRow, legacyRow.updatedAt))
   expect((await getLocalEffect(project.id, legacyId, 'instrument'))?.params).toMatchObject({
     kind: 'sampler',
@@ -115,12 +123,14 @@ test('persists and restores normalized Sampler and Drum Rack instruments', async
 
 test('normalizes nested Granular zone metadata through save, reload, and restore', async () => {
   const project = await createLocalProject(`Granular persistence ${crypto.randomUUID()}`)
+
   const sample = {
     assetKey: 'sample:granular',
     url: 'local-asset:sample:granular',
     sourceKind: 'upload',
     source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
   }
+
   const granular = normalizeTrackInstrumentParams({
     kind: 'granular',
     instanceId: 'instrument:granular:persist',
@@ -146,22 +156,27 @@ test('normalizes nested Granular zone metadata through save, reload, and restore
       },
     },
   })
+
   if (!granular) throw new Error('Expected normalized Granular instrument.')
 
   if (granular.kind !== 'granular') throw new Error('Expected Granular instrument params.')
   const granularWithUndefined = structuredClone(granular)
   const zone = granularWithUndefined.params.zone
+
   if (zone) {
     zone.sample.name = undefined
     zone.endSec = undefined
     zone.loopStartSec = undefined
     zone.loopEndSec = undefined
   }
+
   const normalized = readInstrumentParamsFromEffectRow({
     effect: 'instrument',
     params: granularWithUndefined,
   })
+
   if (!normalized) throw new Error('Expected nested Granular zone normalization.')
+
   if (normalized.kind !== 'granular') throw new Error('Expected Granular instrument params.')
   const edited = { ...normalized, params: { ...normalized.params, grainSizeMs: 120 } }
 
@@ -176,12 +191,14 @@ test('normalizes nested Granular zone metadata through save, reload, and restore
 
 test('round-trips nested undefined instrument fields through edits and chain restore', async () => {
   const project = await createLocalProject(`Undefined instrument persistence ${crypto.randomUUID()}`)
+
   const sample: DrumRackPadSample = {
     assetKey: 'sample:undefined',
     url: 'local-asset:sample:undefined',
     sourceKind: 'upload',
     source: { durationSec: 2, sampleRate: 48000, channelCount: 2 },
   }
+
   const sampler: TrackInstrumentParams = {
     kind: 'sampler',
     instanceId: 'instrument:sampler:undefined',
@@ -208,6 +225,7 @@ test('round-trips nested undefined instrument fields through edits and chain res
       }],
     },
   }
+
   const drumRack: TrackInstrumentParams = {
     kind: 'drum-rack',
     instanceId: 'instrument:drum-rack:undefined',
@@ -216,6 +234,7 @@ test('round-trips nested undefined instrument fields through edits and chain res
       pads: [{ ...createDefaultDrumRackParams().pads[0], sample: { ...sample, name: undefined }, endSec: undefined }],
     },
   }
+
   const granularZone: SamplerZone = {
     id: 'zone:granular',
     sample: { ...sample, name: undefined },
@@ -235,6 +254,7 @@ test('round-trips nested undefined instrument fields through edits and chain res
     crossfadeSec: 0,
     chokeGroup: 0,
   }
+
   const granular: TrackInstrumentParams = {
     kind: 'granular',
     instanceId: 'instrument:granular:undefined',
@@ -249,10 +269,13 @@ test('round-trips nested undefined instrument fields through edits and chain res
     { targetId: 'track:drum-rack-undefined', instrument: drumRack },
     { targetId: 'track:granular-undefined', instrument: granular },
   ]
+
   for (const { targetId, instrument } of instruments) {
     const normalized = readInstrumentParamsFromEffectRow({ effect: 'instrument', params: instrument })
+
     if (!normalized) throw new Error('Expected instrument normalization.')
     let edited: TrackInstrumentParams
+
     if (normalized.kind === 'granular') {
       edited = { ...normalized, params: { ...normalized.params, grainSizeMs: 140 } }
     } else if (normalized.kind === 'sampler') {
@@ -262,6 +285,7 @@ test('round-trips nested undefined instrument fields through edits and chain res
     } else {
       throw new Error('Unexpected instrument kind.')
     }
+
     await setLocalEffect(project.id, targetId, 'instrument', edited)
     const reloaded = await getLocalEffect(project.id, targetId, 'instrument')
     expect(reloaded?.params).toEqual(edited)
@@ -344,6 +368,7 @@ const createProcessor = (instanceId: string) => externalProcessorSchema.parse({
 const createLegacyProcessor = (instanceId: string, index: number) => {
   const processor = createProcessor(instanceId)
   const { index: _index, ...withoutIndex } = processor
+
   return {
     ...withoutIndex,
     chainIndex: index,
@@ -373,7 +398,11 @@ test('the processor cache lists once, refreshes on a project change, and serves 
   const project = await createLocalProject(`Processor cache ${crypto.randomUUID()}`)
   const other = await createLocalProject(`Processor cache other ${crypto.randomUUID()}`)
   const listed: string[] = []
-  const cache = createLocalExternalProcessorCache((projectId) => { listed.push(projectId); return listLocalExternalProcessors(projectId) })
+
+  const cache = createLocalExternalProcessorCache((projectId) => { listed.push(projectId);
+
+ return listLocalExternalProcessors(projectId) })
+
   expect(await cache.read(project.id)).toEqual([])
   expect(await cache.read(project.id)).toEqual([])
   expect(listed).toEqual([project.id])
@@ -414,10 +443,12 @@ test('round trips high-bit IDs and atomically merges multiple parameter override
   const project = await createLocalProject(`High-bit parameter feedback ${crypto.randomUUID()}`)
   const instanceId = crypto.randomUUID()
   await setLocalExternalProcessor(project.id, createProcessor(instanceId))
+
   const updated = await mergeLocalExternalProcessorParameterOverrides(project.id, instanceId, [
     { parameterId: 1, normalizedValue: 0.2 },
     { parameterId: 0xffff_ffff, normalizedValue: 0.9 },
   ])
+
   expect(updated?.current.parameterOverrides).toMatchObject({
     '1': 0.2,
     '4294967295': 0.9,
@@ -460,10 +491,12 @@ test('preserves concurrent parameter and bypass patches from the latest committe
   const [{ current: parameter }, { current: bypassed }] = await Promise.all([
     mergeLocalExternalProcessorParameterOverride(project.id, instanceId, 1, 0.875).then((commit) => {
       if (!commit) throw new Error('Expected parameter commit')
+
       return commit
     }),
     setLocalExternalProcessorBypassed(project.id, instanceId, true).then((commit) => {
       if (!commit) throw new Error('Expected bypass commit')
+
       return commit
     }),
   ])
@@ -497,13 +530,16 @@ test('persists VST state atomically and removes its artifact on processor deleti
 test('preserves a shared local artifact until its last processor is deleted', async () => {
   const project = await createLocalProject(`Shared VST state ${crypto.randomUUID()}`)
   const first = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
+
   const second = await setLocalExternalProcessor(project.id, {
     ...createProcessor(crypto.randomUUID()),
     targetId: first.targetId,
   })
+
   const bytes = new Uint8Array([8, 13, 21])
   const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
   const persisted = await persistLocalExternalProcessorState(project.id, first.instanceId, { bytes, sha256: hash })
+
   if (!persisted?.state) throw new Error('Expected shared VST state.')
   await setLocalExternalProcessor(project.id, { ...second, state: persisted.state })
   const db = await openLocalProjectDb(project.id)
@@ -518,16 +554,19 @@ test('preserves persisted state ownership across auth transitions', async () => 
   const processor = await setLocalExternalProcessor(project.id, createProcessor(crypto.randomUUID()))
   const firstBytes = new Uint8Array([1, 2, 3])
   const firstHash = Array.from(sha256(firstBytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
   const first = await persistLocalExternalProcessorState(
     project.id,
     processor.instanceId,
     { bytes: firstBytes, sha256: firstHash },
     'user-1',
   )
+
   if (!first) throw new Error('Expected first VST state persistence.')
 
   const nextBytes = new Uint8Array([4, 5, 6])
   const nextHash = Array.from(sha256(nextBytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
+
   const next = await persistLocalExternalProcessorState(
     project.id,
     processor.instanceId,
@@ -586,10 +625,13 @@ test('deleting an external effect compacts the remaining mixed chain', async () 
 
   const db = await openLocalProjectDb(project.id)
   const rows = await db.getAll('entities')
+
   const builtin = rows.find((row) => {
     const parsed = storedObjectSchema.safeParse(row.value)
+
     return row.kind === 'effect' && parsed.success && parsed.data.instanceId === builtinId
   })
+
   expect(builtin?.value).toMatchObject({ index: 0 })
 })
 
@@ -603,11 +645,13 @@ test('persists an exact mixed-chain permutation atomically and keeps instruments
   await setLocalExternalProcessor(project.id, { ...createProcessor(externalId), index: 1 })
   await setLocalEffectInstance(project.id, 'track-1', 'chorus', {}, { instanceId: secondId, index: 2 })
   const instrument = createProcessor(instrumentId)
+
   const savedInstrument = await setLocalExternalProcessor(project.id, {
     ...instrument,
     index: 9,
     manifest: { ...instrument.manifest, role: 'instrument', audioInputs: [] },
   })
+
   expect(savedInstrument.index).toBe(0)
 
   await reorderLocalMixedEffects(project.id, 'track-1', [
@@ -618,11 +662,14 @@ test('persists an exact mixed-chain permutation atomically and keeps instruments
 
   const db = await openLocalProjectDb(project.id)
   const rows = await db.getAll('entities')
+
   const indexFor = (id: string) => {
     const row = rows.find((entry) => entry.id.endsWith(id))
     const parsed = indexedStoredObjectSchema.safeParse(row?.value)
+
     return parsed.success ? parsed.data.index : undefined
   }
+
   expect(indexFor(firstId)).toBe(0)
   expect(indexFor(externalId)).toBe(1)
   expect(indexFor(secondId)).toBe(2)
@@ -646,6 +693,7 @@ test('persists an exact mixed-chain permutation atomically and keeps instruments
 
 test('preserves concurrent external overrides while atomically reordering the mixed chain', async () => {
   const operations = ['parameter', 'bypass', 'reorder'] as const
+
   const permutations = [
     operations,
     ['parameter', 'reorder', 'bypass'],
@@ -673,6 +721,7 @@ test('preserves concurrent external overrides while atomically reordering the mi
         { kind: 'builtin', instanceId: secondId },
       ]),
     }
+
     await Promise.all(permutation.map((operation) => actions[operation]()))
 
     const db = await openLocalProjectDb(project.id)
@@ -684,11 +733,14 @@ test('preserves concurrent external overrides while atomically reordering the mi
     })
     expect(externalRow?.value).toHaveProperty('health.state', 'ready')
     const rows = await db.getAll('entities')
+
     const indexFor = (id: string) => {
       const row = rows.find((entry) => entry.id.endsWith(id))
       const parsed = indexedStoredObjectSchema.safeParse(row?.value)
+
       return parsed.success ? parsed.data.index : undefined
     }
+
     expect(indexFor(firstId)).toBe(1)
     expect(indexFor(secondId)).toBe(2)
   }
@@ -701,11 +753,14 @@ test('lists captured chainIndex rows and transactionally self-heals them during 
   const newId = crypto.randomUUID()
   const db = await openLocalProjectDb(project.id)
   const track = (await db.getAll('entities')).find((row) => row.kind === 'track')
+
   if (!track) throw new Error('Expected the project track.')
   const parsedTrack = identifiedStoredObjectSchema.safeParse(track.value)
+
   if (!parsedTrack.success) {
     throw new Error('Expected a valid project track.')
   }
+
   const targetId = parsedTrack.data.id
   await db.put('entities', createLocalProjectEntityRow(
     'external-plugin',
@@ -733,14 +788,17 @@ test('lists captured chainIndex rows and transactionally self-heals them during 
   expect(externalRows).toHaveLength(2)
   expect(externalRows.map((row) => {
     const parsed = storedObjectSchema.safeParse(row.value)
+
     return parsed.success ? parsed.data.index : undefined
   }).sort()).toEqual([0, 2])
   expect(rows.filter((row) => row.kind === 'effect' || row.kind === 'external-plugin').map((row) => {
     const parsed = storedObjectSchema.safeParse(row.value)
+
     return parsed.success ? parsed.data.index : undefined
   }).sort()).toEqual([0, 1, 2])
   expect(externalRows.every((row) => {
     const parsed = storedObjectSchema.safeParse(row.value)
+
     return parsed.success && !Object.hasOwn(parsed.data, 'chainIndex')
   })).toBeTrue()
   expect(externalRows.find((row) => row.id.endsWith(legacyId))?.value).toMatchObject({
@@ -783,9 +841,11 @@ test('reorder and delete paths repair legacy rows before compacting the chain', 
   const repaired = await db.get('entities', ['external-plugin', `external-plugin:${legacyId}`])
   expect(repaired?.value).toMatchObject({ index: 0 })
   const repairedValue = storedObjectSchema.safeParse(repaired?.value)
+
   if (!repairedValue.success) {
     throw new Error('Expected repaired external processor row.')
   }
+
   expect(Object.hasOwn(repairedValue.data, 'chainIndex')).toBeFalse()
 
   await deleteLocalExternalProcessor(project.id, legacyId)

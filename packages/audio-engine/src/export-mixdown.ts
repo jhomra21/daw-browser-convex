@@ -62,12 +62,15 @@ import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from '.
 import type { PreparedStretchArtifactRepository } from './prepared-stretch-store'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
 import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
+
 export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
 export type { AudioEffectRuntimeInstance }
+
 export type { ExportRange } from './export-range'
 
 export type { ExportFx } from './export-types'
+
 export { resolveExportMixerGraph } from './export-mixer-graph'
 
 export type ExportRequest = {
@@ -169,11 +172,13 @@ export function resolveExportLimiterCeilingDbtp(
   graph: ResolvedMixerGraph,
 ): number | undefined {
   const ceilings: number[] = []
+
   for (const instance of graph.master.instances) {
     if (instance.kind === 'limiter' && instance.params.state.enabled) {
       ceilings.push(instance.params.state.ceilingDbtp)
     }
   }
+
   return ceilings.length === 0 ? undefined : Math.min(...ceilings)
 }
 
@@ -188,6 +193,7 @@ export async function assertExportTruePeakWithinLimiterCeiling(
 ): Promise<void> {
   if (ceilingDbtp === undefined) return
   const measured = await scanTruePeakAsync(buffer, signal)
+
   if (measured.peakDbtp > ceilingDbtp + 0.1) {
     throw new Error(
       `Export true peak ${measured.peakDbtp.toFixed(2)} dBTP exceeds the reachable limiter ceiling ${ceilingDbtp.toFixed(2)} dBTP (+0.10 dB tolerance).`,
@@ -200,7 +206,9 @@ export function isAutomationEnvelopeInSourceScope(
   envelope: AutomationEnvelope,
 ): boolean {
   if (scope.trackIds && envelope.target.kind === 'track' && !scope.trackIds.has(envelope.target.trackId)) return false
+
   if (!scope.includeMasterFx && envelope.target.kind === 'master' && envelope.parameterId !== 'volume') return false
+
   return true
 }
 
@@ -211,30 +219,39 @@ type OfflineDrumRackHit = {
 }
 
 type AudioSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'getChannelData'>
+
 type StereoSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'length' | 'sampleRate' | 'getChannelData'>
 
 export const getAudioBufferPeak = (buffer: AudioSampleBuffer): number => {
   let peak = 0
+
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const data = buffer.getChannelData(channel)
+
     for (let index = 0; index < data.length; index += 1) {
       const sample = Math.abs(data[index])
+
       if (Number.isFinite(sample)) peak = Math.max(peak, sample)
     }
   }
+
   return peak
 }
 
 export const normalizeAudioBufferInPlace = (buffer: AudioSampleBuffer): number => {
   const peak = getAudioBufferPeak(buffer)
+
   if (peak === 0 || peak === 1) return 1
   const gain = 1 / peak
+
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     const data = buffer.getChannelData(channel)
+
     for (let index = 0; index < data.length; index += 1) {
       data[index] *= gain
     }
   }
+
   return gain
 }
 
@@ -245,15 +262,19 @@ export const downmixStereoBufferToMono = <Buffer extends StereoSampleBuffer>(
   if (buffer.numberOfChannels === 1) {
     const mono = createBuffer(1, buffer.length, buffer.sampleRate)
     mono.getChannelData(0).set(buffer.getChannelData(0))
+
     return mono
   }
+
   const mono = createBuffer(1, buffer.length, buffer.sampleRate)
   const left = buffer.getChannelData(0)
   const right = buffer.getChannelData(1)
   const output = mono.getChannelData(0)
+
   for (let index = 0; index < output.length; index += 1) {
     output[index] = convertStereoToMonoSample(left[index], right[index])
   }
+
   return mono
 }
 
@@ -278,6 +299,7 @@ export const readPortableDescriptorPage = async (
   input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal },
 ): Promise<readonly Float32Array[]> => {
   const endFrame = input.startFrame + input.frameCount
+
   if (
     !Number.isSafeInteger(input.startFrame)
     || input.startFrame < 0
@@ -293,14 +315,17 @@ export const readPortableDescriptorPage = async (
     { length: descriptor.channelCount },
     () => new Float32Array(input.frameCount),
   )
+
   let nextFrame = input.startFrame
   let hasAcceptedPage = false
+
   for await (const page of descriptor.readPages({
     startFrame: input.startFrame,
     endFrame,
     signal: input.signal,
   })) {
     const pageEndFrame = page.startFrame + page.frameCount
+
     if (
       !Number.isSafeInteger(page.startFrame)
       || page.startFrame < 0
@@ -318,9 +343,11 @@ export const readPortableDescriptorPage = async (
 
     const coveredStart = Math.max(input.startFrame, page.startFrame)
     const coveredEnd = Math.min(endFrame, pageEndFrame)
+
     if (coveredStart > nextFrame) {
       throw new Error(`Portable export source page "${input.assetId}" has a gap before frame ${nextFrame}.`)
     }
+
     if (coveredEnd <= nextFrame || (hasAcceptedPage && page.startFrame < nextFrame)) {
       throw new Error(`Portable export source page "${input.assetId}" overlaps or misses frame ${nextFrame}.`)
     }
@@ -328,25 +355,31 @@ export const readPortableDescriptorPage = async (
     const sourceOffset = nextFrame - page.startFrame
     const copyFrameCount = coveredEnd - nextFrame
     const destinationOffset = nextFrame - input.startFrame
+
     for (let channel = 0; channel < descriptor.channelCount; channel += 1) {
       const sourcePlane = page.planes[channel]
       const destinationPlane = planes[channel]
+
       if (!sourcePlane || !destinationPlane) {
         throw new Error(`Portable export source page "${input.assetId}" has invalid channel data.`)
       }
+
       destinationPlane.set(
         sourcePlane.subarray(sourceOffset, sourceOffset + copyFrameCount),
         destinationOffset,
       )
     }
+
     nextFrame = coveredEnd
     hasAcceptedPage = true
+
     if (nextFrame === endFrame) break
   }
 
   if (nextFrame !== endFrame) {
     throw new Error(`Portable export source page "${input.assetId}" is missing coverage through frame ${endFrame}.`)
   }
+
   return planes
 }
 
@@ -356,17 +389,23 @@ const selectPortableMixdown = async (
   loadArtifact: (manifestUrl: string) => Promise<AudioCoreWasmArtifactResult> = loadAudioCoreWasmArtifact,
 ): Promise<PortableMixdownSelection> => {
   if (!supportsPortableExport(globalThis)) return { selected: false }
+
   if (prepared.automationEnvelopes.length > 0 || prepared.sidechainRoutes.length > 0 || req.cueTrackIds?.length) {
     return { selected: false }
   }
+
   const artifact = await loadArtifact(resolvePortableWasmManifestUrl())
+
   if (!artifact.available) return { selected: false }
   throwIfAborted(req.signal)
   const projectGeneration = req.projectGeneration ?? 1
+
   if (!req.preparedStretchRepository) return { selected: false }
+
   const tracks = req.trackIds
     ? req.tracks.filter((track) => req.trackIds?.has(track.id))
     : req.tracks
+
   const preparedStretchAssets = await preparePortablePagedStretchAssets({
     tracks,
     projectBpm: req.bpm,
@@ -375,20 +414,25 @@ const selectPortableMixdown = async (
     signal: req.signal,
     resolveSource: req.resolveAudioSource,
   })
+
   if (!preparedStretchAssets.supported) return { selected: false }
   let leasesReleased = false
+
   const releasePreparedLeases = async () => {
     if (leasesReleased) return
     leasesReleased = true
     const leases = new Set(preparedStretchAssets.assets.map((asset) => asset.lease))
     await Promise.all([...leases].map((lease) => lease.release()))
   }
+
   try {
     throwIfAborted(req.signal)
     const descriptors = new Map<string, AudioPcmSourceDescriptor>()
+
     for (const track of tracks) {
       for (const clip of track.clips) {
         if (clip.midi || !clip.sourceAssetKey || clip.audioWarp?.enabled === true) continue
+
         const descriptor = req.resolveAudioSource
           ? await req.resolveAudioSource(clip, req.signal)
           : clip.buffer
@@ -401,14 +445,19 @@ const selectPortableMixdown = async (
               source: clip.buffer,
             })
             : undefined
+
         if (!descriptor) {
           await releasePreparedLeases()
+
           return { selected: false }
         }
+
         descriptors.set(clip.sourceAssetKey, descriptor)
       }
     }
+
     throwIfAborted(req.signal)
+
     const snapshot = compilePortableExportSnapshot({
     tracks,
     bpm: req.bpm,
@@ -430,40 +479,54 @@ const selectPortableMixdown = async (
       channelCount: descriptor.channelCount,
     })),
   })
+
     if (!snapshot.supported
       || snapshot.assets.length > portableExportWorkerMaxAssets
       || snapshot.events.length > portableExportWorkerMaxEvents
       || snapshot.graph.nodes.length > portableExportWorkerMaxGraphNodes
       || snapshot.graph.edges.length > portableExportWorkerMaxGraphEdges) {
       await releasePreparedLeases()
+
       return { selected: false }
     }
+
     const pagedAssets = new Map(
       preparedStretchAssets.assets.map((asset) => [asset.asset.assetId, asset]),
     )
+
     const repository = req.preparedStretchRepository
+
     if (!repository) {
       await releasePreparedLeases()
+
       return { selected: false }
     }
+
     const readPage = async (input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal }) => {
       const preparedAsset = pagedAssets.get(input.assetId)
       const descriptor = descriptors.get(input.assetId.replace('portable-export:', ''))
+
       if (preparedAsset) {
         for await (const page of repository.read(preparedAsset.artifactId, input.startFrame, input.startFrame + input.frameCount)) {
           if (page.startFrame === input.startFrame && page.frameCount === input.frameCount) return page.planes
         }
+
         throw new Error(`Prepared Stretch page "${input.assetId}" was not found.`)
       }
+
       if (!descriptor) throw new Error(`Portable export source "${input.assetId}" is unavailable.`)
+
       return readPortableDescriptorPage(descriptor, input)
     }
+
     let cleanupStarted = false
+
     const cleanup = async () => {
       if (cleanupStarted) return
       cleanupStarted = true
       await releasePreparedLeases()
     }
+
     return { selected: true, artifact: artifact.artifact, snapshot, readPage, cleanup }
   } catch (error) {
     await releasePreparedLeases()
@@ -479,8 +542,10 @@ export const createPortableOutputBuffer = (
 ): AudioBuffer => {
   const stereo = new AudioBuffer({ numberOfChannels: 2, length: frameCount, sampleRate })
   let destinationFrame = 0
+
   for (let index = 0; index < chunks.size; index += 1) {
     const chunk = chunks.get(index)
+
     if (!chunk
       || chunk.frameCount <= 0
       || chunk.planes.length !== 2
@@ -489,11 +554,14 @@ export const createPortableOutputBuffer = (
       || destinationFrame + chunk.frameCount > frameCount) {
       throw new Error('Portable export Worker returned invalid PCM output.')
     }
+
     stereo.getChannelData(0).set(chunk.planes[0], destinationFrame)
     stereo.getChannelData(1).set(chunk.planes[1], destinationFrame)
     destinationFrame += chunk.frameCount
   }
+
   if (destinationFrame !== frameCount) throw new Error('Portable export Worker returned incomplete PCM output.')
+
   return numberOfChannels === 1
     ? downmixStereoBufferToMono(
       stereo,
@@ -514,6 +582,7 @@ const renderPortableMixdown = async (
   const releaseWorker = observeResource(prepared.resourceObserver, 'workers', worker)
   const cancel = () => worker.cancel()
   req.signal?.addEventListener('abort', cancel, { once: true })
+
   try {
     await worker.render({
       snapshot: selection.snapshot,
@@ -525,17 +594,22 @@ const renderPortableMixdown = async (
       onChunk: (index, _startFrame, pcm) => {
         if (chunks.has(index)) {
           hasDuplicateChunk = true
+
           return
         }
+
         chunks.set(index, { frameCount: pcm.frameCount, planes: pcm.planes })
       },
       readPage: selection.readPage,
     })
     throwIfAborted(req.signal)
+
     if (hasDuplicateChunk) throw new Error('Portable export Worker returned duplicate PCM output.')
+
     return createPortableOutputBuffer(chunks, frameCount, prepared.sampleRate, prepared.numberOfChannels)
   } finally {
     req.signal?.removeEventListener('abort', cancel)
+
     try {
       await selection.cleanup()
     } finally {
@@ -562,6 +636,7 @@ export const renderPortableMixdownChunks = async (
 } | undefined> => {
   const prepared = prepareExportRender(req)
   const portable = await selectPortableMixdown(req, prepared)
+
   if (!portable.selected) return undefined
   const latencyFrames = portable.snapshot.graphLatencyFrames
   const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate) + latencyFrames
@@ -571,6 +646,7 @@ export const renderPortableMixdownChunks = async (
   let workerDisposed = false
   let cleanupStarted = false
   req.signal?.addEventListener('abort', cancel, { once: true })
+
   try {
     await worker.render({
       snapshot: portable.snapshot,
@@ -583,19 +659,25 @@ export const renderPortableMixdownChunks = async (
         if (prepared.numberOfChannels === 2) {
           return onChunk(index, startFrame, pcm, frameCount)
         }
+
         const left = pcm.planes[0]
         const right = pcm.planes[1]
+
         if (!left || !right || pcm.planes.length !== 2) {
           throw new Error('Portable export Worker returned invalid stereo PCM output.')
         }
+
         const mono = new Float32Array(pcm.frameCount)
+
         for (let frame = 0; frame < pcm.frameCount; frame += 1) {
           mono[frame] = convertStereoToMonoSample(left[frame] ?? 0, right[frame] ?? 0)
         }
+
         return onChunk(index, startFrame, { frameCount: pcm.frameCount, planes: [mono] }, frameCount)
       },
       readPage: portable.readPage,
     })
+
     return {
       frameCount,
       latencyFrames,
@@ -604,6 +686,7 @@ export const renderPortableMixdownChunks = async (
       cleanup: async () => {
         if (cleanupStarted) return
         cleanupStarted = true
+
         try {
           await portable.cleanup()
         } finally {
@@ -622,6 +705,7 @@ export const renderPortableMixdownChunks = async (
       worker.dispose()
       releaseWorker()
     }
+
     throw error
   } finally {
     req.signal?.removeEventListener('abort', cancel)
@@ -641,6 +725,7 @@ function createOfflineSynthTrack(input: {
   automationEnvelopes: readonly AutomationEnvelope[]
 }) {
   const synth = normalizeSynthParams(input.synth ?? {})
+
   const { output: outputGain, outputPan } = createSynthOutputChain(
     input.ctx,
     input.destination,
@@ -648,18 +733,23 @@ function createOfflineSynthTrack(input: {
     synth.pan,
     0,
   )
+
   const outputBindings = {
     'output.gain': outputGain.gain,
     'output.pan': outputPan.pan,
   }
+
   for (const envelope of input.automationEnvelopes) {
     const key = parseSynthAutomationKey(envelope.parameterId)
+
     if (!key || !envelope.enabled) continue
+
     const param = key.parameterId === 'output.gain'
       ? outputBindings['output.gain']
       : key.parameterId === 'output.pan'
         ? outputBindings['output.pan']
         : undefined
+
     if (!param) continue
     scheduleAutomationEnvelope(
       [{ param, valueToAudioValue: (value) => value }],
@@ -673,13 +763,17 @@ function createOfflineSynthTrack(input: {
       SYNTH_AUTOMATION_DESCRIPTORS[key.parameterId].defaultValue,
     )
   }
+
   let voices: SynthVoiceHandle[] = []
   let nextId = 1
   const envelopes = new Map<SynthAutomationParameterId, AutomationEnvelope>()
+
   for (const envelope of input.automationEnvelopes) {
     const key = parseSynthAutomationKey(envelope.parameterId)
+
     if (key && envelope.enabled) envelopes.set(key.parameterId, envelope)
   }
+
   return {
     scheduleEvents: (
       events: readonly (ReturnType<typeof getScheduledMidiEvents>[number] & {
@@ -689,14 +783,18 @@ function createOfflineSynthTrack(input: {
       for (const event of events) {
         const when = Math.max(0, event.startSec - input.rangeStartSec)
         const noteDur = event.endSec - event.startSec
+
         if (noteDur <= 0) continue
         voices = pruneSynthVoiceAllocations(voices, when)
+
         if (!synth.retrigger && voices.some((voice) => voice.pitch === event.pitch && isSynthVoiceSoundingAt(voice, when))) continue
         const victim = chooseSynthVoiceVictim(voices, synth.polyphony, when)
+
         if (victim) {
           voices = voices.filter((voice) => voice !== victim)
           victim.stop(when)
         }
+
         const id = nextId
         nextId += 1
         voices.push(scheduleSynthVoice(input.ctx, {
@@ -715,6 +813,7 @@ function createOfflineSynthTrack(input: {
           automationEnvelopes: envelopes,
           onEnded: (ended) => {
             const index = voices.indexOf(ended)
+
             if (index >= 0) voices.splice(index, 1)
           },
         }))
@@ -733,13 +832,17 @@ function renderOfflineDrumRackEvents(input: {
   activeHitsByChokeGroup: Map<number, OfflineDrumRackHit[]>
 }) {
   if (!input.buffers) return
+
   for (const event of input.events) {
     const pad = input.padsByNote.get(event.pitch)
+
     if (!pad) continue
     const resolved = input.buffers.get(pad.id)
+
     if (!resolved) continue
     const sampled = resolved
     const sampleRate = pad.sample?.source.sampleRate ?? sampled.buffer.sampleRate
+
     const localPad = {
       ...pad,
       startSec: localizeSampledInstrumentSeconds(pad.startSec, sampled.sourceStartFrame, sampleRate),
@@ -747,9 +850,12 @@ function renderOfflineDrumRackEvents(input: {
         ? sampled.buffer.length / sampled.buffer.sampleRate
         : localizeSampledInstrumentSeconds(pad.endSec, sampled.sourceStartFrame, sampleRate),
     }
+
     const when = Math.max(0, event.startSec - input.rangeStartSec)
+
     if (pad.chokeGroup > 0) {
       const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup)
+
       if (activeHits) {
         for (const hit of activeHits) {
           try {
@@ -759,8 +865,10 @@ function renderOfflineDrumRackEvents(input: {
           } catch {}
         }
       }
+
       input.activeHitsByChokeGroup.set(pad.chokeGroup, [])
     }
+
     try {
       const scheduled = scheduleDrumRackHit({
         ctx: input.ctx,
@@ -770,6 +878,7 @@ function renderOfflineDrumRackEvents(input: {
         when,
         velocity: event.velocity ?? 1,
       })
+
       if (scheduled && pad.chokeGroup > 0) {
         const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup) ?? []
         activeHits.push({ source: scheduled.source, gain: scheduled.gain, chokeGroup: pad.chokeGroup })
@@ -790,13 +899,17 @@ function renderOfflineSamplerEvents(input: {
 }) {
   if (!input.buffers) throw new Error('Sampler export requires preloaded sampler buffers.')
   let roundRobin = resetSamplerRoundRobin()
+
   for (const event of input.events) {
     const selected = selectSamplerZone(input.instrument.params.zones, event.pitch, Math.round((event.velocity ?? 1) * 127), roundRobin)
     roundRobin = selected.roundRobin
+
     if (!selected.zone) continue
     const resolved = input.buffers.get(selected.zone.id)
+
     if (!resolved) throw new Error(`Sampler export is missing buffer for zone "${selected.zone.id}".`)
     const sampled = resolved
+
     const zone = {
       ...selected.zone,
       startSec: localizeSampledInstrumentSeconds(selected.zone.startSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
@@ -810,6 +923,7 @@ function renderOfflineSamplerEvents(input: {
         ? undefined
         : localizeSampledInstrumentSeconds(selected.zone.loopEndSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
     }
+
     scheduleSamplerVoice({
       ctx: input.ctx,
       destination: input.destination,
@@ -823,6 +937,7 @@ function renderOfflineSamplerEvents(input: {
       timelineStartSec: event.startSec,
       automationEnvelopes: input.automationEnvelopes.filter((envelope) => {
         const key = parseInstrumentAutomationKey(envelope.parameterId)
+
         return key?.instanceId === input.instrument.instanceId
       }),
       timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
@@ -843,10 +958,12 @@ async function createOfflineGranularTrack(input: {
     params: input.instrument.params,
     resourceObserver: input.resourceObserver,
   })
+
   try {
     if (input.installedBuffer) await runtime.installSample(input.installedBuffer)
     runtime.resetSeed(input.instrument.params.seed)
     runtime.setFrozen(input.instrument.params.freeze)
+
     return runtime
   } catch (error) {
     runtime.close()
@@ -856,7 +973,9 @@ async function createOfflineGranularTrack(input: {
 
 function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
   const trackById = new Map<string, Track<AudioBuffer>>()
+
   for (const track of tracks) trackById.set(track.id, track)
+
   return trackById
 }
 
@@ -881,6 +1000,7 @@ const snapshotInstrument = (instrument: TrackInstrumentParams): TrackInstrumentP
   if (instrument.kind === 'drum-rack') {
     return { ...instrument, params: { ...instrument.params, pads: instrument.params.pads.map((pad) => ({ ...pad })) } }
   }
+
   if (instrument.kind === 'sampler') {
     return {
       ...instrument,
@@ -890,6 +1010,7 @@ const snapshotInstrument = (instrument: TrackInstrumentParams): TrackInstrumentP
       },
     }
   }
+
   if (instrument.kind === 'granular') {
     return {
       ...instrument,
@@ -901,11 +1022,13 @@ const snapshotInstrument = (instrument: TrackInstrumentParams): TrackInstrumentP
       },
     }
   }
+
   return { ...instrument, params: { ...instrument.params } }
 }
 
 const snapshotTrackFx = (trackFx: ExportFx['trackFx']): ExportFx['trackFx'] => {
   if (!trackFx) return undefined
+
   return Object.fromEntries(Object.entries(trackFx).map(([trackId, entry]) => [
     trackId,
     {
@@ -920,12 +1043,15 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
   const { bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
   const tracks = snapshotTracks(req.tracks)
   throwIfAborted(signal)
+
   if (req.cueTrackIds && req.cueTrackIds.length > 0) {
     throw new Error('Cue routing is live-only and cannot be exported.')
   }
+
   const { startSec, endSec } = getExportRangeBounds(tracks, range)
   const sourceEndSec = Math.min(endSec, req.sourceEndSec ?? endSec)
   const durationSec = endSec - startSec
+
   return {
     bpm,
     range: { startSec, endSec, sourceEndSec, durationSec },
@@ -964,14 +1090,17 @@ export function createSourceAutomationScope(
   options: SourceIsolatedRenderOptions,
 ): SourceAutomationScope {
   const { sourceTrackIds, includeMasterFx = true } = options
+
   if (!sourceTrackIds) return { includeMasterFx }
 
   const channelById = new Map(
     graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack] as const),
   )
+
   const outputTargetByChannelId = new Map(
     graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack.outputTargetId] as const),
   )
+
   const scopedTrackIds = new Set<string>()
 
   const addReachableChannel = (channelId: string, queue: string[]) => {
@@ -981,6 +1110,7 @@ export function createSourceAutomationScope(
   }
 
   const queue: string[] = []
+
   for (const sourceTrackId of sourceTrackIds) {
     addReachableChannel(sourceTrackId, queue)
   }
@@ -988,9 +1118,12 @@ export function createSourceAutomationScope(
   for (let index = 0; index < queue.length; index += 1) {
     const channelId = queue[index]
     const channel = channelById.get(channelId)
+
     if (!channel) continue
     const outputPath = collectOutputPathChannelIds(channelId, outputTargetByChannelId)
+
     for (const pathChannelId of outputPath) addReachableChannel(pathChannelId, queue)
+
     for (const send of channel.sends) addReachableChannel(send.targetId, queue)
   }
 
@@ -1018,21 +1151,26 @@ const collectUpstreamChannelIds = (
 ): Set<string> => {
   const upstream = new Set([targetTrackId])
   let changed = true
+
   while (changed) {
     changed = false
+
     for (const channel of graph.channels) {
       if (upstream.has(channel.channel.id)) continue
+
       if (channel.outputTargetId && upstream.has(channel.outputTargetId)) {
         upstream.add(channel.channel.id)
         changed = true
         continue
       }
+
       if (channel.sends.some((send) => upstream.has(send.targetId))) {
         upstream.add(channel.channel.id)
         changed = true
       }
     }
   }
+
   return upstream
 }
 
@@ -1052,6 +1190,7 @@ export function createStemRenderPlan(
     graph.channels.find((channel) => channel.channel.id === stem.targetTrackId),
     `Missing stem target ${stem.targetTrackId}`,
   )
+
   if (stem.mode === 'channel-output') {
     assert(target.channel.role === 'group' || target.channel.role === 'return', 'Channel-output stems require a group or return target.')
   } else {
@@ -1061,8 +1200,10 @@ export function createStemRenderPlan(
   const sourceTrackIds = stem.mode === 'channel-output'
     ? collectUpstreamChannelIds(graph, stem.targetTrackId)
     : new Set([stem.targetTrackId])
+
   const reachableIds = collectReachableChannelIds(graph, sourceTrackIds)
   const detectorOnlyTrackIds = new Set<string>()
+
   for (const route of sidechainRoutes) {
     if (reachableIds.has(route.targetTrackId) && !sourceTrackIds.has(route.sourceTrackId)) {
       detectorOnlyTrackIds.add(route.sourceTrackId)
@@ -1072,11 +1213,14 @@ export function createStemRenderPlan(
   const graphForMode: ResolvedMixerGraph = {
     channels: graph.channels.map((channel) => {
       const id = channel.channel.id
+
       if (detectorOnlyTrackIds.has(id)) {
         return { ...channel, outputGain: 0, sends: [] }
       }
+
       if (stem.mode === 'dry-source') {
         const audible = !channel.channel.muted && channel.outputGain > 0
+
         return {
           ...channel,
           gain: id === stem.targetTrackId && audible ? 1 : 0,
@@ -1086,6 +1230,7 @@ export function createStemRenderPlan(
           fx: undefined,
         }
       }
+
       if (stem.mode === 'post-track-fx') {
         return {
           ...channel,
@@ -1094,6 +1239,7 @@ export function createStemRenderPlan(
           sends: [],
         }
       }
+
       if (stem.mode === 'channel-output') {
         return {
           ...channel,
@@ -1102,13 +1248,16 @@ export function createStemRenderPlan(
           sends: id === stem.targetTrackId ? [] : channel.sends,
         }
       }
+
       return channel
     }),
     master: stem.mode === 'full-master-contribution' ? graph.master : emptyMasterFx(graph),
   }
+
   const nonlinearMaster = graph.master.instances.some((instance) =>
     instance.kind === 'compressor' || instance.kind === 'saturator' || instance.kind === 'limiter' || instance.kind === 'gate',
   )
+
   return {
     sourceTrackIds,
     detectorOnlyTrackIds,
@@ -1134,6 +1283,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
   const renderChannelCount = prepared.numberOfChannels === 1 ? 2 : prepared.numberOfChannels
   const ctx = new OfflineAudioContext(renderChannelCount, length, prepared.sampleRate)
   const releaseContext = observeResource(prepared.resourceObserver, 'audio-contexts', ctx)
+
   const stretchCache = createAudioStretchCache({
     createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
     resolveSource: prepared.resolveAudioSource,
@@ -1142,6 +1292,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
       maximumChannels: 32,
     },
   })
+
   const graph = options.graph ?? (includeMasterFx ? prepared.mixerGraph : {
     ...prepared.mixerGraph,
     master: {
@@ -1151,7 +1302,9 @@ async function renderSourceIsolatedMixdownFromPrepared(
       outputLayout: prepared.mixerGraph.master.inputLayout,
     },
   })
+
   const automationScope = createSourceAutomationScope(graph, options)
+
   const mixerNodes = await createOfflineMixerNodes(
     ctx,
     graph,
@@ -1162,19 +1315,24 @@ async function renderSourceIsolatedMixdownFromPrepared(
     releaseContext()
     throw error
   })
+
   const { trackNodes } = mixerNodes
   const granularRuntimes: Array<Awaited<ReturnType<typeof createGranularRuntime>>> = []
 
   try {
     const mappingBindingBaselines = new Map<string, Map<AutomationAudioBinding['param'], number>>()
+
     for (const envelope of prepared.automationEnvelopes) {
       if (!envelope.enabled) continue
+
       if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
       const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
       const fallback = descriptor?.defaultValue ?? 0
+
       const bindings = envelope.target.kind === 'master'
         ? mixerNodes.resolveMasterAutomationBindings(envelope.target, envelope.parameterId)
         : mixerNodes.resolveTrackAutomationBindings(envelope.target, envelope.parameterId)
+
       scheduleAutomationEnvelope(
         bindings,
         envelope,
@@ -1187,10 +1345,14 @@ async function renderSourceIsolatedMixdownFromPrepared(
         fallback,
       )
     }
+
     const envelopeIndex = indexTrackAutomationEnvelopes(prepared.automationEnvelopes)
+
     for (const resolvedTrack of graph.channels) {
       const track = prepared.trackById.get(resolvedTrack.channel.id)
+
       if (!track) continue
+
       for (const event of compileTrackMidiExpressionSchedule({
         clips: track.clips,
         trackId: track.id,
@@ -1203,10 +1365,12 @@ async function renderSourceIsolatedMixdownFromPrepared(
           { trackId: track.id, effectInstanceId: event.target.effectInstanceId },
           event.target.parameterId,
         )
+
         const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
         const mappingKey = `${track.id}\u0000${midiMappingTargetKey(event.target)}`
         const baselines = mappingBindingBaselines.get(mappingKey) ?? new Map<AutomationAudioBinding['param'], number>()
         const envelope = findTrackAutomationEnvelope(envelopeIndex, track.id, event.target)
+
         const value = event.phase === 'restore'
           ? envelope
             ? valueAtAutomationTime(envelope.points, event.timeSec, descriptor?.defaultValue ?? 0)
@@ -1214,12 +1378,15 @@ async function renderSourceIsolatedMixdownFromPrepared(
               ? track.volume
               : descriptor?.defaultValue
           : event.value
+
         if (value === undefined) continue
+
         for (const binding of bindings) {
           if (!baselines.has(binding.param)) baselines.set(binding.param, binding.param.value ?? binding.valueToAudioValue(value))
           const baseline = event.phase === 'restore' && !envelope ? baselines.get(binding.param) : undefined
           binding.param.setValueAtTime(baseline ?? binding.valueToAudioValue(value), Math.max(0, event.timeSec - prepared.range.startSec))
         }
+
         if (baselines.size > 0) mappingBindingBaselines.set(mappingKey, baselines)
       }
     }
@@ -1229,18 +1396,24 @@ async function renderSourceIsolatedMixdownFromPrepared(
         prepared.trackById.get(resolvedTrack.channel.id),
         `Missing prepared export track ${resolvedTrack.channel.id}`,
       )
+
       if (sourceTrackIds && !sourceTrackIds.has(track.id) && !options.detectorOnlyTrackIds?.has(track.id)) continue
+
       const trackInput = assertDefined(
         trackNodes.get(track.id)?.input,
         `Missing offline track input ${track.id}`,
       )
+
       const fxCfg = resolvedTrack.fx
       const exportFxCfg = prepared.exportTrackFx?.[track.id]
       const instrument = readTrackInstrument(exportFxCfg)
+
       const drumRackPadsByNote = instrument?.kind === 'drum-rack'
         ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
         : undefined
+
       const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
+
       const granularRuntime = instrument?.kind === 'granular'
         ? await createOfflineGranularTrack({
           ctx,
@@ -1250,12 +1423,15 @@ async function renderSourceIsolatedMixdownFromPrepared(
           resourceObserver: prepared.resourceObserver,
         })
         : undefined
+
       if (granularRuntime) granularRuntimes.push(granularRuntime)
+
       const synthParams = instrument?.kind === 'synth'
         ? instrument.params
         : instrument
           ? undefined
           : fxCfg?.synth
+
       const synthTrack = synthParams
         ? createOfflineSynthTrack({
             ctx,
@@ -1265,14 +1441,18 @@ async function renderSourceIsolatedMixdownFromPrepared(
             synth: synthParams,
             automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => {
               const key = parseSynthAutomationKey(envelope.parameterId)
+
               return key?.trackId === track.id && key.instanceId === (instrument?.kind === 'synth' ? instrument.instanceId : undefined)
             }),
           })
         : undefined
+
       if (synthTrack) {
         const events = track.clips.flatMap((clip) => {
           const midi = clip.midi
+
           if (!midi || !Array.isArray(midi.notes)) return []
+
           return getScheduledMidiEvents({
             clip,
             bpm: prepared.bpm,
@@ -1282,13 +1462,16 @@ async function renderSourceIsolatedMixdownFromPrepared(
             arp: fxCfg?.arp,
           }).map((event) => ({ ...event, clipGain: midi.gain }))
         }).toSorted((left, right) => left.startSec - right.startSec)
+
         synthTrack.scheduleEvents(events)
       }
 
       for (const clip of track.clips) {
         const midi = clip.midi
+
         if (midi && Array.isArray(midi.notes)) {
           if (synthTrack) continue
+
           const events = getScheduledMidiEvents({
             clip,
             bpm: prepared.bpm,
@@ -1297,6 +1480,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
             rangeEndSec: prepared.range.sourceEndSec,
             arp: fxCfg?.arp,
           })
+
           if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
             renderOfflineDrumRackEvents({
               ctx,
@@ -1323,6 +1507,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
             const automationEnvelopes = prepared.automationEnvelopes.filter((envelope) => (
               parseGranularAutomationKey(envelope.parameterId)?.trackId === track.id
             ))
+
             for (const event of events) {
               granularRuntime.scheduleNote({
                 when: Math.max(0, event.startSec - prepared.range.startSec),
@@ -1333,10 +1518,12 @@ async function renderSourceIsolatedMixdownFromPrepared(
               })
             }
           }
+
           continue
         }
 
         if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) continue
+
         const map = getAudioClipTimeMap({
           clip,
           bufferDurationSec: clip.buffer?.duration ?? clip.sourceDurationSec ?? 0,
@@ -1344,21 +1531,27 @@ async function renderSourceIsolatedMixdownFromPrepared(
           rangeStartSec: prepared.range.startSec,
           rangeEndSec: prepared.range.sourceEndSec,
         })
+
         if (!map) continue
 
         const src = ctx.createBufferSource()
+
         const stretched = map.mode === 'stretch'
           ? await stretchCache.renderNow(clip, prepared.bpm).catch((error) => {
             throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
           })
           : null
+
         const sourceBuffer = clip.buffer ?? stretched?.buffer
+
         if (!sourceBuffer) continue
+
         const playback = getAudioBufferPlaybackParams({
           sourceBuffer,
           map,
           stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
         })
+
         if (playback.durationSec <= 0) continue
         src.buffer = playback.buffer
         src.playbackRate.value = playback.playbackRate
@@ -1370,6 +1563,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
           timelineEndSec: map.timelineEndSec,
           contextStartTime: Math.max(0, map.timelineStartSec - prepared.range.startSec),
         })
+
         try {
           src.start(
             Math.max(0, map.timelineStartSec - prepared.range.startSec),
@@ -1384,17 +1578,20 @@ async function renderSourceIsolatedMixdownFromPrepared(
     const rendered = await ctx.startRendering()
     mixerNodes.assertCompressorProcessorsHealthy()
     throwIfAborted(prepared.signal)
+
     const output = prepared.numberOfChannels !== 1 || rendered.numberOfChannels === 1
       ? rendered
       : downmixStereoBufferToMono(
       rendered,
       (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
     )
+
     await assertExportTruePeakWithinLimiterCeiling(
       output,
       resolveExportLimiterCeilingDbtp(graph),
       prepared.signal,
     )
+
     return output
   } finally {
     for (const runtime of granularRuntimes) runtime.close()
@@ -1406,6 +1603,7 @@ async function renderSourceIsolatedMixdownFromPrepared(
 export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
   const prepared = prepareExportRender(req)
   const portable = await selectPortableMixdown(req, prepared)
+
   return portable.selected
     ? renderPortableMixdown(req, prepared, portable)
     : renderSourceIsolatedMixdownFromPrepared(prepared)
@@ -1413,14 +1611,17 @@ export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
 
 export function createStemRenderSession(req: ExportRequest): StemRenderSession {
   const prepared = prepareExportRender(req)
+
   return {
     async renderStem(stem) {
       const plan = createStemRenderPlan(prepared.mixerGraph, stem, prepared.sidechainRoutes)
+
       const buffer = await renderSourceIsolatedMixdownFromPrepared(prepared, {
         sourceTrackIds: plan.sourceTrackIds,
         detectorOnlyTrackIds: plan.detectorOnlyTrackIds,
         graph: plan.graph,
       })
+
       return { id: stem.id, name: stem.name, buffer, metadata: plan.metadata }
     },
   }

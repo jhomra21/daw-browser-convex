@@ -18,6 +18,7 @@ const ExportProgressStatus: Component<ExportProgressStatusProps> = (props) => {
   const [choosingSaveLocation, setChoosingSaveLocation] = createSignal(
     exportOutputPickerStatus.current(),
   )
+
   const unsubscribe = exportOutputPickerStatus.subscribe(setChoosingSaveLocation)
   onCleanup(unsubscribe)
 

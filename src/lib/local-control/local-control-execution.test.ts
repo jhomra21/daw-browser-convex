@@ -30,6 +30,7 @@ import { compileLiveNativeProjection } from '@daw-browser/audio-engine/live-nati
 
 const storedJsonObject = (value: Parameters<typeof parseLocalProjectStoredJsonValue>[0]) => {
   const parsed = parseLocalProjectStoredJsonValue(value)
+
   return isJsonObject(parsed) ? parsed : undefined
 }
 
@@ -67,6 +68,7 @@ const snapshotV2 = (projectId: string) => withLocalControlTransaction(projectId,
 
 test('executes sequential client references and persists the canonical result', async () => {
   const project = await createLocalProject(`Execution ${crypto.randomUUID()}`)
+
   const result = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -83,6 +85,7 @@ test('executes sequential client references and persists the canonical result', 
       { kind: 'clip.delete', clip: { source: 'client', clientRef: 'clip' } },
     ],
   })
+
   expect(result.changed).toBe(true)
   expect(result.resolvedRefs.map((entry) => entry.clientRef)).toEqual(['instrument'])
   const current = await snapshot(project.id)
@@ -90,11 +93,14 @@ test('executes sequential client references and persists the canonical result', 
   expect(current.clips).toEqual([])
   const recovery = result.recoveries[0]
   expect(recovery?.kind).toBe('clip.delete')
+
   if (!recovery) throw new Error('Expected clip recovery.')
+
   const restored = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [{ kind: 'recovery.restore', recovery: { id: recovery.id } }],
   })
+
   expect(restored.restored[0]?.entities[0]?.entity).toBe('clip')
   expect((await snapshot(project.id)).clips).toHaveLength(1)
 })
@@ -121,11 +127,14 @@ test('the timeline reload after a commit equals the committed state and reads it
   let transactions = 0
   IDBDatabase.prototype.transaction = function counted(...args: Parameters<typeof transaction>) {
     transactions += 1
+
     return transaction.apply(this, args)
   }
+
   const reloaded = await createLocalTimelineRepository(project.id).loadSnapshot().finally(() => {
     IDBDatabase.prototype.transaction = transaction
   })
+
   expect(transactions).toBe(1)
   expect(reloaded.tracks.map((track) => track.id)).toEqual(committed.tracks.map((track) => track.id))
   expect(reloaded.clips.map((clip) => [clip.id, clip.trackId, clip.startSec, clip.duration]))
@@ -134,6 +143,7 @@ test('the timeline reload after a commit equals the committed state and reads it
 
 test('plans and executes legacy MIDI no-ops without dropping expanded local data', async () => {
   const project = await createLocalProject(`Expanded MIDI ${crypto.randomUUID()}`)
+
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -156,8 +166,11 @@ test('plans and executes legacy MIDI no-ops without dropping expanded local data
       },
     ],
   })
+
   const clip = created.resolvedRefs.find((entry) => entry.entity === 'clip')
+
   if (!clip) throw new Error('Expected MIDI clip.')
+
   const result = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [{
@@ -168,6 +181,7 @@ test('plans and executes legacy MIDI no-ops without dropping expanded local data
       notes: [{ beat: 0, length: 1, pitch: 60, velocity: 0.5 }],
     }],
   })
+
   expect(result.changed).toBe(false)
   expect((await snapshotV2(project.id)).clips.find((entry) => entry.id === clip.id)?.midi).toMatchObject({
     inputChannel: 2,
@@ -178,6 +192,7 @@ test('plans and executes legacy MIDI no-ops without dropping expanded local data
 
 test('edits a legacy local MIDI note through the control resolver', async () => {
   const project = await createLocalProject(`Legacy edit ${crypto.randomUUID()}`)
+
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -193,12 +208,17 @@ test('edits a legacy local MIDI note through the control resolver', async () => 
       },
     ],
   })
+
   const clip = created.resolvedRefs.find((entry) => entry.entity === 'clip')
+
   if (!clip) throw new Error('Expected MIDI clip.')
+
   const notes = Array.from({ length: 501 }, (_, index) => ({
     id: `note-${index}`, beat: index, length: 1, pitch: 60, velocity: 0.5, channel: 1,
   }))
+
   notes[0] = { id: 'invalid-note', beat: -2, length: -1, pitch: 200, velocity: 2, channel: 1 }
+
   const legacy = {
     wave: 'custom-legacy',
     gain: 7,
@@ -206,12 +226,15 @@ test('edits a legacy local MIDI note through the control resolver', async () => 
     cc: [{ id: 'cc-1', beat: 0, controller: 1, value: 0.5, channel: 1 }],
     mappings: [{ id: 'mapping-1', source: { kind: 'cc' as const, controller: 1, channel: 1 }, target: { parameterId: 'gain' }, outputMin: 0, outputMax: 1 }],
   }
+
   const db = await openLocalProjectDb(project.id)
   const row = await db.get('entities', ['clip', clip.id])
   const value = row ? storedJsonObject(row.value) : undefined
+
   if (!row || !value) {
     throw new Error('Expected local clip row.')
   }
+
   await db.put('entities', { ...row, value: { ...value, midi: legacy } })
   await executeLocalControlRequestV1({
     projectId: project.id,
@@ -240,8 +263,10 @@ test('captures and restores oversized legacy MIDI for local clip and track delet
     notes: Array.from({ length: 500 }, (_, beat) => ({ beat, length: 1, pitch: 60 })),
     cc: [{ beat: 0, controller: 1, value: 0 }],
   }
+
   for (const deletionKind of ['clip', 'track'] as const) {
     const project = await createLocalProject(`Oversized ${deletionKind} ${crypto.randomUUID()}`)
+
     const created = await executeLocalControlRequestV1({
       projectId: project.id,
       actions: [
@@ -257,23 +282,31 @@ test('captures and restores oversized legacy MIDI for local clip and track delet
         },
       ],
     })
+
     const track = created.resolvedRefs.find((entry) => entry.entity === 'track')
     const clip = created.resolvedRefs.find((entry) => entry.entity === 'clip')
+
     if (!track || !clip) throw new Error('Expected local track and clip.')
     const db = await openLocalProjectDb(project.id)
     const row = await db.get('entities', ['clip', clip.id])
     const value = row ? storedJsonObject(row.value) : undefined
+
     if (!row || !value) {
       throw new Error('Expected local clip row.')
     }
+
     await db.put('entities', { ...row, value: { ...value, midi: oversizedMidi } })
+
     const action = deletionKind === 'clip'
       ? { kind: 'clip.delete' as const, clip: { source: 'persisted' as const, id: clip.id } }
       : { kind: 'track.delete' as const, track: { source: 'persisted' as const, id: track.id } }
+
     const deleted = await executeLocalControlRequestV1({ projectId: project.id, actions: [action] })
     const recovery = deleted.recoveries[0]
+
     if (!recovery) throw new Error('Expected local recovery.')
     const recoveryRow = await db.get('controlRecoveries', recovery.id)
+
     if (!recoveryRow) throw new Error('Expected stored local recovery.')
     const payload = parseCapturedRecoveryPayload(recoveryRow.payload)
     expect(payload.kind).toBe(`${deletionKind}.delete`)
@@ -306,14 +339,18 @@ test('queues asset metadata deletion and restores it without touching its storag
     createdAt: 1,
     updatedAt: 1,
   })
+
   const deleted = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [{ kind: 'asset.delete', asset: { source: 'persisted', id: 'asset-1' } }],
   })
+
   const recovery = deleted.recoveries[0]
+
   if (!recovery) throw new Error('Expected asset recovery.')
   expect(await db.get('assets', 'asset-1')).toBeUndefined()
   expect((await db.get('controlAssetGc', `local-asset-gc:${recovery.id}`))?.storagePath).toBe('retained-kick.wav')
+
   const deletedAgain = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -321,9 +358,12 @@ test('queues asset metadata deletion and restores it without touching its storag
       { kind: 'asset.delete', asset: { source: 'persisted', id: 'asset-1' } },
     ],
   })
+
   const secondRecovery = deletedAgain.recoveries[0]
+
   if (!secondRecovery) throw new Error('Expected second asset recovery.')
   const secondRow = await db.get('controlRecoveries', secondRecovery.id)
+
   if (!secondRow) throw new Error('Expected second stored recovery.')
   expect(hashRecoveryPayloadSyncV1(secondRow.payload)).toBe(secondRow.payloadHash)
   expect(parseCapturedRecoveryPayload(secondRow.payload)).toMatchObject({
@@ -349,7 +389,9 @@ test('uses original indexes for sequential creates and commits one revision', as
 test('returns the persisted local row ID for created effects', async () => {
   const project = await createLocalProject(`Effect identity ${crypto.randomUUID()}`)
   const track = (await snapshot(project.id)).tracks[0]
+
   if (!track) throw new Error('Expected initial track.')
+
   const result = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [{
@@ -359,7 +401,9 @@ test('returns the persisted local row ID for created effects', async () => {
       effectKind: 'utility',
     }],
   })
+
   const resolved = result.resolvedRefs[0]
+
   if (!resolved) throw new Error('Expected resolved effect.')
   expect((await snapshot(project.id)).processors.map((processor) => processor.id)).toContain(resolved.id)
   expect(resolved.id).not.toStartWith('control:')
@@ -367,6 +411,7 @@ test('returns the persisted local row ID for created effects', async () => {
 
 test('rebases client-created processor identities through automation and sidechains', async () => {
   const project = await createLocalProject(`Processor rebasing ${crypto.randomUUID()}`)
+
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -420,18 +465,25 @@ test('rebases client-created processor identities through automation and sidecha
       })),
     ],
   })
+
   const current = await snapshot(project.id)
   const refs = new Map(created.resolvedRefs.map((entry) => [entry.clientRef, entry.id]))
   const targetId = refs.get('target')
+
   if (!targetId) throw new Error('Expected target track reference.')
+
   const effects = current.processors.filter((processor) => (
     'trackId' in processor.target && processor.target.trackId === targetId
   ))
+
   const effectIds = ['compressor', 'gate', 'spectral'].map((clientRef) => {
     const id = refs.get(clientRef)
+
     if (!id) throw new Error(`Expected ${clientRef} effect reference.`)
+
     return id
   })
+
   expect(effects).toHaveLength(3)
   expect(effects.map((processor) => processor.id).sort()).toEqual(effectIds.sort())
   expect(effects.every((processor) => processor.instanceId?.startsWith('audio-effect:'))).toBe(true)
@@ -476,9 +528,12 @@ test('preserves malformed known rows and rejects tampered recovery payloads', as
       { kind: 'clip.delete', clip: { source: 'client', clientRef: 'clip' } },
     ],
   })
+
   const recovery = created.recoveries[0]
+
   if (!recovery) throw new Error('Expected recovery.')
   const row = await db.get('controlRecoveries', recovery.id)
+
   if (!row) throw new Error('Expected recovery row.')
   await db.put('controlRecoveries', { ...row, payloadHash: '0'.repeat(64) })
   await expect(executeLocalControlRequestV1({
@@ -489,6 +544,7 @@ test('preserves malformed known rows and rejects tampered recovery payloads', as
 
 test('materializes master processors as master rows and preserves them across unrelated changes', async () => {
   const project = await createLocalProject(`Master processor ${crypto.randomUUID()}`)
+
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [{
@@ -498,7 +554,9 @@ test('materializes master processors as master rows and preserves them across un
       effectKind: 'eq',
     }],
   })
+
   const effect = created.resolvedRefs[0]
+
   if (!effect) throw new Error('Expected master effect.')
   const db = await openLocalProjectDb(project.id)
   const row = await db.get('entities', ['effect', effect.id])
@@ -529,6 +587,7 @@ test('preserves legacy synth rows until an instrument update migrates them trans
     actions: [{ kind: 'track.create', clientRef: 'instrument', trackKind: 'instrument' }],
   })
   const track = (await snapshot(project.id)).tracks.find((entry) => entry.kind === 'instrument')
+
   if (!track) throw new Error('Expected initial track.')
   const db = await openLocalProjectDb(project.id)
   const legacyId = `${track.id}:synth`
@@ -558,14 +617,17 @@ test('preserves legacy synth rows until an instrument update migrates them trans
   })
   expect(await db.get('entities', ['effect', legacyId])).toBeUndefined()
   const migrated = (await db.get('entities', ['effect', `${track.id}:instrument`]))?.value
+
   const migratedValue = z.object({
     effect: z.literal('instrument'),
     instanceId: z.string(),
     params: z.looseObject({}),
   }).safeParse(migrated)
+
   if (!migratedValue.success) {
     throw new Error(`${z.prettifyError(migratedValue.error)} ${JSON.stringify(migrated)}`)
   }
+
   expect(migratedValue.data.params).toMatchObject({ instanceId: migratedValue.data.instanceId })
 })
 
@@ -588,6 +650,7 @@ type ActionFixture = {
 
 const seedActionFixture = async (includeExternal = true) => {
   const project = await createLocalProject(`Action fixture ${crypto.randomUUID()}`)
+
   const created = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -600,6 +663,7 @@ const seedActionFixture = async (includeExternal = true) => {
       { kind: 'track.create', clientRef: 'routed', trackKind: 'audio', name: 'Routed' },
     ],
   })
+
   const ids = Object.fromEntries(created.resolvedRefs.map((entry) => [entry.clientRef, entry.id]))
   const instrument = ids.instrument
   const audio = ids.audio
@@ -607,7 +671,9 @@ const seedActionFixture = async (includeExternal = true) => {
   const source = ids.source
   const group = ids.group
   const returnTrack = ids.return
+
   if (!instrument || !audio || !target || !source || !group || !returnTrack) throw new Error('Expected fixture track IDs.')
+
   const effects = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -618,12 +684,15 @@ const seedActionFixture = async (includeExternal = true) => {
       { kind: 'arpeggiator.set', target: { kind: 'track', track: { source: 'persisted', id: instrument } }, params: { enabled: true, pattern: 'up', rate: '1/8', octaves: 1, gate: 0.8, hold: false } },
     ],
   })
+
   for (const entry of effects.resolvedRefs) ids[entry.clientRef] = entry.id
   const gate = ids.gate
   const compressor = ids.compressor
+
   if (!gate || !compressor) throw new Error('Expected fixture effect IDs.')
   const db = await openLocalProjectDb(project.id)
   const externalInstanceId = crypto.randomUUID()
+
   if (includeExternal) await setLocalExternalProcessor(project.id, {
     instanceId: externalInstanceId,
     targetId: target,
@@ -666,6 +735,7 @@ const seedActionFixture = async (includeExternal = true) => {
     health: { state: 'ready', updatedAt: 1 },
     updatedAt: 1,
   })
+
   if (includeExternal) ids.external = `external-plugin:${externalInstanceId}`
   await db.put('assets', {
     id: 'fixture-asset',
@@ -697,6 +767,7 @@ const seedActionFixture = async (includeExternal = true) => {
     updatedAt: 1,
   })
   ids.assetTwo = 'fixture-asset-two'
+
   const clips = await executeLocalControlRequestV1({
     projectId: project.id,
     actions: [
@@ -709,11 +780,15 @@ const seedActionFixture = async (includeExternal = true) => {
       { kind: 'sidechain.set', source: { source: 'persisted', id: group }, target: { source: 'persisted', id: target }, effect: { source: 'persisted', id: compressor } },
     ],
   })
+
   for (const entry of clips.resolvedRefs) ids[entry.clientRef] = entry.id
   const midi = ids.midi
   const audioClip = ids['audio-clip']
+
   if (!midi || !audioClip) throw new Error('Expected fixture clip IDs.')
+
   for (const [index, track] of (await snapshot(project.id)).tracks.entries()) ids[`reorder-${index}`] = track.id
+
   return { projectId: project.id, ids }
 }
 
@@ -768,28 +843,35 @@ const actionFixtures = {
 test('exhaustively executes all advertised local control action fixtures', async () => {
   expect(Object.keys(actionFixtures).sort()).toEqual([...localControlCapabilitiesV1.actionKinds].sort())
   expect(Object.keys(actionFixtures)).toHaveLength(40)
+
   for (const [kind, fixture] of Object.entries(actionFixtures)) {
     const { projectId, ids } = await seedActionFixture()
+
     if (kind === 'recovery.restore') {
       const deletion = await executeLocalControlRequestV1({
         projectId,
         actions: [{ kind: 'clip.delete', clip: persisted(ids.midi!) }],
       })
+
       ids.recovery = deletion.recoveries[0]?.id ?? ''
     }
+
     const before = await snapshot(projectId)
     await executeLocalControlRequestV1({ projectId, actions: [fixture.action(ids)] })
     const current = await snapshot(projectId)
+
     try {
       fixture.assert(current, ids)
     } catch (error) {
       throw new Error(`${kind} fixture failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+
     try {
       expect(current.project.revision).toBe(before.project.revision + 1)
     } catch (error) {
       throw new Error(`${kind} revision fixture failed: ${error instanceof Error ? error.message : String(error)}`)
     }
+
     expect(JSON.stringify(current)).not.toContain('control:')
   }
 }, { timeout: 15_000 })
@@ -878,13 +960,18 @@ const recoveryFixtures = {
 
 const recoveryPayloadSources = (payload: ReturnType<typeof parseRecoveryPayload>) => {
   if (payload.kind === 'clip.delete') return [{ entity: 'clip', sourceId: payload.data.clipId }]
+
   if (payload.kind === 'asset.delete') return [{ entity: 'asset', sourceId: payload.data.assetId }]
+
   if (payload.kind === 'automation.delete') return [{ entity: 'automation', sourceId: payload.data.automationId }]
+
   if (payload.kind === 'sidechain.remove') return [{ entity: 'sidechain', sourceId: payload.data.sidechainId }]
+
   if (payload.kind === 'timeline.range.delete') return payload.data.deletedClips.map((entry) => ({
     entity: 'clip',
     sourceId: entry.id,
   }))
+
   if (payload.kind === 'track.delete' || payload.kind === 'track.ungroup') return [
     ...payload.data.tracks.map((entry) => ({ entity: 'track', sourceId: entry.id })),
     ...payload.data.clips.map((entry) => ({ entity: 'clip', sourceId: entry.id })),
@@ -892,6 +979,7 @@ const recoveryPayloadSources = (payload: ReturnType<typeof parseRecoveryPayload>
     ...payload.data.automation.map((entry) => ({ entity: 'automation', sourceId: entry.id })),
     ...payload.data.sidechains.map((entry) => ({ entity: 'sidechain', sourceId: entry.id })),
   ]
+
   return [
     ...payload.data.effects.map((entry) => ({ entity: 'effect', sourceId: entry.id })),
     ...payload.data.automation.map((entry) => ({ entity: 'automation', sourceId: entry.id })),
@@ -902,6 +990,7 @@ const recoveryPayloadSources = (payload: ReturnType<typeof parseRecoveryPayload>
 test('exhaustively restores all 10 local recovery kinds with canonical payloads and exact mappings', async () => {
   expect(Object.keys(recoveryFixtures).sort()).toEqual([...controlCapabilitiesV1.recovery.supportedKinds].sort())
   expect(Object.keys(recoveryFixtures)).toHaveLength(10)
+
   for (const supportedKind of controlCapabilitiesV1.recovery.supportedKinds) {
     const kind = recoveryKindSchema.parse(supportedKind)
     const fixture = recoveryFixtures[kind]
@@ -909,21 +998,25 @@ test('exhaustively restores all 10 local recovery kinds with canonical payloads 
     const before = await snapshot(projectId)
     const deleted = await executeLocalControlRequestV1({ projectId, actions: [fixture.action(ids)] })
     const recovery = deleted.recoveries[0]
+
     if (!recovery) throw new Error(`${kind} did not create a recovery row.`)
     expect(recovery.kind).toBe(kind)
     const db = await openLocalProjectDb(projectId)
     const recoveryRow = await db.get('controlRecoveries', recovery.id)
+
     if (!recoveryRow) throw new Error(`${kind} recovery row is missing.`)
     const payload = parseRecoveryPayload(z.string().parse(recoveryRow.payload))
     expect(payload.kind).toBe(kind)
     expect(hashRecoveryPayloadSyncV1(recoveryRow.payload)).toBe(recoveryRow.payloadHash)
     expect(canonicalCapturedRecoveryPayloadV2(payload)).toBe(recoveryRow.payload)
+
     if (payload.kind === 'timeline.range.delete') {
       expect(Object.keys(payload.data).sort()).toEqual([
         'automation', 'createdClips', 'deletedClips', 'range', 'updatedClips',
       ])
       expect(payload.data.createdClips.every((entry) => !entry.id.startsWith('control:'))).toBe(true)
     }
+
     fixture.assertDestroyed(await snapshot(projectId), ids)
 
     const restored = await executeLocalControlRequestV1({
@@ -932,17 +1025,21 @@ test('exhaustively restores all 10 local recovery kinds with canonical payloads 
     }).catch((error) => {
       throw new Error(`${kind} recovery restore failed`, { cause: error })
     })
+
     const mappings = restored.restored[0]?.entities
+
     if (!mappings) throw new Error(`${kind} did not return recovery mappings.`)
     expect(mappings.map(({ entity, sourceId }) => ({ entity, sourceId })).sort((left, right) => (
       `${left.entity}:${left.sourceId}`.localeCompare(`${right.entity}:${right.sourceId}`)
     ))).toEqual(recoveryPayloadSources(payload).sort((left, right) => (
       `${left.entity}:${left.sourceId}`.localeCompare(`${right.entity}:${right.sourceId}`)
     )))
+
     for (const mapping of mappings) {
       if (mapping.entity === 'asset') expect(await db.get('assets', mapping.restoredId)).toBeDefined()
       else expect(await db.get('entities', [mapping.entity === 'automation' ? 'automation-envelope' : mapping.entity === 'sidechain' ? 'sidechain-route' : mapping.entity, mapping.restoredId])).toBeDefined()
     }
+
     const restoredSnapshot = await snapshot(projectId)
     expect(restoredSnapshot.project.revision).toBe(before.project.revision + 2)
     expect((await db.get('controlRecoveries', recovery.id))?.consumedAt).toEqual(expect.any(Number))
@@ -953,19 +1050,24 @@ test('exhaustively restores all 10 local recovery kinds with canonical payloads 
 test('restores a locally split range after semantic drift verification', async () => {
   const { projectId, ids } = await seedActionFixture()
   const sourceId = ids['audio-clip']
+
   if (!sourceId) throw new Error('Expected audio clip fixture.')
   const db = await openLocalProjectDb(projectId)
   const clipRow = await db.get('entities', ['clip', sourceId])
   const clipValue = clipRow ? storedJsonObject(clipRow.value) : undefined
+
   if (!clipRow || !clipValue) {
     throw new Error('Expected source clip row.')
   }
+
   await db.put('entities', {
     ...clipRow,
     value: { ...clipValue, historyRef: 'durable-range-clip-ref' },
   })
   const before = (await snapshot(projectId)).clips.find((clip) => clip.id === sourceId)
+
   if (!before) throw new Error('Expected source clip.')
+
   const deleted = await executeLocalControlRequestV1({
     projectId,
     actions: [{
@@ -975,8 +1077,10 @@ test('restores a locally split range after semantic drift verification', async (
       endSec: 0.75,
     }],
   })
+
   expect((await snapshot(projectId)).clips.filter((clip) => clip.trackId === ids.audio)).toHaveLength(2)
   const recovery = deleted.recoveries[0]
+
   if (!recovery) throw new Error('Expected range recovery.')
   await executeLocalControlRequestV1({
     projectId,
@@ -991,28 +1095,37 @@ test('restores a locally split range after semantic drift verification', async (
 test('restores a locally deleted clip with its durable history reference', async () => {
   const { projectId, ids } = await seedActionFixture()
   const sourceId = ids['audio-clip']
+
   if (!sourceId) throw new Error('Expected audio clip fixture.')
   const db = await openLocalProjectDb(projectId)
   const clipRow = await db.get('entities', ['clip', sourceId])
   const clipValue = clipRow ? storedJsonObject(clipRow.value) : undefined
+
   if (!clipRow || !clipValue) {
     throw new Error('Expected source clip row.')
   }
+
   await db.put('entities', {
     ...clipRow,
     value: { ...clipValue, historyRef: 'durable-deleted-clip-ref' },
   })
+
   const deleted = await executeLocalControlRequestV1({
     projectId,
     actions: [{ kind: 'clip.delete', clip: persisted(sourceId) }],
   })
+
   const recovery = deleted.recoveries[0]
+
   if (!recovery) throw new Error('Expected clip recovery.')
+
   const restored = await executeLocalControlRequestV1({
     projectId,
     actions: [{ kind: 'recovery.restore', recovery: { id: recovery.id } }],
   })
+
   const restoredId = restored.restored[0]?.entities.find((entity) => entity.entity === 'clip')?.restoredId
+
   if (!restoredId) throw new Error('Expected restored clip ID.')
   expect((await db.get('entities', ['clip', restoredId]))?.value).toMatchObject({
     historyRef: 'durable-deleted-clip-ref',
@@ -1030,6 +1143,7 @@ test('preserves every earlier deletion across cumulative local actions', async (
     expect((await snapshot(projectId)).project.revision).toBe(before.project.revision + 1)
     expect((await snapshot(projectId)).processors.some((effect) => effect.id === ids.utility)).toBe(false)
   }
+
   {
     const { projectId, ids } = await seedActionFixture()
     const before = await snapshot(projectId)
@@ -1040,6 +1154,7 @@ test('preserves every earlier deletion across cumulative local actions', async (
     expect((await snapshot(projectId)).project.revision).toBe(before.project.revision + 1)
     expect((await snapshot(projectId)).clips.some((clip) => clip.id === ids.midi)).toBe(false)
   }
+
   {
     const { projectId, ids } = await seedActionFixture()
     const before = await snapshot(projectId)
@@ -1052,6 +1167,7 @@ test('preserves every earlier deletion across cumulative local actions', async (
     expect(current.tracks.some((track) => track.id === ids.source)).toBe(false)
     expect(current.tracks.some((track) => track.name === 'Replacement')).toBe(true)
   }
+
   {
     const { projectId, ids } = await seedActionFixture()
     const before = await snapshot(projectId)
@@ -1078,6 +1194,7 @@ test('preserves every earlier deletion across cumulative local actions', async (
       state: { gainDb: -3 },
     })
   }
+
   {
     const { projectId, ids } = await seedActionFixture()
     const before = await snapshot(projectId)
@@ -1098,10 +1215,12 @@ test('deletes and immediately recovers a local external processor artifact exact
   const { projectId, ids } = await seedActionFixture()
   const externalId = ids.external
   const targetId = ids.target
+
   if (!externalId || !targetId) throw new Error('Expected external fixture IDs.')
   const bytes = new Uint8Array([3, 1, 4, 1, 5, 9])
   const hash = Array.from(sha256(bytes), (byte) => byte.toString(16).padStart(2, '0')).join('')
   const processor = await persistLocalExternalProcessorState(projectId, externalId.slice('external-plugin:'.length), { bytes, sha256: hash })
+
   if (!processor?.state) throw new Error('Expected persisted external processor state.')
   const db = await openLocalProjectDb(projectId)
   await executeLocalControlRequestV1({
@@ -1111,6 +1230,7 @@ test('deletes and immediately recovers a local external processor artifact exact
   expect(await db.get('entities', ['external-plugin', externalId])).toBeUndefined()
   expect(await db.get('externalPluginArtifacts', processor.state.artifactId)).toBeUndefined()
   const recovery = (await db.getAll('controlRecoveries')).at(-1)
+
   if (!recovery) throw new Error('Expected external processor recovery.')
   expect(recovery.externalProcessors).toHaveLength(1)
   await executeLocalControlRequestV1({
@@ -1130,10 +1250,13 @@ test('keeps mixed external parameter edits and unrelated VST deletion recovery a
   const targetExternalId = ids.external
   const targetTrackId = ids.target
   const sourceTrackId = ids.source
+
   if (!targetExternalId || !targetTrackId || !sourceTrackId) throw new Error('Expected external fixture IDs.')
+
   const targetExternal = (await listLocalExternalProcessors(projectId)).find(
     (processor) => `external-plugin:${processor.instanceId}` === targetExternalId,
   )
+
   if (!targetExternal) throw new Error('Expected target external processor.')
   const sourceExternalInstanceId = crypto.randomUUID()
   await setLocalExternalProcessor(projectId, {
@@ -1156,9 +1279,11 @@ test('keeps mixed external parameter edits and unrelated VST deletion recovery a
       { kind: 'track.delete', track: { source: 'persisted', id: sourceTrackId } },
     ],
   })
+
   expect((await snapshot(projectId)).processors.find((processor) => processor.id === targetExternalId)
     ?.processor).toMatchObject({ kind: 'external-vst3', params: { parameterOverrides: { '1': 0.9 } } })
   const recovery = mixed.recoveries.find((entry) => entry.kind === 'track.delete')
+
   if (!recovery) throw new Error('Expected VST deletion recovery.')
   const recoveryRow = (await openLocalProjectDb(projectId).then((db) => db.get('controlRecoveries', recovery.id)))
   expect(recoveryRow?.externalProcessors).toHaveLength(1)
@@ -1178,11 +1303,13 @@ test('preserves unavailable long local audio metadata across an external paramet
   const targetTrackId = ids.target
   const externalId = ids.external
   const assetId = ids.asset
+
   if (!audioClipId || !targetTrackId || !externalId || !assetId) throw new Error('Expected VST audio fixture IDs.')
 
   const db = await openLocalProjectDb(projectId)
   const clipRow = await db.get('entities', ['clip', audioClipId])
   const clipValue = clipRow ? storedJsonObject(clipRow.value) : undefined
+
   if (!clipRow || !clipValue) throw new Error('Expected persisted audio clip metadata.')
   await db.put('entities', {
     ...clipRow,
@@ -1195,6 +1322,7 @@ test('preserves unavailable long local audio metadata across an external paramet
     },
   })
   const asset = await db.get('assets', assetId)
+
   if (!asset) throw new Error('Expected persisted local audio asset.')
   await db.put('assets', {
     ...asset,
@@ -1234,6 +1362,7 @@ test('preserves unavailable long local audio metadata across an external paramet
     sourceSampleRate: 48_000,
     sourceChannelCount: 2,
   })
+
   if (!reloadedClip) throw new Error('Expected reloaded audio clip.')
 
   const reloadedTracks = reloaded.tracks.map((track) => ({
@@ -1242,6 +1371,7 @@ test('preserves unavailable long local audio metadata across an external paramet
       .filter((clip) => clip.trackId === track.id)
       .map(toLocalTimelineClip),
   }))
+
   const playback = compileLivePlaybackSnapshot({
     revision: (await snapshot(projectId)).project.revision,
     bpm: 120,
@@ -1250,8 +1380,11 @@ test('preserves unavailable long local audio metadata across an external paramet
     renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
     sidechainRoutes: [],
   })
+
   expect(playback.supported).toBeTrue()
+
   if (!playback.supported) return
+
   const native = compileLiveNativeProjection({
     tracks: playback.snapshot.tracks.filter((track) => track.id === reloadedClip.trackId),
     bpm: playback.snapshot.bpm,
@@ -1260,7 +1393,9 @@ test('preserves unavailable long local audio metadata across an external paramet
     epoch: 1,
     firstSequence: 1,
   })
+
   expect(native.supported).toBeTrue()
+
   if (!native.supported) return
   expect(native.assets).toMatchObject([{
     sourceAssetKey: assetId,

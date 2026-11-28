@@ -21,6 +21,7 @@ describe("canonical automation identity", () => {
       instanceId: "instrument:synth:legacy",
       params: { wave1: "square", gain: 0.4, attackMs: 25, releaseMs: 300 },
     };
+
     const canonical = {
       type: "instrument",
       params: {

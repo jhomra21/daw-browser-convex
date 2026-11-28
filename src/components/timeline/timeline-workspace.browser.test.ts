@@ -9,12 +9,16 @@ const browserCommand = async (session: string, args: readonly string[]) => {
     stdout: 'pipe',
     stderr: 'pipe',
   })
+
   const [stdout, stderr] = await Promise.all([
     new Response(process.stdout).text(),
     new Response(process.stderr).text(),
   ])
+
   const exitCode = await process.exited
+
   if (exitCode !== 0) throw new Error(stderr || stdout)
+
   return stdout.trim()
 }
 
@@ -63,6 +67,7 @@ const browserOutputSchema = z.union([
 test('keeps the mounted timeline surface pinned through runway scrolling', async () => {
   const temporaryRoot = `${process.env.TMPDIR ?? '/tmp'}/daw-timeline-workspace-${crypto.randomUUID()}`
   await mkdir(temporaryRoot, { recursive: true })
+
   const build = await Bun.build({
     entrypoints: [runtimePath],
     target: 'browser',
@@ -70,33 +75,42 @@ test('keeps the mounted timeline surface pinned through runway scrolling', async
     outdir: temporaryRoot,
     naming: 'timeline.js',
   })
+
   expect(build.success).toBe(true)
+
   const server = Bun.serve({
     port: 0,
     fetch(request) {
       const path = new URL(request.url).pathname
+
       if (path === '/') {
         return new Response(
           '<!doctype html><meta name="viewport" content="width=device-width"><script type="module" src="/timeline.js"></script>',
           { headers: { 'content-type': 'text/html' } },
         )
       }
+
       if (path === '/timeline.js') {
         return new Response(Bun.file(`${temporaryRoot}/timeline.js`), {
           headers: { 'content-type': 'text/javascript' },
         })
       }
+
       return new Response('Not found', { status: 404 })
     },
   })
+
   const session = `daw-timeline-workspace-${crypto.randomUUID()}`
+
   try {
     await browserCommand(session, ['open', server.url.toString()])
     await browserCommand(session, ['wait', '--fn', '!!window.__timelineWorkspaceRegressionResult'])
+
     const output = await browserCommand(session, [
       'eval',
       'JSON.stringify(window.__timelineWorkspaceRegressionResult)',
     ])
+
     const result = browserOutputSchema.parse(JSON.parse(output))
     expect(result.runwayWidth).toBe(200_000)
     expect(result.coldMount).toHaveLength(2)

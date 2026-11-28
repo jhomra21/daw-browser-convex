@@ -73,10 +73,13 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const reservedBytes = () => {
     let total = 0
+
     for (const reservation of reservations.values()) total += reservation.bytes
+
     if (!Number.isSafeInteger(total)) {
       throw new Error('Sampled instrument reserved byte count is outside the safe range.')
     }
+
     return total
   }
 
@@ -84,7 +87,9 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const recordCharge = (record: PhysicalRecord) => {
     let chargeBytes = 0
+
     for (const owner of record.owners) chargeBytes = Math.max(chargeBytes, owner.bytes)
+
     return chargeBytes
   }
 
@@ -97,9 +102,11 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const getOrCreatePhysicalRecord = (physical: AudioBuffer) => {
     const existing = physicalRecords.get(physical)
+
     if (existing) return existing
     const record: PhysicalRecord = { physical, owners: new Set(), chargeBytes: 0, pins: 0 }
     physicalRecords.set(physical, record)
+
     return record
   }
 
@@ -114,29 +121,36 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     const entry: BudgetEntry = { bytes, pins, onEvict, physical, record, protectPhysical: false }
     entries.set(key, entry)
     record?.owners.add(entry)
+
     if (record) refreshRecordCharge(record)
     else {
       totalBytes += bytes
       assertTotalInvariant()
     }
+
     return entry
   }
 
   const removeEntry = (key: string, notify: boolean) => {
     const entry = entries.get(key)
+
     if (!entry) return
     entries.delete(key)
+
     for (const [alias, target] of retiredAliases) {
       if (target === key) retiredAliases.delete(alias)
     }
+
     if (entry.record) {
       entry.record.owners.delete(entry)
       refreshRecordCharge(entry.record)
+
       if (entry.record.owners.size === 0) physicalRecords.delete(entry.record.physical)
     } else {
       totalBytes -= entry.bytes
       assertTotalInvariant()
     }
+
     if (notify) entry.onEvict()
   }
 
@@ -144,6 +158,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     for (const [key, candidate] of entries) {
       if (candidate === entry) return key
     }
+
     return undefined
   }
 
@@ -154,6 +169,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     entries.set(retiredKey, entry)
     retiredAliases.set(key, retiredKey)
     entry.onEvict = () => undefined
+
     return retiredKey
   }
 
@@ -165,6 +181,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   const evict = (protectedKeys: ReadonlySet<string>, additionalBytes = 0) => {
     while (totalBytes + reservedBytes() + additionalBytes > maxBytes) {
       const candidate = [...entries].find(([key, entry]) => canEvict(entry) && !protectedKeys.has(key))
+
       if (!candidate) return
       removeEntry(candidate[0], true)
     }
@@ -172,12 +189,15 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const additionalBytesForRequest = (key: string, bytes: number) => {
     const existing = entries.get(key)
+
     return existing ? Math.max(0, bytes - existing.bytes) : bytes
   }
 
   const additionalBytesForReservation = (key: string, bytes: number) => {
     const existing = entries.get(key)
+
     if (!existing) return bytes
+
     return existing.pins > 0 ? bytes : Math.max(0, bytes - existing.bytes)
   }
 
@@ -186,23 +206,29 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     protectedKeys: ReadonlySet<string> = new Set(),
   ) => {
     let additionalBytes = 0
+
     for (const [key, bytes] of requested) {
       validateBudgetValue(bytes, 'Sampled instrument region byte count')
       additionalBytes += additionalBytesForRequest(key, bytes)
     }
+
     if (!Number.isSafeInteger(additionalBytes)) {
       throw new Error('Sampled instrument aggregate byte count is outside the safe range.')
     }
+
     evict(protectedKeys, additionalBytes)
+
     while (totalBytes + reservedBytes() + additionalBytes > maxBytes) {
       const candidate = [...entries].find(([key, entry]) => (
         canEvict(entry)
         && !protectedKeys.has(key)
         && !requested.has(key)
       ))
+
       if (!candidate) throw new Error(`Sampled instrument regions exceed the ${maxBytes} byte aggregate limit.`)
       removeEntry(candidate[0], true)
       additionalBytes = 0
+
       for (const [key, bytes] of requested) additionalBytes += additionalBytesForRequest(key, bytes)
     }
   }
@@ -213,25 +239,35 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     physical: AudioBuffer | undefined,
   ) => {
     const existing = entries.get(key)
+
     const keepExisting = existing !== undefined
       && existing.pins > 0
       && existing.physical !== physical
+
     const affected = new Set<PhysicalRecord>()
+
     if (existing?.record) affected.add(existing.record)
     const targetRecord = physical ? physicalRecords.get(physical) : undefined
+
     if (targetRecord) affected.add(targetRecord)
     let projected = totalBytes
+
     for (const record of affected) {
       let nextCharge = 0
+
       for (const owner of record.owners) {
         if (owner === existing && !keepExisting) continue
         nextCharge = Math.max(nextCharge, owner.bytes)
       }
+
       if (record === targetRecord) nextCharge = Math.max(nextCharge, bytes)
       projected += nextCharge - record.chargeBytes
     }
+
     if (existing && !keepExisting && !existing.record) projected -= existing.bytes
+
     if (!targetRecord) projected += bytes
+
     return projected
   }
 
@@ -244,6 +280,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
       const candidate = [...entries].find(([candidateKey, entry]) => (
         candidateKey !== key && canEvict(entry)
       ))
+
       if (!candidate) throw new Error(`Sampled instrument regions exceed the ${maxBytes} byte aggregate limit.`)
       removeEntry(candidate[0], true)
     }
@@ -252,31 +289,39 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   const pin = (key: string) => {
     key = resolveKey(key)
     const entry = entries.get(key)
+
     if (!entry) return undefined
     const token = createPin(entry)
     touch(key, entry)
+
     return token
   }
 
   const pinEntry = (entry: BudgetEntry) => {
     entry.pins += 1
+
     if (entry.record && entry.protectPhysical) entry.record.pins += 1
   }
 
   const unpinEntry = (entry: BudgetEntry) => {
     if (entry.pins === 0) return
     entry.pins -= 1
+
     if (entry.record && entry.protectPhysical) entry.record.pins -= 1
+
     if (entry.pins === 0) {
       const key = findEntryKey(entry)
+
       if (key?.includes(RETIRED_KEY_MARKER)) removeEntry(key, false)
     }
   }
 
   const releasePin = (token: SampledInstrumentRegionPin) => {
     const entry = pinEntries.get(token)
+
     if (!entry) return
     pinEntries.delete(token)
+
     if (disposed) return
     unpinEntry(entry)
     evict(new Set())
@@ -286,6 +331,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     const token: SampledInstrumentRegionPin = { release: () => releasePin(token) }
     pinEntries.set(token, entry)
     pinEntry(entry)
+
     return token
   }
 
@@ -303,23 +349,29 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     ensureCapacityForSet(key, bytes, physical)
     const existing = entries.get(key)
     const samePhysical = existing !== undefined && existing.physical === physical
+
     if (samePhysical && existing) {
       const previousBytes = existing.bytes
       existing.bytes = bytes
       existing.onEvict = onEvict
+
       if (existing.record) refreshRecordCharge(existing.record)
       else {
         totalBytes += bytes - previousBytes
         assertTotalInvariant()
       }
+
       touch(key, existing)
+
       return existing
     }
+
     if (existing?.pins && existing.physical !== physical) retirePinnedEntry(key, existing)
     else if (existing) removeEntry(key, false)
     const pins = existing && existing.physical === physical ? existing.pins : 0
     const entry = createEntry(key, bytes, onEvict, physical, pins)
     touch(key, entry)
+
     return entry
   }
 
@@ -327,13 +379,16 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     validateBudgetValue(bytes, 'Sampled instrument region byte count')
     const additionalBytes = additionalBytesForReservation(key, bytes)
     evict(new Set(), additionalBytes)
+
     if (totalBytes + reservedBytes() + additionalBytes > maxBytes) {
       throw new Error(`Sampled instrument regions exceed the ${maxBytes} byte aggregate limit.`)
     }
+
     const id = nextInternalId
     nextInternalId += 1
     reservations.set(id, { key, bytes })
     let settled = false
+
     return {
       release: () => {
         if (settled) return
@@ -350,6 +405,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
 
   const dispose = () => {
     disposed = true
+
     for (const entry of entries.values()) entry.onEvict()
     entries.clear()
     physicalRecords.clear()
@@ -366,31 +422,41 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     const leasedBuffers = new Map<AudioBuffer, number>()
     const leaseReleases = new Set<() => void>()
     const scopedKey = (key: string) => `${namespace}\u0000${key}`
+
     const recordPin = (key: string, pin: SampledInstrumentRegionPin) => {
       const owned = pinnedKeys.get(key) ?? []
       owned.push(pin)
       pinnedKeys.set(key, owned)
     }
+
     const pinOwned = (key: string) => {
       const entry = entries.get(key)
+
       if (!entry) return
       const pin = createPin(entry)
       touch(key, entry)
       recordPin(key, pin)
     }
+
     const removeOwnedEntry = (entry: BudgetEntry) => {
       const key = findEntryKey(entry)
+
       if (!key) return
+
       if (entry.pins > 0) {
         if (!key.includes(RETIRED_KEY_MARKER)) retirePinnedEntry(key, entry)
+
         return
       }
+
       removeEntry(key, false)
     }
+
     return {
       reserve: (key, bytes) => {
         const owned = reserve(scopedKey(key), bytes)
         reservations.add(owned)
+
         return owned
       },
       ensureCapacityFor: (requested) => {
@@ -404,13 +470,18 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
         const previouslyPinned = pinnedKeys.get(nextKey)
         const entry = set(nextKey, bytes, onEvict, physical)
         ownedEntries.add(entry)
+
         if (!previouslyPinned) {
           pinOwned(nextKey)
+
           return
         }
+
         if (previouslyPinned.every((pin) => pinEntries.get(pin) === entry)) return
+
         for (const pin of previouslyPinned) pin.release()
         pinnedKeys.delete(nextKey)
+
         for (const _ of previouslyPinned) {
           recordPin(nextKey, createPin(entry))
         }
@@ -418,30 +489,37 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
       touch: (key) => {
         const nextKey = resolveKey(scopedKey(key))
         const entry = entries.get(nextKey)
+
         if (entry) touch(nextKey, entry)
       },
       pin: (key) => {
         const nextKey = scopedKey(key)
         const resolvedKey = resolveKey(nextKey)
         const entry = entries.get(resolvedKey)
+
         if (!entry) return undefined
         const pin = createPin(entry)
         touch(resolvedKey, entry)
         recordPin(nextKey, pin)
+
         return pin
       },
       unpin: (pin) => {
         pin.release()
+
         for (const [key, owned] of pinnedKeys) {
           const index = owned.indexOf(pin)
+
           if (index < 0) continue
           owned.splice(index, 1)
+
           if (owned.length === 0) pinnedKeys.delete(key)
           break
         }
       },
       lease: (buffers, protectPhysicalEntries = false) => {
         const leased = new Set<BudgetEntry>()
+
         try {
           for (const input of buffers) {
             validateBudgetValue(input.bytes, 'Sampled instrument buffer byte count')
@@ -460,30 +538,40 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
             unpinEntry(entry)
             leaseEntries.delete(entry)
             removeOwnedEntry(entry)
+
             if (entry.physical) {
               const count = leasedBuffers.get(entry.physical) ?? 0
+
               if (count <= 1) leasedBuffers.delete(entry.physical)
               else leasedBuffers.set(entry.physical, count - 1)
             }
           }
+
           throw error
         }
+
         let released = false
+
         const release = () => {
           if (released) return
           released = true
+
           for (const entry of leased) {
             unpinEntry(entry)
             leaseEntries.delete(entry)
             removeOwnedEntry(entry)
+
             if (entry.physical) {
               const count = leasedBuffers.get(entry.physical) ?? 0
+
               if (count <= 1) leasedBuffers.delete(entry.physical)
               else leasedBuffers.set(entry.physical, count - 1)
             }
           }
         }
+
         leaseReleases.add(release)
+
         return {
           release: () => {
             release()
@@ -495,13 +583,17 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
       release: () => {
         for (const releaseLease of leaseReleases) releaseLease()
         leaseReleases.clear()
+
         for (const reservation of reservations) reservation.release()
         reservations.clear()
+
         for (const owned of pinnedKeys.values()) for (const pin of owned) pin.release()
         pinnedKeys.clear()
+
         for (const entry of ownedEntries) {
           if (!leaseEntries.has(entry)) removeOwnedEntry(entry)
         }
+
         ownedEntries.clear()
         leaseEntries.clear()
         leasedBuffers.clear()
@@ -512,6 +604,7 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
   return {
     touch: (key: string) => {
       const entry = entries.get(key)
+
       if (entry) touch(key, entry)
     },
     ensureCapacity: (key: string, bytes: number) => ensureCapacity(new Map([[key, bytes]])),
@@ -525,12 +618,16 @@ export function createSampledInstrumentRegionBudget(maxBytes: number) {
     release: (key: string) => {
       key = resolveKey(key)
       const entry = entries.get(key)
+
       if (!entry) return
+
       if (entry.pins > 0) {
         if (key.includes(RETIRED_KEY_MARKER)) return
         retirePinnedEntry(key, entry)
+
         return
       }
+
       removeEntry(key, false)
     },
     totalBytes: () => totalBytes,

@@ -9,6 +9,7 @@ import { registerPublicSampleRoutes, registerSampleRoutes } from "./samples";
 const file = (contents = "audio") => {
   const sampleBytes = new Uint8Array(contents.length * 2)
   const view = new DataView(sampleBytes.buffer)
+
   for (let index = 0; index < contents.length; index += 1) view.setInt16(index * 2, contents.charCodeAt(index), true)
   const bytes = new Uint8Array(44 + sampleBytes.byteLength)
   const header = new DataView(bytes.buffer)
@@ -26,6 +27,7 @@ const file = (contents = "audio") => {
   header.setUint32(36, 0x64617461)
   header.setUint32(40, sampleBytes.byteLength, true)
   bytes.set(sampleBytes, 44)
+
   return new File([bytes], "Kick.wav", { type: "audio/wav" })
 };
 
@@ -34,6 +36,7 @@ const request = (assetKey: string, contents = "audio") => {
   form.append("projectId", "project-1");
   form.append("assetKey", assetKey);
   form.append("file", file(contents));
+
   return new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": "1000" },
@@ -46,6 +49,7 @@ const requestWithFile = (assetKey: string, upload: File) => {
   form.append("projectId", "project-1");
   form.append("assetKey", assetKey);
   form.append("file", upload);
+
   return new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": String(upload.size) },
@@ -68,11 +72,14 @@ test("browser uploads derive a stable server idempotency key and return the auth
             name: z.string(),
             idempotencyKey: z.string(),
           }).passthrough().safeParse(args);
+
           if (!beginUpload.success) {
             return { asset: { id: "asset-authoritative" } };
           }
+
           idempotencyKeys.push(beginUpload.data.idempotencyKey);
           begins += 1;
+
           return begins === 1
             ? { status: "pending", assetKey: "asset-authoritative", r2Key: "asset-namespaces/namespace/object" }
             : { status: "completed", assetKey: "asset-authoritative", r2Key: "asset-namespaces/namespace/object" };
@@ -106,11 +113,13 @@ test("browser uploads require the stable client asset key", async () => {
   const form = new FormData();
   form.append("projectId", "project-1");
   form.append("file", file());
+
   const response = await application.request(new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": "1000" },
     body: form,
   }));
+
   expect(response.status).toBe(400);
 });
 
@@ -181,6 +190,7 @@ test("rejects oversized sample requests before multipart parsing or hashing", as
     },
     hashFile: async () => {
       hashed = true;
+
       return "a".repeat(64);
     },
   });
@@ -190,13 +200,16 @@ test("rejects oversized sample requests before multipart parsing or hashing", as
     headers: { "Content-Length": String(controlLimitsV1.maxAssetUploadRequestBytes + 1) },
     body: "not multipart",
   }));
+
   expect(response.status).toBe(413);
   expect(hashed).toBeFalse();
+
   const unsafeLength = await application.request(new Request("https://control.example/api/samples?projectId=project-1", {
     method: "POST",
     headers: { "Content-Length": String(Number.MAX_SAFE_INTEGER + 1) },
     body: "not multipart",
   }));
+
   expect(unsafeLength.status).toBe(400);
 });
 
@@ -211,6 +224,7 @@ test("rejects oversized sample files after authorization and before hashing", as
     }),
     hashFile: async () => {
       hashed = true;
+
       return "a".repeat(64);
     },
   });
@@ -227,6 +241,7 @@ test("checks project authorization before hashing or inspecting the upload", asy
     requireProjectRoleContext: async () => null,
     hashFile: async () => {
       hashed = true;
+
       return "a".repeat(64);
     },
     inspectAudioMetadata: async () => {
@@ -251,6 +266,7 @@ test("returns an internal error and records failed upload when R2 fails", async 
         query: async () => null,
         mutation: async () => {
           mutationCalls += 1;
+
           return mutationCalls === 1
             ? { status: "pending", assetKey: "asset", r2Key: "asset" }
             : {};
@@ -284,6 +300,7 @@ test("default sample catalog CORS only permits trusted Electron origins", async 
   const allowed = await application.request(new Request("https://control.example/api/default-samples", {
     headers: { Origin: "daw://app" },
   }));
+
   expect(allowed.status).toBe(200);
   expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("daw://app");
   expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBeNull();
@@ -292,12 +309,14 @@ test("default sample catalog CORS only permits trusted Electron origins", async 
     method: "HEAD",
     headers: { Origin: "daw://app" },
   }));
+
   expect(head.status).toBe(200);
   expect(head.headers.get("Access-Control-Allow-Origin")).toBe("daw://app");
 
   const rejected = await application.request(new Request("https://control.example/api/default-samples", {
     headers: { Origin: "https://untrusted.example" },
   }));
+
   expect(rejected.status).toBe(200);
   expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull();
 });
@@ -310,6 +329,7 @@ test("default sample media CORS preflight only permits trusted Electron origins"
     method: "OPTIONS",
     headers: { Origin: "http://localhost:5173" },
   }));
+
   expect(allowed.status).toBe(204);
   expect(allowed.headers.get("Access-Control-Allow-Origin")).toBe("http://localhost:5173");
   expect(allowed.headers.get("Access-Control-Allow-Credentials")).toBeNull();
@@ -318,6 +338,7 @@ test("default sample media CORS preflight only permits trusted Electron origins"
     method: "OPTIONS",
     headers: { Origin: "https://untrusted.example" },
   }));
+
   expect(rejected.status).toBe(403);
   expect(rejected.headers.get("Access-Control-Allow-Origin")).toBeNull();
 });

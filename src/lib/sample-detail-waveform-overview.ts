@@ -22,6 +22,7 @@ export function getSampleDetailWaveformOverviewViewportRect(input: OverviewViewp
 
   const startFraction = Math.max(0, Math.min(1, input.viewport.startSec / input.clipDurationSec))
   const endFraction = Math.max(startFraction, Math.min(1, input.viewport.endSec / input.clipDurationSec))
+
   return {
     leftPx: startFraction * input.widthPx,
     widthPx: (endFraction - startFraction) * input.widthPx,
@@ -33,10 +34,13 @@ export function getSampleDetailWaveformOverviewGrabOffset(
   pointerSec: number,
 ) {
   const durationSec = viewport.endSec - viewport.startSec
+
   if (!Number.isFinite(pointerSec) || !isPositiveFinite(durationSec)) return 0
+
   if (pointerSec >= viewport.startSec && pointerSec <= viewport.endSec) {
     return pointerSec - viewport.startSec
   }
+
   return durationSec / 2
 }
 
@@ -56,7 +60,9 @@ export function moveSampleDetailWaveformOverviewViewport(input: {
     || input.viewport.endSec <= input.viewport.startSec) {
     return input.viewport
   }
+
   const requestedStartSec = input.pointerSec - input.grabOffsetSec
+
   return panSampleDetailWaveformViewport({
     viewport: input.viewport,
     clipDurationSec: input.clipDurationSec,

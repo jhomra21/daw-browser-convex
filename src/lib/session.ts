@@ -16,15 +16,20 @@ type ClientSession = {
 
 export const normalizeClientSession = <Value>(value: Value): ClientSession => {
   const parsed = z.json().safeParse(value)
+
   if (!parsed.success || !isJsonObject(parsed.data) || !isJsonObject(parsed.data.user) || !isJsonObject(parsed.data.session)) return null
 
   const { user: rawUser, session } = parsed.data
   const { id } = rawUser
+
   if (!isJsonString(id) || id.trim() === '') return null
 
   const user: NonNullable<ClientSession>['user'] = { id }
+
   if (isJsonString(rawUser.email)) user.email = rawUser.email
+
   if (isJsonString(rawUser.name)) user.name = rawUser.name
+
   if (isJsonString(rawUser.image) || rawUser.image === null) user.image = rawUser.image
 
   return { user, session }
@@ -33,6 +38,7 @@ export const normalizeClientSession = <Value>(value: Value): ClientSession => {
 // Fetcher used by both the route guard and components
 export async function fetchSession(): Promise<ClientSession> {
   const res = await authClient.getSession()
+
   return normalizeClientSession(serializeJsonValue(res?.data))
 }
 

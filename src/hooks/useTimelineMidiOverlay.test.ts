@@ -26,11 +26,13 @@ test("owns audition release timers by pitch when source IDs collide", () => {
   const callbacks = new Map<number, () => void>()
   const cleared: number[] = []
   let nextTimer = 1
+
   const ownership = createAuditionReleaseTimerOwnership({
     schedule: (callback) => {
       const timer = nextTimer
       nextTimer += 1
       callbacks.set(timer, callback)
+
       return timer
     },
     clear: (timer) => {
@@ -38,6 +40,7 @@ test("owns audition release timers by pitch when source IDs collide", () => {
       callbacks.delete(timer)
     },
   })
+
   const releases: string[] = []
   const firstArpeggiator = { noteOff: (handle: number) => releases.push(`first:${handle}`) }
   const secondArpeggiator = { noteOff: (handle: number) => releases.push(`second:${handle}`) }
@@ -59,11 +62,13 @@ test("replacing an audition pitch cancels its prior bounded release", () => {
   const callbacks = new Map<number, () => void>()
   const cleared: number[] = []
   let nextTimer = 1
+
   const ownership = createAuditionReleaseTimerOwnership({
     schedule: (callback) => {
       const timer = nextTimer
       nextTimer += 1
       callbacks.set(timer, callback)
+
       return timer
     },
     clear: (timer) => {
@@ -71,6 +76,7 @@ test("replacing an audition pitch cancels its prior bounded release", () => {
       callbacks.delete(timer)
     },
   })
+
   const releases: string[] = []
   ownership.schedule(60, 100, () => releases.push("first"))
   ownership.cancel(60)

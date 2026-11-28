@@ -6,26 +6,32 @@ import { z } from 'zod'
 test('live gain ramps stay continuous in Chromium offline rendering', async () => {
   const directory = `/tmp/daw-audio-param-ramp-${crypto.randomUUID()}`
   const session = `audio-param-ramp-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     env.AGENT_BROWSER_ALLOW_FILE_ACCESS = '1'
+
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], {
       env,
       stdout: 'pipe',
       stderr: 'pipe',
     })
+
     const [stdout, stderr, exitCode] = await Promise.all([
       new Response(child.stdout).text(),
       new Response(child.stderr).text(),
       child.exited,
     ])
+
     if (exitCode !== 0) throw new Error(`agent-browser ${args[0]}: ${stderr || stdout}`)
+
     return stdout.trim()
   }
 
   await mkdir(directory, { recursive: true })
+
   try {
     const entry = `${directory}/fixture.ts`
     await Bun.write(entry, `import * as ramp from '${new URL('./audio-param-ramp.ts', import.meta.url).pathname}'
@@ -34,17 +40,22 @@ import { createLiveMixerRuntime } from '${new URL('./live-mixer-runtime.ts', imp
 import { resolveLiveMixerGraph } from '${new URL('./live-mixer-runtime.ts', import.meta.url).pathname}'
 import { AudioEngine } from '${new URL('./audio-engine.ts', import.meta.url).pathname}'
 Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRuntime, resolveLiveMixerGraph, AudioEngine })`)
+
     const bundle = await build({
       entrypoints: [entry],
       target: 'browser',
       format: 'iife',
     })
+
     expect(bundle.success).toBe(true)
     const script = await bundle.outputs[0]?.text()
+
     if (!script) throw new Error('Audio parameter ramp bundle is missing.')
+
     const browserScript = script
       .replaceAll('import.meta.url', JSON.stringify(`file://${directory}/bundle.js`))
       .replaceAll('import.meta.env.BASE_URL', JSON.stringify('/'))
+
     await Bun.write(`${directory}/index.html`, `<!doctype html><script>${browserScript}</script><script>
       window.renderRamp = async () => {
         const sampleRate = 48000;
@@ -598,6 +609,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
       };
     </script>`)
     await browser('open', `file://${directory}/index.html`)
+
     const rendered = z.object({
       before: z.number(),
       after: z.number(),
@@ -605,11 +617,13 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
       copiedCurveSample: z.number(),
       duration: z.number(),
     }).parse(JSON.parse(await browser('eval', 'window.renderRamp()')))
+
     expect(rendered.duration).toBe(0.01)
     expect(rendered.before).toBeLessThan(1)
     expect(rendered.after).toBeCloseTo(0.25, 2)
     expect(rendered.largestAdjacentStep).toBeLessThan(0.01)
     expect(rendered.copiedCurveSample).toBeGreaterThan(0.4)
+
     const mixer = z.object({
       unchangedRefreshCancelCount: z.number(),
       automationRefreshCancelCount: z.number(),
@@ -622,6 +636,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
       faderEnd: z.number(),
       largestFaderStep: z.number(),
     }).parse(JSON.parse(await browser('eval', 'window.renderMixerAutomation()')))
+
     expect(mixer.unchangedRefreshCancelCount).toBe(0)
     expect(mixer.automationRefreshCancelCount).toBe(0)
     expect(mixer.preMute).toBeGreaterThan(0.05)
@@ -634,6 +649,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
     expect(mixer.faderMidpoint).toBeGreaterThan(0.4)
     expect(mixer.faderEnd).toBeCloseTo(0.25, 2)
     expect(mixer.largestFaderStep).toBeLessThan(0.01)
+
     const runtime = z.object({
       configuredGainAfterRelease: z.number(),
       configuredGainAfterReenableCycle: z.number(),
@@ -648,6 +664,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
       writesAfterReenable: z.number(),
       writesAfterOwnedRefresh: z.number(),
     }).parse(JSON.parse(await browser('eval', 'window.renderLiveMixerRuntime()')))
+
     expect(runtime.configuredGainAfterRelease).toBeCloseTo(0.8, 2)
     expect(runtime.configuredGainAfterReenableCycle).toBeCloseTo(0.8, 2)
     expect(runtime.nodeCountAfterRefresh).toBe(runtime.nodeCountBeforeRefresh)
@@ -658,6 +675,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
     expect(runtime.countAfterProjectRecreate).toBe(runtime.nodeCountBeforeRefresh)
     expect(runtime.countAfterProjectClear).toBe(0)
     expect(runtime.writesAfterOwnedRefresh).toBe(runtime.writesAfterReenable)
+
     const sendEdges = z.object({
       initialEdgeCount: z.number(),
       reusedEdgeCount: z.number(),
@@ -668,6 +686,7 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
       midpointAfterRampReversal: z.number(),
       afterFade: z.number(),
     }).parse(JSON.parse(await browser('eval', 'window.renderSendEdgeTransitions()')))
+
     expect(sendEdges.initialEdgeCount).toBe(5)
     expect(sendEdges.reusedEdgeCount).toBe(sendEdges.initialEdgeCount)
     expect(sendEdges.countDuringFade).toBe(sendEdges.initialEdgeCount)
@@ -676,23 +695,29 @@ Object.assign(window, { gainRamp: ramp, applyLiveMixerGraph, createLiveMixerRunt
     expect(sendEdges.largestStep).toBeLessThan(0.05)
     expect(sendEdges.midpointAfterRampReversal).toBeGreaterThan(0.6)
     expect(sendEdges.afterFade).toBeCloseTo(1, 2)
+
     const tapMutes = z.object({
       preFx: z.object({ before: z.number(), midpoint: z.number(), after: z.number() }),
       preFader: z.object({ before: z.number(), midpoint: z.number(), after: z.number() }),
       postFaderDefault: z.object({ before: z.number(), midpoint: z.number(), after: z.number() }),
     }).parse(JSON.parse(await browser('eval', 'window.renderSendTapMutes()')))
+
     for (const tap of [tapMutes.preFx, tapMutes.preFader, tapMutes.postFaderDefault]) {
       expect(tap.before).toBeGreaterThan(tap.after)
       expect(tap.midpoint).toBeGreaterThan(tap.after)
       expect(tap.after).toBeLessThan(0.001)
     }
+
     const sourceMute = z.object({ before: z.number(), midpoint: z.number(), after: z.number() })
       .parse(JSON.parse(await browser('eval', 'window.renderSourceTrackMute()')))
+
     expect(sourceMute.before).toBeGreaterThan(0.7)
     expect(sourceMute.midpoint).toBeGreaterThan(sourceMute.after)
     expect(sourceMute.after).toBeLessThan(0.001)
+
     const master = z.object({ before: z.number(), after: z.number() })
       .parse(JSON.parse(await browser('eval', 'window.renderStoppedMasterManualChange()')))
+
     expect(master.before).toBeGreaterThan(0.6)
     expect(master.after).toBeCloseTo(0.2, 2)
   } finally {

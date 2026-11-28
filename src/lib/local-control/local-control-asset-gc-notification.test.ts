@@ -11,6 +11,7 @@ let failingStoragePath: string | undefined
 const localAssets = () => ({
   removeLocalAssetFileUnlocked: async (_projectId: string, storagePath: string) => {
     if (storagePath === failingStoragePath) throw new Error('Injected asset removal failure.')
+
     return { status: 'already-missing' as const }
   },
 })
@@ -36,23 +37,30 @@ const createExpiredAssetRecovery = async (
     createdAt: 1,
     updatedAt: 1,
   })
+
   const request = {
     version: 'v1' as const,
     projectId: project.id,
     actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: assetId } }],
   }
+
   const approval = await service.requestApproval(request)
+
   const result = await service.commit({
     ...request,
     idempotencyKey: `delete-${assetId}-${crypto.randomUUID()}`,
     approvalToken: approval.approvalToken,
   })
+
   const recovery = result.recoveries[0]
+
   if (!recovery) throw new Error('Expected asset recovery.')
   const jobId = `local-asset-gc:${recovery.id}`
   const job = await db.get('controlAssetGc', jobId)
   const recoveryRow = await db.get('controlRecoveries', recovery.id)
+
   if (!job || !recoveryRow) throw new Error('Expected GC job and recovery.')
+
   return { project, db, job, recoveryRow, jobId, recoveryId: recovery.id, service, storagePath: job.storagePath }
 }
 
@@ -72,6 +80,7 @@ test('isolates a failed GC job and notifies after another job finalizes', async 
   failingStoragePath = second.storagePath
   let changes = 0
   const unsubscribe = subscribeToLocalProjectChanges(first.project.id, () => { changes += 1 })
+
   try {
     expect(await runLocalControlAssetGc(first.project.id, {
       removeAssetFile: localAssets().removeLocalAssetFileUnlocked,
@@ -97,6 +106,7 @@ test('an asset commit publishes partial GC finalization once without double-publ
   failingStoragePath = second.storagePath
   let changes = 0
   const unsubscribe = subscribeToLocalProjectChanges(first.project.id, () => { changes += 1 })
+
   try {
     await createExpiredAssetRecovery('third-commit-asset', first)
     expect(changes).toBe(1)
@@ -105,6 +115,7 @@ test('an asset commit publishes partial GC finalization once without double-publ
     expect(failed?.claimToken).toMatch(/^[0-9a-f]{64}$/u)
 
     failingStoragePath = undefined
+
     if (!failed) throw new Error('Expected failed GC job.')
     await first.db.put('controlAssetGc', { ...failed, claimedAt: 0 })
     await createExpiredAssetRecovery('fourth-commit-asset', first)

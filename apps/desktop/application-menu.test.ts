@@ -28,6 +28,7 @@ type FakeWebContents = { cut: () => void; copy: () => void; paste: () => void; s
 
 const createFakeMenu = (template: ApplicationMenuTemplate[]) => {
   const items = new Map<string, FakeMenuItem>()
+
   for (const item of flatten(template)) {
     if (!item.id) continue
     items.set(item.id, {
@@ -36,6 +37,7 @@ const createFakeMenu = (template: ApplicationMenuTemplate[]) => {
       checked: item.checked ?? false,
     })
   }
+
   return {
     items,
     menu: {
@@ -49,6 +51,7 @@ describe("native application menu", () => {
     for (const platform of ["darwin", "win32"] as const) {
       const commands: unknown[] = []
       const template = createApplicationMenuTemplate(platform, (command) => commands.push(command))
+
       for (const item of flatten(template)) item.click?.()
       expect(new Set(commands)).toEqual(new Set(desktopApplicationMenuCommands))
       expect(commands).toHaveLength(desktopApplicationMenuCommands.length)
@@ -109,16 +112,19 @@ describe("native application menu", () => {
 
   test("mutates one installed menu for live state", () => {
     const sent: unknown[] = []
+
     const controller = createApplicationMenuController({
       platform: "darwin",
       sendCommand: (command) => sent.push(command),
     })
+
     const template = createApplicationMenuTemplate("darwin", () => {})
     const fake = createFakeMenu(template)
     let installedTemplate: ApplicationMenuTemplate[] = []
     controller.install({
       buildFromTemplate: (next) => {
         installedTemplate = next
+
         return fake.menu
       },
       setApplicationMenu: () => {},
@@ -162,6 +168,7 @@ describe("native application menu", () => {
     expect([...fake.items.entries()].filter(([id, item]) => id.startsWith("daw-menu-grid-") && item.checked)).toHaveLength(1)
 
     const grid = fake.items.get(applicationMenuItemIds.grid)
+
     if (!grid) throw new Error("Grid menu item was not installed.")
     grid.checked = false
     flatten(installedTemplate).find((item) => item.id === applicationMenuItemIds.grid)?.click?.()
@@ -172,27 +179,34 @@ describe("native application menu", () => {
   test("sends Edit cut, copy, paste and select all to the focused field, else to the timeline", () => {
     const sent: unknown[] = []
     const nativeCalls: string[] = []
+
     const controller = createApplicationMenuController({
       platform: "darwin",
       sendCommand: (command) => sent.push(command),
     })
+
     const fake = createFakeMenu(createApplicationMenuTemplate("darwin", () => {}))
     controller.install({
       buildFromTemplate: () => fake.menu,
       setApplicationMenu: () => {},
     })
+
     const webContents = {
       cut: () => nativeCalls.push("cut"),
       copy: () => nativeCalls.push("copy"),
       paste: () => nativeCalls.push("paste"),
       selectAll: () => nativeCalls.push("selectAll"),
     }
+
     const focusedWindow = { webContents }
+
     const invoke = (id: string) => {
       const item = fake.items.get(id)
+
       if (!item?.click) throw new Error(`${id} has no click`)
       item.click(item, focusedWindow)
     }
+
     const state: DesktopApplicationMenuState = {
       ready: true,
       canExportArchive: false,
@@ -236,6 +250,7 @@ describe("native application menu", () => {
       platform: "linux",
       sendCommand: () => {},
     })
+
     const fake = createFakeMenu(createApplicationMenuTemplate("linux", () => {}))
     controller.install({
       buildFromTemplate: () => fake.menu,
@@ -280,13 +295,16 @@ describe("native application menu", () => {
       applicationMenuStateAllowed: () => allowed,
       applicationMenuController: { setState: (state) => { applied.push(state) } },
     })
+
     const state: DesktopApplicationMenuState = {
       ready: true, canExportArchive: false, canUndo: false, canRedo: false, canCut: false, canCopy: false,
       canPaste: false, canSelectAll: false, canDuplicateSelection: false, canDeleteSelection: false,
       editableFocused: false, signedIn: false, metronomeEnabled: false, loopEnabled: false, gridEnabled: false,
       followEnabled: false, syncMix: false, gridDenominator: 4,
     }
+
     const send = handlers.get(applicationMenuStateChannel)
+
     if (!send) throw new Error("the menu state channel has no handler")
     send(event, { ...state, ready: "yes" })
     send(event, {})

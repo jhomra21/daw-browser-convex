@@ -40,6 +40,7 @@ describe("theme resolver", () => {
 
   test("applies DAW token overrides", () => {
     const base = getTheme("default")
+
     const tokens = resolveDawTheme(
       {
         id: "default",

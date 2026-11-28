@@ -28,20 +28,24 @@ class TestAudioBuffer implements AudioBuffer {
 
 const createAssetStorage = () => {
   const files = new Map<string, File>()
+
   const assets = {
     getFileHandle: async (name: string) => ({
       getFile: async () => files.get(name) ?? new File([], name),
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => { chunks.push(chunk) },
           close: async () => {
             const bytes = new Uint8Array(chunks.reduce((total, chunk) => total + chunk.byteLength, 0))
             let offset = 0
+
             for (const chunk of chunks) {
               bytes.set(chunk, offset)
               offset += chunk.byteLength
             }
+
             files.set(name, new File([bytes], name))
           },
           abort: async () => undefined,
@@ -50,9 +54,11 @@ const createAssetStorage = () => {
     }),
     removeEntry: async (name: string) => { files.delete(name) },
   }
+
   const root = {
     getDirectoryHandle: async (name: string) => name === "assets" ? assets : root,
   }
+
   return { root }
 }
 
@@ -60,13 +66,16 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
   const project = await createLocalProject(`Timeline reconciliation ${crypto.randomUUID()}`)
   const repository = createLocalTimelineRepository(project.id)
   const track = (await repository.loadSnapshot()).tracks[0]
+
   if (!track) throw new Error("Expected default track.")
+
   const history = {
     undo: [buildTrackVolumeHistoryEntry({ projectId: project.id, track: { ...track, clips: [] },
       scope: "local", from: 1, to: 0.5 })],
     redo: [buildTrackVolumeHistoryEntry({ projectId: project.id, track: { ...track, clips: [] },
       scope: "local", from: 0.5, to: 0.25 })],
   }
+
   await saveLocalHistory(project.id, history)
   const reconciledNames: string[] = []
 
@@ -74,6 +83,7 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
     const [projectId] = createSignal(project.id)
     const [generation] = createSignal(3)
     const [reloadVersion] = createSignal(0)
+
     const recovery = useMissingMediaRecovery({
       projectId,
       mountedProjectGeneration: generation,
@@ -102,6 +112,7 @@ test("reconciliation reloads the canonical local repository snapshot", async () 
         selectTrackTarget: () => undefined,
       },
     })
+
     await recovery.reloadLocalTimeline({
       projectId: project.id,
       mountedProjectGeneration: 3,
@@ -165,16 +176,20 @@ test("mount hydration restores persisted local media through the canonical asset
     configurable: true,
     value: { getDirectory: async () => root },
   })
+
   try {
     const project = await createLocalProject(`Hydration ${crypto.randomUUID()}`)
     const repository = createLocalTimelineRepository(project.id)
     const track = (await repository.loadSnapshot()).tracks[0]
+
     if (!track) throw new Error("Expected default track.")
+
     const asset = await createLocalAsset({
       projectId: project.id,
       file: new File(["wav"], "imported.wav", { type: "audio/wav" }),
       metadata: { sourceKind: "upload", durationSec: 1, sampleRate: 44_100, channelCount: 1 },
     })
+
     const clip = await repository.createClip({
       trackId: track.id,
       name: "imported.wav",
@@ -187,6 +202,7 @@ test("mount hydration restores persisted local media through the canonical asset
       sourceSampleRate: 44_100,
       sourceChannelCount: 1,
     })
+
     await createRoot(async (dispose) => {
       const [projectId] = createSignal(project.id)
       const [generation] = createSignal(4)
@@ -195,12 +211,14 @@ test("mount hydration restores persisted local media through the canonical asset
       const audioEngine = new AudioEngine()
       const hydratedBuffer = new TestAudioBuffer()
       audioEngine.decodeAudioData = async () => hydratedBuffer
+
       const clipBuffers = useClipBuffers({
         audioEngine,
         projectId,
         tracks: runtimeTracks,
         onBufferChange: () => undefined,
       })
+
       const recovery = useMissingMediaRecovery({
         projectId,
         mountedProjectGeneration: generation,
@@ -228,6 +246,7 @@ test("mount hydration restores persisted local media through the canonical asset
           selectTrackTarget: () => undefined,
         },
       })
+
       const preProjectionLoad = clipBuffers.preload(clip.id)
       await recovery.reloadLocalTimeline({
         projectId: project.id,
@@ -251,7 +270,9 @@ test("mount hydration aborts stale project work before loading the next generati
   const second = await createLocalProject(`Hydration B ${crypto.randomUUID()}`)
   const [firstTrack] = (await createLocalTimelineRepository(first.id).loadSnapshot()).tracks
   const [secondTrack] = (await createLocalTimelineRepository(second.id).loadSnapshot()).tracks
+
   if (!firstTrack || !secondTrack) throw new Error("Expected default tracks.")
+
   const firstClip = await createLocalTimelineRepository(first.id).createClip({
     trackId: firstTrack.id,
     name: "A",
@@ -263,6 +284,7 @@ test("mount hydration aborts stale project work before loading the next generati
     sourceSampleRate: 44_100,
     sourceChannelCount: 1,
   })
+
   const secondClip = await createLocalTimelineRepository(second.id).createClip({
     trackId: secondTrack.id,
     name: "B",
@@ -274,6 +296,7 @@ test("mount hydration aborts stale project work before loading the next generati
     sourceSampleRate: 44_100,
     sourceChannelCount: 1,
   })
+
   const gate = Promise.withResolvers<void>()
   const hydrated: string[] = []
   const [projectId, setProjectId] = createSignal(first.id)
@@ -299,6 +322,7 @@ test("mount hydration aborts stale project work before loading the next generati
           await gate.promise
           signal?.throwIfAborted()
         }
+
         hydrated.push(clipId)
       },
       removeClip: async () => false,
@@ -313,12 +337,15 @@ test("mount hydration aborts stale project work before loading the next generati
         selectTrackTarget: () => undefined,
       },
     })
+
     const firstController = new AbortController()
+
     const firstLoad = recovery.reloadLocalTimeline({
       projectId: first.id,
       mountedProjectGeneration: 1,
       signal: firstController.signal,
     })
+
     firstController.abort()
     setProjectId(second.id)
     setGeneration(2)
@@ -345,7 +372,9 @@ test("mount hydration bounds concurrent media loads", async () => {
   const project = await createLocalProject(`Hydration concurrency ${crypto.randomUUID()}`)
   const repository = createLocalTimelineRepository(project.id)
   const [track] = (await repository.loadSnapshot()).tracks
+
   if (!track) throw new Error("Expected default track.")
+
   for (let index = 0; index < 6; index += 1) {
     await repository.createClip({
       trackId: track.id,
@@ -367,6 +396,7 @@ test("mount hydration bounds concurrent media loads", async () => {
     const [generation] = createSignal(1)
     const [reloadVersion] = createSignal(0)
     const buffer = new TestAudioBuffer()
+
     const recovery = useMissingMediaRecovery({
       projectId,
       mountedProjectGeneration: generation,
@@ -399,6 +429,7 @@ test("mount hydration bounds concurrent media loads", async () => {
         selectTrackTarget: () => undefined,
       },
     })
+
     await recovery.reloadLocalTimeline({
       projectId: project.id,
       mountedProjectGeneration: 1,
@@ -413,9 +444,12 @@ test("a newer same-generation reload supersedes an older queued local snapshot",
   const project = await createLocalProject(`Latest snapshot ${crypto.randomUUID()}`)
   const repository = createLocalTimelineRepository(project.id)
   const [track] = (await repository.loadSnapshot()).tracks
+
   if (!track) throw new Error("Expected default track.")
+
   const clip = await repository.createClip({ trackId: track.id, name: "Canonical", startSec: 0,
     duration: 1, sourceAssetKey: "asset:latest", sourceKind: "upload" })
+
   let hydrationLoads = 0
   await createRoot(async (dispose) => {
     const recovery = useMissingMediaRecovery({
@@ -430,6 +464,7 @@ test("a newer same-generation reload supersedes an older queued local snapshot",
       selection: { selectedClip: () => null, setSelectedClip: () => {}, setSelectedClipIds: () => {},
         selectTrackTarget: () => {} },
     })
+
     await Promise.all([recovery.reloadLocalTimeline(), recovery.reloadLocalTimeline()])
     expect(hydrationLoads).toBe(1)
     expect(recovery.localTimelineSnapshot()?.clips[0]?.id).toBe(clip.id)
@@ -441,6 +476,7 @@ test("a reload for an unmounted generation does not supersede the mounted genera
   const project = await createLocalProject(`Stale reload ${crypto.randomUUID()}`)
   const repository = createLocalTimelineRepository(project.id)
   const [track] = (await repository.loadSnapshot()).tracks
+
   if (!track) throw new Error("Expected default track.")
   await createRoot(async (dispose) => {
     const recovery = useMissingMediaRecovery({
@@ -455,9 +491,12 @@ test("a reload for an unmounted generation does not supersede the mounted genera
       selection: { selectedClip: () => null, setSelectedClip: () => {}, setSelectedClipIds: () => {},
         selectTrackTarget: () => {} },
     })
+
     await recovery.reloadLocalTimeline()
+
     const clip = await repository.createClip({ trackId: track.id, name: "Mounted", startSec: 0,
       duration: 1, sourceAssetKey: "asset:mounted", sourceKind: "upload" })
+
     const mounted = recovery.reloadLocalTimeline()
     void recovery.reloadLocalTimeline({ projectId: project.id, mountedProjectGeneration: 1 })
     await mounted

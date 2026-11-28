@@ -35,6 +35,7 @@ test('stabilizes fade inputs across zoom updates with the same local slice', () 
     sliceStartSec: 0,
     sliceDurationSec: 20,
   })
+
   const zoomUpdate = createFadeOverlayInput({
     duration: 20,
     fades: { ...baseline },
@@ -42,6 +43,7 @@ test('stabilizes fade inputs across zoom updates with the same local slice', () 
     sliceStartSec: 0,
     sliceDurationSec: 20,
   })
+
   expect(stabilizeFadeOverlayInput(first, zoomUpdate)).toBe(first)
 })
 
@@ -52,15 +54,18 @@ test('recomputes fade paths when the slice boundary or fade data changes', () =>
     sliceStartSec: 0,
     sliceDurationSec: 20,
   })
+
   const fadePathMemo = createFadeOverlayPathMemo()
   const normalizedFades = normalizeClipFades(first.fades, first.duration)
   const initialPaths = fadePathMemo(first, normalizedFades)
+
   const zoomInput = stabilizeFadeOverlayInput(first, createFadeOverlayInput({
     duration: 20,
     fades: { ...baseline },
     sliceStartSec: 0,
     sliceDurationSec: 20,
   }))
+
   expect(fadePathMemo(zoomInput, normalizedFades)).toBe(initialPaths)
 
   const boundaryInput = createFadeOverlayInput({
@@ -69,10 +74,12 @@ test('recomputes fade paths when the slice boundary or fade data changes', () =>
     sliceStartSec: 0,
     sliceDurationSec: 4,
   })
+
   const boundaryPaths = fadePathMemo(
     boundaryInput,
     normalizedFades,
   )
+
   expect(boundaryPaths).not.toBe(initialPaths)
   expect(boundaryPaths.fadeIn).not.toBe(initialPaths.fadeIn)
 
@@ -82,10 +89,12 @@ test('recomputes fade paths when the slice boundary or fade data changes', () =>
     sliceStartSec: 0,
     sliceDurationSec: 4,
   })
+
   const editedPaths = fadePathMemo(
     editedInput,
     normalizeClipFades(editedInput.fades, editedInput.duration),
   )
+
   expect(editedPaths).not.toBe(boundaryPaths)
   expect(editedPaths.fadeIn).not.toBe(boundaryPaths.fadeIn)
 })
@@ -155,6 +164,7 @@ test('updates all endpoint and curve controls from a local baseline', () => {
     currentX: 120,
     currentY: 20,
   }).fadeOutEndSec).toBe(2)
+
   const curve = updateFadeDraft({
     baseline,
     side: 'fadeIn',
@@ -165,6 +175,7 @@ test('updates all endpoint and curve controls from a local baseline', () => {
     currentX: 10,
     currentY: 0,
   })
+
   expect(curve.fadeInCurvePosition).toBeCloseTo(0.5)
   expect(curve.fadeInCurve).toBe(1)
 })
@@ -200,5 +211,6 @@ test('commits slice-relative fade pointer movement in absolute clip time', () =>
     overlayStartSec: 8,
     overlayDurationSec: 4,
   })
+
   expect(next.fadeInSec).toBe(10)
 })

@@ -18,6 +18,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>() => {
       })
       .finally(() => {
         const current = timers.get(trackId)
+
         if (current === scheduled) timers.delete(trackId)
       })
   )
@@ -31,7 +32,9 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>() => {
       .finally(() => {
         runningWrites.delete(promise)
       })
+
     runningWrites.add(promise)
+
     return promise
   }
 
@@ -42,13 +45,17 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>() => {
     afterWrite?: () => void,
   ) => {
     const previous = timers.get(trackId)
+
     if (previous) clearTimeout(previous.timer)
+
     const timer = window.setTimeout(() => {
       const scheduled = timers.get(trackId)
+
       if (!scheduled) return
       timers.delete(trackId)
       void trackScheduledWrite(timers, trackId, scheduled).catch(() => undefined)
     }, 150)
+
     timers.set(trackId, { timer, write, afterWrite })
   }
 
@@ -57,6 +64,7 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>() => {
     trackId: TTrackId,
   ) => {
     const timer = timers.get(trackId)
+
     if (!timer) return
     clearTimeout(timer.timer)
     timers.delete(trackId)
@@ -64,11 +72,13 @@ export const createTimelineMixerWriteQueue = <TTrackId extends string>() => {
 
   const flushTimers = async (timers: Map<TTrackId, ScheduledTrackWrite>) => {
     const writes: Promise<void>[] = Array.from(runningWrites)
+
     for (const [trackId, scheduled] of timers) {
       clearTimeout(scheduled.timer)
       timers.delete(trackId)
       writes.push(trackScheduledWrite(timers, trackId, scheduled))
     }
+
     await Promise.all(writes)
   }
 

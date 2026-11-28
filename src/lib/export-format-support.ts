@@ -20,19 +20,25 @@ export const probeSupportedExportAudioFormats = (
 ): Promise<ExportAudioFormat[]> => {
   const key = getSupportKey(request)
   const cached = supportedFormatsByConfiguration.get(key)
+
   if (cached) return Promise.resolve(cached)
   const pending = supportPromisesByConfiguration.get(key)
+
   if (pending) return pending
+
   const supportPromise = import('@daw-browser/audio-engine/export-audio-support').then((exportAudioSupport) => (
     exportAudioSupport.getSupportedExportAudioFormats(request)
   )).then((formats) => {
     supportedFormatsByConfiguration.set(key, formats)
+
     return formats
   }).catch(() => (
     ['wav'] satisfies ExportAudioFormat[]
   )).finally(() => {
     supportPromisesByConfiguration.delete(key)
   })
+
   supportPromisesByConfiguration.set(key, supportPromise)
+
   return supportPromise
 }

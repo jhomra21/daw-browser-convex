@@ -21,9 +21,11 @@ test("project-prefix deletion keys are exactly the two project-owned prefixes", 
     "asset-namespaces/namespace-1/",
     "projects/project-1/",
   ]);
+
   for (const prefix of prefixes) {
     expect(isValidR2DeleteKey("project-1", "namespace-1", "project-prefix", prefix)).toBe(true);
   }
+
   for (const key of [
     "asset-namespaces/namespace-1/nested/",
     "asset-namespaces/namespace-1",
@@ -35,6 +37,7 @@ test("project-prefix deletion keys are exactly the two project-owned prefixes", 
   ]) {
     expect(isValidR2DeleteKey("project-1", "namespace-1", "project-prefix", key)).toBe(false);
   }
+
   for (const [projectId, storageNamespace] of [["", "namespace-1"], ["project-1", ""], ["../project-1", "namespace-1"], ["project-1", "namespace/1"]]) {
     expect(isValidR2DeleteKey(projectId, storageNamespace, "project-prefix", projectR2DeletePrefixes(projectId, storageNamespace)[0])).toBe(false);
   }

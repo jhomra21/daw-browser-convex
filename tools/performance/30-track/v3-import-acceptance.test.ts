@@ -22,6 +22,7 @@ test("selects only a unique imported-project page CDP target", () => {
     { id: "blank", type: "page", url: "about:blank", webSocketDebuggerUrl: "ws://127.0.0.1/blank" },
     { id: "project", type: "page", url: "daw://app/?projectId=project%3Aone", webSocketDebuggerUrl: "ws://127.0.0.1/project" },
   ]
+
   expect(selectedProjectCdpTarget(targets, "project:one")?.id).toBe("project")
   expect(selectedProjectCdpTarget(targets, "project:other")).toBeNull()
   expect(selectedProjectCdpTarget([...targets, targets[1]!], "project:one")).toBeNull()
@@ -103,10 +104,14 @@ test("reconnect selects only the mounted imported project, never about:blank", (
 
 test("lost browser session reconnects to the verified app target", async () => {
   const events: string[] = []
+
   const result = await recoverQuietTarget({
     original: async () => { events.push("original"); throw new Error("session lost") },
-    reconnect: async () => { events.push("reconnect"); return "daw://app/?projectId=project:one" },
+    reconnect: async () => { events.push("reconnect");
+
+ return "daw://app/?projectId=project:one" },
   })
+
   expect(result).toEqual({ recovered: true, url: "daw://app/?projectId=project:one" })
   expect(events).toEqual(["original", "reconnect"])
 })

@@ -28,6 +28,7 @@ export function clampSampleDetailWaveformViewport(
 
   const minimumDurationSec = Math.min(bounds.clipDurationSec, 2 / bounds.sampleRate)
   const requestedDurationSec = viewport.endSec - viewport.startSec
+
   const durationSec = Math.max(
     minimumDurationSec,
     Math.min(
@@ -37,8 +38,10 @@ export function clampSampleDetailWaveformViewport(
         : bounds.clipDurationSec,
     ),
   )
+
   const requestedStartSec = Number.isFinite(viewport.startSec) ? viewport.startSec : 0
   const startSec = Math.max(0, Math.min(bounds.clipDurationSec - durationSec, requestedStartSec))
+
   return { startSec, endSec: startSec + durationSec }
 }
 
@@ -50,12 +53,14 @@ export function zoomSampleDetailWaveformViewport(input: {
   zoomFactor: number
 }): SampleDetailWaveformViewport {
   const current = clampSampleDetailWaveformViewport(input.viewport, input)
+
   if (!isPositiveFinite(input.zoomFactor)) return current
 
   const anchorFraction = clampUnit(input.anchorFraction)
   const currentDurationSec = current.endSec - current.startSec
   const anchorSec = current.startSec + currentDurationSec * anchorFraction
   const nextDurationSec = currentDurationSec / input.zoomFactor
+
   return clampSampleDetailWaveformViewport({
     startSec: anchorSec - nextDurationSec * anchorFraction,
     endSec: anchorSec + nextDurationSec * (1 - anchorFraction),
@@ -69,7 +74,9 @@ export function panSampleDetailWaveformViewport(input: {
   deltaSec: number
 }): SampleDetailWaveformViewport {
   const current = clampSampleDetailWaveformViewport(input.viewport, input)
+
   if (!Number.isFinite(input.deltaSec) || input.deltaSec === 0) return current
+
   return clampSampleDetailWaveformViewport({
     startSec: current.startSec + input.deltaSec,
     endSec: current.endSec + input.deltaSec,
@@ -84,6 +91,7 @@ export function sampleDetailWaveformTimeAtX(input: {
   const fraction = input.widthPx > 0 && Number.isFinite(input.widthPx)
     ? input.xPx / input.widthPx
     : 0
+
   return input.viewport.startSec + (input.viewport.endSec - input.viewport.startSec) * fraction
 }
 
@@ -93,6 +101,8 @@ export function sampleDetailWaveformXAtTime(input: {
   widthPx: number
 }) {
   const durationSec = input.viewport.endSec - input.viewport.startSec
+
   if (!isPositiveFinite(durationSec) || !isPositiveFinite(input.widthPx)) return 0
+
   return ((input.timeSec - input.viewport.startSec) / durationSec) * input.widthPx
 }

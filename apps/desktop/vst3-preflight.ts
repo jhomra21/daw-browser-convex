@@ -39,9 +39,11 @@ export const packagedVst3WorkerPath = (resourcesPath: string, isPackaged: boolea
 const readWorkerHelloFrame = (bytes: Buffer) => {
   if (bytes.byteLength < 4) throw new Error("The native VST3 worker response was incomplete.")
   const bodyBytes = bytes.readUInt32BE(0)
+
   if (bodyBytes === 0 || bodyBytes > maximumWorkerHelloBytes || bytes.byteLength !== bodyBytes + 4) {
     throw new Error("The native VST3 worker response exceeded the frame limit.")
   }
+
   return decodeNativeVst3WorkerHello(bytes.subarray(4).toString("utf8"))
 }
 
@@ -57,6 +59,7 @@ export const preflightNativeVst3Worker = async (input: {
   workerEnvironment?: NodeJS.ProcessEnv
 }): Promise<NativeVst3PreflightResult> => {
   const requestId = randomUUID()
+
   const unavailable = (
     code: Extract<NativeVst3PreflightResult, { status: "unavailable" }>["code"],
     message: string,
@@ -69,16 +72,20 @@ export const preflightNativeVst3Worker = async (input: {
     message,
     requirements,
   })
+
   try {
     await (input.accessWorker ?? access)(input.workerPath)
   } catch {
     return unavailable("worker-unavailable", "The packaged native VST3 worker is unavailable.")
   }
+
   if (!Number.isFinite(input.sampleRateHz) || input.sampleRateHz <= 0 || input.sampleRateHz > 384_000) {
     return unavailable("worker-unavailable", "The native VST3 worker preflight sample rate is invalid.")
   }
+
   input.signal?.throwIfAborted()
   const attachment = input.attachment
+
   const arguments_ = [
     "--preflight",
     "--instance-id", attachment.instanceId,
@@ -95,52 +102,67 @@ export const preflightNativeVst3Worker = async (input: {
     "--maximum-events", String(attachment.workerTransport.maximumEventsPerBlock),
     "--state-revision", String(attachment.stateRevision),
   ]
+
   return new Promise((resolve, reject) => {
     const started = performance.now()
     const environment: NodeJS.ProcessEnv = { PATH: "/usr/bin:/bin", ...input.workerEnvironment }
+
     const launch = input.spawnWorker ?? ((workerPath, workerArguments) => spawn(workerPath, [...workerArguments], {
       env: environment,
       stdio: ["pipe", "pipe", "pipe"],
     }))
+
     let child: ChildProcessWithoutNullStreams
+
     try {
       child = launch(input.workerPath, arguments_)
       input.evidence?.("vst-preflight-spawn", { pid: child.pid ?? null, instanceId: attachment.instanceId })
     } catch {
       resolve(unavailable("worker-unavailable", "The native VST3 worker could not start."))
+
       return
     }
+
     child.stdin.end()
     child.stderr.resume()
     const chunks: Buffer[] = []
     let outputBytes = 0
     let settled = false
     let abort = () => {}
+
     const finish = (result: NativeVst3PreflightResult) => {
       if (settled) return
       settled = true
       input.evidence?.("vst-preflight-complete", { pid: child.pid ?? null, instanceId: attachment.instanceId,
         durationMs: performance.now() - started, status: result.status })
+
       if (timer !== undefined) clearTimeout(timer)
       input.signal?.removeEventListener("abort", abort)
       resolve(result)
     }
+
     abort = () => {
       if (settled) return
       settled = true
+
       if (timer !== undefined) clearTimeout(timer)
       child.kill("SIGKILL")
       reject(new DOMException("Native VST3 worker preflight canceled.", "AbortError"))
     }
+
     input.signal?.addEventListener("abort", abort, { once: true })
+
     if (settled) return
+
     // A hard deadline contains a hung native worker; every other terminal path clears it in finish().
     const timer = setTimeout(() => {
       child.kill("SIGKILL")
       finish(unavailable("worker-timeout", "The native VST3 worker preflight timed out."))
     }, input.deadlineMs ?? defaultPreflightDeadlineMs)
+
     child.stdout.on("data", (chunk: Buffer) => {
       outputBytes += chunk.byteLength
+
       if (outputBytes > maximumWorkerHelloBytes + 4) {
         child.kill("SIGKILL")
         finish(unavailable("worker-invalid-response", "The native VST3 worker preflight exceeded the output limit."))
@@ -153,10 +175,13 @@ export const preflightNativeVst3Worker = async (input: {
     })
     child.once("close", (code) => {
       if (settled) return
+
       if (code !== 0) {
         finish(unavailable("worker-crashed", "The native VST3 worker preflight failed."))
+
         return
       }
+
       try {
         const hello = readWorkerHelloFrame(Buffer.concat(chunks))
         finish({

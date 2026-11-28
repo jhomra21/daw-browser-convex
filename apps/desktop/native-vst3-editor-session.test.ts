@@ -41,14 +41,19 @@ const fakeSupervisor = (
 ): FakeSupervisor => {
   const step = (name: string) => {
     calls.push(name)
+
     if (failAt === name) throw new Error(`${name} failed`)
   }
+
   return {
     calls,
     anchors: [],
-    async beginTransaction() { step("begin"); return "transaction-token" },
+    async beginTransaction() { step("begin");
+
+ return "transaction-token" },
     async configure(input, _transactionToken) {
       calls.push(`configure:${input.deviceId}`)
+
       if (failAt === "configure") throw new Error("configure failed")
     },
     async commitTransaction(_transactionToken) { step("commit") },
@@ -65,17 +70,21 @@ const fakeSupervisor = (
     },
     async executeVstEditorCommand(input: { command: string; anchor?: { x: number; y: number } }) {
       step(`editor:${input.command}`)
+
       if (input.anchor) this.anchors.push(input.anchor)
+
       return { success: true, owned: true, supported: true, open: input.command !== "close", width: 640, height: 480 }
     },
     async getVstState() {
       calls.push("get-state")
+
       return state
     },
     async teardown() { step("teardown") },
     async attachVst() {},
     onWorkerNotification(listener) {
       this.interactionListener = listener
+
       return () => { this.interactionListener = undefined }
     },
   }
@@ -99,6 +108,7 @@ const managerFor = (input: {
 } = {}): NativeVst3EditorSessionManager => {
   const calls = input.calls ?? []
   const supervisors = input.supervisors ?? []
+
   const catalog: PluginCatalogData = {
     version: 3,
     directories: [],
@@ -106,6 +116,7 @@ const managerFor = (input: {
     diagnostics: [],
     scannedAtMs: null,
   }
+
   return createNativeVst3EditorSessionManager({
     workerPath: "/worker",
     catalogStore: { load: async () => catalog },
@@ -148,12 +159,14 @@ test("restores initial state before opening and captures state before closing", 
   const state = { bytes: new Uint8Array([4, 5, 6]), sha256: "b".repeat(64) }
   const supervisor = fakeSupervisor(calls, undefined, firstInstance, state)
   let coordinatedState: Uint8Array | undefined
+
   const manager = managerFor({
     calls,
     supervisors: [supervisor],
     coordinate: async ({ capturedVstStates, requiredVstStateInstanceIds }) => {
       coordinatedState = capturedVstStates?.get(firstInstance)?.bytes
       expect(requiredVstStateInstanceIds?.has(firstInstance)).toBeTrue()
+
       return { ok: true, attached: 1 }
     },
   })
@@ -167,6 +180,7 @@ test("restores initial state before opening and captures state before closing", 
     requiresState: true,
     captureState: true,
   })
+
   const status = await manager.execute({
     projectId,
     instanceId: firstInstance,
@@ -187,7 +201,9 @@ test("waits for the worker-ready notification before opening the editor", async 
     calls.push("diagnostic-start")
     startReached.resolve()
   }
+
   const manager = managerFor({ calls, supervisors: [supervisor] })
+
   const opening = manager.execute({
     projectId,
     instanceId: firstInstance,
@@ -215,7 +231,9 @@ test("waits for the requested editor worker when another attachment becomes read
     calls.push("diagnostic-start")
     startReached.resolve()
   }
+
   const manager = managerFor({ calls, supervisors: [supervisor] })
+
   const opening = manager.execute({
     projectId,
     instanceId: firstInstance,
@@ -251,13 +269,16 @@ test("suspendAll cancels an editor initialization waiting for worker readiness",
     calls.push("diagnostic-start")
     startReached.resolve()
   }
+
   const manager = managerFor({ calls, supervisors: [supervisor, fakeSupervisor(calls)] })
+
   const opening = manager.execute({
     projectId,
     instanceId: firstInstance,
     command: "open",
     serializedPlan: "plan",
   })
+
   await startReached.promise
   const suspended = manager.suspendAll()
   await expect(opening).rejects.toThrow("suspended")
@@ -280,13 +301,16 @@ test("teardownAll cancels an editor initialization waiting for worker readiness"
     calls.push("diagnostic-start")
     startReached.resolve()
   }
+
   const manager = managerFor({ calls, supervisors: [supervisor] })
+
   const opening = manager.execute({
     projectId,
     instanceId: firstInstance,
     command: "open",
     serializedPlan: "plan",
   })
+
   await startReached.promise
   const teardown = manager.teardownAll()
   await expect(opening).rejects.toThrow("suspended")
@@ -297,6 +321,7 @@ test("teardownAll cancels an editor initialization waiting for worker readiness"
 test("rolls back and tears down a failed initialization", async () => {
   const calls: string[] = []
   const supervisor = fakeSupervisor(calls)
+
   const manager = managerFor({
     calls,
     supervisors: [supervisor],
@@ -367,12 +392,15 @@ test("retries after host loss even when cleanup fails", async () => {
       failed = true
       throw new Error("Native audio host stopped.")
     }
+
     return originalExecute(input)
   }
+
   firstSupervisor.teardown = async () => {
     calls.push("teardown")
     throw new Error("cleanup failed")
   }
+
   const manager = managerFor({
     calls,
     supervisors: [firstSupervisor, fakeSupervisor(calls)],
@@ -391,6 +419,7 @@ test("captures editor state through the renderer callback before suspension tear
   const calls: string[] = []
   const captured: Array<{ projectId: string; instanceId: string; state: { bytes: Uint8Array; sha256: string } }> = []
   const supervisor = fakeSupervisor(calls)
+
   const manager = managerFor({
     calls,
     supervisors: [supervisor],
@@ -398,6 +427,7 @@ test("captures editor state through the renderer callback before suspension tear
       captured.push(input)
     },
   })
+
   await manager.execute({
     projectId,
     instanceId: firstInstance,
@@ -417,12 +447,14 @@ test("captures editor state through the renderer callback before suspension tear
 test("a playback-owned instance's own editor state is never read or persisted", async () => {
   const calls: string[] = []
   const captured: string[] = []
+
   const manager = managerFor({
     calls,
     supervisors: [fakeSupervisor(calls)],
     playbackOwns: (instanceId) => instanceId === firstInstance,
     onCapturedState: ({ instanceId }) => { captured.push(instanceId) },
   })
+
   await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan", captureState: true })
 
   await manager.captureAll()
@@ -438,14 +470,17 @@ test("captures all editor state before quit and still tears down after capture f
   const captured: string[] = []
   const supervisor = fakeSupervisor(calls)
   let failCapture = false
+
   const manager = managerFor({
     calls,
     supervisors: [supervisor],
     onCapturedState: async ({ instanceId }) => {
       captured.push(instanceId)
+
       if (failCapture) throw new Error("state persistence failed")
     },
   })
+
   await manager.execute({
     projectId,
     instanceId: firstInstance,
@@ -468,10 +503,12 @@ test("tears down each supervisor across queued close and reopen cycles", async (
     teardownCounts[0] += 1
     calls.push("teardown:first")
   }
+
   secondSupervisor.teardown = async () => {
     teardownCounts[1] += 1
     calls.push("teardown:second")
   }
+
   const manager = managerFor({ calls, supervisors: [firstSupervisor, secondSupervisor] })
   const openFirst = manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })
   const closeFirst = manager.execute({ projectId, instanceId: firstInstance, command: "close" })
@@ -500,10 +537,12 @@ test("reuses a session for focus and serializes repeated opens", async () => {
 test("forwards only matching editor interactions to the session callback", async () => {
   const interactions: string[] = []
   const supervisor = fakeSupervisor([])
+
   const manager = managerFor({
     supervisors: [supervisor],
     onEditorInteraction: (input) => interactions.push(input.instanceId),
   })
+
   await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })
   supervisor.interactionListener?.({
     kind: "editor-interaction",
@@ -527,10 +566,12 @@ test("forwards only matching editor interactions to the session callback", async
 test("forwards only matching editor open-state changes", async () => {
   const states: Array<{ projectId: string; instanceId: string; open: boolean }> = []
   const supervisor = fakeSupervisor([])
+
   const manager = managerFor({
     supervisors: [supervisor],
     onEditorOpenState: (input) => states.push(input),
   })
+
   await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })
   supervisor.interactionListener?.({
     kind: "editor-state",
@@ -554,6 +595,7 @@ test("captures editor state when the user closes the editor window, and not on t
   const captured: string[] = []
   const calls: string[] = []
   const supervisor = fakeSupervisor(calls)
+
   const manager = managerFor({
     calls,
     supervisors: [supervisor],
@@ -561,6 +603,7 @@ test("captures editor state when the user closes the editor window, and not on t
       captured.push(instanceId)
     },
   })
+
   await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan", captureState: true })
   supervisor.interactionListener?.({ kind: "editor-state", graphRevision: 1, graphNodeId: 1n, instanceId: firstInstance, value: 1 })
   await manager.execute({ projectId, instanceId: firstInstance, command: "status" })
@@ -578,10 +621,12 @@ test("captures editor state when the user closes the editor window, and not on t
 test("forwards only matching parameter edits with the bound project and instance", async () => {
   const edits: Array<{ projectId: string; instanceId: string; parameterId: number; normalizedValue: number }> = []
   const supervisor = fakeSupervisor([])
+
   const manager = managerFor({
     supervisors: [supervisor],
     onParameterEdit: (input) => edits.push(input),
   })
+
   await manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "plan" })
   supervisor.interactionListener?.({
     kind: "parameter-edit",
@@ -623,9 +668,11 @@ test("rejects a conflicting editor project binding", async () => {
 test("keeps independent editor instances isolated", async () => {
   const firstCalls: string[] = []
   const secondCalls: string[] = []
+
   const manager = managerFor({
     supervisors: [fakeSupervisor(firstCalls), fakeSupervisor(secondCalls, undefined, secondInstance)],
   })
+
   await Promise.all([
     manager.execute({ projectId, instanceId: firstInstance, command: "open", serializedPlan: "first" }),
     manager.execute({ projectId, instanceId: secondInstance, command: "open", serializedPlan: "second" }),
@@ -644,6 +691,7 @@ test("invalidates in-flight initialization before commit and remains reusable", 
   const coordinate = Promise.withResolvers<{ ok: true; attached: number }>()
   const firstSupervisor = fakeSupervisor(calls)
   const secondSupervisor = fakeSupervisor(calls)
+
   const manager = managerFor({
     calls,
     supervisors: [firstSupervisor, secondSupervisor],
@@ -656,6 +704,7 @@ test("invalidates in-flight initialization before commit and remains reusable", 
     command: "open",
     serializedPlan: "plan",
   })
+
   await Promise.resolve()
   const suspended = manager.suspendAll()
   coordinate.resolve({ ok: true, attached: 1 })

@@ -44,6 +44,7 @@ type ActiveValue = {
 }
 
 const compareText = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0
+
 const compareCandidate = (left: ExpressionCandidate, right: ExpressionCandidate) => (
   left.timeSec - right.timeSec
   || (left.source === right.source ? 0 : left.source === 'pre-trim' ? -1 : 1)
@@ -73,13 +74,16 @@ export const compileTrackMidiExpressionSchedule = (input: {
   const secondsPerBeat = 60 / Math.max(1, input.bpm || 120)
   const candidates: ExpressionCandidate[] = []
   const endings: Array<{ timeSec: number; clipId: string; mapping: MidiMapping }> = []
+
   for (const clip of input.clips) {
     if (!clip.midi) continue
     const midi = normalizeLegacyMidiClip(clip.midi)
+
     if (midi.mappings.length === 0) continue
     const clipStart = clip.startSec
     const clipEnd = clip.startSec + clip.duration
     const start = Math.max(clipStart, input.rangeStartSec)
+
     if (
       clipEnd <= start
       || (input.rangeStartSec === input.rangeEndSec
@@ -89,14 +93,19 @@ export const compileTrackMidiExpressionSchedule = (input: {
     const index = compileMidiMappingSourceIndex(midi.mappings)
     const offset = Math.max(0, clip.midiOffsetBeats ?? 0)
     const trimmedState = new Map<string, ExpressionCandidate>()
+
     for (const event of expressionEvents(midi)) {
       const beat = Math.max(0, event.beat - offset)
       const timeSec = clipStart + (beat * secondsPerBeat)
+
       for (const mapping of index.match(event)) {
         const value = midiMappingValue(mapping, event)
+
         if (value === undefined) continue
+
         if (event.beat < offset) {
           const targetKey = midiMappingTargetKey(mapping.target)
+
           const trimmedCandidate: ExpressionCandidate = {
             timeSec: clipStart + (event.beat * secondsPerBeat),
             sourceTimeSec: clipStart + (event.beat * secondsPerBeat),
@@ -105,12 +114,16 @@ export const compileTrackMidiExpressionSchedule = (input: {
             mapping,
             event,
           }
+
           const priorCandidate = trimmedState.get(targetKey)
+
           if (!priorCandidate || compareCandidate(priorCandidate, trimmedCandidate) < 0) {
             trimmedState.set(targetKey, trimmedCandidate)
           }
+
           continue
         }
+
         if (timeSec < clipStart || timeSec >= clipEnd) continue
         candidates.push({
           timeSec,
@@ -122,7 +135,9 @@ export const compileTrackMidiExpressionSchedule = (input: {
         })
       }
     }
+
     candidates.push(...Array.from(trimmedState.values(), (candidate) => ({ ...candidate, timeSec: clipStart })))
+
     for (const mapping of midi.mappings) endings.push({ timeSec: clipEnd, clipId: clip.id, mapping })
   }
 
@@ -134,8 +149,10 @@ export const compileTrackMidiExpressionSchedule = (input: {
   ))
   const active = new Map<string, Map<string, ActiveValue>>()
   const scheduled: MidiExpressionScheduleEvent[] = []
+
   const update = (candidate: ExpressionCandidate, timeSec: number) => {
     const value = midiMappingValue(candidate.mapping, candidate.event)
+
     if (value === undefined) return
     const targetKey = midiMappingTargetKey(candidate.mapping.target)
     const mappingKey = `${candidate.clipId}\u0000${candidate.mapping.id}`
@@ -159,6 +176,7 @@ export const compileTrackMidiExpressionSchedule = (input: {
       eventId: candidate.event.id,
     })
   }
+
   const latest = (entries: Iterable<ActiveValue>) => (
     [...entries].sort((left, right) => (
       right.timeSec - left.timeSec
@@ -167,6 +185,7 @@ export const compileTrackMidiExpressionSchedule = (input: {
       || compareText(right.eventId, left.eventId)
     ))[0]
   )
+
   const hasLaterAutomation = (value: ActiveValue, endSec: number) => (
     input.automationEnvelopes?.some((envelope) => (
       envelope.enabled
@@ -179,28 +198,36 @@ export const compileTrackMidiExpressionSchedule = (input: {
       ))
     )) ?? false
   )
+
   let candidateIndex = 0
   let endingIndex = 0
+
   while (candidateIndex < candidates.length || endingIndex < endings.length) {
     const nextCandidate = candidates[candidateIndex]
     const nextEnding = endings[endingIndex]
     const timeSec = Math.min(nextCandidate?.timeSec ?? Infinity, nextEnding?.timeSec ?? Infinity)
+
     while (candidates[candidateIndex]?.timeSec === timeSec) {
       const candidate = candidates[candidateIndex]
+
       if (candidate) update(candidate, timeSec)
       candidateIndex += 1
     }
+
     while (endings[endingIndex]?.timeSec === timeSec) {
       const ending = endings[endingIndex]
+
       if (!ending) break
       const targetKey = midiMappingTargetKey(ending.mapping.target)
       const mappingKey = `${ending.clipId}\u0000${ending.mapping.id}`
       const entries = active.get(targetKey)
       const wasActive = entries?.delete(mappingKey) ?? false
+
       if (!wasActive) {
         endingIndex += 1
         continue
       }
+
       const continuing = entries ? latest(entries.values()) : undefined
       scheduled.push(continuing && !hasLaterAutomation(continuing, timeSec)
         ? {
@@ -223,17 +250,22 @@ export const compileTrackMidiExpressionSchedule = (input: {
       endingIndex += 1
     }
   }
+
   const ordered = scheduled.sort((left, right) => (
     left.timeSec - right.timeSec
     || (left.phase === right.phase ? 0 : left.phase === 'set' ? -1 : 1)
   ))
+
   const valuesAtStart = new Map<string, MidiExpressionScheduleEvent>()
+
   for (const event of ordered) {
     if (event.timeSec > input.rangeStartSec) break
     const targetKey = midiMappingTargetKey(event.target)
+
     if (event.phase === 'restore') valuesAtStart.delete(targetKey)
     else valuesAtStart.set(targetKey, event)
   }
+
   return [
     ...Array.from(valuesAtStart.values(), (event) => ({
       ...event,
@@ -260,11 +292,14 @@ export const indexTrackAutomationEnvelopes = (
   envelopes: readonly AutomationEnvelope[],
 ): ReadonlyMap<string, AutomationEnvelope> => {
   const index = new Map<string, AutomationEnvelope>()
+
   for (const envelope of envelopes) {
     if (!envelope.enabled || envelope.target.kind !== 'track') continue
     const key = automationEnvelopeKey(envelope.target.trackId, envelope.target.effectInstanceId, envelope.parameterId)
+
     if (!index.has(key)) index.set(key, envelope)
   }
+
   return index
 }
 
@@ -288,6 +323,7 @@ export const resolveTrackMidiExpressionSchedule = (input: {
   compileTrackMidiExpressionSchedule(input).flatMap<ResolvedMidiExpressionScheduleEvent>((event) => {
     if (event.phase === 'set' && event.value !== undefined) return [{ ...event, value: event.value }]
     const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
+
     const envelope = input.automationEnvelopes.find((candidate) => (
       candidate.enabled
       && candidate.target.kind === 'track'
@@ -295,11 +331,13 @@ export const resolveTrackMidiExpressionSchedule = (input: {
       && candidate.target.effectInstanceId === event.target.effectInstanceId
       && candidate.parameterId === event.target.parameterId
     ))
+
     const value = envelope
       ? valueAtAutomationTime(envelope.points, event.timeSec, descriptor?.defaultValue ?? 0)
       : event.target.parameterId === 'volume'
         ? input.trackVolume
         : descriptor?.defaultValue ?? 0
+
     return Number.isFinite(value) ? [{ ...event, value }] : []
   })
 )

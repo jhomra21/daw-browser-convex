@@ -76,6 +76,7 @@ test("diagnostics v2 retains bounded SAB occupancy alongside the recording trans
     sabWriterOccupancy: 2,
     peakSabWriterOccupancy: 8,
   }
+
   expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, recording }).recording).toEqual(recording)
   expect(desktopDiagnosticsSchemaV2.safeParse({
     ...diagnostics, recording: { ...recording, peakSabWriterOccupancy: 9 },
@@ -125,6 +126,7 @@ test("diagnostics v2 requires explicit missing or current worker automation evid
       lastRejectedInstrumentEventCount: 0, lastRejectedGraphRevision: 0,
     },
   }
+
   expect(() => desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native })).toThrow()
   const missing = { ...native, diagnostics: { ...native.diagnostics, workerAutomation: null } }
   expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: missing }).native).toEqual(missing)
@@ -138,14 +140,18 @@ test("diagnostics v2 requires explicit missing or current worker automation evid
       instanceId: "mix", published: 2, projected: 1, overrideSkips: 1, submitted: 1, transportEpoch: 7,
     } },
   } })).toThrow()
+
   const stale = { ...native, diagnostics: { ...native.diagnostics, workerAutomation: {
     acceptedPoints: 2, lastParameterId: 9, transportEpoch: 6, sequence: "12",
   } } }
+
   expect(() => desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: stale })).toThrow()
+
   const matched = { ...native, diagnostics: { ...native.diagnostics, workerAutomation: {
     acceptedPoints: 2, lastParameterId: 9, transportEpoch: 7, sequence: "12",
     instanceId: "11111111-1111-4111-8111-111111111111",
   } } }
+
   expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: matched }).native).toEqual(matched)
   expect(() => desktopDiagnosticsSchemaV2.parse({ ...diagnostics, native: {
     ...matched, diagnostics: { ...matched.diagnostics, workerAutomation: {
@@ -172,6 +178,7 @@ test("diagnostics v2 retains bounded native termination evidence without raw err
     lifecycleTransitions: ["ready", "recovering"],
     lastNativeStatus: { active: false, fatal: true, capturedFrames: 2048, droppedFrames: 2048, queuedBlocks: 8 },
   }
+
   expect(desktopDiagnosticsSchemaV2.parse({ ...diagnostics, recording }).recording).toEqual(recording)
   expect(() => desktopDiagnosticsSchemaV2.parse({
     ...diagnostics, recording: { ...recording, termination: { cause: "native-fatal", error: "raw private error" } },
@@ -195,6 +202,7 @@ test("diagnostics v2 accepts native spool without relabeling legacy transports o
     expect(transport).toBe(desktopDiagnosticsSchemaV2.parse(value).recording.transport)
     expect(parseDesktopResult("diagnostics.snapshot.v2", value)).toEqual(value)
   }
+
   expect(desktopDiagnosticsSchemaV2.safeParse({ ...diagnostics, recording: { ...diagnostics.recording, transport: "file" } }).success).toBeFalse()
 })
 
@@ -204,5 +212,6 @@ test("diagnostics v2 preserves all actual AudioContext states including interrup
     expect(state).toBe(desktopDiagnosticsSchemaV2.parse(value).audio.state)
     expect(parseDesktopResult("diagnostics.snapshot.v2", value)).toEqual(value)
   }
+
   expect(desktopDiagnosticsSchemaV2.safeParse({ ...diagnostics, audio: { ...diagnostics.audio, state: "unknown" } }).success).toBeFalse()
 })

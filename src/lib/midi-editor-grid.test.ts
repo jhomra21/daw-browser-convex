@@ -12,6 +12,7 @@ test('MIDI grid preserves IDs and channels while moving and resizing notes', () 
     { col: 2, row: 46 },
     2,
   )
+
   const resized = grid.noteFromDrag(
     grid.createNoteDrag({ note: first, mode: 'resize', cell: { col: 0, row: 48 }, pointerStep: 0 }),
     { col: 3, row: 48 },

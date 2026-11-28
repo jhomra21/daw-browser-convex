@@ -19,13 +19,17 @@ export function registerTimelineOperationRoutes(app: App) {
     try {
       const projectId = c.req.param('projectId')
       const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor', 'viewer'])
+
       if (!access) return c.json({ error: 'Forbidden' }, 403)
+
       const result = await access.convex.query(convexApi.timeline.fullViewAuthed, {
         projectId,
       })
+
       return c.json(result)
     } catch (error) {
       console.error('Timeline full-view error', error)
+
       return c.json({ error: 'Timeline full-view failed' }, 500)
     }
   })
@@ -33,22 +37,29 @@ export function registerTimelineOperationRoutes(app: App) {
   app.post('/api/projects/:projectId/timeline/operations', async (c) => {
     try {
       const projectId = c.req.param('projectId')
+
       if (!c.get('user')) return c.json({ error: 'Unauthorized' }, 401)
       const access = await requireProjectRoleContextForApi(c, projectId, ['owner', 'editor'])
+
       if (!access) return c.json({ error: 'Forbidden' }, 403)
+
       const operation = await parseJsonBody(
         c,
         timelineOperationRequestSchema(),
       )
+
       if (!operation) return c.json({ error: 'Invalid timeline operation' }, 400)
 
       const result = await executeTimelineOperation({ convex: access.convex, projectId }, operation)
+
       return c.json(result)
     } catch (error) {
       console.error('Timeline operation error', error)
+
       if (error instanceof TimelineOperationTargetError) {
         return c.json({ error: error.message }, error.status)
       }
+
       return c.json({ error: 'Timeline operation failed' }, 500)
     }
   })

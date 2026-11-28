@@ -20,51 +20,68 @@ const root = path.resolve(import.meta.dir, "../../..")
 const executable = path.join(root, "apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app/Contents/MacOS/@daw-browser-desktop")
 const traceDirectory = path.join(root, "acceptance-reports/native-spool-configure-trace-2026-10-12")
 const diagnosticPrefix = "[recording-start-diagnostic] "
+
 const command = async (profile: string, args: string[]) => {
   const child = Bun.spawn(["bun", path.join(root, "packages/control-cli/dist/daw-control.js"), ...args], {
     cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile },
     signal: AbortSignal.timeout(15_000), stdout: "pipe", stderr: "ignore",
   })
+
   const output = await new Response(child.stdout).text()
+
   if (await child.exited !== 0) throw new Error("Public control request failed.")
+
   return JSON.parse(output).data
 }
+
 const nested = (text: string): z.infer<ReturnType<typeof z.json>> => {
   let value = z.json().parse(JSON.parse(text))
+
   for (let count = 0; count < 3; count++) {
     const encoded = z.string().safeParse(value)
+
     if (!encoded.success) break
+
     try { value = z.json().parse(JSON.parse(encoded.data)) } catch { break }
   }
+
   return value
 }
+
 const verifyPackagedInhibitor = () => {
   const source = extractFile(path.join(executable, "../../Resources/app.asar"), ".vite/build/main.js").toString()
   const binding = source.match(/const (\w+) = process\.env\.DAW_RECORDING_START_DIAGNOSTIC === "1"/)
   const guard = source.match(/if \((\w+)\) \{\s*\w+\.observeCaptureBlocked\(\);\s*return \{ ok: !1, error: "diagnostic-capture-blocked" \};/)
   const diagnostic = source.match(/(\w+)\.observeStart\(result\)/)
+
   if (!binding || !guard || !diagnostic || binding[1] !== guard[1]
     || (source.match(/await \w+\.startRecording\(\)/g) ?? []).length !== 1)
     throw new Error("Packaged native-start inhibitor could not be verified.")
 }
+
 const waitForEndpoint = (profile: string, appPid: number) => new Promise<string>((resolve, reject) => {
   let watcher: FSWatcher | undefined
   let settled = false
+
   const finish = (endpoint: string | undefined) => {
     if (settled) return
     settled = true
     clearTimeout(timeout)
     watcher?.close()
+
     if (endpoint) resolve(endpoint)
     else reject(new Error("Owned packaged renderer endpoint unavailable."))
   }
+
   const check = async () => {
     try {
       const owned = await ownedV3CdpEndpoint(profile, appPid, executable)
       finish(owned.endpoint)
     } catch { /* Wait for the profile's DevToolsActivePort creation/update event. */ }
   }
+
   const timeout = setTimeout(() => finish(undefined), 30_000)
+
   try {
     watcher = watch(profile, { persistent: false }, () => { void check() })
     void check()
@@ -78,12 +95,14 @@ const createTraceWaiter = (events: RecordingStartDiagnosticEvent[], timeoutMs: n
   const promise = new Promise<void>((done) => { resolve = done })
   // This is a bounded diagnostic-observation deadline, not a native drain deadline.
   const timeout = setTimeout(() => resolve(), timeoutMs)
+
   const notify = () => {
     if (!events.some((event) => event.kind === "native-start-blocked"
       || (event.kind === "configure-result" && event.outcome === "rejected"))) return
     clearTimeout(timeout)
     resolve()
   }
+
   return { promise, notify, close: () => clearTimeout(timeout) }
 }
 
@@ -106,18 +125,25 @@ const main = async () => {
   let mountedMatchingProject = false
   let postClick: z.infer<ReturnType<typeof z.json>> = null
   let runtime: { nativeStatus: z.infer<typeof desktopDiagnosticsSchemaV2>["recording"]["lastNativeStatus"] } | null = null
+
   const app = spawn(executable, ["--remote-debugging-address=127.0.0.1", "--remote-debugging-port=0", `--user-data-dir=${profile}`],
     { cwd: root, env: { ...process.env, DAW_DESKTOP_USER_DATA: profile, DAW_RECORDING_START_DIAGNOSTIC: "1" },
       detached: true, stdio: ["ignore", "pipe", "ignore"] })
+
   const appPid = app.pid
+
   if (!appPid) throw new Error("Owned diagnostic app PID unavailable.")
+
   const onOutput = (chunk: Buffer) => {
     const lines = (partial + chunk.toString()).split(/\r?\n/)
     partial = (lines.pop() ?? "").slice(0, 4096)
+
     for (const line of lines) {
       if (!line.startsWith(diagnosticPrefix)) continue
+
       try {
         const parsed = recordingStartDiagnosticEventSchema.safeParse(JSON.parse(line.slice(diagnosticPrefix.length)))
+
         if (parsed.success && events.length < 64) {
           events.push(parsed.data)
           traceWaiter?.notify()
@@ -125,17 +151,21 @@ const main = async () => {
       } catch { /* Discard malformed diagnostic lines without retaining their content. */ }
     }
   }
+
   app.stdout?.on("data", onOutput)
+
   try {
     endpoint = await waitForEndpoint(profile, appPid)
     stage = "renderer-connect"
     await browserCommand(session, ["connect", endpoint])
     attached = true
     const target = electronRendererTarget(await browserCommand(session, ["tab"]))?.targetId
+
     if (!target) throw new Error("Packaged renderer unavailable.")
     await browserCommand(session, ["tab", target])
     stage = "host-status"
     const host = z.object({ ready: z.boolean() }).passthrough().parse(await command(profile, ["host", "status"]))
+
     if (!host.ready) throw new Error("Native host is not ready.")
     stage = "new-project"
     await browserCommand(session, ["eval", `(async()=>await new Promise((resolve,reject)=>{
@@ -147,6 +177,7 @@ const main = async () => {
       timer=setTimeout(()=>finish(false),30000);check();
     }))()`])
     await browserCommand(session, ["find", "role", "button", "click", "--name", "New project"])
+
     // DOM mutations signal completion of UI mount; no polling of project control.
     const projectId = z.string().parse(nested(await browserCommand(session, ["eval",
       `(async()=>await new Promise((resolve,reject)=>{
@@ -158,14 +189,17 @@ const main = async () => {
         // Bounded mount observation; both terminal paths disconnect and clear the timer.
         timer=setTimeout(()=>finish(null),30000);check();
       }))()`])))
+
     stage = "project-capabilities"
     controlCapabilitiesSchemaV2.parse(await command(profile, ["capabilities-v2", "--target", "host"]))
     stage = "project-current"
     const current = projectCurrentResultSchema.parse(await command(profile, ["project", "current", "--target", "host"]))
+
     if (current.status !== "present" || current.project.projectId !== projectId)
       throw new Error("Canonical mounted project does not match UI.")
     stage = "project-snapshot"
     const snapshot = projectSnapshotSchemaV2.parse(await command(profile, ["snapshot-v2", current.project.projectId, "--target", "host"]))
+
     if (snapshot.project.id !== projectId) throw new Error("Canonical snapshot mismatch.")
     mountedMatchingProject = true
     stage = "arm-track"
@@ -180,6 +214,7 @@ const main = async () => {
       "JSON.stringify({startPresent:!!document.querySelector('button[aria-label=\"Start recording\"]'),stopPresent:!!document.querySelector('button[aria-label=\"Stop recording\"]'),dialogPresent:!!document.querySelector('[role=\"dialog\"]')})"]))
     const diagnostics = desktopDiagnosticsSchemaV2.parse(await command(profile, ["host", "diagnostics-v2"]))
     runtime = { nativeStatus: diagnostics.recording.lastNativeStatus }
+
     if (!blockProven && !events.some((event) => event.kind === "configure-result" && event.outcome === "rejected"))
       failureCategory = "observation-deadline-no-terminal-event"
   } catch (error) {
@@ -188,11 +223,14 @@ const main = async () => {
       : stage
   } finally {
     traceWaiter?.close()
+
     if (attached) await browserCommand(session, ["close"]).catch(() => undefined)
+
     if (app.exitCode === null && app.signalCode === null) {
       const stopped = await stopOwnedSpoolProcesses({ directory: runDirectory, rootPid: appPid, executable })
       cleanupFailed = !stopped
     }
+
     const trace = {
       schemaVersion: 1,
       status: blockProven ? "start-blocked"
@@ -213,9 +251,11 @@ const main = async () => {
         ? "Main-process start-recording handler returned before native supervisor start."
         : "No native start-block event observed; no capture acceptance was run.",
     }
+
     const artifact = path.join(traceDirectory, `trace-${new Date().toISOString().replaceAll(":", "-")}.json`)
     await writePrivateArtifact(artifact, JSON.stringify(trace, null, 2))
     console.log(`${trace.status}; ${artifact}`)
+
     if (failureCategory !== "none" || cleanupFailed) process.exitCode = 1
   }
 }

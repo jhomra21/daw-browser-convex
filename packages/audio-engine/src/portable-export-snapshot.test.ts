@@ -127,6 +127,7 @@ test('compiles deterministic snapshots without retaining hydrated AudioBuffer da
   if (!first.supported || !second.supported) throw new Error('Expected supported snapshot.')
   expect(second).toEqual(first)
   const sourceBuffer = source.buffer
+
   if (!sourceBuffer) throw new Error('Expected hydrated audio buffer.')
   sourceBuffer.getChannelData(0)[0] = 0.75
   expect(first.assets[0]?.pcm?.planes[0]?.[0]).toBe(0)
@@ -134,12 +135,14 @@ test('compiles deterministic snapshots without retaining hydrated AudioBuffer da
 
 test('localizes bounded sampled instrument regions for portable compilation', () => {
   const sampler = createDefaultSamplerParams()
+
   const sample: SamplerZone['sample'] = {
     assetKey: 'source-a',
     url: 'https://samples.example/source.wav',
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params: SamplerParams = {
     ...sampler,
     zones: [{
@@ -162,6 +165,7 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
       chokeGroup: 0,
     }],
   }
+
   const fx: ExportFx = {
     masterFxInstances: [],
     trackFx: {
@@ -175,6 +179,7 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
       },
     },
   }
+
   const input: PortableExportSnapshotInput = {
     tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
     bpm: 120,
@@ -186,7 +191,9 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
     fx,
     allowInstruments: true,
   }
+
   const result = compilePortableExportSnapshot(input)
+
   const nativeMetadata = compilePortableExportSnapshot({
     ...input,
     instrumentRegionMode: 'metadata',
@@ -194,13 +201,16 @@ test('localizes bounded sampled instrument regions for portable compilation', ()
   })
 
   if (!result.supported) throw new Error(result.reasons.join('\n'))
+
   if (!nativeMetadata.supported) throw new Error(nativeMetadata.reasons.join('\n'))
   const portablePcm = result.assets[0]?.pcm
   const portablePlane = portablePcm?.planes[0]
   const portableTransferable = result.assets[0]?.transferables[0]
+
   if (!portablePcm || !portablePlane || !portableTransferable) {
     throw new Error('Expected portable PCM and transferable plane.')
   }
+
   expect(result.assets).toMatchObject([{
     asset: { frameCount: 24_000, sampleRateHz: 48_000, channelCount: 1 },
     pcm: { frameCount: 24_000, planes: [new Float32Array(24_000)] },
@@ -228,14 +238,17 @@ test('collects localized drum-rack and granular metadata while preserving portab
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const firstBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(0.2)], 48_000)
   const secondBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(-0.8)], 48_000)
+
   const drumParams: DrumRackParams = {
     ...createDefaultDrumRackParams(),
     pads: createDefaultDrumRackParams().pads.map((pad, index) => index < 3
       ? { ...pad, sample }
       : pad),
   }
+
   const granularParams: GranularParams = {
     ...createDefaultGranularParams(),
     zone: {
@@ -260,6 +273,7 @@ test('collects localized drum-rack and granular metadata while preserving portab
       chokeGroup: 0,
     },
   }
+
   const drumFx: ExportFx = {
     masterFxInstances: [],
     trackFx: {
@@ -274,6 +288,7 @@ test('collects localized drum-rack and granular metadata while preserving portab
       },
     },
   }
+
   const drumInput: PortableExportSnapshotInput = {
     tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
     bpm: 120,
@@ -285,15 +300,19 @@ test('collects localized drum-rack and granular metadata while preserving portab
     fx: drumFx,
     allowInstruments: true,
   }
+
   const drumPortable = compilePortableExportSnapshot(drumInput)
+
   const drumMetadata = compilePortableExportSnapshot({
     ...drumInput,
     instrumentRegionMode: 'metadata',
     capabilityTarget: 'native',
   })
+
   if (!drumPortable.supported || !drumMetadata.supported) {
     throw new Error([...(!drumPortable.supported ? drumPortable.reasons : []), ...(!drumMetadata.supported ? drumMetadata.reasons : [])].join('\n'))
   }
+
   expect(drumMetadata.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual(
     drumMetadata.assets.map(({ sourceAssetKey }) => sourceAssetKey ?? ''),
   )
@@ -308,6 +327,7 @@ test('collects localized drum-rack and granular metadata while preserving portab
   expect(drumPortable.assets.every(({ transferables, pcm }) => transferables[0] === pcm?.planes[0]?.buffer)).toBe(true)
 
   const granularBuffer = new TestAudioBuffer([new Float32Array(24_000).fill(0.4)], 48_000)
+
   const granularInput: PortableExportSnapshotInput = {
     ...drumInput,
     fx: {
@@ -321,24 +341,29 @@ test('collects localized drum-rack and granular metadata while preserving portab
       },
     },
   }
+
   const granular = compilePortableExportSnapshot({
     ...granularInput,
     instrumentRegionMode: 'metadata',
     capabilityTarget: 'native',
   })
+
   if (!granular.supported) throw new Error(granular.reasons.join('\n'))
   expect(granular.instrumentRegionSources?.map(({ sourceAssetKey }) => sourceAssetKey)).toEqual([
     granular.assets[0]?.sourceAssetKey ?? '',
   ])
   expect(granular.instrumentRegionSources?.[0]?.buffer).toBe(granularBuffer)
   const granularPortable = compilePortableExportSnapshot(granularInput)
+
   if (!granularPortable.supported) throw new Error(granularPortable.reasons.join('\n'))
   const granularPcm = granularPortable.assets[0]?.pcm
   const granularPlane = granularPcm?.planes[0]
   const granularTransferable = granularPortable.assets[0]?.transferables[0]
+
   if (!granularPcm || !granularPlane || !granularTransferable) {
     throw new Error('Expected granular portable PCM and transferable plane.')
   }
+
   expect(granularPlane[0]).toBe(new Float32Array([0.4])[0])
   expect(granularTransferable === granularPlane.buffer).toBe(true)
   expect(granular.graph.nodes.find((node) => node.id === 'track-1')?.instrument).toMatchObject({
@@ -354,6 +379,7 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
     sourceKind: 'url',
     source: { durationSec: 1, sampleRate: 48_000, channelCount: 1 },
   }
+
   const params: SamplerParams = {
     ...createDefaultSamplerParams(),
     zones: [{
@@ -376,6 +402,7 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
       chokeGroup: 0,
     }],
   }
+
   const fx: ExportFx = {
     masterFxInstances: [],
     trackFx: {
@@ -389,11 +416,15 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
       },
     },
   }
+
   const localizedFx = localizeInstrumentFx(fx)
+
   const localizedKey = localizedFx?.trackFx?.['track-1']?.instrument?.kind === 'sampler'
     ? localizedFx.trackFx['track-1'].instrument.params.zones[0]?.sample.assetKey
     : undefined
+
   if (!localizedKey) throw new Error('Expected localized sampler region key.')
+
   const result = compilePortableExportSnapshot({
     tracks: [track([clip({
       sourceAssetKey: localizedKey,
@@ -416,6 +447,7 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
     instrumentRegionMode: 'metadata',
     capabilityTarget: 'native',
   })
+
   expect(result).toMatchObject({
     supported: false,
     reasons: [`Instrument region "${localizedKey}" resolves inconsistently.`],
@@ -428,6 +460,7 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
       { ...params.zones[0], id: 'zone-shared' },
     ].filter((zone): zone is SamplerZone => zone !== undefined),
   }
+
   const shared = compilePortableExportSnapshot({
     tracks: [track([clip({ midi: { wave: 'sine', notes: [] } })], { kind: 'instrument' })],
     bpm: 120,
@@ -462,6 +495,7 @@ test('rejects metadata-mode instrument dimensions conflicting with a registered 
     instrumentRegionMode: 'metadata',
     capabilityTarget: 'native',
   })
+
   expect(shared).toMatchObject({
     supported: false,
     reasons: [expect.stringMatching(/^Instrument region ".+" resolves inconsistently\.$/)],
@@ -492,12 +526,16 @@ test('uses pre-rendered Stretch PCM as the only portable source asset', () => {
   const source = clip({
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
   })
+
   const sourceBuffer = source.buffer
+
   if (!sourceBuffer) throw new Error('Expected hydrated source buffer.')
+
   const planes = [
     floats([0.5, 0.25, 0, -0.25]),
     floats([-0.5, -0.25, 0, 0.25]),
   ]
+
   const prepared: PortablePreparedStretchAsset = {
     clipId: source.id,
     sourceAssetKey: source.sourceAssetKey,
@@ -518,6 +556,7 @@ test('uses pre-rendered Stretch PCM as the only portable source asset', () => {
     timelineDurationSec: 4 / 48_000,
     sourceStartSec: 0,
   }
+
   const result = compilePortableExportSnapshot({
     tracks: [track([source])],
     bpm: 120,
@@ -545,16 +584,19 @@ test('uses pre-rendered Stretch PCM as the only portable source asset', () => {
 
 test('keeps raw and prepared assets distinct when clips share a source key', () => {
   const raw = clip({ id: 'clip-raw', startSec: 0 })
+
   const stretch = clip({
     id: 'clip-stretch',
     startSec: 0.5,
     duration: 4 / 48_000,
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
   })
+
   const preparedPlanes = [
     floats([0.5, 0.25, 0, -0.25]),
     floats([-0.5, -0.25, 0, 0.25]),
   ]
+
   const prepared: PortablePreparedStretchAsset = {
     clipId: stretch.id,
     sourceAssetKey: stretch.sourceAssetKey,
@@ -578,6 +620,7 @@ test('keeps raw and prepared assets distinct when clips share a source key', () 
     timelineDurationSec: 4 / 48_000,
     sourceStartSec: 0,
   }
+
   const result = compilePortableExportSnapshot({
     tracks: [track([raw, stretch])],
     bpm: 120,
@@ -605,6 +648,7 @@ test('returns typed diagnostics when offline Stretch assets are absent or stale'
   const source = clip({
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
   })
+
   const missing = compile([track([source])])
   expect(missing).toMatchObject({
     supported: false,
@@ -625,8 +669,10 @@ test('returns typed diagnostics when offline Stretch assets are absent or stale'
   })
 
   const sourceBuffer = source.buffer
+
   if (!sourceBuffer) throw new Error('Expected hydrated source buffer.')
   const plane = floats([0, 0.25, -0.5, 1])
+
   const stale = compilePortableExportSnapshot({
     tracks: [track([source])],
     bpm: 120,
@@ -657,6 +703,7 @@ test('returns typed diagnostics when offline Stretch assets are absent or stale'
       sourceStartSec: 0,
     }],
   })
+
   expect(stale).toMatchObject({
     supported: false,
     diagnostics: [{
@@ -668,6 +715,7 @@ test('returns typed diagnostics when offline Stretch assets are absent or stale'
 
 test('projects fixture-proven processors for offline export while rejecting unsupported instrument state', () => {
   const source = track([clip()])
+
   const result = compilePortableExportSnapshot({
     tracks: [source],
     bpm: 120,
@@ -741,7 +789,9 @@ test('projects fixture-proven processors for offline export while rejecting unsu
       },
     },
   })
+
   expect(result.supported).toBe(true)
+
   if (!result.supported) throw new Error(result.reasons.join('\n'))
   expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder.map((processor) => [
     processor.kind,
@@ -791,6 +841,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
       },
     },
   })
+
   expect(unsupported).toEqual({
     supported: false,
     reasons: [
@@ -836,6 +887,7 @@ test('rejects graphs that exceed aggregate audio-core processor capacity', () =>
     id: `track-${index}`,
     name: `Track ${index}`,
   }))
+
   const result = compilePortableExportSnapshot({
     tracks,
     bpm: 120,
@@ -866,10 +918,12 @@ test('rejects graphs that exceed aggregate audio-core processor capacity', () =>
 
 test('reports the total output latency of the exact graph it compiled', () => {
   const source = track([clip()])
+
   const limiterFx: ExportFx = {
     masterFxInstances: [{ id: 'master-limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }],
     trackFx: {},
   }
+
   const compileLatency = (patch: Partial<PortableExportSnapshotInput>) => {
     const result = compilePortableExportSnapshot({
       tracks: [source],
@@ -881,7 +935,9 @@ test('reports the total output latency of the exact graph it compiled', () => {
       firstSequence: 1,
       ...patch,
     })
+
     if (!result.supported) throw new Error(result.reasons.join(' '))
+
     return result.graphLatencyFrames
   }
 

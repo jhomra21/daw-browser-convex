@@ -11,6 +11,7 @@ export type MixerTrackFx = {
 }
 
 export type ResolvedMixerSend = TrackSend
+
 export type ChannelLayout = 'mono' | 'stereo'
 
 export type ResolveMixerGraphOptions = {

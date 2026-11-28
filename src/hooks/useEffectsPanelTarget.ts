@@ -24,15 +24,19 @@ export function useEffectsPanelTarget(
 
   function resolveTrackByTargetId(targetId: string): Track | undefined {
     if (!targetId || targetId === "master") return undefined;
+
     return tracksByTargetId().get(targetId);
   }
 
   const currentTrack = createMemo(() => resolveTrackByTargetId(currentTargetId()));
   const currentTrackId = createMemo(() => currentTrack()?.id);
   const isInstrumentTrack = createMemo(() => currentTrack()?.kind === "instrument");
+
   const canWriteCurrentTrackRouting = createMemo(() => {
     const track = currentTrack();
+
     if (!track) return false;
+
     return options.canWriteTrackRouting ? options.canWriteTrackRouting(track.id) : true;
   });
 

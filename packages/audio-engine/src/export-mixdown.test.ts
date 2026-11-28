@@ -143,6 +143,7 @@ describe('explicit stem render plans', () => {
       mode: 'channel-output',
       targetTrackId: 'group-b',
     })
+
     expect(plan.sourceTrackIds).toEqual(new Set(['source', 'other', 'group-a', 'group-b', 'return-a']))
     expect(plan.sourceTrackIds.has('unrelated')).toBe(false)
     expect(plan.graph.channels.find((entry) => entry.channel.id === 'group-b')?.outputTargetId).toBeUndefined()
@@ -154,6 +155,7 @@ describe('explicit stem render plans', () => {
       { id: 'source', name: 'Source', mode: 'reachable-routing', targetTrackId: 'source' },
       [{ sourceTrackId: 'detector', targetTrackId: 'group-a', effectInstanceId: 'compressor' }],
     )
+
     expect(plan.sourceTrackIds).toEqual(new Set(['source']))
     expect(plan.detectorOnlyTrackIds).toEqual(new Set(['detector']))
     expect(plan.graph.channels.find((entry) => entry.channel.id === 'detector')?.outputGain).toBe(0)
@@ -180,12 +182,14 @@ describe('explicit stem render plans', () => {
       ...graph,
       master: { ...master, instances: [{ id: 'master-saturator', kind: 'saturator', params: { ...createDefaultSaturatorParams(), enabled: true } }] },
     }
+
     const plan = createStemRenderPlan(nonlinearGraph, {
       id: 'source',
       name: 'Source',
       mode: 'full-master-contribution',
       targetTrackId: 'source',
     })
+
     expect(plan.metadata.recombinesToMaster).toBe(false)
   })
 })
@@ -204,6 +208,7 @@ describe('runtime-only cue routing', () => {
 describe('offline instrument scheduling', () => {
   test('does not fabricate a synth for instrument tracks without a persisted device', async () => {
     type Event = { kind: 'set' | 'ramp' | 'cancel'; value?: number; time: number }
+
     type Param = {
       value: number
       events: Event[]
@@ -214,6 +219,7 @@ describe('offline instrument scheduling', () => {
       cancelScheduledValues: (time: number) => void
       cancelAndHoldAtTime: (time: number) => void
     }
+
     type TestBiquadFilter = {
       type: BiquadFilterType
       frequency: Param
@@ -222,6 +228,7 @@ describe('offline instrument scheduling', () => {
       connect: () => void
       disconnect: () => void
     }
+
     type TestOscillator = {
       type: OscillatorType
       frequency: Param
@@ -234,8 +241,10 @@ describe('offline instrument scheduling', () => {
       stop: (when: number) => void
       onended: (() => void) | undefined
     }
+
     const param = (): Param => {
       const events: Event[] = []
+
       return {
         value: 0,
         events,
@@ -247,6 +256,7 @@ describe('offline instrument scheduling', () => {
         cancelAndHoldAtTime: (time) => { events.push({ kind: 'cancel', time }) },
       }
     }
+
     class FakeOfflineAudioContext {
       readonly destination = { channelCount: 2, connect: () => {}, disconnect: () => {} }
       readonly oscillators: Array<{ starts: number[]; stops: number[]; frequency: Param; detune: Param }> = []
@@ -277,6 +287,7 @@ describe('offline instrument scheduling', () => {
           connect: () => {},
           disconnect: () => {},
         }
+
         return filter
       }
 
@@ -293,7 +304,9 @@ describe('offline instrument scheduling', () => {
           stop: (when: number) => { oscillator.stops.push(when) },
           onended: undefined,
         }
+
         this.oscillators.push(oscillator)
+
         return oscillator
       }
 
@@ -309,12 +322,15 @@ describe('offline instrument scheduling', () => {
           stop: (when: number) => { source.stops.push(when) },
           onended: undefined,
         }
+
         this.bufferSources.push(source)
+
         return source
       }
 
       createBuffer(channels: number, length: number, sampleRate: number) {
         const data = Array.from({ length: channels }, () => new Float32Array(length))
+
         return {
           numberOfChannels: channels,
           length,
@@ -322,7 +338,9 @@ describe('offline instrument scheduling', () => {
           duration: length / sampleRate,
           getChannelData: (channel: number) => {
             const channelData = data[channel]
+
             if (!channelData) throw new Error('Missing channel')
+
             return channelData
           },
         }
@@ -334,18 +352,23 @@ describe('offline instrument scheduling', () => {
 
       close() {}
     }
+
     const contexts: FakeOfflineAudioContext[] = []
+
     class RecordingOfflineAudioContext extends FakeOfflineAudioContext {
       constructor(channels: number, length: number, sampleRate: number) {
         super(channels, length, sampleRate)
         contexts.push(this)
       }
     }
+
     Object.defineProperty(globalThis, 'OfflineAudioContext', { configurable: true, value: RecordingOfflineAudioContext })
+
     const midi = {
       wave: 'sine' as const,
       notes: [{ pitch: 60, beat: 0, length: 0.5, velocity: 0.8 }],
     }
+
     const track = (kind: 'audio' | 'instrument'): Track<AudioBuffer> => ({
       id: 'track-1',
       name: 'Track 1',
@@ -404,6 +427,7 @@ describe('isAutomationEnvelopeInSourceScope', () => {
       channels: [channel('source'), channel('unrelated')],
       master,
     }
+
     const scope = createSourceAutomationScope(graph, {
       sourceTrackIds: new Set(['source']),
       includeMasterFx: false,
@@ -419,11 +443,14 @@ describe('isAutomationEnvelopeInSourceScope', () => {
 describe('normalizeAudioBufferInPlace', () => {
   const createBuffer = (channels: number[][]) => {
     const data = channels.map((channelData) => new Float32Array(channelData))
+
     return {
       numberOfChannels: data.length,
       getChannelData(channel: number) {
         const channelData = data[channel]
+
         if (!channelData) throw new Error('Missing channel')
+
         return channelData
       },
     }
@@ -451,6 +478,7 @@ describe('normalizeAudioBufferInPlace', () => {
 describe('final master channel conversion', () => {
   const createBuffer = (channels: number, length: number, sampleRate: number) => {
     const data = Array.from({ length: channels }, () => new Float32Array(length))
+
     return {
       numberOfChannels: channels,
       length,
@@ -458,7 +486,9 @@ describe('final master channel conversion', () => {
       duration: length / sampleRate,
       getChannelData(channel: number) {
         const channelData = data[channel]
+
         if (!channelData) throw new Error('Missing channel')
+
         return channelData
       },
     }
@@ -505,13 +535,16 @@ describe('portable mixdown output adapter', () => {
 
     getChannelData(channel: number) {
       const data = this.channels[channel]
+
       if (!data) throw new Error('Missing channel')
+
       return data
     }
   }
 
   test('assembles ordered Worker PCM chunks into the normal AudioBuffer result', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+
     const output = createPortableOutputBuffer(new Map([
       [0, { frameCount: 2, planes: [new Float32Array([0.25, -0.5]), new Float32Array([0.5, -0.25])] }],
       [1, { frameCount: 2, planes: [new Float32Array([0.75, 1]), new Float32Array([-0.75, -1])] }],
@@ -600,6 +633,7 @@ describe('live and offline channel layout parity', () => {
     numberOfChannels,
     duration: 1,
   })
+
   const clip = (id: string, numberOfChannels: number): Clip<AudioBuffer> => ({
     id,
     name: id,
@@ -608,6 +642,7 @@ describe('live and offline channel layout parity', () => {
     color: '#fff',
     buffer: audioBuffer(numberOfChannels),
   })
+
   const track = (id: string, clips: Clip<AudioBuffer>[]): Track<AudioBuffer> => ({
     id,
     name: id,
@@ -620,6 +655,7 @@ describe('live and offline channel layout parity', () => {
       track('mono', [clip('mono-a', 1), clip('mono-b', 1)]),
       track('mixed', [clip('mixed-a', 1), clip('mixed-b', 2)]),
     ]
+
     const trackFx: NonNullable<ExportFx['trackFx']> = {
       mono: {
         instances: [
@@ -627,6 +663,7 @@ describe('live and offline channel layout parity', () => {
         ],
       },
     }
+
     const masterFxInstances: AudioEffectRuntimeInstance[] = [{ id: 'master-delay', kind: 'delay', params: { ...createDefaultDelayParams(), enabled: true, pingPong: true } }]
     const offline = resolveExportMixerGraph({ tracks, fx: { trackFx, masterFxInstances } })
     const live = resolveLiveMixerGraph(tracks, trackFx, { masterFxInstances })
@@ -668,7 +705,9 @@ describe('MediaBunny WAV encoding', () => {
 
     getChannelData(channel: number) {
       const data = this.channels[channel]
+
       if (!data) throw new Error('Missing channel')
+
       return data
     }
 
@@ -685,19 +724,23 @@ describe('MediaBunny WAV encoding', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const audio = new TestAudioBuffer({ numberOfChannels: 1, length: 32, sampleRate: 48_000 })
     audio.getChannelData(0).set([0.1, -0.1, 0.25, -0.25])
+
     const wav: WavEncodingSettings = codec === 'pcm-f32'
       ? { codec, dither: 'none' }
       : codec === 'pcm-s24'
         ? { codec, dither: 'tpdf' }
         : { codec, dither: 'tpdf' }
+
     const result = await encodeAudioBuffer(audio, {
       format: 'wav',
       wav,
       ditherSeed: 42,
     })
+
     if (!result.blob) throw new Error('WAV buffer target produced no Blob.')
     const bytes = new Uint8Array(await result.blob.arrayBuffer())
     const view = new DataView(bytes.buffer)
+
     return {
       audioFormat: view.getUint16(20, true),
       bitsPerSample: view.getUint16(34, true),

@@ -27,37 +27,51 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
   const ratio = createMemo(() => props.sample.projectBpm / sourceBpm())
   const [renderState, setRenderState] = createSignal<AudioStretchRenderState>({ status: 'idle' })
   const [bpmState, setBpmState] = createSignal<BpmSuggestionState>({ status: 'idle' })
+
   const bpmFailureMessage = createMemo(() => {
     const state = bpmState()
+
     return state.status === 'failed' ? state.message : ''
   })
+
   const bpmSuggestion = createMemo(() => {
     const state = bpmState()
+
     return state.status === 'suggested' || state.status === 'applied' ? state : null
   })
+
   const stretchWarning = createMemo(() => (
     props.sample.clip.audioWarp?.enabled === true
     && props.sample.clip.audioWarp.mode === 'stretch'
     && isStretchQualityWarning(ratio())
   ))
+
   const stretchEnabled = createMemo(() => props.sample.clip.audioWarp?.enabled === true && props.sample.clip.audioWarp.mode === 'stretch')
   const gainDb = createMemo(() => linearGainToDb(props.sample.clip.gain ?? 1))
   const gainLabel = createMemo(() => Number.isFinite(gainDb()) ? `${gainDb().toFixed(1)} dB` : '-inf dB')
+
   const stretchStatusText = createMemo(() => {
     if (!stretchEnabled()) return ''
     const state = renderState()
+
     if (state.status === 'ready') return 'Stretch render ready.'
+
     if (state.status === 'rendering') return 'Rendering Stretch. Re-Pitch fallback is playing until ready.'
+
     if (state.status === 'failed') return `Stretch render failed. Re-Pitch fallback is playing.${state.error ? ` ${state.error.message}` : ''}`
+
     return 'Stretch render will start on playback or export.'
   })
+
   const syncBpmState = () => setBpmState(props.sample.bpmDetection.getState(props.sample.clip.id))
 
   createEffect(() => {
     if (!stretchEnabled()) {
       setRenderState({ status: 'idle' })
+
       return
     }
+
     props.audioEngine.ensureStretchRender(props.sample.clip)
     setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip))
   })
@@ -66,6 +80,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
     const unsubscribe = props.audioEngine.subscribeStretchRenderState(() => {
       untrack(() => setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip)))
     })
+
     onCleanup(unsubscribe)
   })
 
@@ -82,7 +97,9 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
     const sample = props.sample
     const clip = sample.clip
     const audioWarp = buildNextAudioWarp(sample.projectBpm, clip.audioWarp, { sourceBpm: sourceBpm(), ...patch })
+
     if (audioWarp) return sample.onWarpChange(clip, audioWarp)
+
     return false
   }
 
@@ -115,6 +132,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
             disabled={!props.sample.canWrite}
             onChange={(event) => {
               const value = event.currentTarget.valueAsNumber
+
               if (Number.isFinite(value) && value > 0) commit({ sourceBpm: value })
             }}
           />
@@ -168,6 +186,7 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
               disabled={!props.sample.canWrite || markerWarpActive()}
               onChange={(event) => {
                 const value = event.currentTarget.valueAsNumber
+
                 if (Number.isFinite(value)) commit({ sourceBeatOffset: value })
               }}
             />
@@ -226,15 +245,18 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
                 disabled={!props.sample.canWrite}
                 onClick={() => {
                   const state = bpmState()
+
                   if (state.status !== 'suggested') return
                   const sample = props.sample
                   const clip = sample.clip
                   const bpmDetection = sample.bpmDetection
+
                   const audioWarp = buildNextAudioWarp(sample.projectBpm, clip.audioWarp, {
                     enabled: true,
                     sourceBpm: state.result.bpm,
                     mode: 'stretch',
                   })
+
                   if (!audioWarp) return
                   void Promise.resolve(sample.onWarpChange(clip, audioWarp)).then((value) => {
                     if (value !== false) bpmDetection.markApplied(clip.id)

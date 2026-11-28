@@ -6,26 +6,33 @@ const assert = (condition, message) => {
 
 const waitFor = (messages, predicate, label) => new Promise((resolve, reject) => {
   const existing = messages.find(predicate)
+
   if (existing) {
     resolve(existing)
+
     return
   }
+
   const timeout = setTimeout(() => {
     reject(new Error(`Timed out waiting for ${label}.`))
   }, 20_000)
+
   const observer = () => {
     const next = messages.find(predicate)
+
     if (!next) return
     clearTimeout(timeout)
     window.removeEventListener('portable-wasm-status', observer)
     resolve(next)
   }
+
   window.addEventListener('portable-wasm-status', observer)
 })
 
 const readChannelDiagnostics = (analyser) => {
   const output = new Float32Array(analyser.fftSize)
   analyser.getFloatTimeDomainData(output)
+
   return {
     finite: output.every(Number.isFinite),
     maximumAbsolute: Math.max(...output.map(Math.abs)),
@@ -55,6 +62,7 @@ const utilityProcessor = {
     view.setFloat32(4, 0, true)
     view.setUint32(12, 0, true)
     view.setFloat32(24, 1, true)
+
     return state
   })(),
   parameterTargets: [{ id: 'utility.gainDb', target: 1 }],
@@ -80,6 +88,7 @@ const saturatorProcessor = {
     view.setFloat32(20, 0.5, true)
     view.setFloat32(24, -3, true)
     view.setFloat32(28, 1, true)
+
     return state
   })(),
   parameterTargets: [{ id: 'saturator.outputDb', target: 72 }],
@@ -202,17 +211,20 @@ window.runPortableWasmWorkletFixture = (async () => {
   const context = new AudioContext({ sampleRate: requestedSampleRate })
   assert(context.sampleRate === requestedSampleRate, `Chromium substituted ${context.sampleRate} Hz for requested ${requestedSampleRate} Hz.`)
   await context.audioWorklet.addModule('./audio-worklets/daw-portable-audio-core-processor-v2.js')
+
   const node = new AudioWorkletNode(context, 'daw-portable-audio-core-processor-v2', {
     numberOfInputs: 0,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     processorOptions: { wasmModule },
   })
+
   const messages = []
   node.port.onmessage = (event) => {
     messages.push(event.data)
     window.dispatchEvent(new Event('portable-wasm-status'))
   }
+
   node.onprocessorerror = (event) => {
     const details = {
       type: event?.type,
@@ -226,9 +238,11 @@ window.runPortableWasmWorkletFixture = (async () => {
         stack: event.error.stack,
       } : undefined,
     }
+
     console.error(`portable AudioWorklet processorerror ${JSON.stringify(details)}`)
     throw new Error(`The AudioWorklet processor crashed: ${JSON.stringify(details)}`)
   }
+
   const splitter = context.createChannelSplitter(2)
   const leftAnalyser = context.createAnalyser()
   const rightAnalyser = context.createAnalyser()
@@ -448,6 +462,7 @@ window.runPortableWasmWorkletFixture = (async () => {
   leftAnalyser.disconnect()
   rightAnalyser.disconnect()
   await context.close()
+
   return {
     framesProcessed: health.framesProcessed,
     requestedSampleRate,

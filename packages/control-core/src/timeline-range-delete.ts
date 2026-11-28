@@ -7,6 +7,7 @@ import { valueAtAutomationTime } from '@daw-browser/shared'
 import type { ProjectSnapshotV2 } from '@daw-browser/control'
 
 type SnapshotClip = ProjectSnapshotV2['clips'][number]
+
 type SnapshotAutomation = ProjectSnapshotV2['automation'][number]
 
 export type TimelineRangeDeletePatchV1 = {
@@ -27,6 +28,7 @@ const endSec = (clip: SnapshotClip) => clip.startSec + clip.duration
 const trimStart = (clip: SnapshotClip, startSec: number, tempoBpm: number): SnapshotClip => {
   const shiftSec = startSec - clip.startSec
   const duration = endSec(clip) - startSec
+
   const audioTiming = clip.midi ? undefined : calculateAudioTimelineTrimOffsets({
     clip: {
       startSec: clip.startSec,
@@ -41,6 +43,7 @@ const trimStart = (clip: SnapshotClip, startSec: number, tempoBpm: number): Snap
     timelineTrimSec: shiftSec,
     projectBpm: tempoBpm,
   })
+
   return {
     ...clip,
     startSec,
@@ -55,6 +58,7 @@ const trimStart = (clip: SnapshotClip, startSec: number, tempoBpm: number): Snap
 
 const trimEnd = (clip: SnapshotClip, end: number): SnapshotClip => {
   const duration = end - clip.startSec
+
   return {
     ...clip,
     duration,
@@ -74,10 +78,12 @@ const interpolationAtBoundary = (
   timeSec: number,
 ) => {
   let interpolation: SnapshotAutomation['points'][number]['interpolation'] = 'linear'
+
   for (const point of points) {
     if (point.timeSec > timeSec) break
     interpolation = point.interpolation
   }
+
   return interpolation
 }
 
@@ -89,6 +95,7 @@ export const buildTimelineRangeDeletePatchV1 = (
   actionIndex: number,
 ): TimelineRangeDeletePatchV1 => {
   const selected = new Set(trackIds)
+
   const patch: TimelineRangeDeletePatchV1 = {
     trackIds: [...selected].sort(),
     clipDeletes: [],
@@ -96,9 +103,12 @@ export const buildTimelineRangeDeletePatchV1 = (
     clipCreates: [],
     automationUpdates: [],
   }
+
   let fragmentIndex = 0
+
   for (const clip of snapshot.clips) {
     if (!selected.has(clip.trackId) || clip.startSec >= rangeEndSec || endSec(clip) <= startSec) continue
+
     if (clip.startSec >= startSec && endSec(clip) <= rangeEndSec) {
       patch.clipDeletes.push({ clipId: clip.id, before: clip })
     } else if (clip.startSec < startSec && endSec(clip) > rangeEndSec) {
@@ -120,9 +130,12 @@ export const buildTimelineRangeDeletePatchV1 = (
       })
     }
   }
+
   for (const envelope of snapshot.automation) {
     if (!('trackId' in envelope.target) || !selected.has(envelope.target.trackId)) continue
+
     if (!envelope.points.some((point) => point.timeSec >= startSec && point.timeSec <= rangeEndSec)) continue
+
     const after = {
       ...envelope,
       points: [
@@ -141,6 +154,7 @@ export const buildTimelineRangeDeletePatchV1 = (
         ),
       ].sort((left, right) => left.timeSec - right.timeSec || left.id.localeCompare(right.id)),
     }
+
     if (!same(envelope, after)) {
       patch.automationUpdates.push({
         identity: { target: envelope.target, effectInstanceId: envelope.effectInstanceId, parameterId: envelope.parameterId },
@@ -149,5 +163,6 @@ export const buildTimelineRangeDeletePatchV1 = (
       })
     }
   }
+
   return patch
 }

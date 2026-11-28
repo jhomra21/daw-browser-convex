@@ -61,10 +61,12 @@ export const useTimelinePersistenceController = (input: Input) => {
     getClipBuffer: input.getClipBuffer,
     removeClip: async ({ clipId }) => {
       const projectId = input.projectId();
+
       const deletion = await createTimelineClipWriteAdapter({
         projectId,
         userId: input.userId(),
       }).deleteClips([clipId]);
+
       return deletion.removedIds.has(clipId);
     },
     projection: input.projection,
@@ -72,10 +74,12 @@ export const useTimelinePersistenceController = (input: Input) => {
     notify: input.notify,
     onLocalSaveFailed: input.localProject.setLocalSaveFailure,
   });
+
   useCloudSyncTick({
     projectId: input.projectId,
     enabled: () => {
       const mode = input.localProjectMode();
+
       return Boolean(input.userId() && isLocalId("project", input.projectId()) && mode === "backup");
     },
     sync: (projectId) => input.localProject.backUpNow({ projectId, skipIfUnchanged: true }),
@@ -83,32 +87,42 @@ export const useTimelinePersistenceController = (input: Input) => {
   createEffect(() => {
     const projectId = input.projectId();
     const userId = input.userId();
+
     if (!projectId || isLocalId("project", projectId) || !userId) return;
     let active = true;
     let flushPromise: Promise<void> | undefined;
     let flushRequested = false;
     const retry = createSharedOutboxRetry(projectId, userId, () => { void flush(); });
+
     const flush = () => {
       if (flushPromise) {
         flushRequested = true;
+
         return flushPromise;
       }
+
       const operation = flushSharedOutbox(projectId, userId)
         .then(() => retry.settled(true), () => {
           flushRequested = false;
+
           return retry.settled(false);
         })
         .finally(() => {
           flushPromise = undefined;
+
           if (flushRequested && active && !retry.backingOff()) {
             flushRequested = false;
             void flush();
           }
         });
+
       flushPromise = operation;
+
       return operation;
     };
+
     const onOnline = () => { void flush(); };
+
     void flush();
     window.addEventListener("online", onOnline);
     const unsubscribe = subscribeToLocalProjectChanges(projectId, retry.refresh);

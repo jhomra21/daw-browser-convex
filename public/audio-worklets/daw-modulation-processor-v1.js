@@ -1,6 +1,7 @@
 const TWO_PI = 2 * Math.PI
 const MAX_DELAY_FRAMES = Math.ceil(0.043 * sampleRate) + 4
 const KINDS = new Set(['chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble'])
+
 const PARAMETER_PROPERTIES = {
   chorus: ['delayMs', 'depthMs', 'rateHz', 'feedback', 'stereoPhase', 'mix'],
   flanger: ['delayMs', 'depthMs', 'rateHz', 'feedback', 'stereoPhase', 'mix'],
@@ -9,7 +10,9 @@ const PARAMETER_PROPERTIES = {
   autopan: ['rateHz', 'depth', 'shape', 'phase'],
   ensemble: ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix'],
 }
+
 const isModulationMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+
 const isModulationConfigureMessage = (message, revision) => isModulationMessage(message)
   && message.type === 'configure'
   && Number.isInteger(message.revision)
@@ -48,13 +51,16 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     this.allpassYR = new Float64Array(12)
     this.faults = 0
     this.port.onmessage = (event) => this.onMessage(event.data)
+
     if (!this.processorKind) this.fault('invalid-processor-kind')
     this.port.postMessage({ type: 'ready', version: 1, processorKind: this.processorKind })
   }
 
   onMessage(message) {
     if (!isModulationMessage(message)) return this.fault('malformed-message')
+
     if (message.type === 'dispose') return this.port.close()
+
     if (message.type === 'reset') {
       this.phase = 0
       this.bypass = this.state.enabled ? 0 : 1
@@ -62,9 +68,12 @@ class DawModulationProcessor extends AudioWorkletProcessor {
       this.feedbackL = this.feedbackR = 0
       this.allpassXL.fill(0); this.allpassXR.fill(0)
       this.allpassYL.fill(0); this.allpassYR.fill(0)
+
       return
     }
+
     if (!isModulationConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
+
     if (message.processorKind !== undefined && message.processorKind !== this.processorKind) return this.fault('immutable-processor-kind')
     this.revision = message.revision
     this.state = message.state
@@ -77,17 +86,21 @@ class DawModulationProcessor extends AudioWorkletProcessor {
 
   lfo(phase) {
     const wrapped = phase - Math.floor(phase)
+
     if (this.state.waveform === 'triangle') return 1 - 4 * Math.abs(wrapped - 0.5)
+
     return Math.sin(TWO_PI * wrapped)
   }
 
   unipolarWave(phase) {
     const unipolar = 0.5 + 0.5 * this.lfo(phase)
+
     return unipolar ** (2 ** (4 * ((this.state['shape'] || 0) - 0.5)))
   }
 
   readDelay(buffer, delayFrames) {
     let position = this.write - delayFrames
+
     while (position < 0) position += buffer.length
     const index1 = Math.floor(position) % buffer.length
     const fraction = position - Math.floor(position)
@@ -99,6 +112,7 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     const b = 0.5 * (-y0 + y2)
     const c = 0.5 * (2 * y0 - 5 * y1 + 4 * y2 - y3)
     const d = 0.5 * (-y0 + 3 * y1 - 3 * y2 + y3)
+
     return ((d * fraction + c) * fraction + b) * fraction + a
   }
 
@@ -111,14 +125,17 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     const xs = channel === 0 ? this.allpassXL : this.allpassXR
     const ys = channel === 0 ? this.allpassYL : this.allpassYR
     let value = input + (channel === 0 ? this.feedbackL : this.feedbackR) * this.state.feedback
+
     for (let stage = 0; stage < stages; stage++) {
       const output = coefficient * value + xs[stage] - coefficient * ys[stage]
       xs[stage] = value
       ys[stage] = output
       value = output
     }
+
     if (channel === 0) this.feedbackL = value
     else this.feedbackR = value
+
     return value
   }
 
@@ -126,32 +143,40 @@ class DawModulationProcessor extends AudioWorkletProcessor {
     const input = inputs[0] || []
     const output = outputs[0] || []
     const outL = output[0]
+
     if (!outL) return true
     const outR = output[1]
     const inL = input[0]
     const inR = input[1] || inL
     const kind = this.processorKind
     const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
+
     for (let i = 0; i < outL.length; i++) {
       if (this.parameterProperties) {
         for (let bindingIndex = 0; bindingIndex < this.parameterProperties.length; bindingIndex++) {
           const property = this.parameterProperties[bindingIndex]
           const samples = parameters[`${kind}.${property}`]
+
           if (samples && samples.length > 0) {
             this.state[property] = samples.length === 1 ? samples[0] : samples[i]
           }
         }
       }
+
       let l = inL ? inL[i] : 0
       let r = inR ? inR[i] : l
+
       if (!Number.isFinite(l) || !Number.isFinite(r)) { l = r = 0; this.fault('nonfinite-input') }
+
       const dryL = l
       const dryR = r
       let processedL = l
       let processedR = r
+
       if (kind) {
         const phaseL = this.phase + (this.state.phase || 0)
         const phaseR = phaseL + (this.state.stereoPhase || 0)
+
         if (kind === 'chorus' || kind === 'flanger') {
           this.delayL[this.write] = l + this.feedbackL * this.state.feedback
           this.delayR[this.write] = r + this.feedbackR * this.state.feedback
@@ -164,12 +189,14 @@ class DawModulationProcessor extends AudioWorkletProcessor {
         } else if (kind === 'ensemble') {
           this.delayL[this.write] = l; this.delayR[this.write] = r
           let wetL = 0, wetR = 0
+
           for (let voice = 0; voice < 3; voice++) {
             const voicePhase = this.phase + voice / 3
             const spread = this.state.spread * (voice - 1) * 0.25
             wetL += this.readDelay(this.delayL, Math.max(1, (this.state.delayMs + this.state.depthMs * this.lfo(voicePhase - spread)) * sampleRate / 1000))
             wetR += this.readDelay(this.delayR, Math.max(1, (this.state.delayMs + this.state.depthMs * this.lfo(voicePhase + spread)) * sampleRate / 1000))
           }
+
           this.write = (this.write + 1) % MAX_DELAY_FRAMES
           processedL = l * (1 - this.state.mix) + wetL * this.state.mix / 3
           processedR = r * (1 - this.state.mix) + wetR * this.state.mix / 3
@@ -186,19 +213,25 @@ class DawModulationProcessor extends AudioWorkletProcessor {
           processedL = l * Math.cos((position + 1) * Math.PI * 0.25) * Math.SQRT2
           processedR = r * Math.sin((position + 1) * Math.PI * 0.25) * Math.SQRT2
         }
+
         this.phase += this.state.rateHz / sampleRate
+
         if (this.phase >= 1) this.phase -= Math.floor(this.phase)
       }
+
       if (!Number.isFinite(processedL) || !Number.isFinite(processedR)) {
         processedL = processedR = 0
         this.feedbackL = this.feedbackR = 0
         this.fault('nonfinite-state')
       }
+
       const targetBypass = this.state.enabled ? 0 : 1
       this.bypass += Math.max(-bypassStep, Math.min(bypassStep, targetBypass - this.bypass))
       outL[i] = processedL + (dryL - processedL) * this.bypass
+
       if (outR) outR[i] = processedR + (dryR - processedR) * this.bypass
     }
+
     return true
   }
 }

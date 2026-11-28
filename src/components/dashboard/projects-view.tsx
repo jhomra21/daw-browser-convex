@@ -22,6 +22,7 @@ import { DashboardRow, DashboardScrollView, DashboardSection, EmptyDashboardStat
 
 const formatUpdatedAt = (value: number) => {
   if (!value) return "Never opened";
+
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -30,10 +31,13 @@ const formatUpdatedAt = (value: number) => {
 
 const getNextUntitledProjectName = (projects: LocalProjectEntry[]) => {
   const names = new Set(projects.map((project) => project.name));
+
   if (!names.has("Untitled")) return "Untitled";
 
   let index = 2;
+
   while (names.has(`Untitled ${index}`)) index += 1;
+
   return `Untitled ${index}`;
 };
 
@@ -47,10 +51,12 @@ type LocalProjectsDashboardViewProps = {
 function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
   const listingErrorMessage = () => {
     const error = props.error();
+
     return error instanceof Error && isLocalProjectCatalogOpenError(error)
       ? error.message
       : "Local projects could not be loaded.";
   };
+
   const [busy, setBusy] = createSignal(false);
   const [operationError, setOperationError] = createSignal<string | null>(null);
   const [renamingProject, setRenamingProject] = createSignal<LocalProjectEntry | null>(null);
@@ -59,6 +65,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
   const createProject = async () => {
     setOperationError(null);
     setBusy(true);
+
     try {
       const project = await createLocalProject(getNextUntitledProjectName(props.projects() ?? []));
       props.onOpenProject(project.id);
@@ -72,6 +79,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
   const renameProject = async (project: ProjectDialogProject, name: string) => {
     setOperationError(null);
     setBusy(true);
+
     try {
       await renameLocalProject(project.id, name);
       setRenamingProject(null);
@@ -86,6 +94,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
   const removeProject = async (project: ProjectDialogProject) => {
     setOperationError(null);
     setBusy(true);
+
     try {
       await flushLocalProjectPendingWrites(project.id);
       await deleteLocalProject(project.id);
@@ -209,20 +218,26 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
   const [shareCopied, setShareCopied] = createSignal(false);
   let loadedMembersProjectId = "";
   const projectMenu = () => props.model.projectMenu;
+
   const sharedOutboxFailure = useSharedOutboxFailure(() => ({
     projectId: projectMenu().currentProjectId,
     userId: projectMenu().currentUserId,
   }));
+
   const currentProject = () =>
     projectMenu().projects.find((project) => project.projectId === projectMenu().currentProjectId);
+
   const isCurrentProjectLocal = () => isLocalId("project", projectMenu().currentProjectId);
   const currentProjectMode = () => currentProject()?.mode;
   const isBackupProject = () => isCurrentProjectLocal() && currentProjectMode() === "backup";
+
   const canShareCurrentProject = () =>
     !isCurrentProjectLocal() && projectMenu().canManageSharing;
+
   const hasSharedOutboxWork = () => Boolean(
     (projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0),
   );
+
   const currentSaveStatus = useProjectSaveStatus(() => ({
     projectId: projectMenu().currentProjectId,
     userId: projectMenu().currentUserId,
@@ -232,10 +247,12 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
     saveFailed: projectMenu().saveFailed,
     sharedOutboxFailure: sharedOutboxFailure(),
   }));
+
   const shareMenu = useShareMenuController({
     projectId: () => projectMenu().currentProjectId,
     onShare: () => projectMenu().onShare?.(),
   });
+
   const onShare = async () => {
     setShareCopied(false);
     await shareMenu.createShareUrl();
@@ -245,10 +262,12 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
   createEffect(() => {
     const projectId = projectMenu().currentProjectId;
     const membersProjectId = canShareCurrentProject() ? projectId : "";
+
     if (loadedMembersProjectId === membersProjectId) return;
     loadedMembersProjectId = membersProjectId;
     setShareCopied(false);
     shareMenu.reset();
+
     if (!membersProjectId) return;
     void shareMenu.loadMembers();
   });
@@ -370,11 +389,14 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
   const [busyProjectId, setBusyProjectId] = createSignal<string | null>(null);
   const [cloudOperationError, setCloudOperationError] = createSignal<string | null>(null);
   const menu = () => props.model?.projectMenu;
+
   const [localProjects] = createResource(
     () => props.onOpenProject && !menu() ? localProjectsReloadToken() : null,
     listLocalProjects,
   );
+
   const current = () => menu()?.projects.find((project) => project.projectId === menu()?.currentProjectId);
+
   const localProjectsView = () => props.onOpenProject
     ? (
       <LocalProjectsDashboardView
@@ -385,7 +407,9 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
       />
     )
     : <EmptyDashboardState title="No project context" message="Open a project to manage project state from the dashboard." />;
+
   const openDialogProject = (projectId: string, name: string): ProjectDialogProject => ({ id: projectId, name });
+
   const confirmRename = async (
     projectMenu: DashboardTimelineModel["projectMenu"],
     project: ProjectDialogProject,
@@ -393,18 +417,25 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
   ) => {
     if (busyProjectId()) return;
     const nextName = name.trim();
+
     if (!nextName) {
       setRenamingProject(null);
+
       return;
     }
+
     setCloudOperationError(null);
     setBusyProjectId(project.id);
+
     try {
       const outcome = await projectMenu.onRenameProject(project.id, nextName);
+
       if (outcome?.status === "error") {
         setCloudOperationError("This project could not be renamed.");
+
         return;
       }
+
       setRenamingProject(null);
     } catch {
       setCloudOperationError("This project could not be renamed.");
@@ -412,6 +443,7 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
       setBusyProjectId(null);
     }
   };
+
   const confirmDelete = async (
     projectMenu: DashboardTimelineModel["projectMenu"],
     project: ProjectDialogProject,
@@ -419,12 +451,16 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
     if (busyProjectId()) return;
     setCloudOperationError(null);
     setBusyProjectId(project.id);
+
     try {
       const outcome = await projectMenu.onDeleteProject(project.id);
+
       if (outcome?.status === "error") {
         setCloudOperationError("This project could not be deleted.");
+
         return;
       }
+
       setDeletingProject(null);
     } catch {
       setCloudOperationError("This project could not be deleted.");
@@ -432,12 +468,15 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
       setBusyProjectId(null);
     }
   };
+
   const createCloudProject = async (projectMenu: DashboardTimelineModel["projectMenu"]) => {
     if (busyProjectId()) return;
     setCloudOperationError(null);
     setBusyProjectId("create");
+
     try {
       const outcome = await projectMenu.onCreateProject();
+
       if (outcome?.status === "error") setCloudOperationError("This project could not be created.");
     } catch {
       setCloudOperationError("This project could not be created.");

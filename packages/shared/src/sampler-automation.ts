@@ -65,10 +65,14 @@ export const instrumentAutomationKey = (
 
 export const parseInstrumentAutomationKey = (value: string): InstrumentAutomationKey | undefined => {
   const parts = value.split(':')
+
   if (parts.length < 4 || parts[0] !== 'instrument' || !parts[1]) return undefined
   const parameterId = parts.at(-1)
   const instanceId = parts.slice(2, -1).join(':')
+
   if (!parameterId || !instanceId) return undefined
+
   if (!isSamplerAutomationParameterId(parameterId)) return undefined
+
   return { kind: 'instrument', trackId: parts[1], instanceId, parameterId }
 }

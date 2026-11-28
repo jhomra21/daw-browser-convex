@@ -45,14 +45,17 @@ type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValu
 
 const isStoredString = (value: LocalProjectStoredValue): value is string => typeof value === 'string'
 const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => typeof value === 'boolean'
+
 const isStoredFiniteNumber = (value: LocalProjectStoredValue): value is number => (
   typeof value === 'number' && Number.isFinite(value)
 )
+
 const isLocalProjectStoredObject = (
   value: LocalProjectStoredValue,
 ): value is LocalProjectStoredObject => {
   if (typeof value !== 'object' || value === null || Array.isArray(value)) return false
   const prototype = Object.getPrototypeOf(value)
+
   return prototype === Object.prototype || prototype === null
 }
 
@@ -60,57 +63,78 @@ export const parseLocalProjectStoredJsonValue = (
   value: LocalProjectStoredValue,
 ): JsonValue | undefined => {
   if (value === null) return null
+
   if (isStoredString(value) || isStoredBoolean(value) || isStoredFiniteNumber(value)) return value
+
   if (Array.isArray(value)) {
     const result: JsonValue[] = []
+
     for (const entry of value) {
       const parsed = parseLocalProjectStoredJsonValue(entry)
+
       if (parsed === undefined) return undefined
       result.push(parsed)
     }
+
     return result
   }
+
   if (!isLocalProjectStoredObject(value)) return undefined
   const result: Array<readonly [string, JsonValue]> = []
+
   for (const [key, entry] of Object.entries(value)) {
     if (entry === undefined) continue
     const parsed = parseLocalProjectStoredJsonValue(entry)
+
     if (parsed === undefined) return undefined
     result.push([key, parsed])
   }
+
   return Object.fromEntries(result)
 }
 
 const stringField = (value: JsonObject | undefined, key: string) => (
   isJsonString(value?.[key]) ? value[key] : undefined
 )
+
 const numberField = (value: JsonObject | undefined, key: string) => (
   isJsonNumber(value?.[key]) ? value[key] : undefined
 )
+
 const timeField = (value: JsonObject | undefined, key: string, fallback: number) => (
   isJsonNumber(value?.[key]) ? value[key] : fallback
 )
+
 const isAudioEffectKind = (kind: string): kind is AudioEffectKind => (
   AUDIO_EFFECT_ORDER.some((effect) => effect === kind)
 )
+
 const isAudioSourceKind = (kind: string): kind is AudioSourceKind => (
   kind === 'upload' || kind === 'url' || kind === 'recording'
 )
+
 const audioSourceKindField = (value: JsonObject | undefined) => {
   const kind = stringField(value, 'sourceKind')
+
   return kind !== undefined && isAudioSourceKind(kind) ? kind : undefined
 }
+
 const localProcessorKind = (
   target: ProjectSnapshotV2['processors'][number]['target'],
   kind: string,
 ): LocalEffectKind | undefined => {
   if (kind === 'instrument') return 'instrument'
+
   if (kind === 'arpeggiator') return 'arp'
+
   if (!isAudioEffectKind(kind)) return undefined
+
   return 'master' in target ? `master-${kind}` : kind
 }
+
 const localMidi = (value: ProjectSnapshotV2['clips'][number]['midi']): TimelineClipRow['midi'] => {
   if (!value) return undefined
+
   return normalizeLegacyMidiClip(value)
 }
 
@@ -132,6 +156,7 @@ const rowsByKind = (rows: readonly LocalProjectEntityRow[], kind: string) => new
   rows.flatMap((row) => {
     if (row.kind !== kind) return []
     const value = parseLocalProjectStoredJsonValue(row.value)
+
     return isJsonObject(value) ? [{ ...row, value }] : []
   }).map((row) => [row.id, row]),
 )
@@ -154,16 +179,20 @@ export const materializeLocalControlSnapshot = (
   const externalProcessors = rowsByKind(model.entities, externalPluginEntityKind)
   const automation = rowsByKind(model.entities, 'automation-envelope')
   const sidechains = rowsByKind(model.entities, 'sidechain-route')
+
   const canonicalIds = new Map<string, Set<string>>([
     ['track', new Set(snapshot.tracks.map((item) => item.id))],
     ['clip', new Set(snapshot.clips.map((item) => item.id))],
     ['effect', new Set(snapshot.processors.flatMap((item) => {
       const kind = localProcessorKind(item.target, item.processor.kind)
+
       if (!kind) return []
       const targetId = 'master' in item.target ? 'master' : item.target.trackId
+
       const instanceId = item.instanceId ?? (
         item.processor.kind === 'instrument' ? createInstrumentInstanceId() : createAudioEffectInstanceId()
       )
+
       return [localEffectRowId(
         targetId,
         kind,
@@ -183,15 +212,18 @@ export const materializeLocalControlSnapshot = (
       localSidechainRouteRowId(item.targetTrackId, item.effectInstanceId)
     )))],
   ])
+
   const replaceableEntities = model.entities.filter((row) => (
     canonicalIds.get(row.kind)?.has(row.id) === true
     || removedEntities.has(`${row.kind}:${row.id}`)
   ))
+
   const entities = model.entities.filter((row) => !replaceableEntities.includes(row))
 
   for (const item of snapshot.tracks) {
     const existingValue = tracks.get(item.id)?.value
     const existing = isJsonObject(existingValue) ? existingValue : undefined
+
     const row: TimelineTrackRow = {
       ...existing,
       id: item.id,
@@ -211,8 +243,10 @@ export const materializeLocalControlSnapshot = (
       createdAt: timeField(existing, 'createdAt', timestamp),
       updatedAt: timestamp,
     }
+
     entities.push(createLocalProjectEntityRow('track', row.id, row, timestamp))
   }
+
   for (const item of snapshot.clips) {
     const existingValue = clips.get(item.id)?.value
     const existing = isJsonObject(existingValue) ? existingValue : undefined
@@ -222,16 +256,20 @@ export const materializeLocalControlSnapshot = (
     // the entity row remains authoritative for local asset/capability
     // bindings and their metadata.
     const preserveExistingSource = source === undefined && item.midi === undefined
+
     const sourceAssetKey = source?.assetId
       ?? (preserveExistingSource
         ? stringField(existing, 'sourceAssetKey') ?? stringField(existing, 'sourceAssetId')
         : undefined)
+
     const sourceAssetId = source?.assetId
       ?? (preserveExistingSource
         ? stringField(existing, 'sourceAssetId') ?? stringField(existing, 'sourceAssetKey')
         : undefined)
+
     const sourceChanged = source !== undefined
       && stringField(existing, 'sourceAssetKey') !== source.assetId
+
     const row: TimelineClipRow = {
       ...existing,
       id: item.id,
@@ -259,26 +297,33 @@ export const materializeLocalControlSnapshot = (
       createdAt: timeField(existing, 'createdAt', timestamp),
       updatedAt: timestamp,
     }
+
     entities.push(createLocalProjectEntityRow('clip', row.id, row, timestamp))
   }
+
   for (const item of snapshot.processors) {
     if (item.processor.kind === 'external-vst3') {
       const existingValue = externalProcessors.get(item.id)?.value
       let existingProcessor: ExternalProcessor | undefined
+
       if (existingValue === undefined) {
         existingProcessor = externalProcessorFallbacks.get(item.id)
       } else {
         const existing = parseExternalProcessorValue(parseExternalPluginJsonValue(existingValue))
+
         if (existing.success) existingProcessor = existing.data
       }
+
       if (!existingProcessor) {
         throw new Error(`External plugin row "${item.id}" is missing or corrupt.`)
       }
+
       const next: ExternalProcessor = {
         ...existingProcessor,
         parameterOverrides: item.processor.params.parameterOverrides,
         updatedAt: timestamp,
       }
+
       entities.push(createLocalProjectEntityRow(
         externalPluginEntityKind,
         item.id,
@@ -287,7 +332,9 @@ export const materializeLocalControlSnapshot = (
       ))
       continue
     }
+
     const legacy = effects.get(item.id)
+
     if (
       item.processor.kind === 'instrument'
       && isJsonObject(legacy?.value)
@@ -296,12 +343,16 @@ export const materializeLocalControlSnapshot = (
     ) continue
     const targetId = 'master' in item.target ? 'master' : item.target.trackId
     const kind = localProcessorKind(item.target, item.processor.kind)
+
     if (!kind) continue
+
     const instanceId = item.instanceId ?? (
       item.processor.kind === 'instrument' ? createInstrumentInstanceId() : createAudioEffectInstanceId()
     )
+
     const id = localEffectRowId(targetId, kind, item.processor.kind === 'instrument' || kind === 'arp' ? undefined : instanceId)
     const existing = legacy?.value
+
     const row: LocalEffectRow<JsonValue> = {
       ...existing,
       id,
@@ -312,12 +363,15 @@ export const materializeLocalControlSnapshot = (
       index: item.index,
       updatedAt: timestamp,
     }
+
     entities.push(createLocalProjectEntityRow('effect', id, row, timestamp))
   }
+
   for (const item of snapshot.automation) {
     const target: AutomationTarget = 'master' in item.target
       ? createAutomationTarget({ kind: 'master' }, item.effectInstanceId)
       : createAutomationTarget({ kind: 'track', trackId: item.target.trackId }, item.effectInstanceId)
+
     const id = automationTargetKey(target, item.parameterId)
     const existing = automation.get(id)?.value
     entities.push(createLocalProjectEntityRow('automation-envelope', id, {
@@ -332,6 +386,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }, timestamp))
   }
+
   for (const item of snapshot.sidechains) {
     const id = localSidechainRouteRowId(item.targetTrackId, item.effectInstanceId)
     const existing = sidechains.get(id)?.value
@@ -344,9 +399,11 @@ export const materializeLocalControlSnapshot = (
   }
 
   const assetById = new Map([...model.assets, ...assetFallbacks.values()].map((asset) => [asset.id, asset]))
+
   const assetsById = new Map(model.assets
     .filter((asset) => !removedAssetIds.has(asset.id))
     .map((asset) => [asset.id, asset]))
+
   for (const item of snapshot.assets) {
     const existing = assetById.get(item.id)
     assetsById.set(item.id, {
@@ -368,18 +425,24 @@ export const materializeLocalControlSnapshot = (
       updatedAt: item.updatedAt,
     })
   }
+
   const assets = Array.from(assetsById.values())
   const folderKeys = new Set<string>()
+
   const projectState = model.projectState.filter((row) => {
     if (row.key === LOCAL_CONTROL_PROJECT_METADATA_KEY || row.key === 'bpm' || row.key === 'loop' || row.key === 'projectMix') {
       return false
     }
+
     if (!row.key.startsWith('asset-folder:')) return true
     const value = parseLocalProjectStoredJsonValue(row.value)
+
     if (value === undefined || !parseLocalAssetFolderRow(value)) return true
     folderKeys.add(row.key)
+
     return false
   })
+
   projectState.push(
     {
       key: LOCAL_CONTROL_PROJECT_METADATA_KEY,
@@ -397,6 +460,7 @@ export const materializeLocalControlSnapshot = (
     ...snapshot.assetFolders.map((folder) => {
       const key = localAssetFolderKey(folder.id)
       folderKeys.delete(key)
+
       return {
         key,
         value: {
@@ -409,6 +473,7 @@ export const materializeLocalControlSnapshot = (
       }
     }),
   )
+
   return {
     entities,
     assets,

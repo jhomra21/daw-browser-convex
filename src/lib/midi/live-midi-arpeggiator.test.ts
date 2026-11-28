@@ -29,38 +29,46 @@ const createHarness = (initialParams = params()) => {
   const started: Array<{ pitch: number; velocity: number }> = []
   const startTimes: Array<number | undefined> = []
   const stopped: Array<{ id: number; force: LiveMidiArpeggiatorRelease | undefined }> = []
+
   const scheduler: LiveMidiArpeggiatorScheduler = {
     schedule: (callback, delayMs) => {
       const id = nextTimerId
       nextTimerId += 1
       timers.set(id, { callback, at: now + delayMs })
+
       return id
     },
     clear: (timer) => {
       timers.delete(timer)
     },
   }
+
   let config = { trackId: 'track-1', params: initialParams, bpm: 60 }
   let nextHandle = 1
+
   const arp = createLiveMidiArpeggiator<number>({
     getConfig: () => config,
     scheduler,
     start: ({ pitch, velocity, when }) => {
       started.push({ pitch, velocity })
       startTimes.push(when)
+
       return nextHandle++
     },
     stop: (id, force) => stopped.push({ id, force }),
   })
+
   const advance = (ms: number) => {
     now += ms
     let next = [...timers.entries()].sort((left, right) => left[1].at - right[1].at)[0]
+
     while (next && next[1].at <= now) {
       timers.delete(next[0])
       next[1].callback()
       next = [...timers.entries()].sort((left, right) => left[1].at - right[1].at)[0]
     }
   }
+
   return {
     arp,
     started,

@@ -30,25 +30,31 @@ export const createSilenceFixture = (length: number, channelCount = 1): AudioFix
 
 export const createImpulseFixture = (length: number, channelCount = 1): AudioFixture => {
   const channels = createChannels(channelCount, length)
+
   for (const channel of channels) {
     if (channel.length > 0) channel[0] = 1
   }
+
   return channels
 }
 
 export const createStepFixture = (length: number, value = 1, channelCount = 1): AudioFixture => {
   const channels = createChannels(channelCount, length)
+
   for (const channel of channels) channel.fill(value)
+
   return channels
 }
 
 export const createSineFixture = (length: number, frequencyHz: number, sampleRate: number, channelCount = 1): AudioFixture => {
   const channels = createChannels(channelCount, length)
+
   for (const channel of channels) {
     for (let frame = 0; frame < length; frame += 1) {
       channel[frame] = Math.sin(2 * Math.PI * frequencyHz * frame / sampleRate)
     }
   }
+
   return channels
 }
 
@@ -60,40 +66,48 @@ export const createSweepFixture = (
 ): AudioFixture => {
   const channel = new Float32Array(length)
   let phase = 0
+
   for (let frame = 0; frame < length; frame += 1) {
     const progress = length <= 1 ? 0 : frame / (length - 1)
     const frequency = startFrequencyHz + (endFrequencyHz - startFrequencyHz) * progress
     phase += 2 * Math.PI * frequency / sampleRate
     channel[frame] = Math.sin(phase)
   }
+
   return [channel]
 }
 
 export const createSeededNoiseFixture = (length: number, seed = 1, channelCount = 1): AudioFixture => {
   let state = seed >>> 0
   const channels = createChannels(channelCount, length)
+
   for (const channel of channels) {
     for (let frame = 0; frame < length; frame += 1) {
       state = (Math.imul(state, 1664525) + 1013904223) >>> 0
       channel[frame] = state / 0xffffffff * 2 - 1
     }
   }
+
   return channels
 }
 
 export const createStereoIsolationFixture = (length: number): AudioFixture => {
   const channels = createChannels(2, length)
+
   if (length > 0) channels[0][0] = 1
+
   return channels
 }
 
 export const createOppositePolarityFixture = (length: number): AudioFixture => {
   const channels = createChannels(2, length)
+
   for (let frame = 0; frame < length; frame += 1) {
     const value = frame % 2 === 0 ? 1 : -1
     channels[0][frame] = value
     channels[1][frame] = -value
   }
+
   return channels
 }
 
@@ -106,22 +120,27 @@ export const measureAudio = (channels: AudioFixture): AudioMetrics => {
   let squareSum = 0
   let sampleCount = 0
   let containsNonFiniteSamples = false
+
   const dcOffset = channels.map((channel) => {
     let sum = 0
     let finiteSampleCount = 0
+
     for (const sample of channel) {
       if (!Number.isFinite(sample)) {
         containsNonFiniteSamples = true
         continue
       }
+
       peak = Math.max(peak, Math.abs(sample))
       squareSum += sample * sample
       sum += sample
       sampleCount += 1
       finiteSampleCount += 1
     }
+
     return finiteSampleCount === 0 ? 0 : sum / finiteSampleCount
   })
+
   return {
     peak,
     rms: sampleCount === 0 ? 0 : Math.sqrt(squareSum / sampleCount),
@@ -133,26 +152,33 @@ export const measureAudio = (channels: AudioFixture): AudioMetrics => {
 export const measureFrameOffset = (reference: Float32Array, candidate: Float32Array, maximumOffset: number) => {
   const referenceEnergy = reference.reduce((sum, sample) => sum + sample * sample, 0)
   const candidateEnergy = candidate.reduce((sum, sample) => sum + sample * sample, 0)
+
   if (referenceEnergy === 0 || candidateEnergy === 0) return null
   const normalization = Math.sqrt(referenceEnergy * candidateEnergy)
   let bestOffset = 0
   let bestCorrelationMagnitude = 0
+
   for (let offset = -maximumOffset; offset <= maximumOffset; offset += 1) {
     let correlation = 0
+
     for (let frame = 0; frame < reference.length; frame += 1) {
       const candidateFrame = frame + offset
+
       if (candidateFrame >= 0 && candidateFrame < candidate.length) {
         const referenceSample = reference[frame]
         const candidateSample = candidate[candidateFrame]
         correlation += referenceSample * candidateSample
       }
     }
+
     const correlationMagnitude = Math.abs(correlation / normalization)
+
     if (correlationMagnitude > bestCorrelationMagnitude) {
       bestCorrelationMagnitude = correlationMagnitude
       bestOffset = offset
     }
   }
+
   return bestCorrelationMagnitude >= 0.5 ? bestOffset : null
 }
 
@@ -170,6 +196,7 @@ type ToneTransferMetrics = {
 
 const validateToneFrequency = (frequencyHz: number, sampleRate: number) => {
   if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new RangeError('Sample rate must be positive and finite.')
+
   if (!Number.isFinite(frequencyHz) || frequencyHz <= 0 || frequencyHz >= sampleRate / 2) {
     throw new RangeError('Tone frequency must be positive, finite, and below Nyquist.')
   }
@@ -179,8 +206,11 @@ const phaseDegrees = (radians: number) => radians * 180 / Math.PI
 
 const wrapPhase = (radians: number) => {
   let wrapped = radians
+
   while (wrapped > Math.PI) wrapped -= 2 * Math.PI
+
   while (wrapped <= -Math.PI) wrapped += 2 * Math.PI
+
   return wrapped
 }
 
@@ -192,27 +222,34 @@ const measureTone = (
 ): ToneMeasurement => {
   validateToneFrequency(frequencyHz, sampleRate)
   const cycles = frequencyHz * signal.length / sampleRate
+
   if (Math.abs(cycles - Math.round(cycles)) > 1e-6) {
     throw new RangeError('Tone must complete an integer number of cycles in the measurement window.')
   }
+
   if (signal.length === 0) return { amplitude: 0, phaseRadians: 0, finite: true }
   let sine = 0
   let cosine = 0
   let finite = true
+
   for (let frame = 0; frame < signal.length; frame += 1) {
     const sample = signal[frame]
+
     if (!Number.isFinite(sample)) {
       finite = false
       continue
     }
+
     const angle = 2 * Math.PI * frequencyHz * frame / sampleRate
     sine += sample * Math.sin(angle)
     cosine += sample * Math.cos(angle)
   }
+
   if (!finite) return { amplitude: 0, phaseRadians: 0, finite: false }
   const scale = 2 / signal.length
   const sineCoefficient = sine * scale
   const cosineCoefficient = cosine * scale
+
   return {
     amplitude: Math.hypot(sineCoefficient, cosineCoefficient),
     phaseRadians: Math.atan2(cosineCoefficient, sineCoefficient),
@@ -229,11 +266,13 @@ export const measureToneTransfer = (
   const input = measureTone(reference, frequencyHz, sampleRate)
   const output = measureTone(candidate, frequencyHz, sampleRate)
   const phaseRadians = wrapPhase(output.phaseRadians - input.phaseRadians)
+
   const gainDb = input.amplitude <= 0
     ? Number.POSITIVE_INFINITY
     : output.amplitude <= 0
       ? Number.NEGATIVE_INFINITY
       : 20 * Math.log10(output.amplitude / input.amplitude)
+
   return {
     gainDb,
     phaseDegrees: phaseDegrees(phaseRadians),
@@ -247,23 +286,30 @@ export const measureThdPlusNoise = (
   sampleRate: number,
 ) => {
   const tone = measureTone(signal, frequencyHz, sampleRate)
+
   if (!tone.finite || tone.amplitude <= 0) return Number.POSITIVE_INFINITY
   let dc = 0
+
   for (const sample of signal) dc += sample
   dc /= signal.length
   let residualSquareSum = 0
+
   for (let frame = 0; frame < signal.length; frame += 1) {
     const angle = 2 * Math.PI * frequencyHz * frame / sampleRate + tone.phaseRadians
     const residual = signal[frame] - dc - tone.amplitude * Math.sin(angle)
     residualSquareSum += residual * residual
   }
+
   const residualRms = Math.sqrt(residualSquareSum / signal.length)
+
   if (residualRms <= 0) return Number.NEGATIVE_INFINITY
+
   return 20 * Math.log10(residualRms / (tone.amplitude / Math.SQRT2))
 }
 
 const foldFrequencyToNyquist = (frequencyHz: number, sampleRate: number) => {
   const wrapped = frequencyHz % sampleRate
+
   return wrapped <= sampleRate / 2 ? wrapped : sampleRate - wrapped
 }
 
@@ -289,33 +335,46 @@ export const measureAliasingEnergyDb = (
   if (!Number.isInteger(maximumHarmonic) || maximumHarmonic < 2) {
     throw new RangeError('Maximum harmonic must be an integer greater than or equal to two.')
   }
+
   const fundamental = measureTone(signal, fundamentalHz, sampleRate)
   const nyquist = sampleRate / 2
   const separationHz = 2 * sampleRate / signal.length
   const occupiedFrequencies = [0, nyquist]
   const aliasFrequencies = new Set<number>()
+
   for (let harmonic = 1; harmonic <= maximumHarmonic; harmonic += 1) {
     const harmonicFrequency = harmonic * fundamentalHz
+
     if (harmonicFrequency < nyquist) occupiedFrequencies.push(harmonicFrequency)
     else aliasFrequencies.add(foldFrequencyToNyquist(harmonicFrequency, sampleRate))
   }
+
   const aliases = [...aliasFrequencies]
+
   const ambiguous = aliases.some((aliasFrequency, index) =>
     occupiedFrequencies.some((frequency) => Math.abs(aliasFrequency - frequency) <= separationHz)
     || aliases.some((other, otherIndex) => otherIndex !== index && Math.abs(aliasFrequency - other) <= separationHz))
+
   if (ambiguous) {
     throw new RangeError('Fundamental folds harmonics within two bins of DC, Nyquist, harmonics, or other folds; alias energy is ambiguous.')
   }
+
   if (!fundamental.finite) return Number.POSITIVE_INFINITY
+
   if (fundamental.amplitude <= 0) return Number.POSITIVE_INFINITY
+
   if (aliases.length === 0) return Number.NEGATIVE_INFINITY
   let aliasAmplitudeSquared = 0
+
   for (const aliasFrequency of aliases) {
     const alias = measureTone(signal, aliasFrequency, sampleRate)
+
     if (!alias.finite) return Number.POSITIVE_INFINITY
     aliasAmplitudeSquared += alias.amplitude * alias.amplitude
   }
+
   if (aliasAmplitudeSquared <= 0) return Number.NEGATIVE_INFINITY
+
   return 10 * Math.log10(aliasAmplitudeSquared / (fundamental.amplitude * fundamental.amplitude))
 }
 
@@ -325,13 +384,17 @@ export const measureCrosstalkDb = (
 ) => {
   const sourceRms = measureAudio([source]).rms
   const leakedRms = measureAudio([leaked]).rms
+
   if (leakedRms <= 0) return Number.NEGATIVE_INFINITY
+
   if (sourceRms <= 0) return Number.POSITIVE_INFINITY
+
   return 20 * Math.log10(leakedRms / sourceRms)
 }
 
 const blackmanWindow = (frame: number, length: number) => {
   const progress = frame / (length - 1)
+
   return (1 - ANALYZER_BLACKMAN_ALPHA) / 2
     - 0.5 * Math.cos(2 * Math.PI * progress)
     + ANALYZER_BLACKMAN_ALPHA / 2 * Math.cos(4 * Math.PI * progress)
@@ -341,6 +404,7 @@ const downmixAnalyzerFrame = (channels: AudioFixture) => {
   const frame = new Float64Array(ANALYZER_FFT_SIZE)
   const left = channels[0]
   const right = channels[1]
+
   for (let index = 0; index < ANALYZER_FFT_SIZE; index += 1) {
     const leftSample = Number.isFinite(left?.[index]) ? left[index] : 0
     const rightSample = Number.isFinite(right?.[index]) ? right[index] : 0
@@ -348,6 +412,7 @@ const downmixAnalyzerFrame = (channels: AudioFixture) => {
       ? (leftSample + rightSample) * 0.5
       : leftSample
   }
+
   return frame
 }
 
@@ -366,28 +431,34 @@ export const characterizeAnalyzerFrame = (
   const magnitude = new Float32Array(ANALYZER_BIN_COUNT)
   const decibels = new Float32Array(ANALYZER_BIN_COUNT)
   const normalized = new Float32Array(ANALYZER_BIN_COUNT)
+
   for (let bin = 0; bin < ANALYZER_BIN_COUNT; bin += 1) {
     let real = 0
     let imaginary = 0
+
     for (let frame = 0; frame < ANALYZER_FFT_SIZE; frame += 1) {
       const angle = 2 * Math.PI * bin * frame / ANALYZER_FFT_SIZE
       const sample = input[frame] * blackmanWindow(frame, ANALYZER_FFT_SIZE)
       real += sample * Math.cos(angle)
       imaginary -= sample * Math.sin(angle)
     }
+
     // Web Audio exposes bins [0, N/2), so Nyquist is not present in the
     // 1024-value output. DC is not doubled; every exposed non-DC bin is.
     const scale = bin === 0 ? 1 / ANALYZER_FFT_SIZE : 2 / ANALYZER_FFT_SIZE
     const currentMagnitude = Math.hypot(real, imaginary) * scale
+
     const smoothedMagnitude = previousMagnitude && previousMagnitude.length === ANALYZER_BIN_COUNT
       ? ANALYZER_SMOOTHING * previousMagnitude[bin] + (1 - ANALYZER_SMOOTHING) * currentMagnitude
       : currentMagnitude
+
     magnitude[bin] = Number.isFinite(smoothedMagnitude) ? smoothedMagnitude : 0
     const db = 20 * Math.log10(Math.max(magnitude[bin], Number.MIN_VALUE))
     decibels[bin] = Math.min(ANALYZER_MAX_DECIBELS, Math.max(ANALYZER_MIN_DECIBELS, db))
     normalized[bin] = (decibels[bin] - ANALYZER_MIN_DECIBELS)
       / (ANALYZER_MAX_DECIBELS - ANALYZER_MIN_DECIBELS)
   }
+
   return { magnitude, decibels, normalized }
 }
 
@@ -412,23 +483,30 @@ export const measureReverbCharacterization = (
   const right = channels[1] ?? left
   let peak = 0
   let finite = true
+
   for (const channel of channels) {
     for (const sample of channel) {
       finite = finite && Number.isFinite(sample)
+
       if (Number.isFinite(sample)) peak = Math.max(peak, Math.abs(sample))
     }
   }
+
   const onsetThreshold = options.onsetThreshold ?? 1e-6
+
   const onsetFrame = channels.reduce<number | null>((first, channel) => {
     for (let frame = 0; frame < channel.length; frame += 1) {
       if (Number.isFinite(channel[frame]) && Math.abs(channel[frame]) >= onsetThreshold) {
         return first === null ? frame : Math.min(first, frame)
       }
     }
+
     return first
   }, null)
+
   const decayThreshold = peak * linearFromDb(options.decayThresholdDb ?? -60)
   let decayFrameAtMinus60Db: number | null = null
+
   if (peak > 0) {
     for (const channel of channels) {
       for (let frame = channel.length - 1; frame >= 0; frame -= 1) {
@@ -441,19 +519,24 @@ export const measureReverbCharacterization = (
       }
     }
   }
+
   const start = Math.max(0, options.earlyWindow[0])
   const end = Math.min(Math.max(left.length, right.length), options.earlyWindow[1])
   let earlyReflectionEnergy = 0
+
   for (const channel of channels) {
     for (let frame = start; frame < end && frame < channel.length; frame += 1) {
       const sample = channel[frame]
+
       if (Number.isFinite(sample)) earlyReflectionEnergy += sample * sample
     }
   }
+
   let leftEnergy = 0
   let rightEnergy = 0
   let crossEnergy = 0
   const correlationLength = Math.min(left.length, right.length)
+
   for (let frame = 0; frame < correlationLength; frame += 1) {
     const leftSample = Number.isFinite(left[frame]) ? left[frame] : 0
     const rightSample = Number.isFinite(right[frame]) ? right[frame] : 0
@@ -461,10 +544,13 @@ export const measureReverbCharacterization = (
     rightEnergy += rightSample * rightSample
     crossEnergy += leftSample * rightSample
   }
+
   const minimumEnergy = 1e-10
+
   const stereoCorrelation = leftEnergy < minimumEnergy || rightEnergy < minimumEnergy
     ? null
     : crossEnergy / Math.sqrt(leftEnergy * rightEnergy)
+
   return {
     onsetFrame,
     peak,

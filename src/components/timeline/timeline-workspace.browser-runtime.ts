@@ -42,14 +42,18 @@ const afterFrame = () => new Promise<void>((resolve) => requestAnimationFrame(()
 
 const requireElement = (id: string): HTMLElement => {
   const element = document.getElementById(id)
+
   if (!(element instanceof HTMLElement)) throw new Error(`Missing ${id}`)
+
   return element
 }
 
 const numericPixels = (value: string) => {
   const match = value.match(/-?(?:\d+\.?\d*|\.\d+)px/)
+
   if (!match) return 0
   const number = Number.parseFloat(match[0])
+
   return Number.isFinite(number) ? number : 0
 }
 
@@ -136,18 +140,23 @@ const sample = (
   const surfaceRect = surface.getBoundingClientRect()
   const ruler = surface.querySelector('[data-timeline-ruler]')
   const grid = surface.querySelector('[data-timeline-grid]')
+
   const rulerPhase = ruler instanceof HTMLElement
     ? computedBackgroundPositions(ruler)[0] ?? 0
     : 0
+
   const gridPhases = grid instanceof HTMLElement
     ? computedBackgroundPositions(grid)
     : []
+
   const rulerSpacing = ruler instanceof HTMLElement
     ? computedBackgroundSize(ruler)[0] ?? 0
     : 0
+
   const gridSpacings = grid instanceof HTMLElement
     ? computedBackgroundSize(grid)
     : []
+
   return {
     scrollLeft: viewport.scrollLeft,
     viewportLeft: viewportRect.left,
@@ -181,17 +190,21 @@ const sampleScrollPath = (
   pixelsPerSecond: number,
 ) => new Promise<readonly TimelineSample[]>((resolve) => {
   let settled = false
+
   const finish = () => {
     if (settled) return
     settled = true
     const samples: TimelineSample[] = []
+
     for (const position of positions) {
       viewport.scrollLeft = position
       applyLogicalViewport(visibleStartSec, pixelsPerSecond)
       samples.push(sample(viewport, surface, visibleStartSec, pixelsPerSecond))
     }
+
     resolve(samples)
   }
+
   requestAnimationFrame(finish)
   setTimeout(finish, 0)
 })
@@ -240,20 +253,25 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
   applyLogicalViewport(initialVisibleStartSec, initialPixelsPerSecond)
   viewport.scrollLeft = anchor
   await afterFrame()
+
   const coldMount = [
     sample(viewport, surface, initialVisibleStartSec, initialPixelsPerSecond),
   ]
+
   viewport.dataset.project = 'project-b'
   viewport.scrollLeft = anchor
   await afterFrame()
   coldMount.push(sample(viewport, surface, initialVisibleStartSec, initialPixelsPerSecond))
+
   const fixedLogicalPan = [
     sample(viewport, surface, initialVisibleStartSec, initialPixelsPerSecond),
   ]
+
   const fixedPanStartSec = initialVisibleStartSec + 0.375
   applyLogicalViewport(fixedPanStartSec, initialPixelsPerSecond)
   fixedLogicalPan.push(sample(viewport, surface, fixedPanStartSec, initialPixelsPerSecond))
   const maxScrollLeft = viewport.scrollWidth - viewport.clientWidth
+
   const pinnedScroll = await sampleScrollPath(
     viewport,
     surface,
@@ -261,9 +279,11 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
     initialVisibleStartSec,
     initialPixelsPerSecond,
   )
+
   const activeNativeScrollFrames: TimelineSample[] = []
   let logicalStartSec = initialVisibleStartSec
   let previousPhysicalScrollLeft = anchor
+
   for (const physicalScrollLeft of [anchor + 125, anchor + 275, anchor + 50, anchor + 350]) {
     logicalStartSec += (
       physicalScrollLeft - previousPhysicalScrollLeft
@@ -279,23 +299,29 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
     viewport.scrollLeft = anchor
     previousPhysicalScrollLeft = anchor
   }
+
   const recenterStartSec = 13.125
   applyLogicalViewport(recenterStartSec, initialPixelsPerSecond)
+
   const recenterSameLogicalViewport = [
     sample(viewport, surface, recenterStartSec, initialPixelsPerSecond),
   ]
+
   viewport.scrollLeft = anchor + 8_000
   recenterSameLogicalViewport.push(
     sample(viewport, surface, recenterStartSec, initialPixelsPerSecond),
   )
+
   const sameLogicalViewportPhysicalProxies = [
     sample(viewport, surface, recenterStartSec, initialPixelsPerSecond),
   ]
+
   viewport.scrollLeft = anchor - 6_000
   sameLogicalViewportPhysicalProxies.push(
     sample(viewport, surface, recenterStartSec, initialPixelsPerSecond),
   )
   const panZoomSequence: TimelineSample[] = []
+
   const sequence = [
     { visibleStartSec: 8.25, pixelsPerSecond: 100 },
     { visibleStartSec: 9.75, pixelsPerSecond: 160 },
@@ -304,6 +330,7 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
     { visibleStartSec: 9.25, pixelsPerSecond: 100 },
     { visibleStartSec: 8.75, pixelsPerSecond: 100 },
   ]
+
   for (const step of sequence) {
     viewport.scrollLeft = anchor + panZoomSequence.length * 2_000
     applyLogicalViewport(step.visibleStartSec, step.pixelsPerSecond)
@@ -314,6 +341,7 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
       step.pixelsPerSecond,
     ))
   }
+
   const expectedPhase = (visibleStartSec: number, pixelsPerSecond: number) => (
     timelineGridPhasePx(
       visibleStartSec,
@@ -326,19 +354,23 @@ const run = async (): Promise<TimelineWorkspaceRegressionResult> => {
       ).majorSec,
     )
   )
+
   const canonicalMinorSpacingPx = Math.max(
     0.5,
     intervalsFor(initialPixelsPerSecond).minorSec * initialPixelsPerSecond,
   )
+
   const canonicalMajorSpacingPx = Math.max(
     0.5,
     intervalsFor(initialPixelsPerSecond).majorSec * initialPixelsPerSecond,
   )
+
   const coldMountExpected = {
     ...coldMount[0],
     rulerMajorPhasePx: expectedPhase(initialVisibleStartSec, initialPixelsPerSecond),
     gridMajorPhasePx: expectedPhase(initialVisibleStartSec, initialPixelsPerSecond),
   }
+
   return {
     coldMount,
     pinnedScroll,

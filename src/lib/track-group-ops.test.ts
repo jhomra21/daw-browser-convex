@@ -14,7 +14,9 @@ import {
 } from './track-group-ops'
 
 type TestTrackInput = Pick<Track, 'id'> & Partial<Track> & { index?: number }
+
 type TestTrack = Track & { index?: number }
+
 type ReorderTrack = Track & { index: number }
 
 const track = (input: TestTrackInput): TestTrack => ({
@@ -46,6 +48,7 @@ describe('track group operations', () => {
       selectedTrackIds: ['b', 'a'],
       groupTrackId: 'g',
     })
+
     expect(plan?.groupTrack.index).toBe(0)
     expect(plan?.childUpdates).toEqual([
       { trackId: 'a', groupId: 'g', outputTargetId: 'g' },
@@ -70,6 +73,7 @@ describe('track group operations', () => {
       selectedTrackIds: ['a'],
       groupTrackId: 'new-g',
     })
+
     expect(plan?.childUpdates).toEqual([
       { trackId: 'a', groupId: 'new-g', outputTargetId: 'new-g' },
     ])
@@ -240,6 +244,7 @@ describe('track group operations', () => {
       reorderTrack({ id: 'a', index: 0 }),
       reorderTrack({ id: 'r', index: 1, channelRole: 'return' }),
     ]
+
     expect(planTrackReorder({
       tracks,
       moveRootIds: [],

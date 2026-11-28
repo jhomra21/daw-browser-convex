@@ -14,6 +14,7 @@ test("mixed-rate pages are deterministic, bounded, and continuous", () => {
   const sources = planThirtyTrackMixedRateSources()
   expect(new Set(sources.map((source) => source.durationSec))).toEqual(new Set([3, 10, 30, 60, 120, 360, 600]))
   expect(sources).toHaveLength(30)
+
   for (const source of sources) {
     const first = sampleThirtyTrackMixedRatePage(source, 0, 257)
     const next = sampleThirtyTrackMixedRatePage(source, 257, 17)
@@ -25,6 +26,7 @@ test("mixed-rate pages are deterministic, bounded, and continuous", () => {
     expect(first.every((channel) => channel.every((sample) => Number.isFinite(sample) && Math.abs(sample) <= 1))).toBe(true)
     expect(() => sampleThirtyTrackMixedRatePage(source, source.sampleRate * source.durationSec - 1, 2)).toThrow()
   }
+
   expect(() => sampleThirtyTrackMixedRatePage(sources[0]!, 0, 16_385)).toThrow()
 })
 
@@ -42,6 +44,7 @@ test("mixed-rate expansion plan preserves 30 audio lanes and bounds long-source 
   expect(plan.every((source) => source.durationSec >= 3)).toBe(true)
   expect(plan.reduce((total, source) => total + source.uncompressedBytes, 0)).toBeGreaterThan(900_000_000)
 })
+
 import { createTierTwoControlRequest } from "./tier-two"
 
 test("30-track semantic manifest is canonical and complete", () => {

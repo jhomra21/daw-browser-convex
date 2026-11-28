@@ -53,6 +53,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
     // The composed path includes editable nodes inside open shadow roots and
     // actual portal ancestry even though this listener runs in window capture.
     const path = e.composedPath();
+
     if (keyboardTargetOwner(path)) return;
 
     // Left to the native menu on desktop macOS: its key equivalent fires first, so handling these here would double-fire.
@@ -67,14 +68,17 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onToggleFollow();
+
       return;
     }
 
     if ((e.ctrlKey || e.metaKey) && !e.altKey && (e.key === "g" || e.key === "G")) {
       e.preventDefault();
       e.stopPropagation();
+
       if (e.shiftKey) handlers.onUngroupSelectedTrack();
       else handlers.onGroupSelectedTracks();
+
       return;
     }
 
@@ -90,8 +94,10 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
         { mod: true, alt: true, shift: false, key: e.key },
         { editableTarget: false },
       );
+
       return;
     }
+
     // Add Track
     // Instrument: Ctrl/Cmd + Shift + T
     if (
@@ -102,8 +108,10 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onAddInstrumentTrack();
+
       return;
     }
+
     // Audio: Shift + T (no Ctrl/Cmd)
     if (
       !e.ctrlKey &&
@@ -114,8 +122,10 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onAddAudioTrack();
+
       return;
     }
+
     // Return: Shift + R (no Ctrl/Cmd)
     if (
       !e.ctrlKey &&
@@ -126,8 +136,10 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onAddReturnTrack();
+
       return;
     }
+
     // Group: Shift + G (no Ctrl/Cmd)
     if (
       !e.ctrlKey &&
@@ -138,16 +150,19 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onAddGroupTrack();
+
       return;
     }
 
     // Duplicate: Ctrl/Cmd + D
     if ((e.ctrlKey || e.metaKey) && (e.key === "d" || e.key === "D")) {
       if (path.some(isLocalTimelineKeyboardTarget)) return;
+
       if (menuOwnsCommandKey) return;
       e.preventDefault();
       e.stopPropagation();
       handlers.onDuplicate();
+
       return;
     }
 
@@ -156,6 +171,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
         e.preventDefault();
         e.stopPropagation();
       }
+
       return;
     }
 
@@ -164,6 +180,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
         e.preventDefault();
         e.stopPropagation();
       }
+
       return;
     }
 
@@ -175,10 +192,13 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       if (menuOwnsCommandKey) return;
       e.preventDefault();
       e.stopPropagation();
+
       if (e.shiftKey) handlers.onRedo();
       else handlers.onUndo();
+
       return;
     }
+
     // Redo: Ctrl/Cmd + Y
     if (
       (e.ctrlKey || e.metaKey) &&
@@ -188,6 +208,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onRedo();
+
       return;
     }
 
@@ -200,6 +221,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
       e.preventDefault();
       e.stopPropagation();
       handlers.onOpenExport();
+
       return;
     }
 

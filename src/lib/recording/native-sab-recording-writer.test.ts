@@ -8,6 +8,7 @@ const setup = (channelCount: number, stall = false) => {
   let aborted = false
   let terminated = false
   let receive = (_message: WriterOutboundMessage | null) => {}
+
   const core = createRecordingWriterHandler({
     createSession: async () => ({
       append: async (channels) => {
@@ -18,14 +19,17 @@ const setup = (channelCount: number, stall = false) => {
       abort: async () => { aborted = true },
     }),
   }, (message) => receive(message))
+
   const worker = {
     postMessage: (message: WriterInboundMessage) => core.handle(message),
     setMessageHandler: (handler: typeof receive) => { receive = handler },
     terminate: () => { terminated = true },
   }
+
   const writer = createNativeSabRecordingWriter({
     generation: 1, sessionId: 'native', sampleRate: 48000, channelCount, worker, timeoutMs: 20,
   })
+
   return { writer, blocks, worker, receive: (message: WriterOutboundMessage | null) => receive(message), aborted: () => aborted, terminated: () => terminated }
 }
 
@@ -45,9 +49,11 @@ test('native SAB rejects malformed blocks and fails at eight outstanding slots',
   expect(malformed.terminated()).toBe(true)
   const { writer, terminated } = setup(1, true)
   await writer.ready
+
   for (let sequence = 0; sequence < 8; sequence += 1) {
     writer.write({ sequence, frameCount: 1, channelCount: 1, planes: [Float32Array.of(sequence)] })
   }
+
   expect(() => writer.write({ sequence: 8, frameCount: 1, channelCount: 1, planes: [Float32Array.of(8)] })).toThrow(/bound/)
   expect(writer.stats().peakOccupancy).toBeLessThanOrEqual(8)
   expect(writer.stats().droppedBlocks).toBe(0)
@@ -78,9 +84,11 @@ test('native SAB fails closed on malformed worker response and supports abort', 
 test('native SAB wakes workers that do not support asynchronous atomic waits', async () => {
   const messages: WriterInboundMessage[] = []
   let receive = (_message: WriterOutboundMessage | null) => {}
+
   const worker = {
     postMessage: (message: WriterInboundMessage) => {
       messages.push(message)
+
       if (message.type === 'start-sab') {
         queueMicrotask(() => receive({ type: 'ready', generation: 1, sessionId: 'native' }))
       }
@@ -88,9 +96,11 @@ test('native SAB wakes workers that do not support asynchronous atomic waits', a
     setMessageHandler: (handler: typeof receive) => { receive = handler },
     terminate: () => undefined,
   }
+
   const writer = createNativeSabRecordingWriter({
     generation: 1, sessionId: 'native', sampleRate: 48_000, channelCount: 1, worker,
   })
+
   await writer.ready
   writer.write({ sequence: 0, frameCount: 1, channelCount: 1, planes: [Float32Array.of(1)] })
   expect(messages.map((message) => message.type)).toEqual(['start-sab', 'wake'])
@@ -99,6 +109,7 @@ test('native SAB wakes workers that do not support asynchronous atomic waits', a
 
 test('native SAB reports a worker startup error before its deadline', async () => {
   let onError = (_error: Error) => {}
+
   const writer = createNativeSabRecordingWriter({
     generation: 1, sessionId: 'native', sampleRate: 48_000, channelCount: 1,
     timeoutMs: 20,
@@ -109,11 +120,13 @@ test('native SAB reports a worker startup error before its deadline', async () =
       terminate: () => undefined,
     },
   })
+
   await expect(writer.ready).rejects.toThrow('worker-load-failed')
 })
 
 test('native SAB distinguishes a loaded worker from storage startup failure', async () => {
   let receive = (_message: WriterOutboundMessage | null) => {}
+
   const writer = createNativeSabRecordingWriter({
     generation: 1, sessionId: 'native', sampleRate: 48_000, channelCount: 1, timeoutMs: 20,
     worker: {
@@ -122,5 +135,6 @@ test('native SAB distinguishes a loaded worker from storage startup failure', as
       terminate: () => undefined,
     },
   })
+
   await expect(writer.ready).rejects.toThrow('storage startup timed out')
 })

@@ -11,6 +11,7 @@ const BINS = 1024
 // A single 1 kHz partial: normalised level 1 at its bin, falling off two bins either side.
 const toneFrame = (hz: number): SpectrumFrame => {
   const center = (hz / (SAMPLE_RATE / 2)) * (BINS - 1)
+
   return { data: Float32Array.from({ length: BINS }, (_, bin) => Math.max(0, 1 - Math.abs(bin - center) / 2)), sampleRate: SAMPLE_RATE }
 }
 
@@ -25,8 +26,11 @@ const run = async () => {
   render(() => <SpectrumView frame={frame()} view="both" />, host)
   // Tailwind is not loaded here, so give the view the flex layout its classes describe.
   const view = host.querySelector<HTMLElement>('[data-spectrum-view]')
+
   if (view) view.style.cssText = 'display:flex;flex-direction:column;height:100%;gap:4px'
+
   for (const frame of host.querySelectorAll<HTMLElement>('[data-spectrum-canvas]')) frame.style.cssText = 'position:relative;flex:1 1 0;min-height:0'
+
   for (const canvas of host.querySelectorAll('canvas')) canvas.style.cssText = 'position:absolute;inset:0;width:100%;height:100%'
   await nextFrame()
 
@@ -40,16 +44,23 @@ const run = async () => {
 
   const spectrogram = canvases()[1]
   const context = spectrogram.getContext('2d')
+
   if (!context) throw new Error('No spectrogram context')
+
   const brightness = (x: number, y: number) => {
     const [r, g, b] = context.getImageData(x, y, 1, 1).data
+
     return r + g + b
   }
+
   const brightestRow = (x: number) => {
     let best = 0
+
     for (let y = 0; y < spectrogram.height; y++) if (brightness(x, y) > brightness(x, best)) best = y
+
     return best
   }
+
   const expectedRow = spectrogram.height * (1 - Math.log(1000 / 20) / Math.log(1000))
   const tolerance = spectrogram.height * 0.05
   scenarios['a-1khz-tone-lands-on-its-log-frequency-row-at-the-newest-column'] =
@@ -66,13 +77,18 @@ const run = async () => {
     && Math.abs(brightestRow(1) - expectedRow) < tolerance
 
   const curve = canvases()[0].getContext('2d')
+
   if (!curve) throw new Error('No curve context')
+
   const accentPixels = () => {
     const { data } = curve.getImageData(0, 0, canvases()[0].width, canvases()[0].height)
     let count = 0
+
     for (let index = 0; index < data.length; index += 4) if (data[index + 2] > 200 && data[index] < 120) count++
+
     return count
   }
+
   scenarios['the-curve-draws-the-latest-frame'] = accentPixels() > 0
 
   const screenshotReady = host.querySelectorAll('canvas').length
@@ -81,6 +97,7 @@ const run = async () => {
   scenarios['a-null-frame-clears-the-history'] = brightness(spectrogram.width - 2, Math.round(lowRow)) < 60
     && brightness(1, Math.round(expectedRow)) < 60 && accentPixels() === 0
   setFrame(toneFrame(1000))
+
   for (let index = 0; index < 150; index++) setFrame(toneFrame(3000 + index * 20))
   await nextFrame()
   scenarios['a-screenshot-scene-was-rendered'] = screenshotReady === 2

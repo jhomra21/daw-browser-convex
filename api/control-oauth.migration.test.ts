@@ -57,6 +57,7 @@ describe("control OAuth migration", () => {
       const row = database.prepare(`SELECT count(*) count FROM ${table}`).get();
       expect(row).toEqual({ count: 0 });
     }
+
     database.close();
   });
 });

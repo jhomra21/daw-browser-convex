@@ -12,6 +12,7 @@ const user = {
 const createIssuanceContext = async () => {
   const { privateKey, publicKey } = await generateKeyPair("ES256", { extractable: true });
   const privateJwk = await exportJWK(privateKey);
+
   const context = {
     env: {
       CONVEX_AUTH_PRIVATE_JWK: JSON.stringify(privateJwk),
@@ -19,6 +20,7 @@ const createIssuanceContext = async () => {
     },
     requestUrl: "https://app.example.com/api/convex-auth/token",
   };
+
   return { context, publicKey };
 };
 
@@ -44,6 +46,7 @@ test("issues ordinary, attributed, and worker Convex authentication tokens", asy
       tokenIdentifier: "trusted-control-token",
     },
   }), publicKey);
+
   expect(attributed.payload.dawControlActorIssuer).toBe("trusted-control-issuer");
   expect(attributed.payload.dawControlActorTokenIdentifier).toBe("trusted-control-token");
 
@@ -58,6 +61,7 @@ test("accepts bounded control actor claims and rejects invalid ones before token
     const token = await issueConvexAuthToken(context, user, {
       actor: { issuer: value, tokenIdentifier: value },
     });
+
     const verified = await verifyToken(token, publicKey);
     expect(verified.payload.dawControlActorIssuer).toBe(value);
     expect(verified.payload.dawControlActorTokenIdentifier).toBe(value);

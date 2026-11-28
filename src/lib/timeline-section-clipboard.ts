@@ -10,6 +10,7 @@ export type TimelineSectionClipboard = {
 
 export function createTimelineSectionClipboard() {
   let value: TimelineSectionClipboard | null = null
+
   return {
     read: () => value,
     write: (next: TimelineSectionClipboard) => {

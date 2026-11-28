@@ -12,6 +12,7 @@ type ExportAudioEffectRow = AudioEffectRuntimeInstance extends infer Instance
       }
     : never
   : never
+
 type ExportInstrumentEffectRow = {
   targetId: string
   effect: "instrument"
@@ -19,6 +20,7 @@ type ExportInstrumentEffectRow = {
   instanceId?: undefined
   index?: undefined
 }
+
 type ExportArpEffectRow = {
   targetId: string
   effect: "arp"
@@ -26,6 +28,7 @@ type ExportArpEffectRow = {
   instanceId?: undefined
   index?: undefined
 }
+
 type ExportSynthEffectRow = {
   targetId: string
   effect: "synth"
@@ -33,6 +36,7 @@ type ExportSynthEffectRow = {
   instanceId?: undefined
   index?: undefined
 }
+
 export type ExportEffectRow =
   | ExportAudioEffectRow
   | ExportInstrumentEffectRow

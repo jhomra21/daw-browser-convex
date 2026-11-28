@@ -45,6 +45,7 @@ const parseResult = <Value>(
   schema: { safeParse: (cause: unknown) => { success: true; data: Value } | { success: false } },
 ): Value => {
   const result = schema.safeParse(cause)
+
   if (result.success) return result.data
   throw new ProjectControlError(controlErrorSchemaV1.parse(cause))
 }
@@ -66,6 +67,7 @@ export const createProjectControlClient = (input: {
     const local = createLocalControlService({
       actor: { subject: 'local:00000000-0000-4000-8000-000000000000' },
     })
+
     return {
       snapshotV2: async () => projectSnapshotSchemaV2.parse(await localResult(() => local.snapshotV2({ projectId: input.projectId }))),
       previewV1: async (request) => controlPreviewResultSchemaV1.parse(await localResult(() => local.preview(serializeJsonValue(parseControlPreviewRequestV1(request))))),
@@ -73,6 +75,7 @@ export const createProjectControlClient = (input: {
       commitV1: async (request) => controlCommitResultSchemaV1.parse(await localResult(() => local.commit(serializeJsonValue(parseControlCommitRequestV1(request))))),
     }
   }
+
   return {
     snapshotV2: async () => projectSnapshotSchemaV2.parse(await input.convexClient.query(
       input.convexApi.control.snapshotV2,

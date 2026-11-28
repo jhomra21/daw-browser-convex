@@ -11,11 +11,14 @@ export function willClipsOverlap(
   duration: number,
 ) {
   const endSec = startSec + duration
+
   for (const clip of clips) {
     if (excludeId && clip.id === excludeId) continue
     const clipEndSec = clip.startSec + clip.duration
+
     if (endSec > clip.startSec && startSec < clipEndSec) return true
   }
+
   return false
 }
 
@@ -26,6 +29,7 @@ export function calcNonOverlappingStart(
   duration: number,
 ) {
   let startSec = Math.max(0, desiredStartSec)
+
   const sorted = clips
     .filter((clip) => !excludeId || clip.id !== excludeId)
     .slice()
@@ -33,6 +37,7 @@ export function calcNonOverlappingStart(
 
   for (let index = 0; index < sorted.length; index++) {
     const clip = sorted[index]
+
     if (startSec < clip.startSec + clip.duration && startSec + duration > clip.startSec) {
       startSec = clip.startSec + clip.duration
       index = -1

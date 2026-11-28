@@ -10,8 +10,10 @@ const updateAutomationPath = (
   nextValue: number,
 ): JsonObject => {
   const [key, ...rest] = path;
+
   if (!key) return value ?? {};
   const record = value ?? {};
+
   return {
     ...record,
     [key]: rest.length > 0
@@ -28,8 +30,11 @@ const updateEqBandValue = (
 ): JsonObject => {
   if (!value || !Array.isArray(value.bands)) return value ?? {};
   let field = "q";
+
   if (property === "frequencyHz") field = "frequency";
+
   if (property === "gainDb") field = "gainDb";
+
   return {
     ...value,
     bands: value.bands.map((band) => {
@@ -47,11 +52,13 @@ export const overlayEffectAutomationValue = (
 ): JsonObject => {
   const eq = parseEqBandParameterId(parameterId);
   const path = parameterId.split(".").slice(1);
+
   if (!isJsonObject(value.state)) {
     return eq
       ? updateEqBandValue(value, eq.bandId, eq.property, nextValue)
       : updateAutomationPath(value, path, nextValue);
   }
+
   return {
     ...value,
     state: eq

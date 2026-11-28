@@ -96,6 +96,7 @@ async function retainProjectMultipartAborts(ctx: MutationCtx, projectId: string,
       || session.status === "completing"
       || session.status === "verifying"
       || session.status === "finalizing");
+
   await enqueueMultipartAbortRows(ctx, {
     projectId,
     storageNamespace,
@@ -124,6 +125,7 @@ async function deleteRoomRows(ctx: MutationCtx, projectId: string) {
 
 async function findOwnedProject(ctx: { db: DatabaseReader }, projectId: string, userId: string) {
   const project = await getProjectRow(ctx, projectId);
+
   return project?.ownerUserId === userId ? project : null;
 }
 
@@ -133,6 +135,7 @@ async function setRoomProjectDeletionPendingAt(
   deletionPendingAt: number | undefined,
 ) {
   const project = await getProjectRow(ctx, projectId);
+
   if (project) await ctx.db.patch(project._id, { deletionPendingAt });
 }
 
@@ -144,8 +147,10 @@ export async function setProjectNameRow(
   const project = await requireProjectRow(ctx, projectId);
   const trimmed = name.trim().slice(0, 120);
   const state = { name: trimmed.length ? trimmed : "Untitled" };
+
   if (project.name === state.name) return noopRowOperation(state);
   await ctx.db.patch(project._id, state);
+
   return appliedRowOperation(state);
 }
 
@@ -155,21 +160,27 @@ export async function setProjectTimelineSettingsRow(
   input: ProjectTimelineSettingsInput,
 ) {
   const project = await requireProjectRow(ctx, projectId);
+
   const tempoBpm = input.tempoBpm === undefined
     ? project.tempoBpm
     : Math.min(300, Math.max(30, Math.round(input.tempoBpm)));
+
   const timeSignatureNumerator = input.timeSignatureNumerator === undefined
     ? project.timeSignatureNumerator
     : Math.min(32, Math.max(1, Math.round(input.timeSignatureNumerator)));
+
   const timeSignatureDenominator = input.timeSignatureDenominator === undefined
     ? project.timeSignatureDenominator
     : input.timeSignatureDenominator;
+
   if (![1, 2, 4, 8, 16, 32].includes(timeSignatureDenominator)) {
     throw new Error("Unsupported time signature denominator.");
   }
+
   const loopStartSec = input.loopStartSec === undefined
     ? project.loopStartSec
     : Math.max(0, input.loopStartSec);
+
   const loopEndSec = input.loopEndSec === undefined
     ? project.loopEndSec
     : Math.max(loopStartSec + 0.05, input.loopEndSec);
@@ -182,6 +193,7 @@ export async function setProjectTimelineSettingsRow(
     loopStartSec,
     loopEndSec,
   };
+
   const changed = (
     project.tempoBpm !== state.tempoBpm
     || project.timeSignatureNumerator !== state.timeSignatureNumerator
@@ -190,8 +202,10 @@ export async function setProjectTimelineSettingsRow(
     || project.loopStartSec !== state.loopStartSec
     || project.loopEndSec !== state.loopEndSec
   );
+
   if (!changed) return noopRowOperation(state);
   await ctx.db.patch(project._id, state);
+
   return appliedRowOperation(state);
 }
 
@@ -200,6 +214,7 @@ export const listMineDetailed = query({
   returns: v.array(v.object({ projectId: v.string(), name: v.string() })),
   handler: async (ctx) => {
     const userId = await requireAuthenticatedUserId(ctx);
+
     return listAccessibleProjects(ctx, userId);
   },
 });
@@ -210,16 +225,21 @@ export const createOwnedRoom = mutation({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const existingProject = await getProjectRow(ctx, projectId);
+
     if (existingProject) {
       if (existingProject.deletionPendingAt !== undefined) {
         throw new Error("Project deletion is pending.");
       }
+
       if (existingProject.ownerUserId === userId) {
         return statusResult("exists");
       }
+
       throw new Error("Project already exists.");
     }
+
     const created = await ensureOwnedProjectRow(ctx, projectId, userId);
+
     return { status: created.status };
   },
 });
@@ -229,6 +249,7 @@ export const exists = query({
   returns: v.boolean(),
   handler: async (ctx, { projectId }) => {
     const row = await getProjectRow(ctx, projectId);
+
     return Boolean(row);
   },
 });
@@ -238,6 +259,7 @@ export const canDeleteAsOwner = query({
   returns: v.boolean(),
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
+
     return Boolean(await findOwnedProject(ctx, projectId, userId));
   },
 });
@@ -248,9 +270,11 @@ export const prepareCloudRoomDeleteAsOwner = mutation({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
+
     if (!ownerProject) throw new Error("Only project owners can delete this project.");
     const deletionPendingAt = ownerProject.deletionPendingAt ?? Date.now();
     await setRoomProjectDeletionPendingAt(ctx, projectId, deletionPendingAt);
+
     return statusResult("pending");
   },
 });
@@ -261,18 +285,22 @@ export const finalizeCloudRoomDeleteAsOwner = mutation({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
+
     if (!ownerProject) {
       return statusResult("deleted");
     }
+
     if (ownerProject.deletionPendingAt === undefined) {
       throw new Error("Project deletion is not pending.");
     }
+
     await retainProjectMultipartAborts(ctx, projectId, ownerProject.storageNamespace);
     await deleteRoomRows(ctx, projectId);
     await enqueueR2DeleteRows(ctx, {
       projectId, storageNamespace: ownerProject.storageNamespace,
       keys: [...projectR2DeletePrefixes(projectId, ownerProject.storageNamespace)], kind: "project-prefix",
     });
+
     return statusResult("deleted");
   },
 });
@@ -283,10 +311,13 @@ export const clearCloudRoomDeletePendingAsOwner = mutation({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const ownerProject = await findOwnedProject(ctx, projectId, userId);
+
     if (!ownerProject?.deletionPendingAt) {
       return statusResult("skipped");
     }
+
     await setRoomProjectDeletionPendingAt(ctx, projectId, undefined);
+
     return statusResult("cleared");
   },
 });
@@ -297,8 +328,10 @@ export const leaveCloudRoomAccess = mutation({
   handler: async (ctx, { projectId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const role = await requireProjectRole(ctx, projectId, userId, ["owner", "editor", "viewer"]);
+
     if (role === "owner") throw new Error("Project owners cannot leave without deleting or transferring the project.");
     await removeProjectMemberAccessAndTransferEntities(ctx, projectId, userId);
+
     return statusResult("left");
   },
 });
@@ -310,7 +343,9 @@ export const setName = mutation({
     const userId = await requireAuthenticatedUserId(ctx);
     await requireProjectRole(ctx, projectId, userId, ["owner"]);
     const result = await setProjectNameRow(ctx, projectId, name);
+
     if (result.changed) await advanceProjectRevision(ctx, projectId);
+
     return null;
   },
 });
@@ -329,9 +364,12 @@ export const setTimelineSettings = mutation({
   handler: async (ctx, input) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const project = await findOwnedProject(ctx, input.projectId, userId);
+
     if (!project) throw new Error("Only project owners can update project settings.");
     const result = await setProjectTimelineSettingsRow(ctx, input.projectId, input);
+
     if (result.changed) await advanceProjectRevision(ctx, input.projectId);
+
     return null;
   },
 });

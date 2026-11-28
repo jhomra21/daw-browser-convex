@@ -89,6 +89,7 @@ export function createGainTransitionOwner(
 
   const invalidate = () => {
     transitionVersion += 1
+
     if (timer === undefined) return
     scheduler.clear(timer)
     timer = undefined
@@ -112,6 +113,7 @@ export function createGainTransitionOwner(
       scheduleAudioParamRamp(node.gain, 0, currentTime, fadeOutSec)
       timer = scheduler.schedule(() => {
         timer = undefined
+
         if (disposed || transitionVersion !== requestVersion) return
         reconnect()
         const reconnectTime = Math.max(fadeOutEnd, getCurrentTime())
@@ -185,6 +187,7 @@ export type FxChainStageConfig = {
 export function disconnectAudioNodes(nodes: Array<AudioNode | null | undefined>) {
   for (const node of nodes) {
     if (!node) continue
+
     try { node.disconnect() } catch {}
   }
 }
@@ -202,6 +205,7 @@ export function createReverbNodeChain(
       channelCountMode: 'explicit',
       channelInterpretation: 'speakers',
     })
+
     const chain: ReverbNodeChain = {
       enabled: !!params.enabled,
       internalsConnected: false,
@@ -210,7 +214,9 @@ export function createReverbNodeChain(
       workletNode,
       revision: 0,
     }
+
     applyReverbNodeChainParams(chain, params)
+
     return chain
   })
 }
@@ -223,6 +229,7 @@ export function applyReverbNodeChainParams(
   chain.enabled = normalized.enabled
   chain.revision += 1
   chain.workletNode.port.postMessage({ type: 'configure', version: 1, revision: chain.revision, state: normalized })
+
   for (const [parameterId, value] of [
     ['reverb.wet', normalized.wet],
     ['reverb.preDelayMs', normalized.preDelayMs],
@@ -231,6 +238,7 @@ export function applyReverbNodeChainParams(
     ['reverb.stereoWidth', normalized.stereoWidth],
   ] as const) {
     const parameter = chain.workletNode.parameters.get(parameterId)
+
     if (parameter) parameter.value = value
   }
 }
@@ -241,8 +249,11 @@ export function disconnectReverbChain(chain: ReverbNodeChain) {
     chain.output,
     chain.workletNode,
   ])
+
   try { chain.workletNode.port.postMessage({ type: 'release', version: 1 }) } catch {}
+
   try { chain.workletNode.port.close() } catch {}
+
   chain.internalsConnected = false
 }
 
@@ -252,16 +263,19 @@ export async function createCompressorNodeChain(
   onFault?: (code: string) => void,
 ): Promise<CompressorNodeChain> {
   const normalized = normalizeCompressorParams(params)
+
   try {
     await ensureCompressorWorklet(ctx)
   } catch (error) {
     throw new CompressorProcessorError('registration', 'Failed to register compressor processor.', error)
   }
+
   const input = ctx.createGain()
   const output = ctx.createGain()
   const dryGain = ctx.createGain()
   const processedGain = ctx.createGain()
   let workletNode: AudioWorkletNode
+
   try {
     workletNode = new AudioWorkletNode(ctx, compressorWorklet.processorName, {
       numberOfInputs: 2,
@@ -275,6 +289,7 @@ export async function createCompressorNodeChain(
     disconnectAudioNodes([input, output, dryGain, processedGain])
     throw new CompressorProcessorError('construction', 'Failed to construct compressor processor.', error)
   }
+
   const chain: CompressorNodeChain = {
     enabled: normalized.enabled,
     state: 'active',
@@ -285,6 +300,7 @@ export async function createCompressorNodeChain(
     workletNode,
     fault: null,
   }
+
   try {
     input.connect(dryGain)
     dryGain.connect(output)
@@ -301,12 +317,14 @@ export async function createCompressorNodeChain(
     disconnectCompressorChain(chain)
     throw new CompressorProcessorError('construction', 'Failed to connect compressor processor.', error)
   }
+
   try {
     postCompressorParams(chain.workletNode, normalized)
   } catch (error) {
     disconnectCompressorChain(chain)
     throw new CompressorProcessorError('protocol', 'Failed to initialize compressor processor protocol.', error)
   }
+
   return chain
 }
 
@@ -320,6 +338,7 @@ export function disconnectCompressorChain(chain: CompressorNodeChain) {
   chain.state = 'closed'
   chain.workletNode.onprocessorerror = null
   disconnectAudioNodes([chain.input, chain.output, chain.dryGain, chain.processedGain, chain.workletNode])
+
   try { chain.workletNode.port.close() } catch {}
 }
 
@@ -334,7 +353,9 @@ export function createSaturatorNodeChain(ctx: BaseAudioContext, params: Saturato
     waveNode: ctx['createWaveShaper'](),
     outputGain: ctx.createGain(),
   }
+
   applySaturatorNodeChainParams(chain, params)
+
   return chain
 }
 
@@ -361,6 +382,7 @@ function connectSaturatorInternals(chain: SaturatorNodeChain) {
 
 export function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsLite, bpm: number): DelayNodeChain {
   const normalized = normalizeDelayParams(params)
+
   const chain: DelayNodeChain = {
     enabled: normalized.enabled,
     pingPong: normalized.pingPong,
@@ -378,7 +400,9 @@ export function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsL
     splitter: ctx.createChannelSplitter(2),
     merger: ctx.createChannelMerger(2),
   }
+
   applyDelayNodeChainParams(chain, normalized, bpm)
+
   return chain
 }
 
@@ -399,6 +423,7 @@ export function disconnectDelayChain(chain: DelayNodeChain) {
 
 function connectDelayInternals(chain: DelayNodeChain) {
   if (chain.internalsConnected) return
+
   if (chain.pingPong) {
     chain.splitter.connect(chain.delayLeft, 0)
     chain.splitter.connect(chain.delayRight, 1)
@@ -420,6 +445,7 @@ function connectDelayInternals(chain: DelayNodeChain) {
     chain.highCutLeft.connect(chain.feedbackLeft)
     chain.feedbackLeft.connect(chain.delayLeft)
   }
+
   chain.internalsConnected = true
 }
 
@@ -453,16 +479,20 @@ export function connectFxChain(
 
     if (saturator) connectSaturatorInternals(saturator)
     else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
+
     if (delay) connectDelayInternals(delay)
+
     if (reverb) connectReverbInternals(reverb)
     else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
 
     if (stageConfig.kind === 'eq') {
       if (eqNodes.length === 0) return null
       disconnectAudioNodes(eqNodes)
+
       for (let index = 0; index < eqNodes.length; index++) {
         if (index < eqNodes.length - 1) eqNodes[index].connect(eqNodes[index + 1])
       }
+
       return {
         connectInput: (source) => source.connect(eqNodes[0]),
         outputs: [eqNodes[eqNodes.length - 1]],
@@ -475,6 +505,7 @@ export function connectFxChain(
       stageConfig.kind === 'autopan' || stageConfig.kind === 'ensemble' || stageConfig.kind === 'spectral') {
       if (!staticWorklet) return null
       disconnectAudioNodes([staticWorklet.node])
+
       return {
         connectInput: (source) => source.connect(staticWorklet.node),
         outputs: [staticWorklet.node],
@@ -487,6 +518,7 @@ export function connectFxChain(
       compressor.input.connect(compressor.dryGain)
       compressor.input.connect(compressor.workletNode)
       compressor.output.disconnect()
+
       return {
         connectInput: (source) => source.connect(compressor.input),
         outputs: [compressor.output],
@@ -496,6 +528,7 @@ export function connectFxChain(
     if (stageConfig.kind === 'saturator') {
       if (!saturator) return null
       disconnectAudioNodes([saturator.outputGain])
+
       return {
         connectInput: (source) => {
           source.connect(saturator.dryGain)
@@ -508,6 +541,7 @@ export function connectFxChain(
     if (stageConfig.kind === 'delay') {
       if (!delay) return null
       disconnectAudioNodes([delay.dryGain, delay.wetGain])
+
       return {
         connectInput: (source) => {
           source.connect(delay.dryGain)
@@ -520,6 +554,7 @@ export function connectFxChain(
     if (stageConfig.kind === 'reverb') {
       if (!reverb) return null
       disconnectAudioNodes([reverb.input, reverb.output])
+
       return {
         connectInput: (source) => source.connect(reverb.input),
         outputs: [reverb.output],
@@ -530,18 +565,24 @@ export function connectFxChain(
   }
 
   input.disconnect()
+
   const stages = config.instances.flatMap((stageConfig) => {
     const stage = createStage(stageConfig)
+
     return stage ? [stage] : []
   })
+
   if (stages.length === 0) {
     input.connect(destination)
+
     return
   }
 
   stages[0].connectInput(input)
+
   for (let index = 0; index < stages.length; index++) {
     const nextStage = stages[index + 1]
+
     for (const output of stages[index].outputs) {
       if (nextStage) nextStage.connectInput(output)
       else output.connect(destination)

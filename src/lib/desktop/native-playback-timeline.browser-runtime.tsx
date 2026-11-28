@@ -40,6 +40,7 @@ const portableLoopProbe = async (refreshProbe = false) => {
   const coverage: { session: number; startFrame: number; endFrame: number }[] = []
   const portableFaults: string[] = []
   const synth = { kind: 'synth', instanceId: 'portable:synth', params: createDefaultSynthParams() } satisfies TrackInstrumentParams
+
   const controller = createPortableBrowserPlaybackController({
     // The in-place extension fits whole pages (16 384 frames), so the window has to be longer than one.
     scheduleHorizonSec: refreshProbe ? 1.2 : undefined,
@@ -67,18 +68,21 @@ const portableLoopProbe = async (refreshProbe = false) => {
     }),
     backend: { createPlaybackSession: async () => {
       const session = ++sessions
+
       if (refreshProbe && session > 1) {
         // A handoff that rebuilds would otherwise wait forever for an install that never reaches the held one.
         const rebuilt = new Error('The schedule handoff rebuilt the session instead of extending it in place.')
         reached.reject(rebuilt)
         throw rebuilt
       }
+
       return {
       connectInput: () => () => undefined, dispose: () => undefined,
       installSchedule: async (schedule) => {
         if (refreshProbe) coverage.push({
           session, startFrame: schedule.timeOrigin.frame, endFrame: schedule.timeOrigin.frame + 4_800,
         })
+
         // The handoff extends the running session in place: its second install is the held one.
         if (refreshProbe && (installs += 1) === 2) { reached.resolve(); await release.promise }
       }, markActive: () => undefined,
@@ -87,31 +91,46 @@ const portableLoopProbe = async (refreshProbe = false) => {
       publishGraph: async () => { graphPublications += 1 },
       queueInstrumentEvents: async (deliveryEpoch, events) => {
         liveValues.push(...events.map(event => ({ session, epoch: deliveryEpoch, target: event.note, value: event.value })))
+
         if (refreshProbe) await applied.promise
       },
       registerAsset: async () => ({ status: 'registered', handle: { slot: 0, generation: 1 } }),
       scheduleSources: async () => undefined, setTransport: async (nextEpoch, running, frame) => {
         epoch = nextEpoch
+
         if (running) starts.push({ session, frame })
       },
-      onTransportPosition: (listener) => { report = listener; return () => { report = undefined; return true } },
+      onTransportPosition: (listener) => { report = listener;
+
+ return () => { report = undefined;
+
+ return true } },
     } } },
   })
+
   const start = async (sec: number) => {
     const result = await controller.start({ state: 'playing', playheadSec: sec, loopEnabled: true, loopStartSec: 0.2, loopEndSec: 0.4 })
+
     if (result !== 'started') throw new Error(`Portable probe did not start: ${portableFaults.join('; ')}`)
+
     return controller.currentPositionSec()
   }
+
   try {
     const cold = await start(refreshProbe ? 0 : 0.8)
+
     if (refreshProbe) {
       report?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence: 1, running: true, frame: 50_000 })
       const refresh = controller.refreshSchedule()
       await reached.promise
       let settled = false
+
       const flush = controller.liveProcessorControl.flush({
         instanceId: synth.instanceId, values: [{ parameterId: 'synth.filterCutoffHz', value: 913 }],
-      }).then(result => { settled = true; return result })
+      }).then(result => { settled = true;
+
+ return result })
+
       await Promise.resolve()
       await Promise.resolve()
       const settledBeforeApplied = settled
@@ -120,6 +139,7 @@ const portableLoopProbe = async (refreshProbe = false) => {
       controller.rememberInstrumentParameters('portable-track', {
         ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 913 } },
       })
+
       // Keep editing throughout the held preparation, not just before refresh.
       for (let value = 914; value <= 945; value += 1) {
         await controller.liveProcessorControl.flush({
@@ -129,18 +149,22 @@ const portableLoopProbe = async (refreshProbe = false) => {
           ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: value } },
         })
       }
+
       const pending = controller.liveProcessorControl.flush({
         instanceId: synth.instanceId, values: [{ parameterId: 'synth.filterCutoffHz', value: 947 }],
       })
+
       const handoffStarted = performance.now()
       release.resolve()
       const pendingResult = await pending
       controller.rememberInstrumentParameters('portable-track', {
         ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 947 } },
       })
+
       const concurrent = await controller.liveProcessorControl.flush({
         instanceId: synth.instanceId, values: [{ parameterId: 'synth.filterCutoffHz', value: 946 }],
       })
+
       controller.rememberInstrumentParameters('portable-track', {
         ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 946 } },
       })
@@ -149,12 +173,15 @@ const portableLoopProbe = async (refreshProbe = false) => {
       const preserved = controller.preparedInstrument('portable-track')
       const nextRefresh = await controller.refreshSchedule()
       const replacement = controller.preparedInstrument('portable-track')
+
       return { settledBeforeApplied, result, pendingResult, concurrent, staleRefresh, nextRefresh, preserved, replacement, sessions, liveValues, starts, coverage, handoffMs, faults: portableFaults }
     }
+
     const mapped = mapNativeBuiltInParameterCommit({
       targetId: 'portable-track', effect: 'instrument', from: synth,
       to: { ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 913 } } },
     }, 120)
+
     if (!mapped) throw new Error('Portable synth cutoff was not mapped.')
     const publicationsBefore = graphPublications
     const liveResult = await controller.liveProcessorControl.flush(mapped)
@@ -164,6 +191,7 @@ const portableLoopProbe = async (refreshProbe = false) => {
     controller.dispose()
     await start(0.1)
     report?.({ version: 2, type: 'transport-position', sessionId: 1, epoch, sequence: 1, running: true, frame: 24_000 })
+
     return { cold, resumed, beforeLoopWrap: controller.currentPositionSec(), liveResult, liveValues, publicationsBefore, publicationsAfter }
   } finally {
     controller.dispose()
@@ -179,6 +207,7 @@ export const mountTimeline = async () => {
   let remoteTrackId: string | undefined
   let remoteClipId: string | undefined
   let coalescedTrackId: string | undefined
+
   if (new URL(location.href).searchParams.has('layout')) {
     const track = await repository.createTrack({ name: 'Click fixture', kind: 'instrument' })
     instrumentTrackId = track.id
@@ -196,12 +225,14 @@ export const mountTimeline = async () => {
     coalescedTrackId = coalescedTrack.id
     await repository.createClip({ trackId: coalescedTrack.id, name: 'Coalesced instrument fixture', startSec: 0, duration: 8, midi: { wave: 'sine', notes: [{ id: 'coalesced-held', beat: 0, length: 16, pitch: 67, velocity: 0.8 }] } })
   }
+
   await saveLocalProjectState(project.id, 'loop', { enabled: false, startSec: 0.2, endSec: 0.4 })
   await saveLocalProjectState(project.id, 'grid', { enabled: false, denominator: 4 })
   await saveLocalProjectState(project.id, 'timelineScale', 100)
   history.replaceState(null, '', `?timeline&projectId=${project.id}`)
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } })
   client.setQueryData(['session'], null)
+
   const route = createRootRoute({
     errorComponent: (props) => <pre>{String(props.error)} {props.error.stack}</pre>,
     component: () => <QueryClientProvider client={client}>
@@ -214,6 +245,7 @@ export const mountTimeline = async () => {
       </ColorModeProvider>
     </QueryClientProvider>,
   })
+
   const router = createRouter({ routeTree: route, history: createMemoryHistory({ initialEntries: ['/'] }) })
   const dispose = render(() => <RouterProvider router={router} />, document.body)
   const service = createLocalControlService({ actor: { subject: 'local:00000000-0000-4000-8000-000000000000' } })
@@ -231,6 +263,7 @@ export const mountTimeline = async () => {
       roomRows: () => [instrumentTrackId, remoteTrackId, coalescedTrackId].flatMap(trackId => {
         if (!trackId) return []
         const instrument = instrumentPanel()?.readInstrumentForTarget(trackId)
+
         return instrument ? [{ _id: `fixture:${trackId}`, _creationTime: 1, projectId: project.id,
           targetType: 'track', trackId, type: 'instrument', params: instrument }] : []
       }),
@@ -239,7 +272,9 @@ export const mountTimeline = async () => {
       },
       mirrorRoomInstrument: (targetId: string) => {
         const instrument = instrumentPanel()?.readInstrumentForTarget(targetId)
+
         if (!instrument) throw new Error('Room instrument was not observed.')
+
         return setLocalEffect(project.id, targetId, 'instrument', instrument)
       },
       setPanelInstrument: (targetId: string, instanceId: string, frequencyHz: number) =>
@@ -256,6 +291,7 @@ export const mountTimeline = async () => {
       coalescedInstrumentApply: async (instanceId: string) => {
         if (!coalescedTrackId) throw new Error('Coalesced instrument fixture is unavailable.')
         const instrument = instrumentPanel()
+
         if (!instrument) throw new Error('Production instrument panel is unavailable.')
         // Both calls occur before the first Promise-based apply completion.
         instrument.setInstrumentForTarget(coalescedTrackId, { kind: 'synth', instanceId, params: createDefaultSynthParams() })
@@ -274,21 +310,28 @@ export const mountTimeline = async () => {
         const snapshot = projectSnapshotSchemaV2.parse(await hostControl('control.snapshot', { projectId: project.id, readVersion: 'v2' }))
         const request = { version: 'v1', projectId: project.id, expectedRevision: snapshot.project.revision, actions }
         const preview = controlPreviewResultSchemaV1.parse(await hostControl('control.preview', request))
+
         if (!preview.applied) throw new Error('Expected local preview to apply.')
+
         const approvalToken = preview.approval?.required
           ? controlApprovalResultSchemaV1.parse(await hostControl('control.requestApproval', request)).approvalToken : undefined
+
         await hostControl('control.commit', { ...request, ...(approvalToken && { approvalToken }), idempotencyKey: crypto.randomUUID() })
       },
       commitLoop: async () => {
         service.capabilities()
         const snapshot = await service.snapshot({ projectId: project.id })
+
         const request = {
           version: 'v1', projectId: project.id, expectedRevision: snapshot.project.revision,
           actions: [{ kind: 'project.settings.set', loopEnabled: true, loopStartSec: 0.3, loopEndSec: 0.7 }],
         }
+
         const preview = await service.preview(request)
+
         if (!preview.applied) throw new Error('Expected local loop preview to apply.')
         await service.commit({ ...request, idempotencyKey: crypto.randomUUID() })
+
         return service.snapshot({ projectId: project.id })
       },
       close: async () => { await closeTimeline(); dispose(); client.clear() },

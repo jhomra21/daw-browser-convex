@@ -23,6 +23,7 @@ test("serializes worker automation sequence to desktop JSON", () => {
   } satisfies Pick<NativeHostDiagnostics, "workerAutomation"
     | "renderEpoch" | "lastRejectedCallback" | "lastRejectedRenderEpoch" | "transportFrame"
     | "realtimePerformance" | "vstWorkerPerformance">)
+
   expect(serialized.workerAutomation?.sequence).toBe("9007199254740993")
   expect(JSON.parse(JSON.stringify(serialized))).toEqual({
     workerAutomation: { instanceId: "trusted", acceptedPoints: 1, lastParameterId: 48,

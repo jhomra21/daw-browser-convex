@@ -52,6 +52,7 @@ const flush = async () => {
 }
 
 const originalFetch = globalThis.fetch
+
 // Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
 const originalWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, 'window')
 let runMidiRecordingHeartbeat: (() => void) | undefined
@@ -133,15 +134,18 @@ const createHarness = (input: {
         setInputSelected: () => {},
         subscribe: (subscriber) => {
           subscribers.add(subscriber)
+
           return () => { subscribers.delete(subscriber) }
         },
         subscribeSourceReset: (subscriber) => {
           resetSubscribers.add(subscriber)
+
           return () => { resetSubscribers.delete(subscriber) }
         },
         panic: () => {},
       })
   })
+
   if (!controller) throw new Error('MIDI recording controller was not created.')
 
   return {
@@ -172,6 +176,7 @@ beforeEach(() => {
     value: {
       setInterval: (callback: () => void) => {
         heartbeat = callback
+
         return 1
       },
       clearInterval: () => {},
@@ -184,6 +189,7 @@ beforeEach(() => {
 
 afterEach(() => {
   Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
+
   if (originalWindowDescriptor) Object.defineProperty(globalThis, 'window', originalWindowDescriptor)
   else Reflect.deleteProperty(globalThis, 'window')
   runMidiRecordingHeartbeat = undefined
@@ -197,15 +203,19 @@ const setFetch = (
     configurable: true,
     value: async (_url: string | URL | Request, init?: RequestInit) => {
       const body = z.json().parse(JSON.parse(z.string().parse(init?.body)))
+
       if (!isJsonObject(body) || !isJsonString(body.kind) || !isJsonObject(body.payload)) {
         throw new Error('Expected a timeline operation request.')
       }
+
       const operation = {
         projectId: 'cloud-project',
         kind: body.kind,
         payload: body.payload,
       }
+
       operations.push(operation)
+
       return await handler(operation)
     },
   })
@@ -216,11 +226,14 @@ const json = (value: JsonValue, status = 200) => new Response(JSON.stringify(val
 describe('useMidiTrackRecording transactions', () => {
   test('holds a project transition until a MIDI recording permission startup settles', async () => {
     let allowAccess: (() => void) | undefined
+
     const recording = createHarness({
       requestAccess: () => new Promise<void>((resolve) => { allowAccess = resolve }),
     })
+
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.removeMany') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -228,6 +241,7 @@ describe('useMidiTrackRecording transactions', () => {
 
     const start = recording.controller.startRecording()
     await flush()
+
     const transition = settlePopstateProjectTransition({
       currentProjectId: 'cloud-project',
       nextProjectId: 'other-project',
@@ -238,6 +252,7 @@ describe('useMidiTrackRecording transactions', () => {
       resolve: () => { events.push('resolve') },
       restore: () => { events.push('restore') },
     })
+
     await flush()
     expect(events).toEqual(['settle'])
 
@@ -253,8 +268,11 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness({ requestTransportPlay: async () => { throw new Error('transport failed') } })
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.removeMany') return json({ ok: true })
+
       if (operation.kind === 'tracks.unlock') return json({ ok: true })
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -300,6 +318,7 @@ describe('useMidiTrackRecording transactions', () => {
 
     await expect(recording.controller.startRecording()).resolves.toBe(true)
     const clipId = recording.provisional.at(-1)
+
     if (!clipId) throw new Error('Expected a provisional MIDI clip.')
     await repository.deleteClip(clipId)
     recording.emit(noteOn('keyboard', 0))
@@ -315,7 +334,9 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness()
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.setMidiAndTiming') throw new TypeError('network unavailable')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -336,7 +357,9 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness({ projectId: `empty-midi-${crypto.randomUUID()}` })
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.removeMany') throw new TypeError('network unavailable')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -354,7 +377,9 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness()
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.removeMany') return json({ error: 'forbidden' }, 403)
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -371,8 +396,11 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness()
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.setMidiAndTiming') return json({ error: 'forbidden' }, 403)
+
       if (operation.kind === 'clips.removeMany') return json({ ok: true })
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -395,8 +423,11 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness()
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.setMidiAndTiming') return json({ error: 'forbidden' }, 403)
+
       if (operation.kind === 'clips.removeMany') throw new TypeError('network unavailable')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -417,24 +448,31 @@ describe('useMidiTrackRecording transactions', () => {
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock') {
         lockCount += 1
+
         if (lockCount === 1) return json({ ok: true })
+
         return new Promise<Response>((resolve) => {
           finishHeartbeat = () => { resolve(json({ ok: false, reason: 'lost' })) }
         })
       }
+
       if (operation.kind === 'clips.create') return json('clip-1')
+
       if (operation.kind === 'clips.setMidiAndTiming' || operation.kind === 'clips.removeMany' || operation.kind === 'tracks.unlock') {
         return json({ error: 'forbidden' }, 403)
       }
+
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
 
     await recording.controller.startRecording()
     recording.emit(noteOn('keyboard', 0))
     const heartbeat = runMidiRecordingHeartbeat
+
     if (!heartbeat) throw new Error('Heartbeat was not registered.')
     heartbeat()
     await flush()
+
     if (!finishHeartbeat) throw new Error('Heartbeat did not begin.')
     finishHeartbeat()
     await flush()
@@ -454,11 +492,14 @@ describe('useMidiTrackRecording transactions', () => {
 
   test('keeps a take running when one of multiple participating sources resets', async () => {
     let connectedSources = ['keyboard-a', 'keyboard-b']
+
     const recording = createHarness({
       inputs: () => connectedSources.map((id) => ({ id, selected: true, connected: true })),
     })
+
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.setMidiAndTiming') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -483,6 +524,7 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness()
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.setMidiAndTiming') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -506,6 +548,7 @@ describe('useMidiTrackRecording transactions', () => {
     const recording = createHarness({ bpm: () => bpm })
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.setMidiAndTiming') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json('clip-1')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -527,12 +570,17 @@ describe('useMidiTrackRecording transactions', () => {
 
   test('keeps a cloud take on a new instrument track when its target was removed, as one history entry', async () => {
     let current = [track()]
+
     const recording = createHarness({
       tracks: () => current,
-      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+      createTrackForRecording: async () => { current = [keptTrack()];
+
+ return keptTrack() },
     })
+
     setFetch((operation) => {
       if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
       if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
       throw new Error(`Unexpected ${operation.kind}`)
     }, recording.operations)
@@ -557,16 +605,24 @@ describe('useMidiTrackRecording transactions', () => {
 
   test('removes the kept track when its clip cannot be created, with no history entry', async () => {
     let current = [track()]
+
     const recording = createHarness({
       tracks: () => current,
-      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+      createTrackForRecording: async () => { current = [keptTrack()];
+
+ return keptTrack() },
     })
+
     const mutations: unknown[][] = []
     const originalMutation = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
-    Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args); return { status: 'deleted' } } })
+    Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async (...args: unknown[]) => { mutations.push(args);
+
+ return { status: 'deleted' } } })
+
     try {
       setFetch((operation) => {
         if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock' || operation.kind === 'clips.removeMany') return json({ ok: true })
+
         if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? null : 'clip-1')
         throw new Error(`Unexpected ${operation.kind}`)
       }, recording.operations)
@@ -592,14 +648,20 @@ describe('useMidiTrackRecording transactions', () => {
     const originalNow = performance.now
     let nowMs = 0
     Object.defineProperty(performance, 'now', { configurable: true, value: () => nowMs })
+
     try {
       let current = [track()]
+
       const recording = createHarness({
         tracks: () => current,
-        createTrackForRecording: async () => { nowMs = 9_000; current = [keptTrack()]; return keptTrack() },
+        createTrackForRecording: async () => { nowMs = 9_000; current = [keptTrack()];
+
+ return keptTrack() },
       })
+
       setFetch((operation) => {
         if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
         if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? 'clip-kept' : 'clip-1')
         throw new Error(`Unexpected ${operation.kind}`)
       }, recording.operations)
@@ -621,16 +683,23 @@ describe('useMidiTrackRecording transactions', () => {
 
   test('leaves no provisional clip id behind when the kept take fails and the removed target cannot delete it', async () => {
     let current = [track()]
+
     const recording = createHarness({
       tracks: () => current,
-      createTrackForRecording: async () => { current = [keptTrack()]; return keptTrack() },
+      createTrackForRecording: async () => { current = [keptTrack()];
+
+ return keptTrack() },
     })
+
     const originalMutation = Object.getOwnPropertyDescriptor(convexClient, 'mutation')
     Object.defineProperty(convexClient, 'mutation', { configurable: true, value: async () => ({ status: 'deleted' }) })
+
     try {
       setFetch((operation) => {
         if (operation.kind === 'tracks.lock' || operation.kind === 'tracks.unlock') return json({ ok: true })
+
         if (operation.kind === 'clips.removeMany') throw new Error('network down')
+
         if (operation.kind === 'clips.create') return json(operation.payload.trackId === 'kept-instrument' ? null : 'clip-1')
         throw new Error(`Unexpected ${operation.kind}`)
       }, recording.operations)
@@ -654,12 +723,14 @@ describe('useMidiTrackRecording transactions', () => {
     const repository = createLocalTimelineRepository(project.id)
     await repository.createTrack({ id: 'instrument-track', kind: 'instrument' })
     let current = [track()]
+
     const recording = createHarness({
       projectId: project.id,
       tracks: () => current,
       createTrackForRecording: async () => {
         const row = await repository.createTrack({ id: 'kept-instrument', kind: 'instrument' })
         current = [{ ...keptTrack(), id: row.id }]
+
         return keptTrack()
       },
     })

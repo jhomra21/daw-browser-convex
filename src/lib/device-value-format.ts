@@ -1,5 +1,6 @@
 export const formatDeviceFrequency = (value: number, precision: number) => {
   const hz = Math.round(value)
+
   return hz >= 1000 ? `${(value / 1000).toFixed(precision)} kHz` : `${hz} Hz`
 }
 

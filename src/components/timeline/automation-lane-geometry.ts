@@ -12,6 +12,7 @@ export const windowAutomationPoints = (
   const windowed = points
     .filter((point) => point.timeSec >= startSec && point.timeSec <= endSec)
     .sort((left, right) => left.timeSec - right.timeSec)
+
   const boundaryPoints = [
     {
       id: 'automation-window-start',
@@ -26,9 +27,12 @@ export const windowAutomationPoints = (
       interpolation: points.findLast((point) => point.timeSec <= endSec)?.interpolation ?? 'linear',
     },
   ]
+
   const unique = new Map<number, AutomationPoint>()
+
   for (const point of [...windowed, ...boundaryPoints]) {
     if (!unique.has(point.timeSec)) unique.set(point.timeSec, point)
   }
+
   return [...unique.values()].sort((left, right) => left.timeSec - right.timeSec)
 }

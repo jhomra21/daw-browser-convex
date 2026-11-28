@@ -8,6 +8,7 @@ import { exportDawProjectArchiveStreamed, importDawProjectArchiveStreamed } from
 test('streamed archive roundtrips an empty project in bounded chunks', async () => {
   const original = await createLocalProject(`archive-roundtrip-${crypto.randomUUID()}`)
   let restored: string | undefined
+
   try {
     const chunks: Uint8Array[] = []
     await exportDawProjectArchiveStreamed(original.id, (chunk) => {
@@ -25,6 +26,7 @@ test('streamed archive roundtrips an empty project in bounded chunks', async () 
 
 test('streamed export propagates a failed destination write without changing the project', async () => {
   const project = await createLocalProject(`archive-write-failure-${crypto.randomUUID()}`)
+
   try {
     const failure = new Error('destination unavailable')
     await expect(exportDawProjectArchiveStreamed(project.id, () => {
@@ -60,21 +62,26 @@ test('streamed ZIP reader rejects a trailing invalid directory before exposing a
 test('streamed archive restores asset bytes and metadata without whole-file reads', async () => {
   const files = new Map<string, File>()
   const directories = new Map<string, ReturnType<typeof directory>>()
+
   const directory = (path: string) => ({
     getDirectoryHandle: async (name: string) => {
       const key = `${path}/${name}`
       const current = directories.get(key) ?? directory(key)
       directories.set(key, current)
+
       return current
     },
     getFileHandle: async (name: string) => ({
       getFile: async () => {
         const file = files.get(`${path}/${name}`)
+
         if (!file) throw new DOMException('Missing file', 'NotFoundError')
+
         return file
       },
       createWritable: async () => {
         const chunks: Uint8Array[] = []
+
         return {
           write: async (chunk: Uint8Array) => { chunks.push(Uint8Array.from(chunk)) },
           close: async () => { files.set(`${path}/${name}`, new File(chunks.map((chunk) => Uint8Array.from(chunk).buffer), name)) },
@@ -86,19 +93,23 @@ test('streamed archive restores asset bytes and metadata without whole-file read
       for (const key of files.keys()) if (key.startsWith(`${path}/${name}/`) || key === `${path}/${name}`) files.delete(key)
     },
   })
+
   const storage = Object.getOwnPropertyDescriptor(navigator, 'storage')
   Object.defineProperty(navigator, 'storage', {
     configurable: true, value: { getDirectory: async () => directory('root') },
   })
   let original: string | undefined
   let restored: string | undefined
+
   try {
     original = (await createLocalProject(`archive-assets-${crypto.randomUUID()}`)).id
+
     const asset = await createLocalAsset({
       projectId: original,
       file: new File([Uint8Array.of(0, 2, 4, 6, 8)], 'source.wav', { type: 'audio/wav' }),
       metadata: { sourceKind: 'recording', sampleRate: 44_100, channelCount: 1, durationSec: 600 },
     })
+
     const chunks: Uint8Array[] = []
     await exportDawProjectArchiveStreamed(original, (chunk) => { chunks.push(Uint8Array.from(chunk)) })
     restored = await importDawProjectArchiveStreamed(new File(chunks.map((chunk) => Uint8Array.from(chunk).buffer), 'assets.dawproject'))
@@ -111,11 +122,14 @@ test('streamed archive restores asset bytes and metadata without whole-file read
     })
     const result = await readLocalAssetBytes(restored, asset.id)
     expect(result.status).toBe('ready')
+
     if (result.status !== 'ready') throw new Error('Restored asset unavailable.')
     expect(new Uint8Array(await result.file.arrayBuffer())).toEqual(Uint8Array.of(0, 2, 4, 6, 8))
   } finally {
     if (restored) await deleteLocalProject(restored)
+
     if (original) await deleteLocalProject(original)
+
     if (storage) Object.defineProperty(navigator, 'storage', storage)
     else Reflect.deleteProperty(navigator, 'storage')
   }

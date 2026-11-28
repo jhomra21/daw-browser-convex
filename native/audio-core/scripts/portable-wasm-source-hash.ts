@@ -16,6 +16,7 @@ export const computePortableWasmSourceHash = async (
   repositoryRoot: string,
 ): Promise<string> => {
   const hash = createHash('sha256')
+
   for (const sourcePath of portableWasmBuildInputPaths) {
     const bytes = await readFile(path.join(repositoryRoot, sourcePath))
     hash.update(`path:${sourcePath.length}:${sourcePath}\n`)
@@ -23,6 +24,7 @@ export const computePortableWasmSourceHash = async (
     hash.update(bytes)
     hash.update('\n')
   }
+
   return hash.digest('hex')
 }
 

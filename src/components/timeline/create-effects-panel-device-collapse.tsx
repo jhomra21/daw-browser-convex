@@ -20,6 +20,7 @@ export const deviceCollapseIdentity = {
 
 const canUseStorage = () => {
   if (!globalThis.window) return false;
+
   try {
     return Boolean(window.localStorage);
   } catch {
@@ -29,9 +30,12 @@ const canUseStorage = () => {
 
 export const parseCollapsedDeviceIdentities = (raw: string | null): Set<string> => {
   if (!raw) return new Set();
+
   try {
     const parsed: unknown = JSON.parse(raw);
+
     if (!Array.isArray(parsed)) return new Set();
+
     return new Set(parsed.filter((value): value is string => typeof value === "string"));
   } catch {
     return new Set();
@@ -50,12 +54,16 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
 
   const reload = () => {
     const currentProjectId = projectId();
+
     if (currentProjectId === loadedProjectId) return;
     loadedProjectId = currentProjectId;
+
     if (!currentProjectId || !canUseStorage()) {
       setCollapsedIdentities(new Set<string>());
+
       return;
     }
+
     try {
       setCollapsedIdentities(parseCollapsedDeviceIdentities(window.localStorage.getItem(deviceCollapseStorageKey(currentProjectId))));
     } catch {
@@ -68,11 +76,14 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
   const setCollapsed = (identity: DeviceCollapseIdentity, collapsed: boolean) => {
     reload();
     const next = new Set(collapsedIdentities());
+
     if (collapsed) next.add(identity);
     else next.delete(identity);
     setCollapsedIdentities(next);
     const currentProjectId = projectId();
+
     if (!currentProjectId || !canUseStorage()) return;
+
     try {
       window.localStorage.setItem(deviceCollapseStorageKey(currentProjectId), serializeCollapsedDeviceIdentities(next));
     } catch {}
@@ -108,10 +119,12 @@ export const DeviceCollapseProvider: ParentComponent<DeviceCollapseContextValue>
 
 const stableHash = (value: string) => {
   let hash = 2166136261;
+
   for (const character of value) {
     hash ^= character.codePointAt(0) ?? 0;
     hash = Math.imul(hash, 16777619);
   }
+
   return (hash >>> 0).toString(36);
 };
 
@@ -137,6 +150,7 @@ export type DeviceCollapseGestureResult = {
 
 export const devicePointerIdentity = (event: PointerEvent) => {
   const persistentDeviceId = event.persistentDeviceId;
+
   return persistentDeviceId !== 0
     ? String(persistentDeviceId)
     : event.pointerType;
@@ -155,6 +169,7 @@ export const recognizeDeviceDoubleTap = (
     && Math.abs(current.x - previous.x) <= DEVICE_DOUBLE_TAP_DISTANCE_PX
     && Math.abs(current.y - previous.y) <= DEVICE_DOUBLE_TAP_DISTANCE_PX,
   );
+
   return { next: recognized ? undefined : current, recognized };
 };
 

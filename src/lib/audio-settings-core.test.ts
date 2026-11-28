@@ -56,6 +56,7 @@ describe("audio settings policy", () => {
       label,
       toJSON: () => ({})
     })
+
     expect(areAudioDeviceListsEqual([device("Microphone")], [device("Microphone")])).toBe(true)
     expect(areAudioDeviceListsEqual([device("")], [device("Microphone")])).toBe(false)
   })

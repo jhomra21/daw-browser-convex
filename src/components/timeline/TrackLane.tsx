@@ -64,10 +64,12 @@ type TrackLaneProps = {
 const TrackLane: Component<TrackLaneProps> = (props) => {
   const appPreferences = useAppPreferences()
   const [insertStartSec, setInsertStartSec] = createSignal(0)
+
   const contextMenuItems = (): TimelineContextMenuItem[] => {
     const items: TimelineContextMenuItem[] = [
       { kind: 'label', label: props.track.name },
     ]
+
     if (props.track.kind === 'instrument' && props.onAddMidiClip) {
       items.push({
         kind: 'item',
@@ -75,9 +77,11 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
         onSelect: () => props.onAddMidiClip?.(props.track.id, insertStartSec()),
       })
     }
+
     if (props.onDeleteTrack) {
       if (items.length > 1) items.push({ kind: 'separator' })
       const locked = props.recordingTargetLock.holds(props.track.id)
+
       if (locked) items.push({ kind: 'label', label: RECORDING_TARGET_LOCKED_REASON })
       items.push({
         kind: 'item',
@@ -87,22 +91,28 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
         onSelect: () => props.onDeleteTrack?.(props.track.id),
       })
     }
+
     return items
   }
 
   const rangeForLane = createMemo(() => {
     const range = props.rangeSelection
+
     if (!range?.trackIds.includes(props.track.id)) return null
+
     return range
   })
+
   const collapsedSegments = createMemo(() => {
     if (props.track.channelRole === 'group') return props.groupClipOverview
+
     return props.track.clips.map((clip) => ({
       startSec: clip.startSec,
       endSec: clip.startSec + clip.duration,
       color: clip.color,
     }))
   })
+
   const segmentVisualColors = (color: string) => createClipVisualColors(
     resolveClipColor(color, appPreferences.appearance.themeTokens()),
     false,

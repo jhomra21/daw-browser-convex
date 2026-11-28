@@ -66,6 +66,7 @@ const hex = (bytes: Uint8Array) => Array.from(
   bytes,
   (byte) => byte.toString(16).padStart(2, '0'),
 ).join('')
+
 const isCanonicalContentHash = (value: string | undefined) => value !== undefined && /^[0-9a-f]{64}$/u.test(value)
 
 export const validatePreparedStretchProjectionMetadata = (
@@ -92,6 +93,7 @@ export const validatePreparedStretchProjectionMetadata = (
     || prepared.sourceStartSec !== 0) {
     return `${prepared.clipId}: prepared Stretch projection metadata is invalid.`
   }
+
   return undefined
 }
 
@@ -124,6 +126,7 @@ const validateDescriptor = (descriptor: PreparedStretchArtifactDescriptor) => {
     || !Number.isSafeInteger(descriptor.wsola.searchFrameCount)) {
     throw new Error('Prepared Stretch artifact metadata is invalid.')
   }
+
   for (const segment of descriptor.segments) {
     if (!Number.isSafeInteger(segment.sourceStartFrame)
       || !Number.isSafeInteger(segment.sourceEndFrame)
@@ -163,9 +166,11 @@ export const createPreparedStretchArtifact = (input: {
     && isCanonicalContentHash(input.source.contentHash)
     ? input.source.contentHash
     : undefined
+
   const contentIdentity = input.source.contentHashVerified === true
     ? input.contentIdentity ?? trustedContentHash ?? input.source.identity
     : input.source.identity
+
   const descriptor: PreparedStretchArtifactDescriptor = {
     rendererVersion: PREPARED_STRETCH_RENDERER_VERSION,
     algorithmVersion: PREPARED_STRETCH_ALGORITHM_VERSION,
@@ -197,7 +202,9 @@ export const createPreparedStretchArtifact = (input: {
       && input.source.contentHashVerified === true
       && isCanonicalContentHash(trustedContentHash),
   }
+
   validateDescriptor(descriptor)
+
   return Object.freeze({
     ...descriptor,
     artifactId: `stretch:${PREPARED_STRETCH_ARTIFACT_VERSION}:${digest(descriptor)}`,

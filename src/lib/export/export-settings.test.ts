@@ -45,7 +45,9 @@ describe('deriveSelectedExportTrackIds', () => {
     track('b', ['clip-b']),
     track('empty', []),
   ]
+
   const clipTrackIdById = new Map<string, string>()
+
   for (const item of tracks) {
     for (const clip of item.clips) clipTrackIdById.set(clip.id, item.id)
   }

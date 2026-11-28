@@ -25,10 +25,12 @@ const plan = () => ({
 test("accepts a logical offline render beyond the former in-memory boundary", () => {
   const totalFrames = 512 * 1024 * 1024
     / (2 * Float32Array.BYTES_PER_ELEMENT) + 1
+
   const result = nativeOfflineRenderPlanSchema.safeParse({
     ...plan(),
     totalFrames,
   })
+
   expect(result.success).toBe(true)
 })
 
@@ -37,6 +39,7 @@ test("rejects binary control payloads above the native frame limit", () => {
     ...plan(),
     graph: new Uint8Array(nativeAudioHostMaximumPayloadBytes + 1),
   })
+
   expect(result.success).toBe(false)
 })
 
@@ -63,6 +66,7 @@ test("rejects malformed PCM asset dimensions", () => {
       planarPcm: new Uint8Array(4),
     }],
   })
+
   expect(result.success).toBe(false)
 })
 
@@ -75,5 +79,6 @@ test("rejects captured state that is not referenced by an attachment", () => {
       sha256: "0".repeat(64),
     }],
   })
+
   expect(result.success).toBe(false)
 })

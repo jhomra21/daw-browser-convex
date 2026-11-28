@@ -16,6 +16,7 @@ export const createAudioEffectParameterPayload = (
 ): NativeBuiltInParameterPayload => {
   const { targetId, instanceId } = interaction;
   const forms = audioEffectForms(interaction.kind, from, to);
+
   return targetId === "master"
     ? { targetId: "master", instanceId, ...forms.master }
     : { targetId, instanceId, ...forms.track };

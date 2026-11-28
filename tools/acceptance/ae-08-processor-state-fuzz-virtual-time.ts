@@ -1,6 +1,7 @@
 import "fake-indexeddb/auto"
 
 export type VirtualWorkKind = "fire-timer" | "raf-tick" | "idb-task" | "persist-fail"
+
 export type VirtualWork = {
   id: number
   kind: VirtualWorkKind
@@ -11,6 +12,7 @@ export type VirtualWork = {
   delay?: number
   due?: number
 }
+
 export type VirtualTime = ReturnType<typeof createVirtualTime>
 
 type RecordEvent = <Value>(event: Value) => void
@@ -19,10 +21,13 @@ type RecordEvent = <Value>(event: Value) => void
 // coordinator, live control, the panel's flush) asked for it, whatever helper or function name it went through. The hook's lifecycle
 // deadline and host supervisor timers are other owners'.
 const processorWaitOwners = /\/src\/(lib\/desktop\/native-|lib\/live-processor-control|components\/timeline\/create-effects-panel|components\/Timeline\.tsx)/
+
 export const isProcessorWaitTimer = (site: string) => {
   const origin = site.split("\n").find((frame) => frame.includes("/src/") || frame.includes("/apps/"))
+
   return origin !== undefined && processorWaitOwners.test(origin)
 }
+
 const callSite = () => new Error().stack?.split("\n").slice(2, 10).join("\n") ?? "unknown"
 
 export const createVirtualTime = (record: RecordEvent) => {
@@ -47,6 +52,7 @@ export const createVirtualTime = (record: RecordEvent) => {
 
   const realSetTimeout = globalThis.setTimeout
   const realClearTimeout = globalThis.clearTimeout
+
   const globalDescriptors = new Map<PropertyKey, PropertyDescriptor | undefined>([
     ["setTimeout", Object.getOwnPropertyDescriptor(globalThis, "setTimeout")],
     ["clearTimeout", Object.getOwnPropertyDescriptor(globalThis, "clearTimeout")],
@@ -55,6 +61,7 @@ export const createVirtualTime = (record: RecordEvent) => {
     ["setImmediate", Object.getOwnPropertyDescriptor(globalThis, "setImmediate")],
     ["clearImmediate", Object.getOwnPropertyDescriptor(globalThis, "clearImmediate")],
   ])
+
   const transactionPrototype = globalThis.IDBDatabase.prototype
   const transactionDescriptor = Object.getOwnPropertyDescriptor(transactionPrototype, "transaction")
 
@@ -63,10 +70,13 @@ export const createVirtualTime = (record: RecordEvent) => {
     work.push(entry)
     active.set(entry.id, entry)
     record({ event: "virtual-work-scheduled", id: entry.id, kind, site })
+
     return entry
   }
+
   const cancel = (id: number, kind: VirtualWorkKind) => {
     const entry = active.get(id)
+
     if (!entry || entry.kind !== kind) return
     entry.cancelled = true
     active.delete(id)
@@ -77,8 +87,10 @@ export const createVirtualTime = (record: RecordEvent) => {
     if (installed) throw new Error("Virtual time already installed")
     installed = true
     restoring = false
+
     const virtualSetTimeout = (handler: TimerHandler, timeout?: number, ...args: unknown[]) => {
       const callback = handler instanceof Function ? () => handler(...args) : () => undefined
+
       if (escapeNextTimer) {
         escapeNextTimer = false
         // Mutation: deliberately fail to own a timer requested by product code.
@@ -86,33 +98,45 @@ export const createVirtualTime = (record: RecordEvent) => {
         const handle = realSetTimeout(() => { callback(); escaped.resolve() }, timeout)
         escapedTimers.add(handle)
         record({ event: "mutation-unowned-product-timer", site: callSite(), delay: timeout })
+
         return handle
       }
+
       const entry = enqueue("fire-timer", `setTimeout(${timeout ?? 0})\n${callSite()}`, callback)
       entry.delay = timeout ?? 0
       entry.due = now + entry.delay
+
       return entry.id
     }
+
     const virtualClearTimeout = (id?: number | NodeJS.Timeout) => {
       if (id !== undefined && escapedTimers.has(id)) {
         realClearTimeout(id); escapedTimers.delete(id); escaped.resolve()
       } else cancel(Number(id), "fire-timer")
     }
+
     const virtualRequestAnimationFrame = (callback: FrameRequestCallback) => {
       const entry = enqueue("raf-tick", `requestAnimationFrame\n${callSite()}`, () => callback(now))
       entry.due = now + 1000 / 60
+
       return entry.id
     }
+
     const virtualCancelAnimationFrame = (id: number) => cancel(id, "raf-tick")
+
     const virtualSetImmediate = (callback: (...args: never[]) => void) => {
       const entry = enqueue("idb-task", `setImmediate\n${callSite()}`, callback)
       immediateIds.set(entry, entry.id)
+
       return entry
     }
+
     const virtualClearImmediate = (handle: NodeJS.Immediate) => {
       const id = immediateIds.get(handle)
+
       if (id !== undefined) cancel(id, "idb-task")
     }
+
     Object.defineProperty(globalThis, "setTimeout", { configurable: true, writable: true, value: virtualSetTimeout })
     Object.defineProperty(globalThis, "clearTimeout", { configurable: true, writable: true, value: virtualClearTimeout })
     Object.defineProperty(globalThis, "requestAnimationFrame", { configurable: true, writable: true, value: virtualRequestAnimationFrame })
@@ -124,6 +148,7 @@ export const createVirtualTime = (record: RecordEvent) => {
 
     if (transactionDescriptor) {
       const original = transactionPrototype.transaction
+
       const wrapped = function (
         this: IDBDatabase,
         storeNames: string | string[],
@@ -132,6 +157,7 @@ export const createVirtualTime = (record: RecordEvent) => {
       ) {
         const transaction = original.call(this, storeNames, mode, options)
         const stores = Array.isArray(storeNames) ? storeNames : [storeNames]
+
         if (mode === "readwrite" && stores.includes("entities")) {
           pendingEffectTransactions.add(transaction)
           const ordinal = ++effectWrites
@@ -141,8 +167,10 @@ export const createVirtualTime = (record: RecordEvent) => {
           transaction.addEventListener("abort", () => { pendingEffectTransactions.delete(transaction); effectStates.set(ordinal, "aborted") }, { once: true })
           record({ event: "effect-write-transaction", stores, site: callSite() })
         }
+
         return transaction
       }
+
       Object.defineProperty(transactionPrototype, "transaction", { ...transactionDescriptor, value: wrapped })
     }
   }
@@ -150,17 +178,23 @@ export const createVirtualTime = (record: RecordEvent) => {
   const restore = () => {
     if (!installed || restoring) return
     restoring = true
+
     for (const [name, descriptor] of globalDescriptors) {
       if (descriptor) Object.defineProperty(globalThis, name, descriptor)
       else Reflect.deleteProperty(globalThis, name)
     }
+
     if (transactionDescriptor) Object.defineProperty(transactionPrototype, "transaction", transactionDescriptor)
+
     for (const handle of escapedTimers) realClearTimeout(handle)
     escapedTimers.clear()
+
     if (dateNowDescriptor) Object.defineProperty(Date, "now", dateNowDescriptor)
     else Reflect.deleteProperty(Date, "now")
+
     if (performanceNowDescriptor) Object.defineProperty(performance, "now", performanceNowDescriptor)
     else Reflect.deleteProperty(performance, "now")
+
     for (const entry of work) if (!entry.fired && !entry.cancelled) cancel(entry.id, entry.kind)
     pendingEffectTransactions.clear()
     installed = false
@@ -172,13 +206,17 @@ export const createVirtualTime = (record: RecordEvent) => {
   const enabled = () => {
     const pending = [...active.values()]
     const firstIdb = pending.find((entry) => entry.kind === "idb-task")
+
     const firstTimer = pending.filter((entry) => entry.kind === "fire-timer")
       .reduce<VirtualWork | undefined>((first, entry) => !first || (entry.due ?? 0) < (first.due ?? 0) ? entry : first, undefined)
+
     return pending.filter((entry) => (entry.kind !== "idb-task" || entry === firstIdb)
       && (entry.kind !== "fire-timer" || entry === firstTimer))
   }
+
   const run = (id: number) => {
     const entry = enabled().find((entry) => entry.id === id)
+
     if (!entry) throw new Error(`No enabled virtual work ${id}`)
     entry.fired = true
     active.delete(id)
@@ -186,16 +224,20 @@ export const createVirtualTime = (record: RecordEvent) => {
     record({ event: "virtual-work-fired", id, kind: entry.kind, site: entry.site })
     entry.run()
   }
+
   const failNextPersistence = () => {
     const transaction = pendingEffectTransactions.values().next().value
+
     if (!transaction) throw new Error("persist-fail without pending effect write")
     record({ event: "persist-fail-abort" })
     transaction.abort()
     pendingEffectTransactions.delete(transaction)
   }
+
   const sentinel = () => {
     let didFire = false
     const id = realSetTimeout(() => { didFire = true }, 0)
+
     return {
       fired: () => didFire,
       clear: () => realClearTimeout(id),
@@ -212,6 +254,7 @@ export const createVirtualTime = (record: RecordEvent) => {
     // Ordinal of the write persist-fail would abort, and the writes started so far.
     nextFailureOrdinal: () => {
       const transaction = pendingEffectTransactions.values().next().value
+
       return transaction && effectOrdinals.get(transaction)
     },
     effectWrites: () => effectWrites,
@@ -219,6 +262,7 @@ export const createVirtualTime = (record: RecordEvent) => {
     scheduleDeadline: (site: string, callback: () => void) => {
       const entry = enqueue("fire-timer", site, callback)
       entry.delay = 2000; entry.due = now + 2000
+
       return entry.id
     },
     cancelExternal: (id: number) => cancel(id, "fire-timer"),

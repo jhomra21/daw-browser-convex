@@ -71,8 +71,10 @@ test('prepared native windows exactly match independent portable compilation', (
           { ...track.clips[0]!, id: 'overlap', startSec: 0.213, duration: 3.1, midiOffsetBeats: 0.35 },
         ],
       }]
+
       const base = { ...input, sampleRateHz, bpm, tracks }
       const compileWindow = createPortableFrameScheduleWindowCompiler(base)
+
       for (const frame of [0, 1, 511, 512, 9_731, 44_100, 48_000, 96_000, 150_000]) {
         for (const frameCount of [128, 512, 96_000]) {
           for (const shift of [0, 24_001]) {
@@ -81,6 +83,7 @@ test('prepared native windows exactly match independent portable compilation', (
               rangeStartFrame: frame + shift,
               rangeEndFrame: frame + shift + frameCount,
             }
+
             expect(compileWindow(window)).toEqual(compilePortableFrameScheduleWindow({
               ...base, ...window,
               eventRangeStartSec: window.timeOrigin.timelineSec,
@@ -98,10 +101,12 @@ test('prepared native windows exactly match independent portable compilation', (
 test('prepared compiler owns no cache across replacement snapshots', () => {
   const window = { timeOrigin: input.timeOrigin, rangeStartFrame: 0, rangeEndFrame: 48_000 }
   const before = createPortableFrameScheduleWindowCompiler(input)(window)
+
   const changed = {
     ...input, revision: input.revision + 1, bpm: 123,
     tracks: [{ ...track, clips: [{ ...track.clips[0]!, midi: { wave: 'sine', notes: [{ beat: 0, length: 1, pitch: 72 }] } }] } satisfies RuntimeTrack],
   }
+
   const after = createPortableFrameScheduleWindowCompiler(changed)(window)
   expect(after.revision).toBe(changed.revision)
   expect(after.events.filter((event) => event.type === 'note-on').map((event) => event.pitch)).toEqual([72])
@@ -112,7 +117,9 @@ test('projects timeline, expression, and automation authorities into stable fram
   const schedule = compilePortableFrameSchedule(input)
   const frameAt = (timeSec: number) => portableFrameAtTimelineTime(schedule, timeSec)
   const clip = track.clips[0]
+
   if (!clip) throw new Error('Expected fixture clip.')
+
   const expectedNotes = getScheduledMidiEvents({
     clip,
     bpm: input.bpm,
@@ -120,6 +127,7 @@ test('projects timeline, expression, and automation authorities into stable fram
     rangeStartSec: 0,
     rangeEndSec: 2,
   })
+
   const expectedExpression = resolveTrackMidiExpressionSchedule({
     clips: track.clips,
     trackId: track.id,
@@ -129,6 +137,7 @@ test('projects timeline, expression, and automation authorities into stable fram
     rangeStartSec: 0,
     rangeEndSec: 2,
   })
+
   const expectedAutomation = getAutomationEnvelopeSchedulePlan(automation, {
     playheadSec: 0,
     startLimitSec: 0,
@@ -174,6 +183,7 @@ test('projects timeline, expression, and automation authorities into stable fram
     },
   ])
 })
+
 test('keeps hold and linear automation exact over ten seconds, one minute, and five minutes', () => {
   for (const durationSec of [10, 60, 300]) {
     const hold: AutomationEnvelope = {
@@ -184,6 +194,7 @@ test('keeps hold and linear automation exact over ten seconds, one minute, and f
         { id: 'hold-end', timeSec: durationSec, value: 0.75, interpolation: 'hold' },
       ],
     }
+
     const linear: AutomationEnvelope = {
       ...automation,
       id: `linear-${durationSec}`,
@@ -192,12 +203,14 @@ test('keeps hold and linear automation exact over ten seconds, one minute, and f
         { id: 'linear-end', timeSec: durationSec, value: 0.75, interpolation: 'linear' },
       ],
     }
+
     const schedule = compilePortableFrameSchedule({
       ...input,
       rangeEndSec: durationSec + 1,
       tracks: [],
       automationEnvelopes: [hold, linear],
     })
+
     const expectedFrame = durationSec * input.sampleRateHz
     const events = schedule.events.filter((event) => event.type.startsWith('parameter'))
     expect(events.some((event) => event.type === 'parameter-set'
@@ -238,6 +251,7 @@ test('keeps a spanning note identity stable across logical loop windows', () => 
       },
     }],
   }
+
   const first = compilePortableFrameSchedule({
     ...input,
     tracks: [spanningTrack],
@@ -245,6 +259,7 @@ test('keeps a spanning note identity stable across logical loop windows', () => 
     stableNoteIds: true,
     clipSpanningNoteOn: true,
   })
+
   const second = compilePortableFrameSchedule({
     ...input,
     timeOrigin: { timelineSec: 2, frame: 96_000 },
@@ -253,6 +268,7 @@ test('keeps a spanning note identity stable across logical loop windows', () => 
     stableNoteIds: true,
     clipSpanningNoteOn: true,
   })
+
   const firstNote = first.events.find((event) => event.type === 'note-on')
   const secondNote = second.events.find((event) => event.type === 'note-on')
   expect(firstNote?.noteId).toBe(secondNote?.noteId)
@@ -273,11 +289,13 @@ test('emits release and retrigger events instead of collapsing adjacent notes', 
       },
     }],
   }
+
   const events = compilePortableFrameSchedule({
     ...input,
     tracks: [adjacentTrack],
     automationEnvelopes: [],
   }).events.filter((event) => event.type === 'note-on' || event.type === 'note-off')
+
   expect(events.map((event) => event.type)).toEqual(['note-on', 'note-off', 'note-on', 'note-off'])
   expect(events.map((event) => event.noteId)).toEqual([1, 1, 2, 2])
 })
@@ -293,6 +311,7 @@ test('releases active voices at a loop boundary before retriggering the next ite
       },
     }],
   }
+
   const events = compilePortableFrameSchedule({
     ...input,
     tracks: [longTrack],
@@ -300,6 +319,7 @@ test('releases active voices at a loop boundary before retriggering the next ite
     rangeEndSec: 2,
     loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 },
   }).events.filter((event) => event.type === 'note-on' || event.type === 'note-off')
+
   expect(events.map((event) => [event.frame, event.type])).toEqual([
     [0, 'note-on'],
     [48_000, 'note-off'],
@@ -316,14 +336,19 @@ test('W-R5 a loop pass keeps its note ids in a compile from a later seam with th
     ...track,
     clips: [{ ...track.clips[0]!, midi: { ...track.clips[0]!.midi!, notes: [{ id: 'pass-note', beat: 0, length: 0.75, pitch: 60, velocity: 0.7 }] } }],
   }
+
   const base = { ...input, tracks: [shortTrack], automationEnvelopes: [], stableNoteIds: true, clipSpanningNoteOn: true }
+
   const noteOns = (schedule: ReturnType<typeof compilePortableFrameSchedule>) => schedule.events
     .flatMap((event) => event.type === 'note-on' ? [[event.frame, event.noteId] as const] : [])
+
   const first = noteOns(compilePortableFrameSchedule({ ...base, rangeEndSec: 5, loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } }))
   // The seam is raw frame 110_000, 14_000 frames into the third pass: its loop starts two seconds (two passes) later.
   const arrangement = 14_000 / 48_000
+
   const later = noteOns(compilePortableFrameSchedule({ ...base, timeOrigin: { timelineSec: arrangement, frame: 110_000 }, rangeEndSec: arrangement + 3,
     loop: { loopEnabled: true, loopStartSec: 2, loopEndSec: 3 } }))
+
   const idAt = (notes: typeof first, frame: number) => notes.find(([at]) => at === frame)?.[1]
   expect({ spanning: idAt(later, 110_000) === idAt(first, 96_000), fourth: idAt(later, 144_000) === idAt(first, 144_000),
     distinct: new Set(first.map(([, id]) => id)).size === first.length })

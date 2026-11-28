@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 
 import { isJsonObject, isJsonString, type JsonValue } from '@daw-browser/shared'
+
 type PublishedRequest = { value: JsonValue }
 
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -76,6 +77,7 @@ const deps = (
 
 test('legacy persisted cloud clip deletes recreate through the strict sanitized create endpoint', async () => {
   const projectId = 'project-cloud-legacy-delete'
+
   const entry: Extract<HistoryEntry, { type: 'clip-delete' }> = {
     type: 'clip-delete',
     projectId,
@@ -96,18 +98,23 @@ test('legacy persisted cloud clip deletes recreate through the strict sanitized 
       }],
     },
   }
+
   const inserted: Track['clips'] = []
   const published: PublishedRequest = { value: null }
   const originalFetch = globalThis.fetch
+
   const replayFetch: typeof globalThis.fetch = Object.assign(
     async (...arguments_: Parameters<typeof globalThis.fetch>) => {
       const [, init] = arguments_
       published.value = JSON.parse(init?.body ? await new Response(init.body).text() : 'null')
+
       return new Response(JSON.stringify('restored-clip-1'), { status: 200 })
     },
     { preconnect: originalFetch.preconnect },
   )
+
   globalThis.fetch = replayFetch
+
   try {
     await execUndo(entry, deps(projectId, [entry], inserted))
   } finally {
@@ -122,6 +129,7 @@ test('legacy persisted cloud clip deletes recreate through the strict sanitized 
       midi: { wave: 'sine' },
     },
   })
+
   if (
     !isJsonObject(published.value)
     || !isJsonObject(published.value.payload)
@@ -137,6 +145,7 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
   const projectId = 'project-cloud-persisted-recovery'
   const operationId = 'queued-delete-1'
   const recoveryId = 'recovery-1'
+
   const inMemoryEntry: Extract<HistoryEntry, { type: 'clip-delete' }> = {
     type: 'clip-delete',
     projectId,
@@ -153,6 +162,7 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
       }],
     },
   }
+
   const persistedEntry: Extract<HistoryEntry, { type: 'clip-delete' }> = {
     ...inMemoryEntry,
     data: {
@@ -165,6 +175,7 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
       }],
     },
   }
+
   const previousWindow = globalThis.window
   const previousLocalStorage = globalThis.localStorage
   const storage = new MemoryStorage()
@@ -182,11 +193,13 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
     const [, args] = arguments_
     const persistedArgs: JsonValue = JSON.parse(JSON.stringify(args))
     mutationCalls.push(persistedArgs)
+
     return { status: 'applied', clipId: 'restored-clip-1' }
   })
   saveHistory({ projectId, userId: 'user-1' }, { undo: [persistedEntry], redo: [] })
 
   const inserted: Track['clips'] = []
+
   try {
     await execUndo(inMemoryEntry, deps(projectId, [inMemoryEntry], inserted))
   } finally {
@@ -202,6 +215,7 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
 
 test('retries a response-lost clip deletion with its original operation ID', async () => {
   const projectId = 'project-cloud-delete-retry'
+
   const entry: Extract<HistoryEntry, { type: 'clip-delete' }> = {
     type: 'clip-delete',
     projectId,
@@ -213,18 +227,22 @@ test('retries a response-lost clip deletion with its original operation ID', asy
       recreatedClips: [{ clipRef: 'clip-ref-1', clipId: 'clip-1' }],
     },
   }
+
   const originalMutation = convexClient.mutation
   const operationIds: string[] = []
   let responseLost = true
   Reflect.set(convexClient, 'mutation', async (...arguments_: Parameters<typeof convexClient.mutation>) => {
     const [, args] = arguments_
     const persistedArgs: JsonValue = JSON.parse(JSON.stringify(args))
+
     if (
       !isJsonObject(persistedArgs)
       || !isJsonString(persistedArgs.operationId)
     ) throw new Error('Expected delete operation ID.')
     operationIds.push(persistedArgs.operationId)
+
     if (responseLost) throw new Error('Response lost after deletion.')
+
     return {
       removedClipIds: ['clip-1'],
       recoveries: [{ sourceClipId: 'clip-1', recoveryId: 'recovery-1' }],
@@ -232,10 +250,12 @@ test('retries a response-lost clip deletion with its original operation ID', asy
       skipped: [],
     }
   })
+
   try {
     await expect(execRedo(entry, deps(projectId, [entry], []))).rejects.toThrow('Response lost')
     const retainedOperationId = entry.data.deleteOperationId
     expect(retainedOperationId).toBeString()
+
     if (!retainedOperationId) throw new Error('Expected pending deletion operation ID.')
     responseLost = false
     await execRedo(entry, deps(projectId, [entry], []))

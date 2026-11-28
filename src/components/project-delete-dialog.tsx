@@ -31,6 +31,7 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
 
   const confirmDelete = () => {
     const project = props.project
+
     if (!project || confirmation() !== project.name) return
     props.onConfirm(project)
   }

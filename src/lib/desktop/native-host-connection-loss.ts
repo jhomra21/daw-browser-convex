@@ -4,11 +4,13 @@ export const sanitizeNativeVst3DiagnosticError = (error: NativePlaybackDiagnosti
   const message = error instanceof Error
     ? error.message
     : error ?? "Native playback could not start."
+
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
 }
 
 export const indicatesNativeHostConnectionLoss = (error: NativePlaybackDiagnosticFailure) => {
   const message = sanitizeNativeVst3DiagnosticError(error).toLowerCase()
+
   return message.includes("native playback host connection was lost")
     || message.includes("native audio host is unavailable")
     || message.includes("native audio host stopped")
@@ -38,15 +40,20 @@ export const createNativeHostConnectionLoss = (host: {
     recoveryUsed = false
     lossReported = false
   }
+
   const isLost = () => {
     if (!lost) return false
     const projectGeneration = host.projectGeneration()
+
     if (lossProjectGeneration !== undefined && projectGeneration !== lossProjectGeneration) {
       forget()
+
       return false
     }
+
     return true
   }
+
   const message = () => lossReason ?? "Native playback host connection was lost."
 
   return {
@@ -68,6 +75,7 @@ export const createNativeHostConnectionLoss = (host: {
       lossReason = reason ?? message()
       recoveryAvailable = !recoveryUsed
       lossReported = false
+
       return true
     },
     beginRecovery: () => {
@@ -78,6 +86,7 @@ export const createNativeHostConnectionLoss = (host: {
       lossProjectGeneration = undefined
       lossReason = undefined
       lossReported = false
+
       return true
     },
     completeRecovery: () => {

@@ -6,6 +6,7 @@ import { createMidiRecordingSession } from './recording-session'
 const noteOn = (pitch: number, timeStamp = 0): MidiInputEvent => ({
   sourceId: 'keyboard', timeStamp, channel: 1, kind: 'note-on', note: pitch, velocity: 0.5,
 })
+
 const noteOff = (pitch: number, timeStamp = 0): MidiInputEvent => ({
   sourceId: 'keyboard', timeStamp, channel: 1, kind: 'note-off', note: pitch, velocity: 0,
 })
@@ -58,9 +59,11 @@ describe('createMidiRecordingSession', () => {
 
   test('settles without exceeding the performance event limit', () => {
     const session = createMidiRecordingSession(0, 'take')
+
     for (let index = 0; index < MAX_MIDI_PERFORMANCE_EVENTS; index += 1) {
       session.receive(noteOn(index % 128), index)
     }
+
     session.receive(noteOn(1), 501)
     const snapshot = session.snapshot(60, 501)
 

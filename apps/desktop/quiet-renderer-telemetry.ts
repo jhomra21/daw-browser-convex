@@ -17,6 +17,7 @@ type RendererMetric = {
 export const classifyNavigationUrl = (url: string) => {
   try {
     const parsed = new URL(url)
+
     return parsed.protocol === "daw:" && parsed.hostname === "app" ? "app" : "other"
   } catch { return "invalid" }
 }
@@ -25,10 +26,14 @@ export const boundedRendererEvents = (events: readonly RendererEvent[]) => event
 
 export const summarizeRendererMetrics = (samples: readonly RendererMetric[], pid: number, startAtMs = 0) => {
   const selected = samples.filter((sample) => sample.pid === pid && sample.elapsedMs >= startAtMs)
+
   if (selected.length === 0) return null
+
   const at = (elapsedMs: number) => selected.reduce((nearest, sample) =>
     Math.abs(sample.elapsedMs - startAtMs - elapsedMs) < Math.abs(nearest.elapsedMs - startAtMs - elapsedMs) ? sample : nearest)
+
   const cpus = selected.map((sample) => sample.cpuPercent).sort((a, b) => a - b)
+
   return {
     startBytes: selected[0]!.workingSetKiB * 1024,
     at30sBytes: at(30_000).workingSetKiB * 1024,

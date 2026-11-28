@@ -16,6 +16,7 @@ function Separator(
   props: PolymorphicProps<ValidComponent, SeparatorRootProps<ValidComponent>>,
 ): JSX.Element {
   const [local, others] = splitProps(props, ["class", "orientation"])
+
   return (
     <SeparatorPrimitive.Root
       orientation={local.orientation ?? "horizontal"}

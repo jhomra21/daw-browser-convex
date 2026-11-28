@@ -23,6 +23,7 @@ const firstNumber = (values: Array<number | undefined>) => {
   for (const value of values) {
     if (value !== undefined) return value
   }
+
   return undefined
 }
 
@@ -30,6 +31,7 @@ const firstBoolean = (values: Array<boolean | undefined>, fallback = false) => {
   for (const value of values) {
     if (value !== undefined) return value
   }
+
   return fallback
 }
 
@@ -49,12 +51,15 @@ const resolveTrackMixFlag = (input: {
     serverValue,
     pendingSharedValue,
   } = input
+
   if (canWriteSharedMix) {
     return firstBoolean([pendingSharedValue, serverValue, currentValue])
   }
+
   if (syncMix) {
     return firstBoolean([serverValue, currentValue, localValue])
   }
+
   return firstBoolean([localValue, currentValue, serverValue])
 }
 

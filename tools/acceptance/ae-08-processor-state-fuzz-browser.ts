@@ -15,7 +15,9 @@ const track: RuntimeTrack = {
   clips: [{ id: "clip", name: "MIDI", color: "#fff", startSec: 0, duration: 1, midiOffsetBeats: 0,
     midi: { wave: "sine", notes: [{ id: "note", beat: 0, length: 1, pitch: 60, velocity: 0.8 }], cc: [], mappings: [] } }],
 }
+
 const transport: LivePlaybackTransport = { state: "playing", playheadSec: 0, loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
+
 const compilation = async (next: LivePlaybackTransport): Promise<LivePlaybackSnapshotCompilation> => ({
   supported: true,
   snapshot: {
@@ -27,6 +29,7 @@ const compilation = async (next: LivePlaybackTransport): Promise<LivePlaybackSna
     },
   },
 })
+
 const selected: PortableWasmBackendSelection = {
   selected: true,
   capability: {
@@ -40,10 +43,13 @@ const selected: PortableWasmBackendSelection = {
     sharedQueue: "available",
   },
 }
+
 const context: AudioContext = Object.assign(Object.create(null), { sampleRate: 48_000 })
 
 type Held = { release?: () => void }
+
 type Backend = NonNullable<Parameters<typeof createPortableBrowserPlaybackController>[0]["backend"]>
+
 const createSession = (held: Held): Awaited<ReturnType<Backend["createPlaybackSession"]>> => ({
   connectInput: () => () => undefined,
   dispose: () => undefined,
@@ -65,17 +71,21 @@ const flushRequest = { instanceId: "synth:1", values: [{ parameterId: "synth.fil
 
 export default async function browserReceipts() {
   const held: Held = {}
+
   const controller = createPortableBrowserPlaybackController({
     compileSnapshot: compilation,
     getAudioContext: () => context,
     backend: { createPlaybackSession: async () => createSession(held) },
     select: async () => selected,
   })
+
   const control = controller.liveProcessorControl
+
   if (await controller.start(transport) !== "started") throw new Error("Browser witness could not start portable playback")
   const acrossPause = control.flush(flushRequest)
   await controller.pause(0)
   held.release?.()
+
   const acrossRestart = (async () => {
     await controller.start(transport)
     const flush = control.flush(flushRequest)
@@ -83,9 +93,12 @@ export default async function browserReceipts() {
     await controller.pause(0)
     await controller.start({ ...transport, loopEnabled: true, loopStartSec: 0, loopEndSec: 1 })
     held.release?.()
+
     return flush
   })()
+
   const results = { acrossPause: await acrossPause, acrossRestart: await acrossRestart }
   controller.dispose()
+
   return results
 }

@@ -33,6 +33,7 @@ export const createNativeVstProjectBindings = (): NativeVstProjectBindings => {
       if (staged === undefined) return
       assertToken(transactionToken)
       committed.clear()
+
       for (const [instanceId, projectId] of staged) committed.set(instanceId, projectId)
       staged = undefined
       stagedToken = undefined

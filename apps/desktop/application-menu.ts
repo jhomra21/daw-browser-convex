@@ -170,6 +170,7 @@ export const createApplicationMenuTemplate = (
   // routes text-field undo/redo itself. Elsewhere the renderer owns the key and the menu only displays it.
   const menuShortcut = (accelerator: string, options: { macOwnsKey: boolean }): ApplicationMenuTemplate => {
     if (platform !== "darwin") return { accelerator, registerAccelerator: false }
+
     return options.macOwnsKey ? { accelerator } : {}
   }
 
@@ -357,60 +358,82 @@ const applyState = (
 ) => {
   for (const id of statefulIds) {
     const item = menu.getMenuItemById(id)
+
     if (item) item.enabled = state.ready
   }
+
   const archive = menu.getMenuItemById(menuIds.exportArchive)
+
   if (archive) archive.enabled = state.ready && state.canExportArchive
+
   const availability: ReadonlyArray<readonly [string, boolean]> = [
     [menuIds.undo, state.canUndo],
     [menuIds.redo, state.canRedo],
     [menuIds.duplicate, state.canDuplicateSelection],
     [menuIds.delete, state.canDeleteSelection],
   ]
+
   for (const [id, available] of availability) {
     const item = menu.getMenuItemById(id)
+
     if (item) item.enabled = state.ready && available
   }
+
   const editing: ReadonlyArray<readonly [string, boolean, keyof EditingWebContents, DesktopApplicationMenuMessage | null]> = [
     [menuIds.cut, state.canCut, "cut", null],
     [menuIds.copy, state.canCopy, "copy", "copy"],
     [menuIds.paste, state.canPaste, "paste", "paste"],
     [menuIds.selectAll, state.canSelectAll, "selectAll", "select-all"],
   ]
+
   for (const [id, available, native, command] of editing) {
     const item = menu.getMenuItemById(id)
+
     if (!item) continue
     item.enabled = state.ready && available
     item.click = editingClick(state, sendCommand, native, command)
   }
+
   const signIn = menu.getMenuItemById(menuIds.signIn)
+
   if (signIn) {
     signIn.enabled = state.ready
     signIn.visible = !state.signedIn
   }
+
   const account = menu.getMenuItemById(menuIds.account)
+
   if (account) {
     account.enabled = state.ready
     account.visible = state.signedIn
   }
+
   const logout = menu.getMenuItemById(menuIds.logout)
+
   if (logout) {
     logout.enabled = state.ready
     logout.visible = state.signedIn
   }
+
   const metronome = menu.getMenuItemById(menuIds.metronome)
+
   if (metronome) metronome.checked = state.metronomeEnabled
   const loop = menu.getMenuItemById(menuIds.loop)
+
   if (loop) loop.checked = state.loopEnabled
   const grid = menu.getMenuItemById(menuIds.grid)
+
   if (grid) grid.checked = state.gridEnabled
   const follow = menu.getMenuItemById(menuIds.follow)
+
   if (follow) follow.checked = state.followEnabled
   const syncMix = menu.getMenuItemById(menuIds.syncMix)
+
   if (syncMix) {
     syncMix.enabled = state.ready
     syncMix.checked = state.syncMix
   }
+
   const gridItems = new Map([
     [2, menuIds.grid2],
     [4, menuIds.grid4],
@@ -418,17 +441,22 @@ const applyState = (
     [12, menuIds.grid12],
     [16, menuIds.grid16],
   ] as const)
+
   for (const [denominator, id] of gridItems) {
     const item = menu.getMenuItemById(id)
+
     if (item) {
       item.enabled = state.ready
       item.checked = state.gridDenominator === denominator
     }
   }
+
   const contributions = [...(state.extensionContributions ?? [])]
     .sort((left, right) => left.order - right.order || left.id.localeCompare(right.id))
+
   for (const index of extensionMenuSlots) {
     const item = menu.getMenuItemById(menuIds.extensionSlot(index))
+
     if (!item) continue
     const contribution = contributions[index]
     item.visible = contribution !== undefined
@@ -454,6 +482,7 @@ export const createApplicationMenuController = <TMenu extends ApplicationMenu = 
   const reapplyState = () => {
     if (menu) applyState(menu, state, sendCommand)
   }
+
   const sendCommand = (command: DesktopApplicationMenuMessage) => {
     options.sendCommand(command)
     reapplyState()

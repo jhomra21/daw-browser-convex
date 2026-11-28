@@ -30,12 +30,14 @@ export function createTimelineTrackIndex<TBuffer = never>(tracks: Track<TBuffer>
     trackIndexById.set(track.id, trackIndex)
 
     const clipIds: string[] = []
+
     for (const clip of track.clips) {
       clipById.set(clip.id, clip)
       clipTrackIdById.set(clip.id, track.id)
       clipEntryById.set(clip.id, { trackId: track.id, trackIndex, track, clip })
       clipIds.push(clip.id)
     }
+
     clipIdsByTrackId.set(track.id, clipIds)
   }
 

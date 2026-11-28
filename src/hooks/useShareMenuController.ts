@@ -14,10 +14,14 @@ type UseShareMenuControllerOptions = {
 
 const readProjectMembers = (value: JsonValueInput) => {
   const parsed = parseJsonValue(value);
+
   if (!isJsonObject(parsed) || !Array.isArray(parsed.members)) return null;
+
   return parsed.members.flatMap((member): ProjectMember[] => {
     if (!isJsonObject(member) || !isJsonString(member.userId)) return [];
+
     if (member.role !== "editor" && member.role !== "viewer") return [];
+
     return [{ userId: member.userId, role: member.role }];
   });
 };
@@ -41,6 +45,7 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
 
   const createShareUrl = async () => {
     setShareError("");
+
     try {
       setShareUrl(await Promise.resolve(options.onShare?.()) ?? "");
     } catch {
@@ -53,10 +58,13 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
     setMembersLoading(true);
     const projectId = options.projectId();
     setMembersError("");
+
     try {
       const response = await fetch(`/api/projects/${encodeURIComponent(projectId)}/members`);
       const nextMembers = readProjectMembers(await response.json().catch(() => null));
+
       if (!response.ok || !nextMembers) throw new Error("Members could not be loaded.");
+
       if (options.projectId() !== projectId) return;
       setMembers(nextMembers);
     } catch {
@@ -72,26 +80,33 @@ export function useShareMenuController(options: UseShareMenuControllerOptions) {
 
   const copy = async () => {
     const currentShareUrl = shareUrl();
+
     if (!currentShareUrl) return false;
     await copyText(currentShareUrl);
+
     return true;
   };
 
   const revokeMember = async (targetUserId: string) => {
     const projectId = options.projectId();
+
     if (!projectId || !targetUserId) return;
     const isCurrentProject = () => options.projectId() === projectId;
     setMembersError("");
     setRevokingMemberId(targetUserId);
+
     try {
       const response = await fetch(
         `/api/projects/${encodeURIComponent(projectId)}/members/${encodeURIComponent(targetUserId)}`,
         { method: "DELETE" },
       );
+
       if (!response.ok) throw new Error("Member could not be removed.");
+
       if (!isCurrentProject()) return;
       setMembers((current) => {
         if (!current.some((member) => member.userId === targetUserId)) return current;
+
         return current.filter((member) => member.userId !== targetUserId);
       });
     } catch {

@@ -24,11 +24,14 @@ type UseTimelineAudioWarpOptions = {
 
 export function useTimelineAudioWarp(options: UseTimelineAudioWarpOptions) {
   const bpmDetection = createBpmDetectionService()
+
   const selectedAudioClip = createMemo(() => {
     const selected = options.selectedClip()
+
     if (!selected) return undefined
     const track = options.tracks().find((entry) => entry.id === selected.trackId)
     const clip = track?.clips.find((entry) => entry.id === selected.clipId)
+
     return clip && !clip.midi ? clip : undefined
   })
 
@@ -39,14 +42,18 @@ export function useTimelineAudioWarp(options: UseTimelineAudioWarpOptions) {
   const changeAudioWarp = async (clip: Clip, audioWarp: AudioWarp) => {
     const projectId = options.projectId()
     const userId = options.userId()
+
     if (!projectId || (!isLocalId('project', projectId) && !userId) || !options.canWriteClip(clip.id)) return false
 
     const nextAudioWarp = normalizeAudioWarp(audioWarp)
+
     if (!nextAudioWarp) return false
     const previous = buildClipAudioWarpSnapshot(clip)
+
     if (audioWarpEqual(previous.audioWarp, nextAudioWarp)) return true
 
     const applied = await createTimelineClipWriteAdapter({ projectId, userId }).setAudioWarp(clip.id, nextAudioWarp)
+
     if (!applied) return false
 
     options.projection.commitClipAudioWarp(clip.id, nextAudioWarp)
@@ -60,6 +67,7 @@ export function useTimelineAudioWarp(options: UseTimelineAudioWarpOptions) {
         to: { audioWarp: nextAudioWarp },
       },
     })
+
     return true
   }
 

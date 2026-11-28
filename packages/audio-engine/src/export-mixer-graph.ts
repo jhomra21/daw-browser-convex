@@ -9,6 +9,7 @@ export const resolveExportMixerGraph = (input: {
   fx?: ExportFx
 }): ResolvedMixerGraph => {
   const { tracks, fx } = input
+
   return resolveMixerGraph({
     channels: createMixerChannels(tracks),
     sourceChannelCounts: Object.fromEntries(tracks.map((track) => [

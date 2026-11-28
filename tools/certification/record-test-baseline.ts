@@ -12,10 +12,13 @@ import { allTestFiles } from "./tiers"
 const args = process.argv.slice(2)
 const out = path.resolve(args.includes("--out") ? args[args.indexOf("--out") + 1] ?? "" : path.join("/tmp/fast-cert", `record-tests-${new Date().toISOString().replaceAll(":", "-")}`))
 const exp = expectationsSchema.parse(JSON.parse(readFileSync(expectationsFile, "utf8")))
+
 mkdirSync(out, { recursive: true })
+
 const files = allTestFiles()
 const shards = [...testShards(files.filter((file) => !exp.isolatedTests.includes(file)), 40), ...exp.isolatedTests.map((file) => [file])]
 const logs: string[] = []
+
 const run = async (shard: string[], index: number) => {
   const log = path.join(out, `shard-${index}.log`)
   // bun treats arguments as substring filters: absolute paths keep archived copies of a test (acceptance-reports/) out.
@@ -23,14 +26,22 @@ const run = async (shard: string[], index: number) => {
   await once(child, "exit")
   logs.push(log)
 }
+
 const queue = shards.map((shard, index) => ({ shard, index }))
+
 // Isolated files run last and alone.
 const parallel = queue.slice(0, queue.length - exp.isolatedTests.length)
+
 await Promise.all(Array.from({ length: jobLimit() }, async () => {
   for (let next = parallel.shift(); next; next = parallel.shift()) await run(next.shard, next.index)
 }))
+
 for (const entry of queue.slice(queue.length - exp.isolatedTests.length)) await run(entry.shard, entry.index)
+
 const knownRed: Record<string, string[]> = {}
+
 for (const log of logs.sort()) for (const [file, names] of failuresByFile(readFileSync(log, "utf8"))) knownRed[file] = names
+
 writeFileSync(testBaselineFile, `${JSON.stringify({ knownRed: Object.fromEntries(Object.entries(knownRed).sort(([a], [b]) => a < b ? -1 : 1)) }, null, 1)}\n`)
+
 console.log(`${files.length} test files, ${Object.keys(knownRed).length} with failures, ${Object.values(knownRed).flat().length} known-red tests, logs ${out}`)

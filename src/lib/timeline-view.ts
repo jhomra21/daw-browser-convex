@@ -3,7 +3,9 @@ import { MAX_PIXELS_PER_SECOND } from './timeline-viewport-geometry'
 
 export const DEFAULT_PIXELS_PER_SECOND = 100
 export const MIN_PIXELS_PER_SECOND = Number.EPSILON
+
 export { MAX_PIXELS_PER_SECOND }
+
 export const ZOOM_STEP_FACTOR = 1.25
 
 export type TimelineRange = { startSec: number; endSec: number }
@@ -35,6 +37,7 @@ export const normalizeTimelineRange = (
   const end = Math.max(rawStart, rawEnd)
   const rangeDuration = Math.max(minimum, end - start)
   const clampedStart = Math.min(Math.max(0, start), Math.max(0, duration - rangeDuration))
+
   return { startSec: clampedStart, endSec: Math.min(duration, clampedStart + rangeDuration) }
 }
 
@@ -56,6 +59,7 @@ export const scrollLeftForTimelineRange = (
 ) => {
   const totalWidth = secondsToPixels(durationSec, pixelsPerSecond)
   const maxScroll = Math.max(0, totalWidth - Math.max(0, viewportWidth))
+
   return Math.min(maxScroll, Math.max(0, secondsToPixels(range.startSec, pixelsPerSecond)))
 }
 
@@ -74,6 +78,7 @@ export const zoomRangeAtAnchor = (
   const rangeDuration = Math.max(1e-6, range.endSec - range.startSec)
   const nextDuration = Math.min(durationSec, Math.max(minimumDurationSec, rangeDuration / Math.max(1e-6, factor)))
   const anchorTime = range.startSec + rangeDuration * normalizedAnchor
+
   return normalizeTimelineRange({
     startSec: anchorTime - nextDuration * normalizedAnchor,
     endSec: anchorTime + nextDuration * (1 - normalizedAnchor),
@@ -90,9 +95,11 @@ export const normalizeWheelZoomFactor = (deltaY: number, deltaMode: number) => {
     : deltaMode === 2
       ? 800
       : 1
+
   const normalizedDelta = Number.isFinite(deltaY)
     ? Math.min(240, Math.max(-240, deltaY * unit))
     : 0
+
   return Math.exp(-normalizedDelta / 400)
 }
 
@@ -109,17 +116,24 @@ export const selectTimelineGridIntervals = (
   gridEnabled: boolean,
 ): TimelineGridIntervals => {
   const scale = clampPixelsPerSecond(pixelsPerSecond)
+
   if (gridEnabled) {
     const beat = 60 / Math.max(1e-6, bpm)
     const base = beat * 4 / Math.max(1, denominator)
     let minor = base
+
     while (minor * scale < 8) minor *= 2
     let major = beat * 4
+
     while (major * scale < 56) major *= 2
+
     while (major < minor) major *= 2
+
     return { minorSec: minor, majorSec: major }
   }
+
   const minorSec = secondsIntervals.find((candidate) => candidate * scale >= 8) ?? secondsIntervals[secondsIntervals.length - 1]
   const majorSec = secondsIntervals.find((candidate) => candidate >= minorSec && candidate * scale >= 56) ?? secondsIntervals[secondsIntervals.length - 1]
+
   return { minorSec, majorSec }
 }

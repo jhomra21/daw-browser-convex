@@ -39,6 +39,7 @@ export type MidiEditorPersistenceError = {
 }
 
 const localActor = { subject: 'timeline-midi-editor' }
+
 type MidiAdapter = {
   clipId: string
   flush: () => Promise<void>
@@ -61,8 +62,10 @@ export const subscribeMidiProjectProjection = (projectId: string, listener: () =
   const listeners = projectionListeners.get(key) ?? new Set<() => void>()
   listeners.add(listener)
   projectionListeners.set(key, listeners)
+
   return () => {
     listeners.delete(listener)
+
     if (listeners.size === 0) projectionListeners.delete(key)
   }
 }
@@ -72,8 +75,10 @@ const registerAdapter = (projectId: string, adapter: MidiAdapter) => {
   const entries = midiAdapters.get(key) ?? new Set<MidiAdapter>()
   entries.add(adapter)
   midiAdapters.set(key, entries)
+
   return () => {
     entries.delete(adapter)
+
     if (entries.size === 0) midiAdapters.delete(key)
   }
 }
@@ -88,10 +93,12 @@ const serializeProjectMidiCommit = async <Value>(
   const chain = previous.then(() => gate, () => gate)
   midiCommitChains.set(projectId, chain)
   await previous
+
   try {
     return await callback()
   } finally {
     release?.()
+
     if (midiCommitChains.get(projectId) === chain) midiCommitChains.delete(projectId)
   }
 }
@@ -113,12 +120,15 @@ export const projectMidiProjectTracks = (
   const adapters = new Map(
     Array.from(midiAdapters.get(adapterKey(projectId)) ?? [], (adapter) => [adapter.clipId, adapter]),
   )
+
   if (adapters.size === 0) return tracks
+
   return tracks.map((track) => ({
     ...track,
     clips: track.clips.map((clip) => {
       if (!clip.midi) return clip
       const adapter = adapters.get(clip.id)
+
       return adapter ? { ...clip, midi: adapter.project(normalizeLegacyMidiClip(clip.midi)) } : clip
     }),
   }))
@@ -148,23 +158,31 @@ const isOperationReflected = (
   operation: MidiEditorOperation,
 ) => {
   if (operation.kind === 'set-input-channel') return midi.inputChannel === operation.inputChannel
+
   if (operation.kind === 'insert-mapping') {
     return JSON.stringify(midi.mappings.find((mapping) => mapping.id === operation.mapping.id)) === JSON.stringify(operation.mapping)
   }
+
   if (operation.kind === 'delete-mapping') return !midi.mappings.some((mapping) => mapping.id === operation.id)
+
   if (operation.kind === 'update-mapping') {
     const mapping = midi.mappings.find((candidate) => candidate.id === operation.id)
+
     return mapping !== undefined
       && (operation.changes.source === undefined || JSON.stringify(mapping.source) === JSON.stringify(operation.changes.source))
       && (operation.changes.target === undefined || JSON.stringify(mapping.target) === JSON.stringify(operation.changes.target))
       && (operation.changes.outputMin === undefined || mapping.outputMin === operation.changes.outputMin)
       && (operation.changes.outputMax === undefined || mapping.outputMax === operation.changes.outputMax)
   }
+
   const note = midi.notes.find((candidate) => candidate.id === (
     operation.kind === 'insert' ? operation.note.id : operation.id
   ))
+
   if (operation.kind === 'insert') return note !== undefined && sameNote(noteWithChannel(note), operation.note)
+
   if (operation.kind === 'delete') return note === undefined
+
   return note !== undefined
     && (operation.changes.beat === undefined || note.beat === operation.changes.beat)
     && (operation.changes.length === undefined || note.length === operation.changes.length)
@@ -193,6 +211,7 @@ export const reconcileAwaitingMidiReconciliation = (
   midi: NormalizedLegacyMidiClip,
 ): AwaitingMidiReconciliation | undefined => {
   const operations = reconcileMidiEditorOperations(midi, overlay.operations)
+
   return operations.length > 0 ? { ...overlay, operations } : undefined
 }
 
@@ -205,51 +224,66 @@ export const applyMidiEditorOperations = (
   midi: NormalizedLegacyMidiClip,
   operations: readonly MidiEditorOperation[],
 ): NormalizedLegacyMidiClip => {
-  let notes = [...midi.notes].map((note) => ({ ...note, channel: note.channel ?? 1 }))
+  let notes = midi.notes.map((note) => ({ ...note, channel: note.channel ?? 1 }))
   let mappings = [...midi.mappings]
+
   for (const operation of operations) {
     if (operation.kind === 'set-input-channel') {
       midi = { ...midi, ...(operation.inputChannel === undefined ? { inputChannel: undefined } : { inputChannel: operation.inputChannel }) }
       continue
     }
+
     if (operation.kind === 'insert-mapping') {
       const existing = mappings.find((mapping) => mapping.id === operation.mapping.id)
-      if (!existing) mappings = [...mappings, operation.mapping]
+
+      if (!existing) mappings.push(operation.mapping)
       else if (JSON.stringify(existing) !== JSON.stringify(operation.mapping)) {
         throw new MidiEditorConflictError(`MIDI mapping "${operation.mapping.id}" already exists with different values.`)
       }
+
       continue
     }
+
     if (operation.kind === 'delete-mapping') {
       mappings = mappings.filter((mapping) => mapping.id !== operation.id)
       continue
     }
+
     if (operation.kind === 'update-mapping') {
       if (!mappings.some((mapping) => mapping.id === operation.id)) {
         throw new MidiEditorConflictError(`MIDI mapping "${operation.id}" was removed remotely.`)
       }
+
       mappings = mappings.map((mapping) => mapping.id === operation.id ? { ...mapping, ...operation.changes } : mapping)
       continue
     }
+
     if (operation.kind === 'insert') {
       const index = notes.findIndex((note) => note.id === operation.note.id)
+
       if (index < 0) {
-        notes = [...notes, operation.note]
+        notes.push(operation.note)
       } else if (!sameNote({ ...notes[index]!, id: notes[index]!.id ?? operation.note.id }, operation.note)) {
         throw new MidiEditorConflictError(`MIDI note "${operation.note.id}" already exists with different values.`)
       }
+
       continue
     }
+
     const index = notes.findIndex((note) => note.id === operation.id)
+
     if (operation.kind === 'delete') {
       if (index >= 0) notes = notes.filter((note) => note.id !== operation.id)
       continue
     }
+
     if (index < 0) {
       throw new MidiEditorConflictError(`MIDI note "${operation.id}" was removed remotely.`)
     }
+
     notes = notes.map((note) => note.id === operation.id ? { ...note, ...operation.changes } : note)
   }
+
   return { ...midi, notes, mappings }
 }
 
@@ -264,6 +298,7 @@ export const reconcileMidiEditorOperationBatch = (
 ): MidiEditorOperationBatch => {
   let projected = midi
   const conflicts: MidiEditorOperation[] = []
+
   for (const operation of operations) {
     try {
       projected = applyMidiEditorOperations(projected, [operation])
@@ -272,6 +307,7 @@ export const reconcileMidiEditorOperationBatch = (
       conflicts.push(operation)
     }
   }
+
   return { midi: projected, conflicts }
 }
 
@@ -282,14 +318,17 @@ type MidiEditorOperationBatch = {
 
 const coalesceOperations = (operations: readonly MidiEditorOperation[]) => {
   const result: MidiEditorOperation[] = []
+
   for (const operation of operations) {
     const entryKey = (entry: MidiEditorOperation) => entry.kind === 'insert'
       ? entry.note.id
       : entry.kind === 'insert-mapping' ? `mapping:${entry.mapping.id}`
         : entry.kind === 'set-input-channel' ? 'input-channel'
           : entry.kind === 'update-mapping' || entry.kind === 'delete-mapping' ? `mapping:${entry.id}` : entry.id
+
     const index = result.findIndex((entry) => entryKey(entry) === entryKey(operation))
     const previous = index < 0 ? undefined : result[index]
+
     if (previous?.kind === 'insert' && operation.kind === 'update') {
       result[index] = { kind: 'insert', note: { ...previous.note, ...operation.changes } }
     } else if (previous?.kind === 'insert' && operation.kind === 'delete') {
@@ -315,6 +354,7 @@ const coalesceOperations = (operations: readonly MidiEditorOperation[]) => {
       result.push(operation)
     }
   }
+
   return result
 }
 
@@ -337,8 +377,10 @@ const nestedCodedErrorSchema = z.object({ data: codedErrorSchema })
 
 const errorCode = (cause: unknown) => {
   const direct = codedErrorSchema.safeParse(cause)
+
   if (direct.success) return direct.data.code
   const nested = nestedCodedErrorSchema.safeParse(cause)
+
   return nested.success ? nested.data.data.code : undefined
 }
 
@@ -364,8 +406,11 @@ const operationId = (operation: MidiEditorOperation) => (
 
 const clipMidi = (snapshot: ProjectSnapshotV2, clipId: string) => {
   const clip = snapshot.clips.find((entry) => entry.id === clipId)
+
   if (!clip) throw new MidiEditorClipConflictError('The MIDI clip was removed remotely.')
+
   if (!('midi' in clip) || clip.midi === undefined) throw new MidiEditorClipConflictError('The MIDI clip is no longer editable.')
+
   return normalizeLegacyMidiClip(clip.midi)
 }
 
@@ -377,6 +422,7 @@ export const createMidiEditorPersistence = (input: {
   onSettled?: () => void
 }) => {
   const local = isLocalId('project', input.projectId)
+
   const service = local
     ? createLocalControlService({
       actor: localActor,
@@ -384,6 +430,7 @@ export const createMidiEditorPersistence = (input: {
       excludePendingWriteKinds: ['midi'],
     })
     : undefined
+
   let revision: number | undefined
   let pending: MidiEditorOperation[] = []
   let inFlightOperations: MidiEditorOperation[] = []
@@ -398,20 +445,25 @@ export const createMidiEditorPersistence = (input: {
 
   const reconcile = (midi: NormalizedLegacyMidiClip) => {
     const overlay = awaitingReconciliation
+
     if (authoritativeMidi && midiFingerprint(authoritativeMidi) === midiFingerprint(midi)) {
       authoritativeMidi = undefined
     }
+
     if (!overlay) return
     awaitingReconciliation = reconcileAwaitingMidiReconciliation(overlay, midi)
     notifyMidiProjectProjection(input.projectId)
+
     if (!awaitingReconciliation || local || reconciledInputFingerprint === midiFingerprint(midi) || reconciliationQuery) return
     reconciledInputFingerprint = midiFingerprint(midi)
     const commitRevision = awaitingReconciliation.commitRevision
     reconciliationQuery = snapshot().then((canonical) => {
       const canonicalMidi = clipMidi(canonical, input.clipId)
       const current = awaitingReconciliation
+
       if (!current || current.commitRevision !== commitRevision) return
       const remaining = reconcileAwaitingMidiReconciliation(current, canonicalMidi)
+
       if (remaining && canonical.project.revision >= commitRevision) {
         authoritativeMidi = canonicalMidi
         awaitingReconciliation = undefined
@@ -429,8 +481,10 @@ export const createMidiEditorPersistence = (input: {
     const value = local
       ? await service!.snapshotV2({ projectId: input.projectId })
       : await convexClient.query(convexApi.control.snapshotV2, { projectId: input.projectId })
+
     const parsed = projectSnapshotSchemaV2.parse(value)
     revision = parsed.project.revision
+
     return parsed
   }
 
@@ -441,6 +495,7 @@ export const createMidiEditorPersistence = (input: {
     // Reapplying them to this fresh write snapshot would overwrite collaborators.
     const midi = applyMidiEditorOperations(baseMidi, operations)
     const key = `midi-editor-${crypto.randomUUID()}`
+
     const request = {
       version: 'v1' as const,
       projectId: input.projectId,
@@ -448,18 +503,24 @@ export const createMidiEditorPersistence = (input: {
       idempotencyKey: key,
       actions: [commitAction(input.clipId, midi)],
     }
+
     const commit = async () => {
       const value = local
         ? await service!.commit(serializeJsonValue(request))
         : await convexClient.mutation(convexApi.control.commitV1, { request: serializeJsonValue(request) })
+
       return controlCommitResultSchemaV1.parse(value)
     }
+
     try {
       const result = await commit().catch(async (error) => {
         if (errorCode(error) !== undefined) throw error
+
         return commit()
       })
+
       revision = result.revision
+
       if (!local) {
         awaitingReconciliation = awaitingReconciliation
           ? {
@@ -470,13 +531,16 @@ export const createMidiEditorPersistence = (input: {
         authoritativeMidi = undefined
         reconciledInputFingerprint = undefined
       }
+
       input.onCommitted?.(midi)
       notifyMidiProjectProjection(input.projectId)
     } catch (error) {
       if (errorCode(error) === 'revision-conflict' && !retryAfterConflict) {
         await attemptOperations(operations, true)
+
         return
       }
+
       throw error
     }
   }
@@ -488,8 +552,10 @@ export const createMidiEditorPersistence = (input: {
       if (!(error instanceof MidiEditorClipConflictError) && terminalError(error)) {
         lastError = { error: asError(error), retryable: false, operationIds: operations.map(operationId) }
         input.onError?.(lastError)
+
         return
       }
+
       throw error
     }
   }
@@ -497,8 +563,10 @@ export const createMidiEditorPersistence = (input: {
   const flush = async (): Promise<void> => {
     if (inFlight) {
       await inFlight
+
       return flush()
     }
+
     if (pending.length === 0) return
     const operations = pending
     pending = []
@@ -507,8 +575,10 @@ export const createMidiEditorPersistence = (input: {
       if (terminalError(error)) {
         lastError = { error: asError(error), retryable: false }
         input.onError?.(lastError)
+
         return
       }
+
       if (!discarded) pending = [...operations, ...pending]
       notifyMidiProjectProjection(input.projectId)
       lastError = { error: asError(error), retryable: true }
@@ -519,9 +589,11 @@ export const createMidiEditorPersistence = (input: {
       notifyMidiProjectProjection(input.projectId)
       input.onSettled?.()
       inFlight = undefined
+
       if (disposed && pending.length === 0) unregister()
     })
     await inFlight
+
     if (pending.length > 0) await flush()
   }
 
@@ -531,6 +603,7 @@ export const createMidiEditorPersistence = (input: {
     inFlightOperations = []
     notifyMidiProjectProjection(input.projectId)
   }
+
   const unregisterAdapter = registerAdapter(input.projectId, {
     clipId: input.clipId,
     flush,
@@ -541,9 +614,11 @@ export const createMidiEditorPersistence = (input: {
       ...pending,
     ]),
   })
+
   const unregisterLocal = local
     ? registerPendingLocalProjectWriteFlusher('midi', input.projectId, flush)
     : undefined
+
   const unregister = () => {
     unregisterAdapter()
     unregisterLocal?.()
@@ -579,6 +654,7 @@ export const createMidiEditorPersistence = (input: {
     dispose: () => {
       disposed = true
       void flush().catch(input.onError)
+
       if (!inFlight && pending.length === 0) unregister()
     },
   }
@@ -592,18 +668,23 @@ export const commitMidiEditorOperations = async (input: {
   operations: MidiEditorOperation[]
 }): Promise<NormalizedLegacyMidiClip> => {
   const committed: NormalizedLegacyMidiClip[] = []
+
   const adapter = createMidiEditorPersistence({
     projectId: input.projectId,
     clipId: input.clipId,
     onCommitted: (midi) => committed.push(midi),
   })
+
   try {
     for (const operation of input.operations) adapter.enqueue(operation)
     await adapter.flush()
     const failure = adapter.error()
+
     if (failure) throw failure.error
     const midi = committed[committed.length - 1]
+
     if (!midi) throw new Error('MIDI notes were not committed.')
+
     return midi
   } catch (error) {
     adapter.discard()

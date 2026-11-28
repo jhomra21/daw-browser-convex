@@ -43,6 +43,7 @@ test('stores structured-clone values without reducing them to JSON', async () =>
   const buffer = new Uint8Array([1, 2, 3]).buffer
   const bytes = new Uint8Array([4, 5, 6])
   const readonlyValues: readonly LocalProjectStoredValue[] = ['audio', undefined, bytes]
+
   const value = {
     file,
     blob,
@@ -61,6 +62,7 @@ test('stores structured-clone values without reducing them to JSON', async () =>
 test('upgrades existing project databases additively and retains v1 rows', async () => {
   const projectId = `project:db-upgrade-${crypto.randomUUID()}`
   const request = indexedDB.open(getProjectDbName(projectId), 1)
+
   const legacy = await new Promise<IDBDatabase>((resolve, reject) => {
     request.onupgradeneeded = () => {
       const db = request.result
@@ -73,15 +75,18 @@ test('upgrades existing project databases additively and retains v1 rows', async
       db.createObjectStore('history', { keyPath: 'key' })
       db.createObjectStore('syncState', { keyPath: 'key' })
     }
+
     request.onsuccess = () => resolve(request.result)
     request.onerror = () => reject(request.error)
   })
+
   const transaction = legacy.transaction('projectState', 'readwrite')
   transaction.objectStore('projectState').put({ key: 'legacy', value: 1, updatedAt: 1 })
   await new Promise<void>((resolve, reject) => {
     transaction.oncomplete = () => resolve()
     transaction.onerror = () => reject(transaction.error)
   })
+
   const processor = externalProcessorSchema.parse({
     instanceId: '00000000-0000-4000-8000-000000000011',
     targetId: 'legacy-track',
@@ -123,6 +128,7 @@ test('upgrades existing project databases additively and retains v1 rows', async
     health: { state: 'ready', updatedAt: 1 },
     updatedAt: 1,
   })
+
   const { index: _index, ...legacyProcessor } = processor
   const entityTransaction = legacy.transaction('entities', 'readwrite')
   entityTransaction.objectStore('entities').put({
@@ -142,9 +148,11 @@ test('upgrades existing project databases additively and retains v1 rows', async
   const migrated = await upgraded.get('entities', ['external-plugin', `external-plugin:${processor.instanceId}`])
   expect(migrated?.value).toMatchObject({ index: 0 })
   const parsedMigratedValue = z.json().safeParse(migrated?.value)
+
   if (!parsedMigratedValue.success || !isJsonObject(parsedMigratedValue.data)) {
     throw new Error('Expected migrated external processor row.')
   }
+
   expect(Object.hasOwn(parsedMigratedValue.data, 'chainIndex')).toBeFalse()
   expect(upgraded.objectStoreNames.contains('controlState')).toBe(true)
   expect(upgraded.objectStoreNames.contains('controlCommits')).toBe(true)
@@ -179,6 +187,7 @@ test('lazily seeds legacy metadata and reconciles stale global cache from its au
   global.close()
 
   const projectRequest = indexedDB.open(getProjectDbName(projectId), 1)
+
   const legacyProject = await new Promise<IDBDatabase>((resolve, reject) => {
     projectRequest.onupgradeneeded = () => {
       const db = projectRequest.result
@@ -191,9 +200,11 @@ test('lazily seeds legacy metadata and reconciles stale global cache from its au
       db.createObjectStore('history', { keyPath: 'key' })
       db.createObjectStore('syncState', { keyPath: 'key' })
     }
+
     projectRequest.onsuccess = () => resolve(projectRequest.result)
     projectRequest.onerror = () => reject(projectRequest.error)
   })
+
   legacyProject.close()
 
   const seeded = await getLocalProject(projectId)
@@ -264,6 +275,7 @@ test('normalizes duplicated import and replacement metadata to the target projec
     'Duplicated Project',
     100,
   )
+
   await importLocalProject(imported, {
     entities: [],
     assets: [],
@@ -343,6 +355,7 @@ test('normalizes invalid imported and replacement time signatures to 4/4', async
       'Invalid Signature',
       100,
     )
+
     await importLocalProject(project, {
       entities: [],
       assets: [],

@@ -7,11 +7,14 @@ test('shares one serial queue with progress, status, and cancellation', async ()
   const statuses: string[] = []
   const unsubscribe = queue.subscribe((job) => statuses.push(job?.progress?.phase ?? 'idle'))
   let releaseFirst: (() => void) | undefined
+
   const first = queue.enqueue({ name: 'first' }, async (signal, progress) => {
     progress({ phase: 'rendering' })
     await new Promise<void>((resolve) => { releaseFirst = resolve })
+
     return signal.aborted ? { type: 'canceled', outputs: [] } : { type: 'success', outputs: [] }
   })
+
   const second = queue.enqueue({ name: 'second' }, async () => ({ type: 'success', outputs: [] }))
 
   await Promise.resolve()
@@ -28,10 +31,13 @@ test('submits a synchronously addressable serial job', async () => {
   let nextId = 0
   const queue = createExportQueue(() => `job-${++nextId}`)
   let release: (() => void) | undefined
+
   const first = queue.submit({ name: 'first' }, async (signal) => {
     await new Promise<void>((resolve) => { release = resolve })
+
     return signal.aborted ? { type: 'canceled', outputs: [] } : { type: 'success', outputs: [] }
   })
+
   const second = queue.submit({ name: 'second' }, async () => ({ type: 'success', outputs: [] }))
 
   expect(first.id).toBe('job-1')
@@ -47,15 +53,21 @@ test('cancels queued work before it opens an output target', async () => {
   let nextId = 0
   const queue = createExportQueue(() => `job-${++nextId}`)
   let release: (() => void) | undefined
+
   const first = queue.submit({ name: 'first' }, async () => {
     await new Promise<void>((resolve) => { release = resolve })
+
     return { type: 'success', outputs: [] }
   })
+
   let ran = false
+
   const second = queue.submit({ name: 'second' }, async () => {
     ran = true
+
     return { type: 'success', outputs: [] }
   })
+
   second.cancel()
   await Promise.resolve()
   release?.()

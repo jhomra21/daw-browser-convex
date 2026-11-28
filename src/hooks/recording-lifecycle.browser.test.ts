@@ -2266,16 +2266,21 @@ window.dispatchScenarios = async () => {
 test('recording startup joins duplicate requests and stop cancels setup immediately', async () => {
   const directory = `/tmp/daw-recording-lifecycle-${crypto.randomUUID()}`
   const session = `daw-recording-${crypto.randomUUID()}`
+
   const browser = async (...args: string[]) => {
     const env = { ...process.env }
     delete env.AGENT_BROWSER_CDP
     delete env.AGENT_BROWSER_SESSION
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   await mkdir(directory, { recursive: true })
+
   try {
     const bundledFixture = fixture
       .replaceAll("'./useTrackRecording'", `'${import.meta.dir}/useTrackRecording.ts'`)
@@ -2288,7 +2293,9 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
       .replaceAll("'../components/timeline/TransportControls'", `'${import.meta.dir}/../components/timeline/TransportControls.tsx'`)
       .replaceAll("'../components/timeline/TrackLane'", `'${import.meta.dir}/../components/timeline/TrackLane.tsx'`)
       .replaceAll("'../components/timeline/TrackSidebarRow'", `'${import.meta.dir}/../components/timeline/TrackSidebarRow.tsx'`)
+
     await Bun.write(`${directory}/fixture.js`, bundledFixture)
+
     const output = await build({
       configFile: false,
       root: new URL('../../', import.meta.url).pathname,
@@ -2301,14 +2308,20 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
           enforce: 'pre',
           resolveId(id) {
             if (id.endsWith('recording-temp-storage')) return '\0recording-test:temp-storage'
+
             if (/context\/midi-access(\.tsx?)?$/.test(id)) return '\0recording-test:midi-access'
+
             if (/context\/app-preferences(\.tsx?)?$/.test(id)) return '\0recording-test:app-preferences'
+
             return undefined
           },
           load(id) {
             if (id === '\0recording-test:midi-access') return `export const useMidiAccess = () => window.liveMidiAccess`
+
             if (id === '\0recording-test:app-preferences') return `export const useAppPreferences = () => ({ appearance: { themeTokens: () => ({}) } })`
+
             if (id !== '\0recording-test:temp-storage') return undefined
+
             return `export const decodePlanarPcmBlocks = () => []
 export const isRecordingTempStorageSupported = () => true
 export const createRecordingTempStorage = () => ({ cleanupStale: async () => {}, remove: async () => {}, open: async () => null })`
@@ -2331,10 +2344,13 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
         },
       },
     })
+
     if (!('output' in output)) throw new Error('Recording lifecycle browser build returned no output.')
     const bundle = output.output.find((entry) => entry.type === 'chunk')
+
     if (!bundle || bundle.type !== 'chunk') throw new Error('Recording lifecycle browser bundle was not emitted.')
     const stylesheet = output.output.find((entry) => entry.type === 'asset' && entry.fileName.endsWith('.css'))
+
     if (stylesheet?.type === 'asset') await Bun.write(`${directory}/style.css`, stylesheet.source)
     await Bun.write(`${directory}/index.html`, `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="style.css"><body><script>window.addEventListener('error', event => document.body.dataset.error = event.message)</script><script>window.unhandledRejectionCount = 0; window.addEventListener('unhandledrejection', () => { window.unhandledRejectionCount += 1 })</script><script>${bundle.code}</script>`)
     await browser('open', `file://${directory}/index.html`)
@@ -2344,6 +2360,7 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
     Object.assign(results, playResults)
     const lockResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.lockScenarios()')))
     Object.assign(results, lockResults)
+
     const surfaceState = z.object({
       outputs: z.array(z.object({ disabled: z.boolean(), title: z.string() })),
       otherOutputs: z.array(z.boolean()),
@@ -2353,9 +2370,11 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
       sidebarMenu: z.object({ delete: z.boolean().optional(), ungroup: z.boolean().optional(), reason: z.boolean() }),
       laneMenu: z.object({ delete: z.boolean().optional(), reason: z.boolean() }),
     })
+
     const reason = 'Finish recording to delete this track or change its routing.'
     await browser('eval', 'window.surfaceMount()')
     const surfaceStates: Record<string, z.infer<typeof surfaceState>> = {}
+
     for (const phase of ['starting', 'recording', 'finishing', 'released'] as const) {
       const state = surfaceState.parse(JSON.parse(await browser('eval', `window.surfaceSet('${phase}')`)))
       surfaceStates[phase] = state
@@ -2374,12 +2393,15 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
           && state.otherStatus === ''
         : state.badge === '' && state.status === '' && state.otherStatus === ''
     }
+
     await Bun.write(`${directory}/surface-states.json`, JSON.stringify(surfaceStates, null, 2))
     await browser('eval', 'window.surfaceUnmount()')
     const dispatchResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.dispatchScenarios()')))
     Object.assign(results, dispatchResults)
+
     const deltas = z.record(z.string(), z.record(z.string(), z.union([z.boolean(), z.number(), z.string()])))
       .parse(JSON.parse(await browser('eval', 'window.recordingDeltas')))
+
     await Bun.write(`${directory}/results.json`, JSON.stringify({ scenarios: results, deltas }, null, 2))
     console.log(`Recording lifecycle evidence: ${directory}/results.json`)
     expect(Object.entries(results).filter(([, passed]) => !passed)).toEqual([])

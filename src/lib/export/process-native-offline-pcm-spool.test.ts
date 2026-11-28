@@ -34,7 +34,9 @@ class TestAudioBuffer implements AudioBuffer {
 
   getChannelData(channel: number): Float32Array<ArrayBuffer> {
     const data = this.channels[channel]
+
     if (!data) throw new Error('Missing channel')
+
     return data
   }
 
@@ -57,15 +59,18 @@ const createProgram = () => {
   const sourceFrames = Math.ceil(SOURCE_DURATION_SEC * SAMPLE_RATE)
   const left = buffer.getChannelData(0)
   const right = buffer.getChannelData(1)
+
   for (let frame = 0; frame < sourceFrames; frame += 1) {
     const time = frame / SAMPLE_RATE
     left[frame] = 0.34 * Math.sin(2 * Math.PI * 440 * time)
     right[frame] = 0.21 * Math.sin(2 * Math.PI * 330 * time)
   }
+
   for (let frame = sourceFrames; frame < sourceFrames + Math.round(0.08 * SAMPLE_RATE); frame += 1) {
     left[frame] = 0.004
     right[frame] = -0.003
   }
+
   return buffer
 }
 
@@ -75,17 +80,21 @@ const cloneBuffer = (source: TestAudioBuffer) => {
     length: source.length,
     sampleRate: source.sampleRate,
   })
+
   for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
     clone.getChannelData(channel).set(source.getChannelData(channel))
   }
+
   return clone
 }
 
 const getSamplePeak = (buffer: TestAudioBuffer) => {
   let peak = 0
+
   for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
     for (const sample of buffer.getChannelData(channel)) peak = Math.max(peak, Math.abs(sample))
   }
+
   return peak
 }
 
@@ -98,6 +107,7 @@ const createFakeSpool = (source: TestAudioBuffer): NativeOfflinePcmSpoolSession 
     byteLength: source.length * source.numberOfChannels * Float32Array.BYTES_PER_ELEMENT,
     samplePeak: getSamplePeak(source),
   }
+
   return {
     append: async () => { throw new Error('Fake finalized spool is not writable') },
     finalize: async () => descriptor,
@@ -105,21 +115,26 @@ const createFakeSpool = (source: TestAudioBuffer): NativeOfflinePcmSpoolSession 
       const endFrame = options.endFrame ?? source.length
       const gain = options.gain ?? 1
       const chunkFrames = 997
+
       for (let startFrame = options.startFrame ?? 0; startFrame < endFrame; startFrame += chunkFrames) {
         options.signal?.throwIfAborted()
         const frameCount = Math.min(chunkFrames, endFrame - startFrame)
+
         const chunk = new TestAudioBuffer({
           numberOfChannels: source.numberOfChannels,
           length: frameCount,
           sampleRate: source.sampleRate,
         })
+
         for (let channel = 0; channel < source.numberOfChannels; channel += 1) {
           const input = source.getChannelData(channel)
           const output = chunk.getChannelData(channel)
+
           for (let frame = 0; frame < frameCount; frame += 1) {
             output[frame] = (input[startFrame + frame] ?? 0) * gain
           }
         }
+
         yield chunk
       }
     },
@@ -130,16 +145,20 @@ const createFakeSpool = (source: TestAudioBuffer): NativeOfflinePcmSpoolSession 
 
 const collectReplay = async (source: AsyncIterable<AudioBuffer>) => {
   const blocks: AudioBuffer[] = []
+
   for await (const block of source) blocks.push(block)
   const totalFrames = blocks.reduce((sum, block) => sum + block.length, 0)
   const output = new TestAudioBuffer({ numberOfChannels: 2, length: totalFrames, sampleRate: SAMPLE_RATE })
   let offset = 0
+
   for (const block of blocks) {
     for (let channel = 0; channel < 2; channel += 1) {
       output.getChannelData(channel).set(block.getChannelData(channel), offset)
     }
+
     offset += block.length
   }
+
   return output
 }
 
@@ -170,15 +189,18 @@ describe('native offline PCM spool processing', () => {
   test('matches whole-buffer automatic tail and analysis without normalization', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const program = createProgram()
+
     const render = renderSettings({
       tail: { mode: 'automatic', thresholdDbfs: -40, holdSec: 0.05, maximumSec: 0.35 },
     })
+
     const expected = processRenderedExport({
       rendered: cloneBuffer(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
     })
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
@@ -196,15 +218,18 @@ describe('native offline PCM spool processing', () => {
   test('matches whole-buffer sample-peak normalization', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const program = createProgram()
+
     const render = renderSettings({
       normalization: { mode: 'sample-peak', targetDbfs: -6 },
     })
+
     const expected = processRenderedExport({
       rendered: cloneBuffer(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
     })
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
@@ -220,6 +245,7 @@ describe('native offline PCM spool processing', () => {
   test('matches whole-buffer loudness normalization when limiting is off', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const program = createProgram()
+
     const render = renderSettings({
       normalization: {
         mode: 'loudness',
@@ -228,12 +254,14 @@ describe('native offline PCM spool processing', () => {
         limiting: 'off',
       },
     })
+
     const expected = processRenderedExport({
       rendered: cloneBuffer(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
     })
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
@@ -249,6 +277,7 @@ describe('native offline PCM spool processing', () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const program = createProgram()
     program.getChannelData(0)[7_500] = 1
+
     const render = renderSettings({
       normalization: {
         mode: 'loudness',
@@ -257,12 +286,14 @@ describe('native offline PCM spool processing', () => {
         limiting: 'true-peak',
       },
     })
+
     const expected = processRenderedExport({
       rendered: cloneBuffer(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
     })
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(program),
       sourceDurationSec: SOURCE_DURATION_SEC,
@@ -280,22 +311,26 @@ describe('native offline PCM spool processing', () => {
 
 describe('native offline PCM spool processing with graph latency', () => {
   const LATENCY_FRAMES = 1_234
+
   const delayed = (aligned: TestAudioBuffer) => {
     const buffer = new TestAudioBuffer({
       numberOfChannels: 2,
       length: aligned.length + LATENCY_FRAMES,
       sampleRate: SAMPLE_RATE,
     })
+
     for (let channel = 0; channel < 2; channel += 1) {
       buffer.getChannelData(channel).fill(0.9, 0, LATENCY_FRAMES)
       buffer.getChannelData(channel).set(aligned.getChannelData(channel), LATENCY_FRAMES)
     }
+
     return buffer
   }
 
   test('drops the leading latency frames and keeps the range length', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const aligned = createProgram()
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(delayed(aligned)),
       latencyFrames: LATENCY_FRAMES,
@@ -314,15 +349,18 @@ describe('native offline PCM spool processing with graph latency', () => {
   test('measures the automatic tail from the aligned start', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const aligned = createProgram()
+
     const render = renderSettings({
       tail: { mode: 'automatic', thresholdDbfs: -40, holdSec: 0.05, maximumSec: 0.35 },
     })
+
     const expected = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(aligned),
       sourceDurationSec: SOURCE_DURATION_SEC,
       render,
       signal: new AbortController().signal,
     })
+
     const actual = await processNativeOfflinePcmSpool({
       spool: createFakeSpool(delayed(aligned)),
       latencyFrames: LATENCY_FRAMES,
@@ -340,6 +378,7 @@ describe('native offline PCM spool processing with graph latency', () => {
   test('rejects latency that leaves no audio', async () => {
     Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
     const program = createProgram()
+
     for (const latencyFrames of [program.length, -1, 1.5]) {
       await expect(processNativeOfflinePcmSpool({
         spool: createFakeSpool(program),

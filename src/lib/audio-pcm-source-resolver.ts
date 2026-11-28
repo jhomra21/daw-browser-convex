@@ -55,11 +55,13 @@ const persistedMetadata = (
   const durationSec = source?.durationSec ?? clip.sourceDurationSec
   const sampleRate = source?.sampleRate ?? clip.sourceSampleRate
   const channelCount = source?.channelCount ?? clip.sourceChannelCount
+
   if (durationSec === undefined
     || sampleRate === undefined
     || channelCount === undefined) {
     throw new Error(`Clip "${clip.id}" is missing persisted source metadata.`)
   }
+
   return {
     durationSec,
     frameCount: Math.round(durationSec * sampleRate),
@@ -76,6 +78,7 @@ const assertEncodedMetadataMatchesPersisted = (
   if (encoded.sampleRate !== persisted.sampleRate || encoded.channelCount !== persisted.channelCount) {
     throw new Error(`Audio source "${label}" metadata does not match its authoritative asset metadata.`)
   }
+
   if (encoded.durationSec !== undefined
     && Math.abs(encoded.durationSec - persisted.durationSec) > 0.5 / persisted.sampleRate) {
     throw new Error(`Audio source "${label}" duration does not match its authoritative asset metadata.`)
@@ -84,16 +87,20 @@ const assertEncodedMetadataMatchesPersisted = (
 
 const descriptorFromBuffer = (clip: RuntimeClip) => {
   if (!clip.buffer) return undefined
+
   if (clip.sourceSampleRate !== undefined && clip.buffer.sampleRate !== clip.sourceSampleRate) {
     throw new Error(`Clip "${clip.id}" buffer sample rate does not match its persisted source metadata.`)
   }
+
   if (clip.sourceChannelCount !== undefined && clip.buffer.numberOfChannels !== clip.sourceChannelCount) {
     throw new Error(`Clip "${clip.id}" buffer channel count does not match its persisted source metadata.`)
   }
+
   if (clip.sourceDurationSec !== undefined
     && Math.abs(clip.buffer.duration - clip.sourceDurationSec) > 0.5 / clip.buffer.sampleRate) {
     throw new Error(`Clip "${clip.id}" buffer duration does not match its persisted source metadata.`)
   }
+
   return createAudioPcmSourceDescriptor({
     identity: getAudioBufferSessionIdentity(clip.buffer),
     durationSec: clip.buffer.duration,
@@ -109,9 +116,11 @@ const deriveCloudSampleUrl = (
   projectId: string | undefined,
 ) => {
   if (!clip.sourceAssetKey) return undefined
+
   if (!projectId) {
     throw new Error(`Clip "${clip.id}" requires a project ID to resolve cloud audio asset "${clip.sourceAssetKey}".`)
   }
+
   return `/api/samples/${encodeURIComponent(projectId)}/${encodeURIComponent(clip.sourceAssetKey)}`
 }
 
@@ -136,22 +145,28 @@ export const createAudioPcmSourceResolver = (input: {
 } = {}): AudioPcmSourceResolver => {
   const descriptorCache = new Map<string, AudioPcmSourceDescriptor>()
   const pendingDescriptorResolutions = new Map<string, PendingDescriptorResolution>()
+
   const rememberDescriptor = (key: string, descriptor: AudioPcmSourceDescriptor) => {
     descriptorCache.delete(key)
     descriptorCache.set(key, descriptor)
+
     while (descriptorCache.size > MAX_DESCRIPTOR_CACHE_ENTRIES) {
       const oldest = descriptorCache.keys().next().value
+
       if (oldest === undefined) break
       descriptorCache.delete(oldest)
     }
   }
+
   const readLocalAsset = input.readLocalAsset ?? readLocalAssetBytes
   const resolveUrl = input.resolveUrl ?? resolveSamplePlaybackUrlForRuntime
+
   const abortReason = (signal?: AbortSignal) => (
     signal?.reason instanceof Error
       ? signal.reason
       : new DOMException('The operation was aborted.', 'AbortError')
   )
+
   const resolveDescriptor = async (
     clip: RuntimeClip,
     projectId: string | undefined,
@@ -161,33 +176,44 @@ export const createAudioPcmSourceResolver = (input: {
     const localId = clip.sourceAssetKey && isLocalProjectAssetKey(clip.sourceAssetKey)
       ? clip.sourceAssetKey
       : undefined
+
     if (localId) {
       if (!projectId) {
         throw new Error(`Clip "${clip.id}" requires a project ID to resolve local audio asset "${localId}".`)
       }
+
       const row = await getLocalAsset(projectId, localId)
       const result = await readLocalAsset(projectId, localId)
       signal?.throwIfAborted()
+
       if (result.status === 'missing') throw new Error(`Local audio asset "${localId}" is missing.`)
+
       if (result.status === 'permission-denied') throw new Error(`Permission to read local audio asset "${localId}" was denied.`)
+
       if (!row) throw new Error(`Local audio asset "${localId}" has no metadata row.`)
+
       if (row.durationSec === undefined
         || row.sampleRate === undefined
         || row.channelCount === undefined) {
         throw new Error(`Local audio asset "${localId}" is missing authoritative audio metadata.`)
       }
+
       const metadata = persistedMetadata(clip, row)
       const encoded = await inspectAudioSourceMetadata(result.file, { signal })
       assertEncodedMetadataMatchesPersisted(metadata, encoded, localId)
       const claimedHash = row.contentHash
+
       const requiresVerifiedIdentity = verifyContentHash
         || (clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
+
       const actualHash = requiresVerifiedIdentity
         ? await sha256File(result.file, signal)
         : undefined
+
       const verified = actualHash !== undefined
         && canonicalContentHash(claimedHash)
         && actualHash === claimedHash
+
       return createAudioPcmSourceDescriptor({
         identity: verified
           ? `${clip.sourceAssetKey}:${actualHash}`
@@ -199,13 +225,17 @@ export const createAudioPcmSourceResolver = (input: {
         source: result.file,
       })
     }
+
     const metadata = persistedMetadata(clip)
     const sampleUrl = resolveClipSampleUrl(clip) ?? deriveCloudSampleUrl(clip, projectId)
+
     if (!sampleUrl) throw new Error(`Clip "${clip.id}" has no resolvable audio source.`)
     const url = resolveUrl(sampleUrl)
+
     if (!url) throw new Error(`Clip "${clip.id}" has an invalid audio source URL.`)
     const encoded = await inspectAudioSourceMetadata(url, { signal })
     assertEncodedMetadataMatchesPersisted(metadata, encoded, url)
+
     return createAudioPcmSourceDescriptor({
       identity: clip.sourceAssetKey
         ? `asset:${projectId ?? 'project:unknown'}:${clip.sourceAssetKey}`
@@ -228,6 +258,7 @@ export const createAudioPcmSourceResolver = (input: {
   ) => {
     for (const subscriber of Array.from(entry.subscribers)) {
       removeSubscriber(entry, subscriber)
+
       if (error !== undefined) subscriber.reject(error)
       else if (subscriber.signal?.aborted) subscriber.reject(abortReason(subscriber.signal))
       else if (result) subscriber.resolve(result)
@@ -247,43 +278,54 @@ export const createAudioPcmSourceResolver = (input: {
         if (!entry.subscribers.has(subscriber)) return
         removeSubscriber(entry, subscriber)
         reject(abortReason(signal))
+
         if (entry.subscribers.size === 0) {
           entry.controller.abort(abortReason(signal))
+
           if (pendingDescriptorResolutions.get(key) === entry) {
             pendingDescriptorResolutions.delete(key)
           }
         }
       },
     }
+
     entry.subscribers.add(subscriber)
     signal?.addEventListener('abort', subscriber.onAbort, { once: true })
+
     if (signal?.aborted) subscriber.onAbort()
   })
 
   const resolve: AudioPcmSourceResolver = async (clip, signal, options) => {
     const verifyContentHash = options?.verifyContentHash === true
       || (clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')
+
     signal?.throwIfAborted()
     const eager = descriptorFromBuffer(clip)
+
     if (eager) return eager
     const projectId = input.projectId?.()
     const cacheKey = descriptorCacheKey(clip, projectId, verifyContentHash)
     const cached = descriptorCache.get(cacheKey)
+
     if (cached) return cached
     const pending = pendingDescriptorResolutions.get(cacheKey)
+
     if (pending) return subscribePending(cacheKey, pending, signal)
 
     const controller = new AbortController()
+
     const entry = {
       controller,
       promise: resolveDescriptor(clip, projectId, controller.signal, verifyContentHash),
       subscribers: new Set<PendingSubscriber>(),
     }
+
     pendingDescriptorResolutions.set(cacheKey, entry)
     void entry.promise.then((resolved) => {
       if (pendingDescriptorResolutions.get(cacheKey) === entry && !controller.signal.aborted) {
         rememberDescriptor(cacheKey, resolved)
       }
+
       settlePending(entry, resolved)
     }).catch((error) => {
       settlePending(
@@ -296,15 +338,18 @@ export const createAudioPcmSourceResolver = (input: {
         pendingDescriptorResolutions.delete(cacheKey)
       }
     })
+
     return subscribePending(cacheKey, entry, signal)
   }
 
   const clear = () => {
     descriptorCache.clear()
+
     for (const entry of pendingDescriptorResolutions.values()) {
       entry.controller.abort()
       settleClearedPending(entry)
     }
+
     pendingDescriptorResolutions.clear()
   }
 

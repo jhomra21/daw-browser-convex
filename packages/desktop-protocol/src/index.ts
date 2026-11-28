@@ -14,16 +14,23 @@ import {
   projectIdSchemaV1, projectSnapshotSchemaV1, projectSnapshotSchemaV2,
   type ControlErrorV1,
 } from "@daw-browser/control"
+
 export { projectIdSchemaV1 } from "@daw-browser/control"
+
 import { pluginHealthSchema } from "@daw-browser/plugin-host-protocol"
+
 export type { ControlErrorV1 } from "@daw-browser/control"
+
 import { desktopDiagnosticsSchemaV2 } from "./diagnostics-v2"
+
 export { desktopDiagnosticsSchemaV2 } from "./diagnostics-v2"
 
 export const desktopProtocolVersion = "v1" as const
 export const desktopProtocolVersionV2 = "v2" as const
 export const desktopProtocolVersions = [desktopProtocolVersion, desktopProtocolVersionV2] as const
+
 export type DesktopProtocolVersion = typeof desktopProtocolVersions[number]
+
 export const maxDesktopFrameBytes = 1_048_576
 export const maxDesktopReplyFrameBytes = 512 * 1024
 export const maxDesktopReplyBytes = 64 * 1024 * 1024
@@ -61,6 +68,7 @@ export const desktopVstParameterEditPayloadSchema = z.object({
   parameterId: z.number().int().min(0).max(0xffff_ffff),
   normalizedValue: z.number().finite().min(0).max(1),
 }).strict()
+
 export type DesktopVstParameterEditPayload = z.infer<typeof desktopVstParameterEditPayloadSchema>
 
 // What a loaded plug-in instance tells the renderer. "failed" is only ever the plug-in's own fault;
@@ -74,6 +82,7 @@ export const desktopVstInstanceEventSchema = z.discriminatedUnion("kind", [
   }).strict(),
   z.object({ kind: z.literal("failed"), instanceId: z.string().uuid() }).strict(),
 ])
+
 export type DesktopVstInstanceEvent = z.infer<typeof desktopVstInstanceEventSchema>
 
 const correlationId = z.string().min(1).max(maxCorrelationIdLength).regex(/^[A-Za-z0-9._-]+$/)
@@ -82,6 +91,7 @@ const versionV2 = z.literal(desktopProtocolVersionV2)
 export const desktopEmptyInputSchemaV1 = z.object({}).strict()
 const finiteSeconds = z.number().finite().min(0).max(86_400)
 export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).strict()
+
 export const desktopHostVstCursorSchemaV1 = z.string().min(1).max(String(0xffff_ffff).length).regex(/^(0|[1-9][0-9]*)$/)
   .refine((value) => Number(value) <= 0xffff_ffff)
 
@@ -110,6 +120,7 @@ export const desktopOperationSchemaV1 = z.enum([
   "control.history",
   "control.recoveries",
 ])
+
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
 
 export const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
@@ -121,19 +132,24 @@ export const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
   "control.history",
   "control.recoveries",
 ])
+
 export type DesktopHostOperationV1 = z.infer<typeof desktopHostOperationSchemaV1>
 
 export const desktopControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1
 export const desktopControlSnapshotInputSchemaV1 = controlSnapshotQuerySchemaV1
+
 export const desktopRendererControlCapabilitiesInputSchemaV1 = controlCapabilitiesQuerySchemaV1.extend({
   readVersion: z.literal("v2").optional(),
 }).strict()
+
 export const desktopRendererControlSnapshotInputSchemaV1 = controlSnapshotQuerySchemaV1.extend({
   readVersion: z.literal("v2").optional(),
 }).strict()
+
 export const desktopControlCapabilitiesInputSchemaV2 = controlCapabilitiesQuerySchemaV2.extend({
   readVersion: z.literal("v2"),
 }).strict()
+
 export const desktopControlSnapshotInputSchemaV2 = controlSnapshotQuerySchemaV1.extend({
   readVersion: z.literal("v2"),
 }).strict()
@@ -258,31 +274,41 @@ const requestInputs = {
 
 export const desktopHostImportInputSchemaV1 = requestInputs["host.import.audio"]
 export const desktopHostImportCancelInputSchemaV1 = requestInputs["host.import.cancel"]
+
 const mixdownExtensionMatchesFormat = (format: string, filePath: string) => {
   const extension = filePath.slice(filePath.lastIndexOf(".")).toLowerCase()
+
   return (format === "wav" && extension === ".wav")
     || (format === "mp3" && extension === ".mp3")
     || (format === "ogg-opus" && extension === ".ogg")
     || (format === "flac" && extension === ".flac")
 }
+
 export const desktopHostExportRunInputSchemaV1 = requestInputs["host.export.run"].superRefine((value, context) => {
   if (value.mode !== "mixdown" || value.destination.kind !== "file") return
+
   if (!mixdownExtensionMatchesFormat(value.format, value.destination.path)) {
     context.addIssue({ code: "custom", message: "Mixdown file extension must match the selected format.", path: ["destination", "path"] })
   }
 })
+
 export const desktopHostExportCancelInputSchemaV1 = requestInputs["host.export.cancel"]
 export const desktopHostVstInstancesInputSchemaV1 = requestInputs["host.vst.instances"]
 export const desktopHostVstParametersInputSchemaV1 = requestInputs["host.vst.parameters"]
+
 export type DesktopHostVstInstancesInputV1 = z.infer<typeof desktopHostVstInstancesInputSchemaV1>
+
 export type DesktopHostVstParametersInputV1 = z.infer<typeof desktopHostVstParametersInputSchemaV1>
 
 const capabilityToken = z.string().regex(/^[a-f0-9]{64}$/)
+
 const capabilityFile = z.object({
   token: capabilityToken,
   basename: z.string().min(1).max(256),
 }).strict()
+
 const capabilityFileByteLength = z.number().int().nonnegative().safe()
+
 export const desktopRendererImportInputSchemaV1 = z.object({
   canceled: z.boolean(),
   files: z.array(capabilityFile.extend({
@@ -292,14 +318,17 @@ export const desktopRendererImportInputSchemaV1 = z.object({
 }).strict().superRefine((value, context) => {
   if (!value.canceled && value.files === undefined) context.addIssue({ code: "custom", message: "A non-canceled import requires a file capability." })
 })
+
 const internalExportDestination = z.discriminatedUnion("kind", [
   capabilityFile.extend({ kind: z.literal("capability-file") }).strict(),
   capabilityFile.extend({ kind: z.literal("capability-directory") }).strict(),
 ])
+
 const internalExportRequestKeys = new Set([
   "canceled", "preflightOnly", "destination", "mode", "format", "formats", "range",
   "render", "encoding", "selection", "stemMode",
 ])
+
 const activeInternalExport = z.object({
   canceled: z.literal(false),
   preflightOnly: z.literal(true).optional(),
@@ -310,22 +339,30 @@ const activeInternalExport = z.object({
       context.addIssue({ code: "unrecognized_keys", keys: [key], path: [] })
     }
   }
+
   const { canceled: _canceled, preflightOnly: _preflightOnly, ...request } = value
+
   const externalDestination = value.destination.kind === "capability-file"
     ? { kind: "file" as const, path: `/capability/${value.destination.basename}` }
     : { kind: "directory" as const, path: "/capability" }
+
   const parsed = desktopHostExportRunInputSchemaV1.safeParse({ ...request, destination: externalDestination })
+
   if (!parsed.success) context.addIssue({ code: "custom", message: "Invalid renderer export operation input." })
 })
+
 const canceledInternalExport = z.discriminatedUnion("mode", [
   z.object({ canceled: z.literal(true), mode: z.literal("mixdown") }).strict(),
   z.object({ canceled: z.literal(true), mode: z.literal("stems") }).strict(),
 ])
+
 export const desktopRendererExportInputSchemaV1 = z.union([
   canceledInternalExport,
   activeInternalExport,
 ])
+
 export type DesktopRendererImportInputV1 = z.infer<typeof desktopRendererImportInputSchemaV1>
+
 export type DesktopRendererExportInputV1 = z.infer<typeof desktopRendererExportInputSchemaV1>
 
 export const hostErrorSchemaV1 = z.object({
@@ -333,8 +370,11 @@ export const hostErrorSchemaV1 = z.object({
   code: z.enum(["invalid-request", "unauthorized", "unsupported-version", "unavailable", "cancelled", "deadline-exceeded", "internal"]),
   message: z.string().min(1).max(512),
 }).strict()
+
 export type HostErrorV1 = z.infer<typeof hostErrorSchemaV1>
+
 export const hostErrorSchemaV2 = hostErrorSchemaV1.extend({ version: versionV2 })
+
 export type HostErrorV2 = z.infer<typeof hostErrorSchemaV2>
 
 export const desktopHostStatusSchemaV1 = z.object({
@@ -346,7 +386,9 @@ export const desktopHostStatusSchemaV1 = z.object({
     diagnostics: z.boolean(),
   }).strict(),
 }).strict()
+
 export const desktopTransportStatusSchemaV1 = z.object({ state: z.enum(["playing", "paused", "stopped"]), playheadSec: finiteSeconds }).strict()
+
 export const desktopDiagnosticsSchemaV1 = z.object({
   audio: z.object({
     state: z.string().max(64),
@@ -360,12 +402,15 @@ export const desktopDiagnosticsSchemaV1 = z.object({
   }).strict(),
   counts: z.object({ tracks: z.number().int().nonnegative(), clips: z.number().int().nonnegative() }).strict(),
 }).strict()
+
 const safeExportOutputSchema = z.object({ name: z.string().min(1).max(256), sizeBytes: z.number().int().nonnegative().max(8 * 1024 * 1024 * 1024) }).strict()
+
 export const desktopHostImportResultSchemaV1 = z.object({
   status: z.enum(["created", "queued", "canceled", "failed"]),
   count: z.number().int().min(0).max(1),
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/).optional(),
 }).strict()
+
 export const desktopHostImportStatusSchemaV1 = z.object({
   status: z.enum(["idle", "queued", "running", "completed", "canceled", "failed"]),
   job: z.object({
@@ -375,10 +420,12 @@ export const desktopHostImportStatusSchemaV1 = z.object({
     error: z.string().min(1).max(512).optional(),
   }).strict().optional(),
 }).strict()
+
 export const desktopHostExportRunResultSchemaV1 = z.object({
   status: z.enum(["queued", "canceled"]),
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/).optional(),
 }).strict().refine((value) => value.status === "canceled" || value.jobId !== undefined)
+
 export const desktopHostExportStatusSchemaV1 = z.object({
   status: z.enum(["idle", "queued", "running", "completed", "canceled", "failed"]),
   job: z.object({
@@ -390,6 +437,7 @@ export const desktopHostExportStatusSchemaV1 = z.object({
     error: z.string().min(1).max(512).optional(),
   }).strict().optional(),
 }).strict()
+
 export const desktopHostVstIdentitySchemaV1 = z.object({
   format: z.literal("vst3"),
   classId: z.string().min(1).max(128),
@@ -398,6 +446,7 @@ export const desktopHostVstIdentitySchemaV1 = z.object({
   version: z.string().min(1).max(128),
   architecture: z.literal("arm64"),
 }).strict()
+
 export const desktopHostVstParameterSchemaV1 = z.object({
   id: z.number().int().nonnegative().max(0xffff_ffff),
   title: z.string().min(1).max(256),
@@ -411,8 +460,10 @@ export const desktopHostVstParameterSchemaV1 = z.object({
   currentValue: z.number().finite().min(0).max(1),
 }).strict().superRefine((value, context) => {
   if (value.minimum > value.maximum) context.addIssue({ code: "custom", message: "Parameter minimum exceeds maximum." })
+
   if (value.defaultValue < value.minimum || value.defaultValue > value.maximum) context.addIssue({ code: "custom", message: "Parameter default is outside its range." })
 })
+
 export const desktopHostVstInstancesResultSchemaV1 = z.object({
   projectId: projectIdSchemaV1,
   instances: z.array(z.object({
@@ -429,15 +480,20 @@ export const desktopHostVstInstancesResultSchemaV1 = z.object({
   }).strict()).max(100),
   nextCursor: desktopHostVstCursorSchemaV1.nullable(),
 }).strict()
+
 export const desktopHostVstParametersResultSchemaV1 = z.object({
   projectId: projectIdSchemaV1,
   instanceId: z.string().uuid(),
   parameters: z.array(desktopHostVstParameterSchemaV1).max(256),
   nextCursor: desktopHostVstCursorSchemaV1.nullable(),
 }).strict()
+
 export type DesktopHostVstInstancesResultV1 = z.infer<typeof desktopHostVstInstancesResultSchemaV1>
+
 export type DesktopHostVstParametersResultV1 = z.infer<typeof desktopHostVstParametersResultSchemaV1>
+
 export type DesktopHostVstIdentityV1 = z.infer<typeof desktopHostVstIdentitySchemaV1>
+
 export type DesktopHostVstParameterV1 = z.infer<typeof desktopHostVstParameterSchemaV1>
 
 export type DesktopHostOperationDescriptorV1<Operation extends DesktopHostOperationV1 = DesktopHostOperationV1> = {
@@ -597,10 +653,14 @@ const request = z.object({
   const schema = value.operation === "host.export.run"
     ? desktopHostExportRunInputSchemaV1
     : inputSchemaFor(value.operation)
+
   const parsed = schema.safeParse(value.input)
+
   if (!parsed.success) context.addIssue({ code: "custom", message: "Invalid operation input.", path: ["input"] })
 })
+
 export const desktopRequestSchemaV1 = request
+
 export type DesktopRequestV1 = z.infer<typeof request>
 
 const lifecyclePrepareToCloseRequest = z.object({
@@ -611,6 +671,7 @@ const lifecyclePrepareToCloseRequest = z.object({
   input: desktopEmptyInputSchemaV1,
   deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
 }).strict()
+
 const rendererRequest = z.object({
   version,
   type: z.literal("request"),
@@ -624,18 +685,23 @@ const rendererRequest = z.object({
     : value.operation === "host.export.run"
       ? desktopRendererExportInputSchemaV1
       : inputSchemaFor(value.operation)
+
   if (!schema.safeParse(value.input).success) {
     context.addIssue({ code: "custom", message: "Invalid renderer operation input.", path: ["input"] })
   }
 })
+
 export const desktopRendererRequestSchemaV1 = z.union([rendererRequest, lifecyclePrepareToCloseRequest])
+
 export type DesktopRendererRequestV1 = z.infer<typeof desktopRendererRequestSchemaV1>
 
 export const desktopControlOperationSchemaV1 = z.enum([
   "control.capabilities", "control.snapshot", "control.preview", "control.commit",
   "control.requestApproval", "control.history", "control.recoveries",
 ])
+
 export type DesktopControlOperationV1 = z.infer<typeof desktopControlOperationSchemaV1>
+
 const trustedRendererControlRequest = z.object({
   version, type: z.literal("request"), id: correlationId, operation: desktopControlOperationSchemaV1,
   input: desktopJsonValueSchema, deadlineMs: z.number().int().positive().max(maxDeadlineMs).optional(),
@@ -646,11 +712,14 @@ const trustedRendererControlRequest = z.object({
     : value.operation === "control.snapshot"
       ? desktopRendererControlSnapshotInputSchemaV1
       : inputSchemaFor(value.operation)
+
   if (!schema.safeParse(value.input).success) {
     context.addIssue({ code: "custom", message: "Invalid renderer control operation input.", path: ["input"] })
   }
 })
+
 export const desktopTrustedRendererRequestSchemaV1 = z.union([desktopRendererRequestSchemaV1, trustedRendererControlRequest])
+
 export type DesktopTrustedRendererRequestV1 = z.infer<typeof desktopTrustedRendererRequestSchemaV1>
 
 export const desktopReplySchemaV1 = z.object({
@@ -662,7 +731,9 @@ export const desktopReplySchemaV1 = z.object({
 }).strict().superRefine((value, context) => {
   if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
 })
+
 export const desktopCancelSchemaV1 = z.object({ version, type: z.literal("cancel"), id: correlationId }).strict()
+
 const desktopReplyChunkFieldsV1 = {
   version, type: z.literal("replyChunk"), id: correlationId, operation: desktopOperationSchemaV1,
   index: z.number().int().nonnegative(), total: z.number().int().positive().max(maxDesktopReplyChunks),
@@ -670,23 +741,28 @@ const desktopReplyChunkFieldsV1 = {
   sha256: z.string().regex(/^[a-f0-9]{64}$/),
   payload: z.string().max(maxDesktopReplyPayloadBase64Characters).regex(/^[A-Za-z0-9+/]*={0,2}$/),
 }
+
 export const desktopReplyChunkSchemaV1 = z.object(desktopReplyChunkFieldsV1).strict().refine((value) => value.index < value.total)
 export const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
+
 export const desktopExportTerminalSchemaV1 = z.object({
   version,
   type: z.literal("export-terminal"),
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
   status: z.enum(["success", "canceled", "error"]),
 }).strict()
+
 export const desktopImportTerminalSchemaV1 = z.object({
   version,
   type: z.literal("import-terminal"),
   jobId: z.string().min(1).max(128).regex(/^[A-Za-z0-9._-]+$/),
 }).strict()
+
 export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128), actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) }).strict()
 export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length) }).strict()
 export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
 export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopImportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
+
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
 
 const requestInputsV2 = {
@@ -694,6 +770,7 @@ const requestInputsV2 = {
   "control.capabilities": z.union([controlCapabilitiesQuerySchemaV2, desktopControlCapabilitiesInputSchemaV2]),
   "control.snapshot": z.union([controlSnapshotQuerySchemaV1, desktopControlSnapshotInputSchemaV2]),
 } as const
+
 const requestV2 = z.object({
   version: versionV2,
   type: z.literal("request"),
@@ -711,11 +788,14 @@ const requestV2 = z.object({
           ? requestInputsV2["control.snapshot"]
           : desktopControlOperationDescriptorsV1[value.operation].input
       : requestInputsV2[value.operation]
+
   if (!schema.safeParse(value.input).success) {
     context.addIssue({ code: "custom", message: "Invalid operation input.", path: ["input"] })
   }
 })
+
 export const desktopRequestSchemaV2 = requestV2
+
 export type DesktopRequestV2 = z.infer<typeof requestV2>
 
 export const desktopReplySchemaV2 = z.object({
@@ -730,13 +810,17 @@ export const desktopReplySchemaV2 = z.object({
 }).strict().superRefine((value, context) => {
   if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
 })
+
 export const desktopCancelSchemaV2 = z.object({ version: versionV2, type: z.literal("cancel"), id: correlationId }).strict()
+
 export const desktopReplyChunkSchemaV2 = z.object({
   ...desktopReplyChunkFieldsV1,
   version: versionV2,
 }).strict().refine((value) => value.index < value.total)
+
 export const desktopProgressSchemaV2 = desktopProgressSchemaV1.extend({ version: versionV2 })
 export const desktopExportTerminalSchemaV2 = desktopExportTerminalSchemaV1.extend({ version: versionV2 })
+
 export const desktopHelloSchemaV2 = z.object({
   version: versionV2,
   type: z.literal("hello"),
@@ -745,6 +829,7 @@ export const desktopHelloSchemaV2 = z.object({
   actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/),
   supportedVersions: z.array(z.enum(desktopProtocolVersions)).min(1).max(desktopProtocolVersions.length).refine((versions) => new Set(versions).size === versions.length && versions.includes("v2")),
 }).strict()
+
 export const desktopHelloAckSchemaV2 = z.object({
   version: versionV2,
   type: z.literal("helloAck"),
@@ -752,15 +837,20 @@ export const desktopHelloAckSchemaV2 = z.object({
   sessionId: z.string().min(16).max(128),
   capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length),
 }).strict()
+
 export const desktopLifecycleSchemaV2 = desktopLifecycleSchemaV1.extend({ version: versionV2 })
 export const desktopImportTerminalSchemaV2 = desktopImportTerminalSchemaV1.extend({ version: versionV2 })
+
 export const desktopFrameSchemaV2 = z.discriminatedUnion("type", [
   desktopRequestSchemaV2, desktopReplySchemaV2, desktopReplyChunkSchemaV2,
   desktopCancelSchemaV2, desktopProgressSchemaV2, desktopExportTerminalSchemaV2, desktopImportTerminalSchemaV2,
   desktopHelloSchemaV2, desktopHelloAckSchemaV2, desktopLifecycleSchemaV2,
 ])
+
 export type DesktopFrameV2 = z.infer<typeof desktopFrameSchemaV2>
+
 export const desktopFrameSchema = z.union([desktopFrameSchemaV1, desktopFrameSchemaV2])
+
 export type DesktopFrame = z.infer<typeof desktopFrameSchema>
 
 export const desktopRegistrationSchemaV1 = z.object({
@@ -771,6 +861,7 @@ export const desktopRegistrationSchemaV1 = z.object({
   address: z.string().min(1).max(512),
   secret: z.string().regex(/^[a-f0-9]{64}$/),
 }).strict()
+
 export type DesktopRegistrationV1 = z.infer<typeof desktopRegistrationSchemaV1>
 
 const nonControlResultSchemas = {
@@ -794,6 +885,7 @@ const nonControlResultSchemas = {
 
 const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {
   const descriptor = getControlOperationDescriptor(operation)
+
   if (operation === "control.capabilities") {
     return {
       input: desktopControlCapabilitiesInputSchemaV1,
@@ -802,6 +894,7 @@ const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {
       canonicalOutput: canonicalControlCapabilitiesSchema,
     }
   }
+
   if (operation === "control.snapshot") {
     return {
       input: desktopControlSnapshotInputSchemaV1,
@@ -810,6 +903,7 @@ const desktopControlDescriptor = (operation: DesktopControlOperationV1) => {
       canonicalOutput: canonicalProjectSnapshotSchema,
     }
   }
+
   return {
     input: descriptor.input,
     output: descriptor.output,
@@ -856,25 +950,33 @@ export const parseDesktopResult = (
   if (protocolVersion === desktopProtocolVersionV2 && operation === "control.capabilities" && desktopControlCapabilitiesInputSchemaV2.safeParse(input).success) {
     return desktopJsonValueSchema.parse(controlCapabilitiesSchemaV2.parse(value))
   }
+
   if (protocolVersion === desktopProtocolVersionV2 && operation === "control.snapshot" && desktopControlSnapshotInputSchemaV2.safeParse(input).success) {
     return desktopJsonValueSchema.parse(projectSnapshotSchemaV2.parse(value))
   }
+
   if (operation === "control.capabilities") {
     const legacy = controlCapabilitiesSchemaV1.safeParse(value)
+
     return desktopJsonValueSchema.parse(legacy.success
       ? legacy.data
       : projectCanonicalControlCapabilitiesV1(canonicalControlCapabilitiesSchema.parse(value)))
   }
+
   if (operation === "control.snapshot") {
     const legacy = projectSnapshotSchemaV1.safeParse(value)
+
     return desktopJsonValueSchema.parse(legacy.success
       ? legacy.data
       : projectCanonicalProjectSnapshotV1(canonicalProjectSnapshotSchema.parse(value)))
   }
+
   const schema = isDesktopControlOperation(operation)
     ? desktopControlOperationDescriptorsV1[operation].output
     : nonControlResultSchemas[operation]
+
   if (!schema) throw new Error("Unknown desktop operation.")
+
   return desktopJsonValueSchema.parse(schema.parse(value))
 }
 

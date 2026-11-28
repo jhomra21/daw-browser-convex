@@ -35,6 +35,7 @@ import {
 import { createDesktopFrameDecoder as createDecoder, encodeDesktopFrame as encodeFrame } from "./socket"
 
 const actorSubject = "local:123e4567-e89b-42d3-a456-426614174000"
+
 const vstParameterEditPayload = {
   projectId: "project-1",
   source: "editor-session",
@@ -50,7 +51,9 @@ test("recording spool wire dimensions stay compatible with captured files", () =
     maximumRecordingSpoolBlockFrames,
   ]).toEqual([4, 4, 2048])
 })
+
 const controlAction = { kind: "project.rename", name: "Project" }
+
 const controlRequestInputs = [
   ["control.capabilities", {}],
   ["control.snapshot", { projectId: "project-1" }],
@@ -81,6 +84,7 @@ const snapshot = {
   assets: [],
   assetFolders: [],
 }
+
 const planningResult = {
   version: "v1",
   projectId: "project-1",
@@ -140,6 +144,7 @@ describe("desktop protocol v1", () => {
         encoding: { wav: { codec: "pcm-s16", dither: "none" } },
       },
     }
+
     expect(desktopRequestSchemaV1.safeParse(exportRequest).success).toBe(true)
     expect(desktopRequestSchemaV1.safeParse({
       ...exportRequest,
@@ -171,6 +176,7 @@ describe("desktop protocol v1", () => {
       canceled: false,
       preflightOnly: true,
     }
+
     expect(desktopRendererExportInputSchemaV1.safeParse(input).success).toBe(true)
     expect(desktopRequestSchemaV1.safeParse({
       version: "v1",
@@ -191,6 +197,7 @@ describe("desktop protocol v1", () => {
         byteLength: 1,
       }],
     }
+
     expect(desktopRendererImportInputSchemaV1.safeParse(input).success).toBe(true)
     expect(desktopRendererImportInputSchemaV1.safeParse({
       ...input,
@@ -226,6 +233,7 @@ describe("desktop protocol v1", () => {
         encoding: { wav: { codec: "pcm-s16", dither: "none" } },
         canceled: false,
       }
+
       expect(desktopRendererExportInputSchemaV1.safeParse(input).success).toBe(true)
       expect(desktopRendererExportInputSchemaV1.safeParse({
         ...input,
@@ -269,6 +277,7 @@ describe("desktop protocol v1", () => {
     expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, cursor: "99999999999" }).success).toBe(false)
     expect(desktopHostVstInstancesInputSchemaV1.safeParse({ ...instanceInput, unexpected: true }).success).toBe(false)
     expect(desktopHostVstParametersInputSchemaV1.safeParse({ ...parameterInput, unexpected: true }).success).toBe(false)
+
     const instanceResult = {
       projectId: "project-1",
       instances: [{
@@ -294,7 +303,9 @@ describe("desktop protocol v1", () => {
       }],
       nextCursor: null,
     }
+
     expect(desktopHostVstInstancesResultSchemaV1.safeParse(instanceResult).success).toBe(false)
+
     const safeInstances = {
       projectId: "project-1",
       instances: [{
@@ -318,6 +329,7 @@ describe("desktop protocol v1", () => {
       }],
       nextCursor: null,
     }
+
     expect(desktopHostVstInstancesResultSchemaV1.safeParse(safeInstances).success).toBe(true)
     expect(parseDesktopResult("host.vst.instances", safeInstances)).toEqual(safeInstances)
     expect(desktopHostVstParametersResultSchemaV1.safeParse({
@@ -388,6 +400,7 @@ describe("desktop protocol v1", () => {
 
   test("directly validates all shared control request inputs", () => {
     expect(controlRequestInputs).toHaveLength(7)
+
     for (const [operation, input] of controlRequestInputs) {
       const request = { version: "v1", type: "request", id: "control-1", operation, input }
       expect(desktopRequestSchemaV1.safeParse(request).success).toBe(true)
@@ -410,6 +423,7 @@ describe("desktop protocol v1", () => {
       operation: "control.capabilities",
       input: {},
     }
+
     for (const invalidActorSubject of [
       "123e4567-e89b-42d3-a456-426614174000",
       "local:123E4567-E89B-42D3-A456-426614174000",
@@ -428,6 +442,7 @@ describe("desktop protocol v1", () => {
       operation: "transport.play",
       input: {},
     }
+
     expect(desktopRendererRequestSchemaV1.safeParse(rendererRequest).success).toBe(true)
     expect(desktopTrustedRendererRequestSchemaV1.safeParse(rendererRequest).success).toBe(true)
     expect(desktopRendererRequestSchemaV1.safeParse({ ...rendererRequest, actorSubject }).success).toBe(false)
@@ -440,6 +455,7 @@ describe("desktop protocol v1", () => {
       operation: "lifecycle.prepareToClose",
       input: {},
     }
+
     expect(desktopRendererRequestSchemaV1.safeParse(lifecycleRequest).success).toBe(true)
     expect(desktopRendererRequestSchemaV1.safeParse({ ...lifecycleRequest, actorSubject }).success).toBe(false)
   })
@@ -461,12 +477,15 @@ describe("desktop protocol v1", () => {
       ["control.history", { entries: [], continueCursor: "end", isDone: true }],
       ["control.recoveries", { entries: [], continueCursor: "end", isDone: true }],
     ]
+
     expect(results).toHaveLength(7)
+
     for (const [operation, result] of results) {
       const parsedOperation = desktopControlOperationSchemaV1.parse(operation)
       expect(parseDesktopResult(parsedOperation, result)).toEqual(result)
       expect(() => parseDesktopResult(parsedOperation, {})).toThrow()
     }
+
     expect(parseDesktopResult("control.capabilities", localControlCapabilitiesV1, {}, "v2")).toEqual(localControlCapabilitiesV1)
     expect(parseDesktopResult("control.snapshot", snapshot, { projectId: "project-1" }, "v2")).toEqual(snapshot)
     expect(parseDesktopResult("control.capabilities", localControlCapabilitiesV2, { readVersion: "v2" }, "v2")).toEqual(localControlCapabilitiesV2)
@@ -482,6 +501,7 @@ describe("desktop protocol v1", () => {
       actionIndex: 2,
       details: { field: "name" },
     }
+
     expect(parseDesktopReplyError("control.commit", controlError)).toEqual({
       version: "v1",
       code: "validation",

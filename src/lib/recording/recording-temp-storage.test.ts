@@ -31,9 +31,11 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
   const wrapFile = (file: MemoryFile): RecordingStorageFile => ({
     createWritable: async (): Promise<RecordingStorageWritable> => {
       const chunks: Uint8Array[] = []
+
       return {
         write: async (data) => {
           writes += 1
+
           if (writes === failWriteAt) throw new DOMException("full", "QuotaExceededError")
           chunks.push(new Uint8Array(data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength)))
         },
@@ -41,10 +43,12 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
           const length = chunks.reduce((total, chunk) => total + chunk.byteLength, 0)
           const bytes = new Uint8Array(length)
           let offset = 0
+
           for (const chunk of chunks) {
             bytes.set(chunk, offset)
             offset += chunk.byteLength
           }
+
           file.bytes = bytes
         },
         abort: async () => undefined
@@ -56,18 +60,24 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
   const wrapDirectory = (directory: MemoryDirectory): RecordingStorageDirectory => ({
     getDirectory: async (name, create) => {
       const existing = directory.children.get(name)
+
       if (existing?.kind === "directory") return wrapDirectory(existing)
+
       if (!create) throw new DOMException("missing", "NotFoundError")
       const child: MemoryDirectory = { kind: "directory", children: new Map() }
       directory.children.set(name, child)
+
       return wrapDirectory(child)
     },
     getFile: async (name, create) => {
       const existing = directory.children.get(name)
+
       if (existing?.kind === "file") return wrapFile(existing)
+
       if (!create) throw new DOMException("missing", "NotFoundError")
       const child: MemoryFile = { kind: "file", bytes: new Uint8Array() }
       directory.children.set(name, child)
+
       return wrapFile(child)
     },
     entries: async function* (): AsyncIterable<RecordingStorageDirectoryEntry> {
@@ -84,31 +94,39 @@ const createMemoryFilesystem = (failWriteAt = Number.POSITIVE_INFINITY) => {
 
   const readBytes = (path: readonly string[]): Uint8Array | null => {
     let node: MemoryNode = root
+
     for (const part of path) {
       if (node.kind !== "directory") return null
       const child = node.children.get(part)
+
       if (!child) return null
       node = child
     }
+
     return node.kind === "file" ? node.bytes : null
   }
 
   const directoryAt = (path: readonly string[]): MemoryDirectory | null => {
     let node: MemoryNode = root
+
     for (const part of path) {
       if (node.kind !== "directory") return null
       const child = node.children.get(part)
+
       if (!child) return null
       node = child
     }
+
     return node.kind === "directory" ? node : null
   }
 
   const activeLocks = new Set<string>()
+
   const lockManager: RecordingStorageLockManager = {
     request: async (name, options, callback) => {
       if (options.ifAvailable && activeLocks.has(name)) return callback(undefined)
       activeLocks.add(name)
+
       try {
         return await callback({ name, mode: "exclusive" })
       } finally {
@@ -124,26 +142,33 @@ describe("recording temp storage", () => {
   test("aggregates awaited header and channel writes with asynchronous storage", async () => {
     let clock = 0
     const memory = createMemoryFilesystem()
+
     const filesystem: RecordingStorageFilesystem = {
       root: async () => {
         const root = await memory.filesystem.root()
+
         return {
           ...root,
           getDirectory: async (name, create) => {
             const directory = await root.getDirectory(name, create)
+
             return {
               ...directory,
               getDirectory: async (sessionName, createSession) => {
                 const sessionDirectory = await directory.getDirectory(sessionName, createSession)
+
                 return {
                   ...sessionDirectory,
                   getFile: async (fileName, createFile) => {
                     const file = await sessionDirectory.getFile(fileName, createFile)
+
                     if (fileName !== "capture.pcm") return file
+
                     return {
                       ...file,
                       createWritable: async () => {
                         const writable = await file.createWritable()
+
                         return {
                           ...writable,
                           write: async (data: Uint8Array<ArrayBuffer>) => {
@@ -162,8 +187,10 @@ describe("recording temp storage", () => {
         }
       },
     }
+
     const session = await createRecordingTempStorage({ filesystem, clock: () => clock })
       .createSession({ sessionId: "timed", sampleRate: 48000, channelCount: 2 })
+
     await session.append([Float32Array.of(1, 2), Float32Array.of(3, 4)])
     expect(session.timingSnapshot()).toEqual({
       headerWriteMs: { count: 1, total: 2, max: 2 },
@@ -177,6 +204,7 @@ describe("recording temp storage", () => {
       configurable: true,
       value: { storage: { getDirectory: async () => undefined }, locks: undefined },
     })
+
     try {
       expect(isRecordingTempStorageSupported()).toBeFalse()
       await expect(createRecordingTempStorage().createSession({
@@ -358,25 +386,31 @@ describe("recording temp storage", () => {
     const memory = createMemoryFilesystem()
     let now = 0
     const storage = createRecordingTempStorage({ filesystem: memory.filesystem, now: () => now })
+
     const staleMalformed = await storage.createSession({
       sessionId: "stale-malformed",
       sampleRate: 48000,
       channelCount: 1
     })
+
     await staleMalformed.finalize()
+
     const staleMissing = await storage.createSession({
       sessionId: "stale-missing",
       sampleRate: 48000,
       channelCount: 1
     })
+
     await staleMissing.finalize()
 
     now = 24 * 60 * 60 * 1000 + 1
+
     const freshMissing = await storage.createSession({
       sessionId: "fresh-missing",
       sampleRate: 48000,
       channelCount: 1
     })
+
     memory.directoryAt(["recording-sessions", "stale-malformed"])?.children.set(
       "session.json",
       { kind: "file", bytes: new TextEncoder().encode("{bad") },
@@ -394,16 +428,19 @@ describe("recording temp storage", () => {
   test("skips stale cleanup for a session owned by another storage instance", async () => {
     const memory = createMemoryFilesystem()
     const oldNow = 0
+
     const firstStorage = createRecordingTempStorage({
       filesystem: memory.filesystem,
       lockManager: memory.lockManager,
       now: () => oldNow,
     })
+
     const secondStorage = createRecordingTempStorage({
       filesystem: memory.filesystem,
       lockManager: memory.lockManager,
       now: () => 24 * 60 * 60 * 1000 + 1,
     })
+
     const session = await firstStorage.createSession({
       sessionId: "active-stale",
       sampleRate: 48000,
@@ -418,16 +455,19 @@ describe("recording temp storage", () => {
   test("uses the finalized timestamp for stale recovery after a long take", async () => {
     const memory = createMemoryFilesystem()
     let now = 0
+
     const storage = createRecordingTempStorage({
       filesystem: memory.filesystem,
       lockManager: memory.lockManager,
       now: () => now,
     })
+
     const session = await storage.createSession({
       sessionId: "long-take",
       sampleRate: 48000,
       channelCount: 1,
     })
+
     now = 24 * 60 * 60 * 1000 + 1
     await session.finalize()
 

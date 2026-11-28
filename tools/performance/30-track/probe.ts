@@ -198,6 +198,7 @@ export const browserProbeResultSchema = z.object({
       if (value.status === "observed" && (value.activityDetected === null || value.maxHeightPercent === null || value.unavailableReason !== null)) {
         context.addIssue({ code: "custom", message: "Observed meter evidence requires activity and height without an unavailable reason." })
       }
+
       if (value.status === "unavailable" && (value.activityDetected !== null || value.maxHeightPercent !== null || value.unavailableReason === null)) {
         context.addIssue({ code: "custom", message: "Unavailable meter evidence must not claim observed activity." })
       }
@@ -221,12 +222,15 @@ const percentile = (sorted: readonly number[], quantile: number): number | null 
   const upper = Math.ceil(position)
   const lowerValue = sorted[lower]
   const upperValue = sorted[upper]
+
   if (lowerValue === undefined || upperValue === undefined) return null
+
   return lower === upper ? lowerValue : lowerValue + (upperValue - lowerValue) * (position - lower)
 }
 
 export const summarizeIntervals = (intervals: readonly number[]): QuantileStats => {
   const sorted = [...intervals].sort((left, right) => left - right)
+
   return {
     p50: percentile(sorted, 0.5),
     p95: percentile(sorted, 0.95),
@@ -250,11 +254,13 @@ type PerformanceMemory = {
 
 const performanceMemory = (): PerformanceMemory | undefined => {
   if (!("memory" in performance)) return undefined
+
   const parsed = z.object({
     usedJSHeapSize: z.number().finite().nonnegative(),
     totalJSHeapSize: z.number().finite().nonnegative(),
     jsHeapSizeLimit: z.number().finite().nonnegative(),
   }).strict().safeParse(performance.memory)
+
   return parsed.success ? parsed.data : undefined
 }
 
@@ -303,6 +309,7 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
   const startupErrors: BrowserProbeError[] = []
   const phaseErrors = new Map<PhaseName, BrowserProbeError[]>()
   const phases: PhaseResult[] = []
+
   let active: {
     name: PhaseName
     parameters: Readonly<Record<string, boolean | number | string>>
@@ -311,42 +318,53 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
     timestamps: number[]
     longTaskDurations: number[]
   } | undefined
+
   let integrity = emptyIntegrity()
   let lastTimestamp: number | undefined
   let rafId: number | undefined
   let longTaskObserver: PerformanceObserver | undefined
+
   const onError = (event: ErrorEvent) => {
     const error: BrowserProbeError = { kind: "error", message: event.message.slice(0, 512) }
+
     if (active) (phaseErrors.get(active.name) ?? []).push(error)
     else startupErrors.push(error)
   }
+
   const onUnhandledRejection = (event: PromiseRejectionEvent) => {
     const reason = event.reason instanceof Error ? event.reason.message : String(event.reason)
     const error: BrowserProbeError = { kind: "unhandledrejection", message: reason.slice(0, 512) }
+
     if (active) (phaseErrors.get(active.name) ?? []).push(error)
     else startupErrors.push(error)
   }
+
   const onAnimationFrame = (timestamp: number) => {
     if (active) {
       active.timestamps.push(timestamp)
     }
+
     // Track delivered frames between phases too: a new phase must not count
     // intervening setup/screenshot time as one giant frame interval.
     lastTimestamp = timestamp
     rafId = requestAnimationFrame(onAnimationFrame)
   }
+
   window.addEventListener("error", onError)
   window.addEventListener("unhandledrejection", onUnhandledRejection)
   rafId = requestAnimationFrame(onAnimationFrame)
+
   try {
     longTaskObserver = new PerformanceObserver((list) => {
       if (!active) return
+
       for (const entry of list.getEntries()) active.longTaskDurations.push(entry.duration)
     })
     longTaskObserver.observe({ type: "longtask", buffered: true })
   } catch {
     longTaskObserver = undefined
   }
+
   return {
     startPhase(name, parameters) {
       if (active) throw new Error(`Phase ${active.name} is still active.`)
@@ -402,6 +420,7 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
     },
     recordError(message) {
       const error: BrowserProbeError = { kind: "error", message: message.slice(0, 512) }
+
       if (active) (phaseErrors.get(active.name) ?? []).push(error)
       else startupErrors.push(error)
     },
@@ -410,14 +429,18 @@ export const installBrowserProbe = (): BrowserProbeCoordinator => {
     },
     finish() {
       if (active) throw new Error(`Phase ${active.name} was not finished.`)
+
       if (rafId !== undefined) cancelAnimationFrame(rafId)
       longTaskObserver?.disconnect()
       window.removeEventListener("error", onError)
       window.removeEventListener("unhandledrejection", onUnhandledRejection)
+
       const intervals = phases.flatMap((phase) => {
         const p50 = phase.raf.intervalsMs.p50
+
         return p50 === null ? [] : [p50]
       })
+
       return browserProbeResultSchema.parse({
         version: "30-track-probe-v2",
         phases,

@@ -73,6 +73,7 @@ export type NativeExternalEditorPlanCompilation = NativeExternalAttachmentPlanCo
 const stateRevision = (updatedAt: number) => updatedAt % 0x8000_0000
 
 const layoutChannels = (layout: "mono" | "stereo") => layout === "mono" ? 1 : 2
+
 const layoutForChannels = (channels: number): "mono" | "stereo" | undefined => (
   channels === 1 ? "mono" : channels === 2 ? "stereo" : undefined
 )
@@ -92,9 +93,11 @@ const compileProcessor = (
   if (processor.manifest.sidechainInputs.length > 0) {
     return { supported: false, reason: `External processor "${processor.instanceId}" has unsupported sidechain buses.` }
   }
+
   const inputs = processor.manifest.audioInputs.filter((bus) => bus.enabled)
   const outputs = processor.manifest.audioOutputs.filter((bus) => bus.enabled)
   const instrument = processor.manifest.role === "instrument"
+
   if ((!instrument && inputs.length !== 1)
     || (instrument && (inputs.length !== 0 || node.channel.kind !== "instrument"))
     || outputs.length !== 1) {
@@ -105,18 +108,23 @@ const compileProcessor = (
         : `External processor "${processor.instanceId}" must have exactly one enabled input and output bus.`,
     }
   }
+
   const input = inputs[0]
   const output = outputs[0]
+
   if (!output || (!instrument && !input)) {
     return { supported: false, reason: `External processor "${processor.instanceId}" has incomplete enabled bus metadata.` }
   }
+
   if (
     (!instrument && input?.channels !== layoutChannels(node.inputLayout))
     || output.channels !== layoutChannels(node.outputLayout)
   ) {
     return { supported: false, reason: `External processor "${processor.instanceId}" has buses incompatible with mixer node "${node.channel.id}".` }
   }
+
   const reference = processor.launchReference
+
   if (
     !reference
     || reference.version !== 1
@@ -128,6 +136,7 @@ const compileProcessor = (
   ) {
     return { supported: false, reason: `External processor "${processor.instanceId}" has stale native catalog identity.` }
   }
+
   return {
     supported: true,
     attachment: {
@@ -174,6 +183,7 @@ export const compileNativeExternalAttachmentSnapshot = (
 ): NativeExternalAttachmentSnapshotCompilation => {
   if (input.target === "browser") {
     const live = input.processors.find((processor) => !processor.bypassed)
+
     return live
       ? { supported: false, reasons: [`External plugin ${live.instanceId} must be frozen or bypassed before browser playback.`] }
       : { supported: true, attachments: [] }
@@ -183,45 +193,58 @@ export const compileNativeExternalAttachmentSnapshot = (
   const nodes = new Map(input.graph.channels.map((node) => [node.channel.id, node]))
   const attachments: NativeExternalAttachmentProjection[] = []
   const processorsByNode = new Map<string, ExternalProcessor[]>()
+
   for (const processor of input.processors) {
     if (processor.health.state === "degraded") {
       reasons.push(`External plugin "${processor.instanceId}" is degraded and cannot participate in native playback.`)
       continue
     }
+
     const processors = processorsByNode.get(processor.targetId) ?? []
     processors.push(processor)
     processorsByNode.set(processor.targetId, processors)
   }
+
   for (const [targetId, processors] of processorsByNode) {
     const node = nodes.get(targetId)
+
     if (!node) {
       for (const processor of processors) {
         reasons.push(`External processor "${processor.instanceId}" targets missing mixer node "${targetId}".`)
       }
+
       continue
     }
+
     const ordered = [...processors].sort((left, right) => (
       left.index - right.index || left.instanceId.localeCompare(right.instanceId)
     ))
+
     if (ordered.some((processor, index) => processor.index === ordered[index - 1]?.index)) {
       reasons.push(`External processors on mixer node "${targetId}" must have unique persisted indexes.`)
       continue
     }
+
     let inputLayout = node.inputLayout
+
     for (const [index, processor] of ordered.entries()) {
       if (index > 0 && processor.manifest.role === "instrument") {
         reasons.push(`External instrument "${processor.instanceId}" must be the first processor in mixer node "${targetId}".`)
       }
+
       const outputBuses = processor.manifest.audioOutputs.filter((bus) => bus.enabled)
       const outputLayout = outputBuses.length === 1 ? layoutForChannels(outputBuses[0].channels) : undefined
+
       if (outputLayout !== undefined && outputLayout !== node.outputLayout) {
         reasons.push(`External processor "${processor.instanceId}" must preserve mixer node "${targetId}" output layout.`)
       }
+
       const compiled = compileProcessor(processor, {
         channel: node.channel,
         inputLayout,
         outputLayout: outputLayout ?? node.outputLayout,
       }, input.workerTransport)
+
       if (!compiled.supported) {
         reasons.push(compiled.reason)
       } else {
@@ -229,17 +252,21 @@ export const compileNativeExternalAttachmentSnapshot = (
           ...compiled.attachment,
           stageIndex: processor.manifest.role === "instrument" ? 0 : processor.index,
         }
+
         attachments.push(processor.manifest.role === "instrument"
           ? { ...attachment, sourceIndex: 0 }
           : attachment)
         inputLayout = outputLayout ?? inputLayout
       }
     }
+
     if (inputLayout !== node.outputLayout) {
       reasons.push(`External processor chain on mixer node "${targetId}" does not produce the node output layout.`)
     }
   }
+
   if (reasons.length > 0) return { supported: false, reasons }
+
   return {
     supported: true,
     attachments: attachments.sort((left, right) => (
@@ -255,7 +282,9 @@ export const compileNativeExternalAttachmentPlan = (
   input: NativeExternalAttachmentSnapshotInput,
 ): NativeExternalAttachmentPlanCompilation => {
   const snapshot = compileNativeExternalAttachmentSnapshot(input)
+
   if (!snapshot.supported) return { supported: false, reasons: snapshot.reasons }
+
   return compileAttachmentPlan(snapshot.attachments, "External attachment plan is invalid.")
 }
 
@@ -285,13 +314,17 @@ export const compileNativeExternalEditorPlan = (
   const instrument = input.processor.manifest.role === "instrument"
   const inputs = input.processor.manifest.audioInputs.filter((bus) => bus.enabled)
   const outputs = input.processor.manifest.audioOutputs.filter((bus) => bus.enabled)
+
   const inputLayout = instrument
     ? "stereo"
     : inputs[0] ? layoutForChannels(inputs[0].channels) : undefined
+
   const outputLayout = outputs[0] ? layoutForChannels(outputs[0].channels) : undefined
+
   if (input.processor.targetId !== input.targetId) {
     return { supported: false, reasons: [`External processor "${input.processor.instanceId}" targets an invalid editor node.`] }
   }
+
   if (
     (!instrument && inputs.length !== 1)
     || (instrument && inputs.length !== 0)
@@ -306,6 +339,7 @@ export const compileNativeExternalEditorPlan = (
         : `External processor "${input.processor.instanceId}" must have exactly one enabled mono or stereo input and output bus.`],
     }
   }
+
   const compiled = compileProcessor(input.processor, {
     channel: { id: input.targetId, kind: instrument ? "instrument" : "audio" },
     inputLayout,
@@ -315,11 +349,14 @@ export const compileNativeExternalEditorPlan = (
     maximumFrames: 8_192,
     maximumEventsPerBlock: 128,
   })
+
   if (!compiled.supported) return { supported: false, reasons: [compiled.reason] }
+
   const attachment = {
     ...compiled.attachment,
     stageIndex: 0,
   }
+
   return compileAttachmentPlan([
     instrument ? { ...attachment, sourceIndex: 0 } : attachment,
   ], "External editor attachment plan is invalid.")

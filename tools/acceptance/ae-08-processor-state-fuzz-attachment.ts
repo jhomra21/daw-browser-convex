@@ -2,9 +2,11 @@ import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-prot
 import { nativeGraphNodeId } from "@daw-browser/audio-engine/native-host-wire"
 
 export const attachmentInstanceId = "11111111-1111-4111-8111-111111111111"
+
 // Native external latency is declared latency plus one worker transport block
 // (native-offline-render-plan.ts nativeExternalLatencyFrames).
 export const workerTransportFrames = 512
+
 export default function attachmentPlan(latencyFrames: number): NativeExternalAttachmentPlan {
   return {
     version: 1,

@@ -13,19 +13,33 @@ type PortableRequest = Extract<PortableWasmControlMessage, { requestId: number }
 
 const responseFor = (message: PortableRequest): PortableWasmStatusMessage => {
   if (message.type === "prepare-graph") return { version: portableWasmProtocolVersion, type: "graph-prepared", requestId: message.requestId, revision: message.snapshot.revision, result: "prepared" }
+
   if (message.type === "publish-graph") return { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: message.revision, result: "published" }
+
   if (message.type === "register-asset") return { version: portableWasmProtocolVersion, type: "asset-registered", requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: "registered", handle: { slot: 0, generation: message.generation } }
+
   if (message.type === "install-schedule") return { version: portableWasmProtocolVersion, type: "schedule-installed", requestId: message.requestId, revision: message.schedule.revision, epoch: message.schedule.transportEpoch, result: "installed" }
+
   if (message.type === "schedule-sources") return { version: portableWasmProtocolVersion, type: "sources-scheduled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
+
   if (message.type === "transport") return { version: portableWasmProtocolVersion, type: "transport-applied", requestId: message.requestId, epoch: message.epoch, result: "applied" }
+
   if (message.type === "processor-events") return { version: portableWasmProtocolVersion, type: "processor-events-applied", requestId: message.requestId, revision: message.revision, epoch: message.epoch, sequence: message.sequence, result: "applied" }
+
   if (message.type === "release-asset") return { version: portableWasmProtocolVersion, type: "asset-released", requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: "released" }
+
   if (message.type === "register-paged-asset") return { version: portableWasmProtocolVersion, type: "paged-asset-registered", requestId: message.requestId, generation: message.generation, assetId: message.asset.assetId, result: "registered", handle: { slot: 0, generation: message.generation } }
+
   if (message.type === "write-asset-page") return { version: portableWasmProtocolVersion, type: "asset-page-written", requestId: message.requestId, generation: message.generation, assetId: message.assetId, pageIndex: message.pageIndex, result: "written" }
+
   if (message.type === "prepare-asset-range") return { version: portableWasmProtocolVersion, type: "asset-range-prepared", requestId: message.requestId, generation: message.generation, assetId: message.assetId, result: "prepared", preparationId: 1 }
+
   if (message.type === "schedule-prepared-sources") return { version: portableWasmProtocolVersion, type: "prepared-sources-scheduled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "scheduled" }
+
   if (message.type === "release-asset-preparation") return { version: portableWasmProtocolVersion, type: "asset-preparation-released", requestId: message.requestId, generation: message.generation, preparationId: message.preparationId, result: "released" }
+
   if (message.type === "trim-asset-pages") return { version: portableWasmProtocolVersion, type: "asset-pages-trimmed", requestId: message.requestId, generation: message.generation, assetId: message.assetId, firstPage: message.firstPage, pageCount: message.pageCount, result: "trimmed" }
+
   return { version: portableWasmProtocolVersion, type: "processor-automation-reenabled", requestId: message.requestId, revision: message.revision, epoch: message.epoch, result: "applied" }
 }
 
@@ -39,6 +53,7 @@ const createSession = (
 ) => {
   const calls: string[] = []
   let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+
   const node: AudioWorkletNode = Object.assign(Object.create(null), {
     port: {
       get onmessage() {
@@ -50,6 +65,7 @@ const createSession = (
       postMessage(message: PortableWasmControlMessage) {
         calls.push(message.type)
         const response = reply && isPortableRequest(message) ? respond(message) : undefined
+
         if (response) handler?.(new MessageEvent("message", { data: response }))
       },
       close() {},
@@ -58,11 +74,13 @@ const createSession = (
     connect() {},
     disconnect() {},
   })
+
   return { calls, node, session: new PortableWasmPlaybackSession(node, undefined, controlTimeoutMs) }
 }
 
 test("requires acknowledged portable preparation before marking playback active", async () => {
   const fixture = createSession()
+
   const snapshot: AudioCoreGraphSnapshot = {
     version: audioCoreContractVersion,
     revision: 1,
@@ -79,6 +97,7 @@ test("requires acknowledged portable preparation before marking playback active"
       processorOrder: [],
     }],
   }
+
   const asset: AudioAssetRef = { version: audioCoreContractVersion, assetId: "asset", frameCount: 1, sampleRateHz: 48_000, channelCount: 1 }
   const pcm = { frameCount: 1, planes: [new Float32Array([0])] }
 
@@ -202,6 +221,7 @@ test("a framed publish that times out is late and cancelled by revision, not a s
 
 test("dispose rejects unresolved portable requests and closes the dispatcher", async () => {
   const fixture = createSession(false, responseFor, 1_000)
+
   const pending = fixture.session.prepareGraph({
     version: audioCoreContractVersion,
     revision: 1,
@@ -218,6 +238,7 @@ test("dispose rejects unresolved portable requests and closes the dispatcher", a
       processorOrder: [],
     }],
   })
+
   fixture.session.dispose()
 
   await expect(pending).rejects.toThrow("disposed")
@@ -229,6 +250,7 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
   const posted: PortableWasmControlMessage[] = []
   const transfers: unknown[] = []
   let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+
   const node: AudioWorkletNode = Object.assign(Object.create(null), {
     port: {
       get onmessage() { return handler },
@@ -236,6 +258,7 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
       postMessage(message: PortableWasmControlMessage, transfer?: unknown[]) {
         posted.push(message)
         transfers.push(transfer)
+
         if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: message.type === "publish-graph" && message.revision === 3
           ? { version: portableWasmProtocolVersion, type: "graph-published", requestId: message.requestId, revision: 3, result: "rejected" }
           : message.type === "publish-graph" && message.revision === 4
@@ -250,11 +273,14 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
     connect() {},
     disconnect() {},
   })
+
   const session = new PortableWasmPlaybackSession(node)
+
   const snapshot: AudioCoreGraphSnapshot = {
     version: audioCoreContractVersion, revision: 2, contractHash: "test", masterNodeId: "master", edges: [], assets: [],
     nodes: [{ id: "master", kind: "master", inputLayout: "stereo", outputLayout: "stereo", latencyFrames: 0, processorOrder: [] }],
   }
+
   await session.prepareGraph(snapshot)
   await session.publishGraph(2, { requireContinuity: true })
   await expect(session.publishGraph(3, { requireContinuity: true })).rejects.toThrow("graph-published was rejected")
@@ -274,12 +300,14 @@ test("B6f5 posts the graph envelope encoded on the main thread and the adoption 
 test("C9a an adoption publish posts the sources of its revision with it", async () => {
   const posted: PortableWasmControlMessage[] = []
   let handler: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null = null
+
   const node: AudioWorkletNode = Object.assign(Object.create(null), {
     port: {
       get onmessage() { return handler },
       set onmessage(next: ((event: MessageEvent<PortableWasmStatusMessage>) => void) | null) { handler = next },
       postMessage(message: PortableWasmControlMessage) {
         posted.push(message)
+
         if (isPortableRequest(message)) handler?.(new MessageEvent("message", { data: responseFor(message) }))
       },
       close() {},
@@ -288,6 +316,7 @@ test("C9a an adoption publish posts the sources of its revision with it", async 
     connect() {},
     disconnect() {},
   })
+
   const session = new PortableWasmPlaybackSession(node)
   const sources = { epoch: 2, ordinary: [], prepared: [] }
   await session.publishGraph(2, { requireContinuity: true, publicationFrame: 100, sources })

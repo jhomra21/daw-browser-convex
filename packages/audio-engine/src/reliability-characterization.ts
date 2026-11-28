@@ -9,6 +9,7 @@ import {
 import type { ResourceObserver } from './runtime-diagnostics'
 
 export const RELIABILITY_SAMPLE_RATES = [44_100, 48_000, 96_000] as const
+
 export const RELIABILITY_RESOURCE_KINDS = [
   'media-streams',
   'audio-contexts',
@@ -31,12 +32,14 @@ export const createReliabilityResourceLedger = (): ResourceObserver & {
   const active = new Map<string, Set<ReliabilityResource>>(
     RELIABILITY_RESOURCE_KINDS.map((kind) => [kind, new Set()]),
   )
+
   return {
     acquire(kind: string, resource: ReliabilityResource) {
       const resources = active.get(kind) ?? new Set<ReliabilityResource>()
       resources.add(resource)
       active.set(kind, resources)
       let released = false
+
       return () => {
         if (released) return
         released = true
@@ -70,6 +73,7 @@ export const runCancellableExportStages = async (
 ) => {
   try {
     const orderedStages: readonly CancellableExportStage[] = ['rendering', 'analysis', 'encoding', 'saving']
+
     for (const stage of orderedStages) {
       signal.throwIfAborted()
       await stages[stage]()

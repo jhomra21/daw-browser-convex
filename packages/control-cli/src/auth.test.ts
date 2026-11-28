@@ -32,6 +32,7 @@ const expired: ControlCredentials = {
 const temporaryStore = async () => {
   const directory = await mkdtemp("/tmp/daw-control-cli-")
   directories.push(directory)
+
   return createCredentialStore(join(directory, "credentials.json"))
 }
 
@@ -58,8 +59,10 @@ describe("control OAuth primitives", () => {
     const store = await temporaryStore()
     await store.write(expired)
     let requests = 0
+
     const requestFetch = async () => {
       requests += 1
+
       return Response.json({
         access_token: "new-access",
         refresh_token: "new-refresh",
@@ -68,6 +71,7 @@ describe("control OAuth primitives", () => {
         scope: "control:read control:write offline_access",
       })
     }
+
     const first = createAccessTokenProvider(credentialIdentity(expired), store, requestFetch)
     const second = createAccessTokenProvider(credentialIdentity(expired), createCredentialStore(store.path), requestFetch)
     await expect(Promise.all([first(), second()])).resolves.toEqual(["new-access", "new-access"])
@@ -78,16 +82,20 @@ describe("control OAuth primitives", () => {
   test("fails closed without deleting a newer refresh successor", async () => {
     const store = await temporaryStore()
     await store.write(expired)
+
     const successor = {
       ...expired,
       accessToken: "successor-access",
       refreshToken: "successor-refresh",
       expiresAt: Date.now() + 900_000,
     }
+
     const accessToken = createAccessTokenProvider(credentialIdentity(expired), store, async () => {
       await store.write(successor)
+
       return Response.json({ error: "invalid_grant" }, { status: 400 })
     })
+
     await expect(accessToken()).rejects.toThrow("Run daw-control auth login")
     expect(await store.read()).toEqual(successor)
   })
@@ -95,10 +103,12 @@ describe("control OAuth primitives", () => {
   test("removes the rejected refresh generation", async () => {
     const store = await temporaryStore()
     await store.write(expired)
+
     const accessToken = createAccessTokenProvider(credentialIdentity(expired), store, async () => Response.json(
       { error: "invalid_grant" },
       { status: 400 },
     ))
+
     await expect(accessToken()).rejects.toThrow("Run daw-control auth login")
     expect(await store.read()).toBeUndefined()
   })
@@ -106,6 +116,7 @@ describe("control OAuth primitives", () => {
   test("preserves credentials for transient refresh failures", async () => {
     const store = await temporaryStore()
     await store.write(expired)
+
     for (const response of [
       new Response(null, { status: 503 }),
       new Response("{", { headers: { "Content-Type": "application/json" } }),
@@ -119,9 +130,11 @@ describe("control OAuth primitives", () => {
   test("rejects a cross-origin credential replacement before requesting a token", async () => {
     const store = await temporaryStore()
     await store.write({ ...expired, expiresAt: Date.now() + 900_000 })
+
     const accessToken = createAccessTokenProvider(credentialIdentity(expired), store, async () => {
       throw new Error("A changed credential must not be used.")
     })
+
     await store.write({
       ...expired,
       baseUrl: "https://other.example",
@@ -152,12 +165,14 @@ describe("control OAuth primitives", () => {
 
   test("later login persistence wins after refresh, cleanup, or logout lock holders", async () => {
     const store = await temporaryStore()
+
     const login = {
       ...expired,
       accessToken: "login-access",
       refreshToken: "login-refresh",
       expiresAt: Date.now() + 900_000,
     }
+
     for (const operation of [
       async () => { await store.write({ ...expired, accessToken: "refreshed", refreshToken: "refreshed-token" }) },
       async () => { await store.remove() },
@@ -177,13 +192,17 @@ describe("control OAuth primitives", () => {
     const store = await temporaryStore()
     await store.write(expired)
     let releaseRevocation: (() => void) | undefined
+
     const revocationStarted = new Promise<void>((resolve) => {
       releaseRevocation = resolve
     })
+
     const pendingLogout = logout(store, async () => {
       await revocationStarted
+
       return new Response(null, { status: 200 })
     })
+
     const refresh = createAccessTokenProvider(credentialIdentity(expired), createCredentialStore(store.path), async () => Response.json({
       access_token: "should-not-persist",
       refresh_token: "should-not-persist",
@@ -191,6 +210,7 @@ describe("control OAuth primitives", () => {
       expires_in: 900,
       scope: "control:read control:write offline_access",
     }))
+
     const pendingRefresh = refresh()
     releaseRevocation?.()
     await expect(pendingLogout).resolves.toEqual({ revoked: true })

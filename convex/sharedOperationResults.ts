@@ -7,6 +7,7 @@ export const readSharedOperationResult = async (
 ) => {
   if (!input.operationId) return null;
   const operationId = input.operationId;
+
   return await ctx.db
     .query("sharedOperationResults")
     .withIndex("by_room_user_operation", (q) => q
@@ -41,12 +42,15 @@ export const runSharedOperationOnce = async <T>(
   },
 ) => {
   if (!input.projectId) return await input.run()
+
   const existingResult = await readSharedOperationResult(ctx, {
     projectId: input.projectId,
     userId: input.userId,
     operationId: input.operationId,
   })
+
   const persistedResult = existingResult ? parseJsonValue(existingResult.result) : undefined
+
   if (persistedResult !== undefined && input.isResult(persistedResult)) return persistedResult
   const result = await input.run()
   await writeSharedOperationResult(ctx, {
@@ -55,5 +59,6 @@ export const runSharedOperationOnce = async <T>(
     operationId: input.operationId,
     result,
   })
+
   return result
 }

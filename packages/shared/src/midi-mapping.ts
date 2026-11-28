@@ -36,6 +36,7 @@ const sourceKeysForEvent = (event: MidiMappingSourceEvent) => {
   const controller = event.kind === 'cc' ? event.controller : undefined
   const pitch = event.kind === 'poly-pressure' ? event.pitch : undefined
   const channel = event.channel
+
   return [
     sourceKey({ kind: event.kind, controller, channel, pitch }),
     sourceKey({ kind: event.kind, controller, channel, pitch: undefined }),
@@ -48,16 +49,20 @@ export const compileMidiMappingSourceIndex = (
   mappings: readonly MidiMapping[],
 ): CompiledMidiMappingIndex => {
   const index = new Map<string, MidiMapping[]>()
+
   for (const mapping of mappings) {
     const key = sourceKey(mapping.source)
     const entries = index.get(key)
+
     if (entries) entries.push(mapping)
     else index.set(key, [mapping])
   }
+
   return {
     match: (event) => {
       const matched: MidiMapping[] = []
       const seen = new Set<string>()
+
       for (const key of sourceKeysForEvent(event)) {
         for (const mapping of index.get(key) ?? []) {
           if (seen.has(mapping.id)) continue
@@ -65,6 +70,7 @@ export const compileMidiMappingSourceIndex = (
           matched.push(mapping)
         }
       }
+
       return matched
     },
   }
@@ -91,10 +97,13 @@ export const midiMappingDescriptor = (
   target: MidiMappingTarget,
 ): AutomationParameterDescriptor | undefined => {
   const descriptor = getAutomationParameterDescriptor(target.parameterId)
+
   if (!descriptor || !descriptor.targetKinds.includes('track')) return undefined
+
   if (target.effectInstanceId === undefined) {
     return descriptor.owner === 'mixer' && target.parameterId === 'volume' ? descriptor : undefined
   }
+
   return descriptor.owner !== 'mixer'
     && descriptor.owner !== 'sampler'
     && descriptor.owner !== 'granular'
@@ -112,7 +121,9 @@ export const midiMappingValue = (
   event: MidiMappingSourceEvent,
 ): number | undefined => {
   const descriptor = midiMappingDescriptor(mapping.target)
+
   if (!descriptor) return undefined
+
   return automationRatioToValue(
     descriptor,
     midiMappingOutputRatio(mapping, midiMappingInputRatio(event)),

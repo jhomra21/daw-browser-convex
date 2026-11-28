@@ -24,12 +24,16 @@ export default function Limiter(props: LimiterProps) {
   const [gainReductionDb, setGainReductionDb] = createSignal(0)
   createEffect(() => {
     setGainReductionDb(0)
+
     if (!props.audioEngine) return
+
     const unsubscribe = props.targetId === 'master'
       ? props.audioEngine.subscribeMasterGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
       : props.audioEngine.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+
     onCleanup(unsubscribe)
   })
+
   return (
     <EffectShell title="Limiter" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-56 min-w-56">
       <div class="device-controls-with-footer grid min-h-0 flex-1 gap-3 px-3 py-3">

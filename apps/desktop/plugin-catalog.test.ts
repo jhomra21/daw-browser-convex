@@ -17,6 +17,7 @@ import { resolveVst3Attachment } from './vst3-attachment'
 test('fingerprints plugin files through a stream', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const filePath = path.join(directory, 'plugin.bin')
+
   try {
     await writeFile(filePath, 'plugin-binary')
     await expect(fingerprintPluginBinary(filePath)).resolves.toBe(
@@ -30,6 +31,7 @@ test('fingerprints plugin files through a stream', async () => {
 test('fingerprints complete VST3 bundle contents deterministically', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const bundlePath = path.join(directory, 'Plugin.vst3')
+
   try {
     await mkdir(path.join(bundlePath, 'Contents'), { recursive: true })
     await writeFile(path.join(bundlePath, 'Contents', 'binary'), 'plugin-binary')
@@ -46,6 +48,7 @@ test('rejects oversize and stream failures through the injectable binary reader'
     stat: async () => ({ isFile: () => true, size: 2 * 1024 * 1024 * 1024 + 1 }),
     async *createReadStream() {},
   }
+
   await expect(fingerprintPluginBinary('/plugin', oversizeReader)).rejects.toThrow('exceeds the scanner size limit')
 
   const failingReader = {
@@ -55,12 +58,14 @@ test('rejects oversize and stream failures through the injectable binary reader'
       throw new Error('stream failure')
     },
   }
+
   await expect(fingerprintPluginBinary('/plugin', failingReader)).rejects.toThrow('stream failure')
 })
 
 test('accepts VST3 bundle directories only for scanner discovery', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const bundlePath = path.join(directory, 'Plugin.vst3')
+
   try {
     await mkdir(bundlePath)
     await expect(canonicalizeVst3ScannerBundlePath(bundlePath)).resolves.toEndWith('/Plugin.vst3')
@@ -74,6 +79,7 @@ test('discovers VST3 bundles deterministically without descending into bundles o
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const alpha = path.join(directory, 'nested', 'Alpha.vst3')
   const beta = path.join(directory, 'Beta.vst3')
+
   try {
     await mkdir(path.join(alpha, 'Nested.vst3'), { recursive: true })
     await mkdir(beta)
@@ -105,6 +111,7 @@ test('bounds persisted diagnostics to stable path-free messages', () => {
     diagnostics: [{ directory: '/private/secret', message: 'native scanner leaked /private/secret' }],
     scannedAtMs: null,
   })
+
   expect(catalog?.diagnostics).toEqual([{
     directory: 'configured-directory',
     message: 'The plug-in directory could not be scanned.',
@@ -115,6 +122,7 @@ test('falls back to an empty catalog for corrupt persisted data and persists sca
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const filePath = path.join(directory, 'plugin-catalog-v1.json')
   const pluginDirectory = path.join(directory, 'plugins')
+
   try {
     await mkdir(path.join(pluginDirectory, 'Only.vst3'), { recursive: true })
     await writeFile(filePath, '{not-json')
@@ -162,6 +170,7 @@ test('migrates persisted catalogs without trusting invalid eligibility', () => {
     diagnostics: [],
     scannedAtMs: 1,
   }
+
   const migrated = parsePluginCatalogData(legacy)
   expect(migrated?.version).toBe(3)
   expect(migrated?.entries[0]?.launchEligibility).toBeUndefined()
@@ -183,6 +192,7 @@ test('migrates persisted catalogs without trusting invalid eligibility', () => {
       },
     }],
   }
+
   const catalog = parsePluginCatalogData(valid)
   expect(catalog?.entries[0]?.hostingStatus).toBe('discovered')
   expect(parsePluginCatalogData({
@@ -197,10 +207,12 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
   const filePath = path.join(directory, 'plugin-catalog-v1.json')
   const bundleFingerprint = 'b'.repeat(64)
   const binaryFingerprint = 'a'.repeat(64)
+
   try {
     await mkdir(path.join(pluginDirectory, 'Example.vst3'), { recursive: true })
     const store = createPluginCatalogStore({ filePath })
     await store.addDirectory(pluginDirectory)
+
     const scanBundle = async (entry: Vst3CatalogEntry) => ({
       classes: [{
         classId: 'example-effect',
@@ -223,7 +235,9 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
         scannerProtocolVersion: 2 as const,
       },
     })
+
     const scanned = await store.scan(scanBundle)
+
     const reference = {
       version: 1 as const,
       classId: 'example-effect',
@@ -233,6 +247,7 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
       binaryFingerprint,
       scannerCatalogVersion: 2 as const,
     }
+
     expect(scanned.entries[0]?.launchEligibility).toBeDefined()
     expect(resolveVst3Attachment(scanned, reference)).toBeDefined()
 
@@ -252,6 +267,7 @@ test('seeds standard directories and revalidates trusted entries during initiali
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const filePath = path.join(directory, 'plugin-catalog-v1.json')
   const bundlePath = path.join(directory, 'Example.vst3')
+
   try {
     await mkdir(bundlePath)
     const store = createPluginCatalogStore({ filePath })
@@ -280,6 +296,7 @@ test('seeds standard directories and revalidates trusted entries during initiali
       },
     }))
     const restarted = createPluginCatalogStore({ filePath })
+
     const result = await restarted.initialize([directory], async (entry) => ({
       classes: [{
         classId: 'example',
@@ -302,6 +319,7 @@ test('seeds standard directories and revalidates trusted entries during initiali
         scannerProtocolVersion: 2,
       },
     }))
+
     expect(result.directories).toContain(await realpath(directory))
     expect(result.entries[0]?.hostingStatus).toBe('ready')
     expect(result.entries[0]?.launchEligibility).toBeDefined()
@@ -312,13 +330,16 @@ test('seeds standard directories and revalidates trusted entries during initiali
 
 test('preserves a concrete scan failure reason without launch eligibility', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+
   try {
     await mkdir(path.join(directory, 'Broken.vst3'))
     const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
     await store.addDirectory(directory)
+
     const catalog = await store.scan(async () => {
       throw new Error('Code signing verification failed.')
     })
+
     expect(catalog.entries[0]?.hostingStatus).toBe('failed')
     expect(catalog.entries[0]?.unavailableReason).toBe('The VST3 scanner failed.')
     expect(catalog.entries[0]?.launchEligibility).toBeUndefined()
@@ -332,15 +353,18 @@ test('initialization skips missing and non-directory standard paths', async () =
   const customDirectory = path.join(directory, 'custom')
   const filePath = path.join(directory, 'catalog.json')
   const fileCandidate = path.join(directory, 'not-a-directory')
+
   try {
     await mkdir(customDirectory)
     await writeFile(fileCandidate, 'not a directory')
     const store = createPluginCatalogStore({ filePath })
     await store.addDirectory(customDirectory)
+
     const result = await store.initialize([
       path.join(directory, 'missing'),
       fileCandidate,
     ])
+
     expect(result.directories).toEqual([await realpath(customDirectory)])
   } finally {
     await rm(directory, { recursive: true, force: true })
@@ -352,10 +376,12 @@ test('preserves trusted entries and custom directories when initialization has n
   const customDirectory = path.join(directory, 'custom')
   const bundlePath = path.join(customDirectory, 'Example.vst3')
   const filePath = path.join(directory, 'catalog.json')
+
   try {
     await mkdir(bundlePath, { recursive: true })
     const store = createPluginCatalogStore({ filePath })
     await store.addDirectory(customDirectory)
+
     const scanBundle = async (entry: Vst3CatalogEntry) => ({
       scanHealth: 'scanned' as const,
       binaryFingerprint: 'a'.repeat(64),
@@ -370,6 +396,7 @@ test('preserves trusted entries and custom directories when initialization has n
         scannerProtocolVersion: 2 as const,
       },
     })
+
     await store.scan(scanBundle)
     const canonicalBundlePath = await realpath(bundlePath)
     await rm(bundlePath, { recursive: true, force: true })
@@ -398,10 +425,12 @@ test('preserves trusted entries and custom directories when initialization has n
 test('revalidates a previously trusted entry after a transient scan failure', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
   const bundlePath = path.join(directory, 'Example.vst3')
+
   try {
     await mkdir(bundlePath)
     const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
     await store.addDirectory(directory)
+
     const scanBundle = async (entry: Vst3CatalogEntry) => ({
       classes: [{
         classId: 'example',
@@ -424,15 +453,19 @@ test('revalidates a previously trusted entry after a transient scan failure', as
         scannerProtocolVersion: 2 as const,
       },
     })
+
     await store.scan(scanBundle)
     await expect(store.scan(async () => { throw new Error('temporary') })).resolves.toMatchObject({
       entries: [{ hostingStatus: 'failed', hasTrustedScan: true }],
     })
     let calls = 0
+
     const result = await store.revalidate(async (entry) => {
       calls += 1
+
       return scanBundle(entry)
     })
+
     expect(calls).toBe(1)
     expect(result.entries[0]?.hostingStatus).toBe('ready')
   } finally {
@@ -442,6 +475,7 @@ test('revalidates a previously trusted entry after a transient scan failure', as
 
 test('serializes scans and shares concurrent revalidation work', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+
   try {
     await mkdir(path.join(directory, 'Example.vst3'))
     const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
@@ -449,14 +483,17 @@ test('serializes scans and shares concurrent revalidation work', async () => {
     let active = 0
     let maximumActive = 0
     let releaseScan: (() => void) | undefined
+
     const scanBlocked = new Promise<void>((resolve) => {
       releaseScan = resolve
     })
+
     const scanBundle = async (entry: Vst3CatalogEntry) => {
       active += 1
       maximumActive = Math.max(maximumActive, active)
       await scanBlocked
       active -= 1
+
       return {
         scanHealth: 'scanned' as const,
         binaryFingerprint: 'a'.repeat(64),
@@ -472,6 +509,7 @@ test('serializes scans and shares concurrent revalidation work', async () => {
         },
       }
     }
+
     const firstScan = store.scan(scanBundle)
     const secondScan = store.scan(scanBundle)
     releaseScan?.()
@@ -483,10 +521,12 @@ test('serializes scans and shares concurrent revalidation work', async () => {
     await Promise.all([
       restarted.revalidate(async (entry) => {
         revalidateCalls += 1
+
         return scanBundle(entry)
       }),
       restarted.revalidate(async (entry) => {
         revalidateCalls += 1
+
         return scanBundle(entry)
       }),
     ])
@@ -498,6 +538,7 @@ test('serializes scans and shares concurrent revalidation work', async () => {
 
 test('never marks an unscanned or ineligible result ready and preserves the directory cap', async () => {
   const directory = await mkdtemp(path.join(tmpdir(), 'daw-plugin-catalog-'))
+
   try {
     await mkdir(path.join(directory, 'Example.vst3'))
     const store = createPluginCatalogStore({ filePath: path.join(directory, 'catalog.json') })
@@ -515,9 +556,11 @@ test('never marks an unscanned or ineligible result ready and preserves the dire
       Array.from({ length: 64 }, async (_, index) => {
         const candidate = path.join(directory, `directory-${index}`)
         await mkdir(candidate)
+
         return realpath(candidate)
       }),
     )
+
     await writeFile(path.join(directory, 'capped.json'), JSON.stringify({
       version: 3,
       directories: cappedDirectories,

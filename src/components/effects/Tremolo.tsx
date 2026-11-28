@@ -13,8 +13,10 @@ type TremoloProps = {
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
 }
+
 const defaults = createDefaultTremoloParams()
 const percent = formatDevicePercent
+
 export default function Tremolo(props: TremoloProps) {
   return <EffectShell title="Tremolo" typeLabel="Modulation" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="w-52 min-w-52"><div class="device-controls-with-footer grid min-h-0 flex-1 gap-3 px-3 py-3">
     <div class="grid grid-cols-2 place-content-center gap-x-5 gap-y-5">

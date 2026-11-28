@@ -32,6 +32,7 @@ test('rolls back a failed cloud insertion without touching unrelated tracks', as
     index: 0,
     timestamp: 1,
   }))
+
   const removed: string[] = []
 
   expect(await applyCreatedTrackInsertion({
@@ -55,6 +56,7 @@ test('preserves a successfully applied insertion', async () => {
     index: 0,
     timestamp: 1,
   }))
+
   let rollbackCalled = false
 
   expect(await applyCreatedTrackInsertion({

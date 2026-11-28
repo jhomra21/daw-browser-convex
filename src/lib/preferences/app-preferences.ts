@@ -25,10 +25,12 @@ export const loadInitialAppPreferences = (): AppPreferences => {
 
   try {
     const stored = localStorage.getItem(APP_PREFERENCES_STORAGE_KEY)
+
     if (stored) return normalizeAppPreferences(JSON.parse(stored))
   } catch {
     return defaultAppPreferences
   }
+
   return defaultAppPreferences
 }
 
@@ -39,11 +41,14 @@ export const createPersistedAppPreferencesWithInitial = (
   SetStoreFunction<AppPreferences>
 ] => {
   const [preferences, setPreferences] = createStore(initialPreferences)
+
   const store: [Store<AppPreferences>, SetStoreFunction<AppPreferences>] = [
     preferences,
     setPreferences,
   ]
+
   if (!canUseLocalStorage()) return store
+
   const [persistedPreferences, setPersistedPreferences] = makePersisted(store, {
     name: APP_PREFERENCES_STORAGE_KEY,
     storage: localStorage,
@@ -51,5 +56,6 @@ export const createPersistedAppPreferencesWithInitial = (
     serialize: JSON.stringify,
     deserialize: (value) => normalizeAppPreferences(JSON.parse(value))
   })
+
   return [persistedPreferences, setPersistedPreferences]
 }

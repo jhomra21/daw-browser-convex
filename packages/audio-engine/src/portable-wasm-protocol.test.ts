@@ -24,6 +24,7 @@ test('keeps the validated Wasm module outside portable control messages', () => 
     maxFramesPerBlock: 128,
     wasmBytes: new ArrayBuffer(0),
   })
+
   expect(parsed).toEqual({
     version: portableWasmProtocolVersion,
     type: 'initialize',
@@ -64,6 +65,7 @@ test('accepts only monotonic-shaped portable transport positions', () => {
 
 test('accepts safe recording uint64 boundaries and rejects overflow', () => {
   const safe = Number.MAX_SAFE_INTEGER
+
   const block: Extract<PortableWasmStatusMessage, { type: 'recording-capture-block' }> = {
     version: portableWasmProtocolVersion,
     type: 'recording-capture-block',
@@ -76,6 +78,7 @@ test('accepts safe recording uint64 boundaries and rejects overflow', () => {
     rms: 0,
     peak: 0,
   }
+
   expect(readPortableWasmRecordingStatusMessage(block)).toEqual(block)
   expect(readPortableWasmRecordingStatusMessage({
     ...block,
@@ -161,6 +164,7 @@ test('validates bounded portable recording capture controls', () => {
 
 test('keeps recording uint64 identifiers exact within the JavaScript safe-number boundary', () => {
   const sequence = Number.MAX_SAFE_INTEGER
+
   const block = {
     version: portableWasmProtocolVersion,
     type: 'recording-capture-block',
@@ -173,6 +177,7 @@ test('keeps recording uint64 identifiers exact within the JavaScript safe-number
     rms: 0,
     peak: 0,
   }
+
   expect(readPortableWasmRecordingStatusMessage(block)).toMatchObject({ sessionId: sequence, sequence })
   expect(readPortableWasmRecordingStatusMessage({ ...block, sequence: sequence + 1 })).toBeNull()
   expect(readPortableWasmRecordingStatusMessage({ ...block, sessionId: sequence + 1 })).toBeNull()
@@ -203,6 +208,7 @@ test('accepts only versioned schedules with explicit ramp endpoints and restore 
       value: 0.5,
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'install-schedule',
@@ -245,6 +251,7 @@ test('accepts exact planar PCM only for versioned portable asset registration', 
     sampleRateHz: 48_000,
     channelCount: 2,
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'register-asset',
@@ -280,6 +287,7 @@ test('requires ordered source-targeted schedules in one transport epoch', () => 
     fadeOutStartFrame: 128,
     fadeOutEndFrame: 128,
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'schedule-sources',
@@ -345,6 +353,7 @@ test('accepts atomic mixed ordinary and prepared source replacements in sequence
     fadeOutStartFrame: 128,
     fadeOutEndFrame: 128,
   }
+
   const prepared = {
     version: audioCoreContractVersion,
     epoch: 2,
@@ -361,6 +370,7 @@ test('accepts atomic mixed ordinary and prepared source replacements in sequence
     fadeOutStartFrame: 256,
     fadeOutEndFrame: 256,
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'replace-sources',
@@ -511,12 +521,14 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       }],
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
     requestId: 1,
     snapshot,
   })).toMatchObject({ type: 'prepare-graph' })
+
   const maximumTargetSnapshot = {
     ...snapshot,
     nodes: [{
@@ -530,6 +542,7 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       }],
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
@@ -574,6 +587,7 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       masterNodeId: 'master-0',
     },
   })).toBeNull()
+
   const aggregateCapacitySnapshot = {
     ...snapshot,
     masterNodeId: 'node-0',
@@ -591,6 +605,7 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
           },
           (_, processorIndex) => {
             const instanceId = nodeIndex * audioCoreMaxProcessorsPerNode + processorIndex + 1
+
             return {
               ...snapshot.nodes[0].processorOrder[0],
               id: `utility-${instanceId}`,
@@ -601,16 +616,19 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       }),
     ),
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
     requestId: 1,
     snapshot: aggregateCapacitySnapshot,
   })).toBeNull()
+
   const saturatorState = encodeSaturatorProcessorState({
     enabled: true, driveDb: 6, curve: 'soft', color: false,
     colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
   })
+
   const saturatorSnapshot = {
     ...snapshot,
     nodes: [{
@@ -629,6 +647,7 @@ test('accepts bounded versioned processor chains and rejects duplicate instances
       }],
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
@@ -662,6 +681,7 @@ test('requires sidechain edges to target a processor in their destination chain'
     tailFrames: 0,
     bypassed: false,
   }
+
   const snapshot = {
     version: audioCoreContractVersion,
     revision: 1,
@@ -685,6 +705,7 @@ test('requires sidechain edges to target a processor in their destination chain'
       pdcDelayFrames: 0,
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'prepare-graph',
@@ -715,12 +736,14 @@ test('transports registered Saturator and EQ envelopes without utility parsing',
     tailFrames: 0,
     parameterTargets: [],
   })
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'processor-state',
     revision: 1,
     envelope,
   })).toMatchObject({ type: 'processor-state', revision: 1 })
+
   const eqEnvelope = encodeAudioCoreProcessorStateEnvelope({
     kindId: 3,
     schemaVersion: 1,
@@ -737,6 +760,7 @@ test('transports registered Saturator and EQ envelopes without utility parsing',
     tailFrames: 0,
     parameterTargets: [],
   })
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion,
     type: 'processor-state',
@@ -760,16 +784,19 @@ test('accepts bounded epoch-scoped synth state and ordered MIDI events', () => {
     outputLayout: 'stereo',
     parameterTargets: [{ id: 'synth.outputGain', target: 1 }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'instrument-state', revision: 1, nodeId: 'synth-1', state,
   })).toMatchObject({ type: 'instrument-state', nodeId: 'synth-1' })
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'transport', requestId: 1, epoch: 2, running: true, frame: 0,
   })).toMatchObject({ type: 'transport', epoch: 2 })
+
   const events = [
     { nodeId: 'synth-1', noteId: 2, sequence: 1, frameOffset: 3, type: 'note-on', channel: 0, note: 60, value: 1 },
     { nodeId: 'synth-1', noteId: 2, sequence: 2, frameOffset: 3, type: 'note-off', channel: 0, note: 60, value: 0 },
   ] as const
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'instrument-events', epoch: 2, events,
   })).toMatchObject({ type: 'instrument-events', events })
@@ -817,6 +844,7 @@ test('accepts bounded sampler and drum-rack state DTOs before the worklet', () =
       startFrame: 0, endFrame: 32, loopStartFrame: 0, loopEndFrame: 0, crossfadeFrameCount: 0, chokeGroup: 0,
     }],
   }
+
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'instrument-state', revision: 1, nodeId: 'sampler-1', state: sampler,
   })).toMatchObject({ type: 'instrument-state', nodeId: 'sampler-1' })
@@ -837,22 +865,28 @@ test('B6f5 publish-graph carries an adoption continuity requirement and prepare-
   expect(parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: false,
   })).toBeNull()
+
   const framed = (publicationFrame: number | string) => parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true, publicationFrame,
   })
+
   expect(framed(256)).toEqual({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, requireContinuity: true, publicationFrame: 256 })
+
   // A publication frame is a safe integer from 0, and only an adoption (requireContinuity) carries one.
   for (const publicationFrame of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1, '256']) expect(framed(publicationFrame)).toBeNull()
   expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, publicationFrame: 256 })).toBeNull()
   expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 }))
     .toEqual({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision: 2 })
+
   for (const revision of [0, 1.5, '2']) {
     expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'cancel-publication', revision })).toBeNull()
   }
+
   const snapshot = {
     version: audioCoreContractVersion, revision: 1, contractHash: 'test', masterNodeId: 'master', edges: [], assets: [],
     nodes: [{ id: 'master', kind: 'master', inputLayout: 'stereo', outputLayout: 'stereo', latencyFrames: 0, processorOrder: [] }],
   }
+
   const envelope = new Uint8Array([3, 0, 0, 0])
   expect(parsePortableWasmControlMessage({ version: portableWasmProtocolVersion, type: 'prepare-graph', requestId: 1, snapshot, envelope }))
     .toMatchObject({ type: 'prepare-graph', envelope })
@@ -865,10 +899,13 @@ test('C9a publish-graph carries the source table of its revision, only with an a
     version: audioCoreContractVersion, epoch, sequence, sourceNodeId: 'track-1', assetId: 'asset:one', startFrame: 0, stopFrame: 128,
     sourceOffsetFrame: 0, sourceFrameCount: 128, gain: 1, fadeInStartFrame: 0, fadeInEndFrame: 0, fadeOutStartFrame: 128, fadeOutEndFrame: 128,
   })
+
   const prepared = { ...event(2), preparationId: 4, assetId: undefined }
+
   const publish = (sources: { epoch?: number; ordinary: readonly object[]; prepared: readonly object[] }, publicationFrame?: number, requireContinuity: boolean = true) => parsePortableWasmControlMessage({
     version: portableWasmProtocolVersion, type: 'publish-graph', requestId: 1, revision: 2, ...(requireContinuity && { requireContinuity }), publicationFrame, sources,
   })
+
   const table = { epoch: 2, ordinary: [event(1)], prepared: [prepared] }
   expect(publish(table, 256)).toMatchObject({ type: 'publish-graph', publicationFrame: 256, sources: table })
   expect(publish(table)).toMatchObject({ type: 'publish-graph', sources: table })

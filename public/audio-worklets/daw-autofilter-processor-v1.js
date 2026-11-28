@@ -11,10 +11,12 @@ const PARAMS = [
   ['autofilter.lfo.phaseOffset', 0, 0, 1],
   ['autofilter.lfo.stereoPhase', 0, -0.5, 0.5],
 ]
+
 const LATENCY = 6
 const valueAt = (values, index) => values[values.length === 1 ? 0 : index]
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value))
 const isAutoFilterMessage = (message) => message !== null && Object.prototype.toString.call(message) === '[object Object]' && message.version === 1
+
 const isAutoFilterConfigureMessage = (message, revision) => isAutoFilterMessage(message)
   && message.type === 'configure'
   && Number.isInteger(message.revision)
@@ -53,8 +55,11 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
 
   onMessage(message) {
     if (!isAutoFilterMessage(message)) return this.fault('malformed-message')
+
     if (message.type === 'dispose') return this.port.close()
+
     if (message.type === 'reset') return this.reset()
+
     if (!isAutoFilterConfigureMessage(message, this.revision)) return this.fault('malformed-or-stale-configure')
     this.revision = message.revision
     this.state = message.state
@@ -67,6 +72,7 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
 
   lfo(phase) {
     const wrapped = phase - Math.floor(phase)
+
     return this.state.lfo && this.state.lfo.waveform === 'triangle'
       ? 1 - 4 * Math.abs(wrapped - 0.5)
       : Math.sin(2 * Math.PI * wrapped)
@@ -81,10 +87,15 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
     channel.ic1 = 2 * v1 - channel.ic1
     channel.ic2 = 2 * v2 - channel.ic2
     const high = input - k * v1 - v2
+
     if (mode === 'highpass') return high
+
     if (mode === 'bandpass') return v1
+
     if (mode === 'notch') return high + v2
+
     if (mode === 'peak') return v2 - high
+
     return v2
   }
 
@@ -109,37 +120,47 @@ class DawAutoFilterProcessor extends AudioWorkletProcessor {
     this.filter(channel, midpoint, cutoff, q, this.state.mode)
     const wet = this.filter(channel, driven, cutoff, q, this.state.mode)
     channel.previous = driven
+
     return input + (wet - input) * valueAt(parameters['autofilter.mix'], frame)
   }
 
   process(inputs, outputs, parameters) {
     const input = inputs[0]
     const output = outputs[0]
+
     if (!output || output.length === 0) return true
     const leftIn = input && input[0]
     const rightIn = input && input[1]
     const targetBypass = this.state.enabled ? 0 : 1
     const bypassStep = 1 / Math.max(1, Math.round(0.01 * sampleRate))
+
     for (let frame = 0; frame < output[0].length; frame++) {
       this.bypass += clamp(targetBypass - this.bypass, -bypassStep, bypassStep)
+
       for (let channelIndex = 0; channelIndex < output.length; channelIndex++) {
         let sample = channelIndex === 0 ? (leftIn ? leftIn[frame] : 0) : (rightIn ? rightIn[frame] : (leftIn ? leftIn[frame] : 0))
+
         if (!Number.isFinite(sample)) {
           sample = 0
           this.fault('nonfinite-input')
         }
+
         const processed = this.processChannel(channelIndex, sample, parameters, frame)
         const mixed = Number.isFinite(processed) ? processed + (sample - processed) * this.bypass : 0
+
         if (!Number.isFinite(processed)) {
           this.channels[channelIndex] = this.createChannel()
           this.fault('nonfinite-state')
         }
+
         const delayed = this.delay[channelIndex][this.delayIndex]
         this.delay[channelIndex][this.delayIndex] = mixed
         output[channelIndex][frame] = delayed
       }
+
       this.delayIndex = (this.delayIndex + 1) % LATENCY
     }
+
     return true
   }
 }

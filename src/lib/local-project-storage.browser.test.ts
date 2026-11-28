@@ -900,6 +900,7 @@ window.storageFixture = {
   list: () => listLocalProjects(),
 }
 `
+
   const result = await build({
     root: repositoryRoot,
     configFile: false,
@@ -909,25 +910,37 @@ window.storageFixture = {
       enforce: 'pre',
       resolveId: (id) => {
         if (id.endsWith(fixtureId)) return `\0${fixtureId}.ts`
+
         if (id.endsWith('hooks/useShareMenuController')) return '\0stub:share.ts'
+
         if (id.endsWith('hooks/useProjectSaveStatus')) return '\0stub:status.ts'
+
         if (id.endsWith('lib/shared-outbox')) return '\0stub:outbox.ts'
+
         if (id.endsWith('lib/local-project-pending-writes')) return '\0stub:pending.ts'
+
         return undefined
       },
       load: (id) => {
         if (id === `\0${fixtureId}.ts`) return source
+
         if (id === '\0stub:share.ts') return 'export const useShareMenuController = () => ({})'
+
         if (id === '\0stub:status.ts') return 'export const useProjectSaveStatus = () => () => ({})'
+
         if (id === '\0stub:outbox.ts') return 'export const readSharedOutboxRetryState = async () => ({})'
+
         if (id === '\0stub:pending.ts') return 'export const flushLocalProjectPendingWrites = async () => {}'
+
         return undefined
       },
     }],
     resolve: { alias: { '~': `${repositoryRoot}src` } },
     build: { write: false, minify: false, lib: { entry: fixtureId, formats: ['iife'], name: 'storageFixture' } },
   })
+
   const output = Array.isArray(result) ? result[0] : result
+
   if (!output || !('output' in output)) throw new Error('Expected storage fixture bundle')
   const directory = `/tmp/daw-storage-round6-${crypto.randomUUID()}`
   await mkdir(directory, { recursive: true })
@@ -939,22 +952,31 @@ window.storageFixture = {
   const env = { ...process.env }
   delete env.AGENT_BROWSER_CDP
   delete env.AGENT_BROWSER_SESSION
+
   const run = async (...args: string[]) => {
     const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
     const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
+
     if (await child.exited !== 0) throw new Error(stderr || stdout)
+
     return stdout.trim()
   }
+
   const results: [string, unknown][] = []
+
   const read = async (method: string) => {
     const value = z.json().parse(JSON.parse(JSON.parse(
       await run('eval', `storageFixture.${method}().then(JSON.stringify)`),
     )))
+
     // toMatchObject rewrites matched fields in place, so the evidence keeps an untouched copy.
     results.push([method, structuredClone(value)])
+
     return value
   }
+
   await run('open', server.url.href)
+
   try {
     const upgrade = await read('upgrade')
     expect(upgrade).toMatchObject({ version: 2, names: ['V1 A', 'V1 B'], jobs: 0, directoryPreserved: true })
@@ -990,6 +1012,7 @@ window.storageFixture = {
     expect(await read('recreated')).toEqual({ jobs: 0, live: 1, bytes: 'new incarnation' })
     expect(await read('starvation')).toEqual({ first: 9, attempted: 8, laterProcessed: true })
     expect(await read('crossTab')).toEqual({ otherScans: 0, active: 1, queued: 0 })
+
     for (const kind of ['dashboard', 'gc']) {
       for (const retention of ['live', 'implicit', 'gc', 'copy', 'none']) {
         expect(await read("sharedAssetRemoval.bind(null, '" + kind + "', '" + retention + "')")).toEqual({
@@ -997,6 +1020,7 @@ window.storageFixture = {
         })
       }
     }
+
     expect(await read("reservationRecovery.bind(null, 'closed')")).toEqual({
       reservation: false, pending: false, finalReservation: false, finalPending: false,
       expectedRoot: 'implicit-opfs', retainedChosenRoot: false, restoredImplicitRoot: true,

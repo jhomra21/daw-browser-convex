@@ -32,10 +32,12 @@ export const parseSerializableSha256State = (value: unknown): SerializableSha256
   if (typeof value !== 'object' || value === null || Array.isArray(value)) {
     throw new Error('SHA-256 state must be an object.')
   }
+
   const keys = Object.keys(value).sort()
   const words = Reflect.get(value, 'words')
   const totalBytes = Reflect.get(value, 'totalBytes')
   const tail = Reflect.get(value, 'tail')
+
   if (keys.join(',') !== 'tail,totalBytes,words'
     || !Array.isArray(words) || words.length !== 8
     || !Array.isArray(tail) || tail.length >= 64
@@ -46,6 +48,7 @@ export const parseSerializableSha256State = (value: unknown): SerializableSha256
     || !tail.every((byte) => typeof byte === 'number' && Number.isInteger(byte) && byte >= 0 && byte <= 255)) {
     throw new Error('SHA-256 state is invalid.')
   }
+
   return {
     words: [...words],
     totalBytes,
@@ -61,6 +64,7 @@ export const initialSerializableSha256State = (): SerializableSha256State => ({
 
 const compress = (input: number[], block: Uint8Array, offset: number) => {
   const schedule = Array.from({ length: 64 }, () => 0)
+
   for (let index = 0; index < 16; index += 1) {
     const position = offset + index * 4
     schedule[index] = (
@@ -70,6 +74,7 @@ const compress = (input: number[], block: Uint8Array, offset: number) => {
       | block[position + 3]!
     ) >>> 0
   }
+
   for (let index = 16; index < 64; index += 1) {
     const previous = schedule[index - 15]!
     const secondPrevious = schedule[index - 2]!
@@ -77,7 +82,9 @@ const compress = (input: number[], block: Uint8Array, offset: number) => {
     const smallSigma1 = rightRotate(secondPrevious, 17) ^ rightRotate(secondPrevious, 19) ^ (secondPrevious >>> 10)
     schedule[index] = (schedule[index - 16]! + smallSigma0 + schedule[index - 7]! + smallSigma1) >>> 0
   }
+
   let [a, b, c, d, e, f, g, h] = input
+
   for (let index = 0; index < 64; index += 1) {
     const bigSigma1 = rightRotate(e!, 6) ^ rightRotate(e!, 11) ^ rightRotate(e!, 25)
     const choice = (e! & f!) ^ (~e! & g!)
@@ -94,6 +101,7 @@ const compress = (input: number[], block: Uint8Array, offset: number) => {
     b = a
     a = (temp1 + temp2) >>> 0
   }
+
   input[0] = (input[0]! + a!) >>> 0
   input[1] = (input[1]! + b!) >>> 0
   input[2] = (input[2]! + c!) >>> 0
@@ -109,15 +117,19 @@ export const updateSerializableSha256State = (
   bytes: Uint8Array,
 ): SerializableSha256State => {
   const state = parseSerializableSha256State(stateInput)
+
   if (bytes.length > Number.MAX_SAFE_INTEGER - state.totalBytes) {
     throw new Error('SHA-256 byte count exceeds the safe integer range.')
   }
+
   const combined = new Uint8Array(state.tail.length + bytes.length)
   combined.set(state.tail)
   combined.set(bytes, state.tail.length)
   const words = [...state.words]
   const completeBytes = combined.length - (combined.length % 64)
+
   for (let offset = 0; offset < completeBytes; offset += 64) compress(words, combined, offset)
+
   return {
     words,
     totalBytes: state.totalBytes + bytes.length,
@@ -137,6 +149,8 @@ export const finalizeSerializableSha256State = (stateInput: SerializableSha256St
     false,
   )
   const words = [...state.words]
+
   for (let offset = 0; offset < finalBytes.length; offset += 64) compress(words, finalBytes, offset)
+
   return words.map((word) => word.toString(16).padStart(8, '0')).join('')
 }

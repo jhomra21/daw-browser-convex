@@ -38,6 +38,7 @@ class InertSocket extends EventTarget implements WebSocket {
 }
 
 const unexpected = (name: string) => () => { throw new Error(`Effect history reached unexpected action ${name}`) }
+
 const unexpectedActions: TimelineHistoryActions = {
   insertLocalTrack: unexpected("insertLocalTrack"), removeLocalTrack: unexpected("removeLocalTrack"),
   insertLocalClip: unexpected("insertLocalClip"), replaceLocalClip: unexpected("replaceLocalClip"),
@@ -66,6 +67,7 @@ export default function mountHookHistory(input: Input) {
   const client = new ConvexClient("https://inert.invalid", {
     webSocketConstructor: InertSocket, skipConvexDeploymentUrlCheck: true, unsavedChangesWarning: false,
   })
+
   const history = useTimelineHistory({
     projectId: () => input.projectId,
     userId: () => "local",
@@ -78,9 +80,12 @@ export default function mountHookHistory(input: Input) {
     reserveInstanceEffectEdit: ({ targetId, effect, instanceId, params }) => {
       if (effect === "instrument") {
         const instrument = normalizeTrackInstrumentParams(params)
+
         return instrument && input.processorEdits.reserve({ targetId, effect, from: instrument, to: instrument })
       }
+
       const kind = effect.replace(/^master-/, "")
+
       return instanceId && isAudioEffectKind(kind)
         ? input.processorEdits.reserve(createAudioEffectParameterPayload({ targetId, instanceId, kind }, params, params))
         : undefined
@@ -92,5 +97,6 @@ export default function mountHookHistory(input: Input) {
     notify: input.notify,
     getActions: () => unexpectedActions,
   })
+
   return { ...history, close: () => client.close() }
 }

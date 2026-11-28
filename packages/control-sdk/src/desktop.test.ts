@@ -28,6 +28,7 @@ const status = {
 const temporaryDirectory = async () => {
   const directory = await mkdtemp(path.join(tmpdir(), "daw-control-sdk-"))
   directories.push(directory)
+
   return directory
 }
 
@@ -37,8 +38,10 @@ afterEach(async () => {
   await Promise.all(servers.splice(0).map((server) => new Promise<void>((resolve) => {
     if (!server.listening) {
       resolve()
+
       return
     }
+
     server.close(() => resolve())
   })))
   await Promise.all(directories.splice(0).map((directory) => rm(directory, { recursive: true, force: true })))
@@ -52,9 +55,11 @@ const createHost = async (version: "v1" | "v2" = "v2", respond = true) => {
   await mkdir(hostDirectory, { recursive: true, mode: 0o700 })
   await chmod(hostDirectory, 0o700)
   const socketPath = path.join(hostDirectory, "host.sock")
+
   const server = createServer((socket) => {
     sockets.add(socket)
     socket.once("close", () => sockets.delete(socket))
+
     const decode = createDesktopFrameDecoder((frame) => {
       if (frame.type === "hello") {
         if (!respond) return
@@ -72,14 +77,18 @@ const createHost = async (version: "v1" | "v2" = "v2", respond = true) => {
               sessionId: "session-identifier",
               capabilities: ["host.status", "control.capabilities", "control.snapshot"],
             }))
+
         return
       }
+
       if (frame.type !== "request") return
+
       const result = frame.operation === "host.status"
         ? status
         : version === "v2"
           ? localControlCapabilitiesV2
           : localControlCapabilitiesV1
+
       socket.write(encodeDesktopFrame({
         version,
         type: "reply",
@@ -87,8 +96,10 @@ const createHost = async (version: "v1" | "v2" = "v2", respond = true) => {
         result,
       }))
     })
+
     socket.on("data", decode)
   })
+
   servers.push(server)
   await new Promise<void>((resolve, reject) => server.once("error", reject).listen(socketPath, resolve))
   await writeFile(path.join(hostDirectory, "registration-v1.json"), JSON.stringify({
@@ -102,6 +113,7 @@ const createHost = async (version: "v1" | "v2" = "v2", respond = true) => {
   await chmod(path.join(hostDirectory, "registration-v1.json"), 0o600)
   process.env.DAW_DESKTOP_USER_DATA = directory
   process.env.DAW_CONTROL_AUTH_PATH = path.join(directory, "credentials", "control-auth.json")
+
   return directory
 }
 
@@ -155,6 +167,7 @@ describe("public desktop control SDK", () => {
       userDataDirectory: profile,
       actorPath: path.join(actorProfile, "sdk-actor.json"),
     })
+
     const client = createCanonicalControlClient(connection.invoker)
 
     await expect(client.projects.list({})).resolves.toEqual({ projects: [{ projectId: "project-1" }] })

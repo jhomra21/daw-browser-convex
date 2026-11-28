@@ -4,6 +4,7 @@ import { createLiveMidiRouter, type LiveMidiNoteHandle } from './live-midi-route
 const noteOn = (sourceId: string, channel: number, note: number, timeStamp: number) => ({
   sourceId, channel, note, timeStamp, velocity: 1, kind: 'note-on' as const,
 })
+
 const noteOff = (sourceId: string, channel: number, note: number, timeStamp: number) => ({
   sourceId, channel, note, timeStamp, velocity: 0, kind: 'note-off' as const,
 })
@@ -11,12 +12,14 @@ const noteOff = (sourceId: string, channel: number, note: number, timeStamp: num
 test('releases duplicate note-ons FIFO without crossing source or channel boundaries', () => {
   const released: number[] = []
   let nextId = 1
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: nextId++ }),
     releaseNote: (handle) => released.push(handle.id),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive(noteOn('one', 1, 60, 2))
   router.receive(noteOn('two', 1, 60, 3))
@@ -28,12 +31,14 @@ test('releases duplicate note-ons FIFO without crossing source or channel bounda
 
 test('defers note-off under sustain and drains it on pedal release', () => {
   const released: LiveMidiNoteHandle[] = []
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: 1 }),
     releaseNote: (handle) => released.push(handle),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 2, kind: 'control-change', controller: 64, value: 1 })
   router.receive(noteOff('one', 1, 60, 3))
@@ -45,12 +50,14 @@ test('defers note-off under sustain and drains it on pedal release', () => {
 test('source resets release only the source state', () => {
   const released: number[] = []
   let nextId = 1
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: nextId++ }),
     releaseNote: (handle) => released.push(handle.id),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive(noteOn('two', 1, 60, 2))
   router.resetSource('one')
@@ -61,12 +68,14 @@ test('source resets release only the source state', () => {
 
 test('all sound off releases held notes even when sustain is active', () => {
   const released: Array<{ id: number; force: boolean | undefined }> = []
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: 1 }),
     releaseNote: (handle, _timeStamp, force) => released.push({ id: handle.id, force }),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 2, kind: 'control-change', controller: 64, value: 1 })
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 3, kind: 'control-change', controller: 120, value: 0 })
@@ -75,12 +84,14 @@ test('all sound off releases held notes even when sustain is active', () => {
 
 test('all notes off uses ordinary release and respects sustain', () => {
   const released: Array<{ id: number; force: boolean | undefined }> = []
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: 1 }),
     releaseNote: (handle, _timeStamp, force) => released.push({ id: handle.id, force }),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 2, kind: 'control-change', controller: 123, value: 0 })
   expect(released).toEqual([{ id: 1, force: false }])
@@ -96,12 +107,14 @@ test('all notes off uses ordinary release and respects sustain', () => {
 test('reset all controllers releases only sustain-deferred notes', () => {
   const released: number[] = []
   let nextId = 1
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: nextId++ }),
     releaseNote: (handle) => released.push(handle.id),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   router.receive(noteOn('one', 1, 61, 2))
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 3, kind: 'control-change', controller: 64, value: 1 })
@@ -115,12 +128,14 @@ test('reset all controllers releases only sustain-deferred notes', () => {
 test('selection changes preserve an admitted note until ordinary note-off', () => {
   const released: Array<{ id: number; force: boolean | undefined }> = []
   let admitted = true
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => admitted,
     startNote: () => ({ id: 1 }),
     releaseNote: (handle, _timeStamp, force) => released.push({ id: handle.id, force }),
     applyExpression: () => undefined,
   })
+
   router.receive(noteOn('one', 1, 60, 1))
   admitted = false
   router.receive(noteOff('one', 1, 60, 2))
@@ -130,12 +145,14 @@ test('selection changes preserve an admitted note until ordinary note-off', () =
 test('panic clears filtered sustain state before a newly admitted note arrives', () => {
   const released: number[] = []
   let admitted = false
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => admitted,
     startNote: () => ({ id: 1 }),
     releaseNote: (handle) => released.push(handle.id),
     applyExpression: () => undefined,
   })
+
   router.receive({ sourceId: 'one', channel: 1, timeStamp: 1, kind: 'control-change', controller: 64, value: 1 })
   admitted = true
   router.panic()
@@ -146,6 +163,7 @@ test('panic clears filtered sustain state before a newly admitted note arrives',
 
 test('routes sustain and panic controllers through expression exactly once', () => {
   const expressions: Array<{ controller: number; value: number; channel: number; sourceId: string }> = []
+
   const router = createLiveMidiRouter({
     acceptsChannel: () => true,
     startNote: () => ({ id: 1 }),

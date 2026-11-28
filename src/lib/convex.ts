@@ -16,18 +16,23 @@ const convexAccessTokenSchema = z.object({ token: z.string() });
 
 const fetchConvexAccessToken = async () => {
   let response: Response;
+
   try {
     response = await fetch('/api/convex-auth/token', { credentials: 'include' });
   } catch {
     if (import.meta.env.VITE_DESKTOP) return null;
     throw new Error('Failed to fetch Convex auth token');
   }
+
   if (response.status === 401) return null;
+
   if (!response.ok) {
     if (import.meta.env.VITE_DESKTOP) return null;
     throw new Error('Failed to fetch Convex auth token');
   }
+
   const body = convexAccessTokenSchema.safeParse(await response.json());
+
   return body.success ? body.data.token : null;
 };
 
@@ -68,13 +73,16 @@ export function useConvexQuery<
     queryKey: ['convex', ...queryKey()],
     queryFn: async () => {
       const currentArgs = args();
+
       if (currentArgs === null || currentArgs === undefined) {
         throw new Error('Query args are null or undefined');
       }
+
       return await convex.query(query, currentArgs);
     },
     enabled: () => {
       const currentArgs = args();
+
       return currentArgs !== null && currentArgs !== undefined;
     },
     staleTime: 1000 * 60 * 5, // 5 minutes - we rely on real-time invalidation
@@ -85,6 +93,7 @@ export function useConvexQuery<
   // Set up Convex real-time subscription to invalidate TanStack Query cache
   createEffect(() => {
     const currentArgs = args();
+
     if (currentArgs === null || currentArgs === undefined) {
       return;
     }

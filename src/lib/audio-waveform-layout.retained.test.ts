@@ -13,6 +13,7 @@ describe('source-aligned waveform crop', () => {
       framesPerInterval: 10,
       intervalCount: 2,
     }
+
     const cropped = cropWaveformDataToSourceRange({ data, sourceStartSec: 0.1, sourceEndSec: 0.2 })
     expect(cropped?.sourceStartFrame).toBe(10)
     expect(cropped?.sourceEndFrame).toBe(20)
@@ -31,11 +32,13 @@ describe('source-aligned waveform crop', () => {
       framesPerInterval: 10,
       intervalCount: 3,
     }
+
     const cropped = cropWaveformDataToSourceRange({ data, sourceStartSec: 0.15, sourceEndSec: 0.25 })
     expect(cropped?.sourceStartFrame).toBe(15)
     expect(cropped?.sourceEndFrame).toBe(25)
     expect(cropped?.data.firstFrame).toBe(10)
     expect(cropped?.data.kind).toBe('intervals')
+
     if (!cropped || cropped.data.kind !== 'intervals') throw new Error('Expected interval data')
     expect(cropped.data.intervalCount).toBe(2)
   })

@@ -5,6 +5,7 @@ const STEMS_DIRECTORY_NAME = 'stems'
 
 export const chooseStemExportDirectory = async (): Promise<FileSystemDirectoryHandle> => {
   const selectedDirectory = await chooseLocalExportDirectory()
+
   return selectedDirectory.getDirectoryHandle(STEMS_DIRECTORY_NAME, { create: true })
 }
 

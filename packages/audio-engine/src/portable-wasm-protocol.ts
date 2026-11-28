@@ -75,6 +75,7 @@ export type PortableWasmControlMessage =
   | { version: typeof portableWasmProtocolVersion; type: 'utility-state'; revision: number; state: UtilityProcessorState }
   | { version: typeof portableWasmProtocolVersion; type: 'instrument-state'; revision: number; nodeId: string; state: AudioCoreInstrumentState }
   | { version: typeof portableWasmProtocolVersion; type: 'transport'; requestId: number; epoch: number; running: boolean; frame: number }
+  | { version: typeof portableWasmProtocolVersion; type: 'tempo'; bpm: number }
   | { version: typeof portableWasmProtocolVersion; type: 'instrument-events'; epoch: number; events: readonly PortableWasmInstrumentEvent[] }
   | { version: typeof portableWasmProtocolVersion; type: 'instrument-parameters'; requestId: number; revision: number; epoch: number; sequence: number; events: readonly PortableWasmInstrumentEvent[] }
   | { version: typeof portableWasmProtocolVersion; type: 'install-schedule'; requestId: number; schedule: PortableFrameSchedule }
@@ -626,6 +627,10 @@ export const parsePortableWasmControlMessage = <Value>(value: Value): PortableWa
   if (value.type === 'transport' && isPositiveInteger(value.requestId) && isPositiveInteger(value.epoch) && isProtocolBoolean(value.running)
     && isProtocolNumber(value.frame) && Number.isSafeInteger(value.frame) && value.frame >= 0) {
     return { version: portableWasmProtocolVersion, type: 'transport', requestId: value.requestId, epoch: value.epoch, running: value.running, frame: value.frame }
+  }
+
+  if (value.type === 'tempo' && isProtocolNumber(value.bpm) && Number.isFinite(value.bpm) && value.bpm > 0) {
+    return { version: portableWasmProtocolVersion, type: 'tempo', bpm: value.bpm }
   }
 
   if ((value.type === 'instrument-events' || value.type === 'instrument-parameters') && isPositiveInteger(value.epoch) && Array.isArray(value.events)

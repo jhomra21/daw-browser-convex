@@ -499,13 +499,14 @@ extern "C" daw_audio_core_result daw_audio_core_wasm_graph_process_planar(
 extern "C" daw_audio_core_result daw_audio_core_wasm_graph_set_transport(
   uint32_t epoch,
   uint32_t running,
-  int64_t frame) {
+  int64_t frame,
+  double tempo_bpm) {
   if (!wasm_graph_initialized) return DAW_AUDIO_CORE_NOT_PREPARED;
   const daw_audio_transport_state state{
     .epoch = epoch,
     .running = running,
     .frame = frame,
-    .tempo_bpm = 0.0,
+    .tempo_bpm = tempo_bpm,
     .time_signature_numerator = 0,
     .time_signature_denominator = 0,
     .cycle_active = 0,

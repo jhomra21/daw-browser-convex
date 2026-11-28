@@ -48,7 +48,12 @@ void render_autofilter_processor(
     .sync = state.lfo_sync != 0,
   };
   advance_bypass(core, history.bypass, processor.bypassed != 0 || state.enabled == 0);
-  history.kernel.process(values, config, core.transport.tempo_bpm, history.bypass, input_left, input_right,
-    *output_left, *output_right);
+  // The wrapped project frame keeps a looped song's LFO on its bar; the block's start is where a mid-block loop wrap is ignored.
+  const daw::audio_core::AutoFilterTransport transport{
+    .tempo_bpm = core.transport.tempo_bpm,
+    .frame = project_time_frame(core) + static_cast<int64_t>(frame),
+    .running = core.transport.running != 0,
+  };
+  history.kernel.process(values, config, transport, history.bypass, input_left, input_right, *output_left, *output_right);
 }
 }  // namespace daw::audio_core_internal

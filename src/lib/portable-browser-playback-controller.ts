@@ -654,6 +654,7 @@ export const createPortableBrowserPlaybackController = (input: {
       await playbackSession.publishGraph(startupPrepared.graph.revision)
 
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
+      playbackSession.setTempo?.(compilation.snapshot.bpm)
       await playbackSession.setTransport(nextEpoch, false, startupPrepared.schedule.timeOrigin.frame)
 
       if (cancelled()) throw new Error("Portable browser playback startup was cancelled.")
@@ -1293,6 +1294,10 @@ export const createPortableBrowserPlaybackController = (input: {
 
       const published = session.publishGraph(candidate.graph.revision, wasPlaying ? { requireContinuity: true, publicationFrame: seamFrame, sources } : { requireContinuity: true, sources }).then((): PortableAdoptionAttemptResult => {
         if (active !== session) return "unavailable"
+
+        // Tempo-synced effects follow the project tempo the transport carries, as native restates it with an adopted tempo edit.
+        if (folded.bpm !== activeSnapshot?.bpm) session.setTempo?.(folded.bpm)
+
         // The compiled schedule, not the installed one: it still holds the note-on of a voice that continues from before
         // the seam, which the next reconcile needs to know that voice sounds.
         activeFrameSchedule = candidate.schedule

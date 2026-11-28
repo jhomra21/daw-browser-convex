@@ -40,36 +40,36 @@
    "src/components/timeline/create-persisted-effect-state.ts": "200343a8ef20a412aabdef8c0e8c057cb9e96b0b42db9487e337448de800628d",
    "src/components/timeline/create-effects-panel-state.ts": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38",
    "src/components/timeline/create-effects-panel-controller.ts": "978a49ecf05c163cdc05de1a87b6868361fc89179ea7592a9e1df87d3ef6f99d",
-   "src/lib/portable-browser-playback-controller.ts": "6e984e3219debb419935a9e75ec76507a79afa91a42807de9a87098444292b09",
+   "src/lib/portable-browser-playback-controller.ts": "4914eae96cfc9d6a0a081ebaf372e875dcffe77e49bbc8e4c74f389e7750b3d8",
    "src/components/effects/Sampler.tsx": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8",
    "src/components/effects/Granular.tsx": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e",
    "src/lib/when-number.ts": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5",
    "tools/acceptance/device-control-cost.browser-runtime.tsx": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7",
    "tools/acceptance/device-control-cost.ts": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345",
    "src/hooks/useEffectsPanelAudioSync.test.ts": "b59c7be4e86858c38c62ab84a4414f50c1423e279bb6e164dec46a4daa4e073d",
-   "src/lib/portable-browser-playback-controller.test.ts": "a87d91e459b09aa0230fc9167caaca447a179e8c55eef0a4b2f038217715c443",
+   "src/lib/portable-browser-playback-controller.test.ts": "bb6cb7654362efaad79c926e21697be701bf28232d73ca57762142093f0573dc",
    "src/components/timeline/create-persisted-effect-state.test.ts": "4015e82cc121cb819afb990b2078c06ca996e0732fcb9184592f324682c5eead",
    "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "0da64041beda5de695b159d1652f3359119aff52097923a45ebc744adc8e3708",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
    "src/hooks/pointer-gesture-ownership.browser.test.ts": "5d9d060426c06a29d85f2fb64f2de58bf39a572092c657213783b164149cc9e0",
    "native/audio-core/src/audio_core.cpp": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e",
-   "native/audio-core/include/daw/audio_core.h": "3d1b6454915ed1833fbe077173fe9f2c61b6fc0ce2705839f469e47d37a285e2",
-   "native/audio-core/tests/audio_core_test.cpp": "cbd5c45bc03375c5b1cc9ad85efc3290da73a3c085ef546594f26fb3e86772dd",
+   "native/audio-core/include/daw/audio_core.h": "4d12d0c3a2b1efe4147114d8f83703b2b46c314c06f57aad3eb103a1784d856a",
+   "native/audio-core/tests/audio_core_test.cpp": "36b04b44658f799c503140c2e1da248e57b7db35d5935f8a489d5e1f56b084eb",
    "native/audio-host-macos/tests/audio_host_test.cpp": "7ced47a18c9c8d37f61d06f3a76f562e4a2a6f63bf9701f9e5354c8dc66dc562",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
-   "public/audio-core/daw-audio-core.wasm": "e723de479f3b191dc90b0eb16a6cfc0e68e41533428cfacb2deb620f34ba9e4b",
-   "public/audio-core/daw-audio-core.manifest.json": "074a506a690afd45322ee7d1c5b61d32cd212ed1cdabe474c29c63fea0877882",
+   "public/audio-core/daw-audio-core.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
+   "public/audio-core/daw-audio-core.manifest.json": "2774775ba9f6b62102f60da3cc8c96b93ccd8038fc6086b5a55469e3566e6367",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "53ecf1158f097547efc0d389ab1fe22e2bd3fedd191c8423175aa88174d67712",
-   "public/audio-worklets/daw-portable-audio-core-host-v2.js": "122eec400ee20d0adbfddca21ff349457c22e8ea6b0b3114ca782502f710539b",
+   "public/audio-worklets/daw-portable-audio-core-host-v2.js": "aca3c5d2dd1d783568d492702a6cb9e90b85e5e561e44b6d438ed9e25037bffa",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
-   "packages/audio-engine/src/portable-wasm-protocol.ts": "b4793183ac8a093491a35d21d7921a0dd238e4f251ad47b473323eeb5f7060fc",
-   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "7cc174ea208770d24101e6aac31ae18694b5e8f648cbd28fa60b22cca7a2a193",
+   "packages/audio-engine/src/portable-wasm-protocol.ts": "9b59fb1edf13bed9628568dc3a1cbc8ce6e9177283b73d94cf18464f288bcd6b",
+   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "b74e90e9294e1e7c1a101e78faed82c92a9c985ae56bdcf75e25f5bde89259ce",
    "packages/audio-engine/src/native-host-wire.ts": "7f4d56b92169ecf5896c8b7b63bd967c7684767fb8f9c7a859c203ac767912a8",
    "packages/audio-engine/src/native-host-wire.test.ts": "19d2b6b19f4e292148b7a01aae71a7ae4cdf50b807a828a0f81919e130ae2a39",
-   "packages/audio-engine/src/portable-wasm-host.test.ts": "cb36b01e5f83237f254edb794fba730ac282add341f123a134cf0ce752574e20",
-   "packages/audio-engine/src/portable-wasm-protocol.test.ts": "f9037f067e208a1252b07ecc16cd1eb8f52d5c0df82fef29c83b203c89377cbe",
+   "packages/audio-engine/src/portable-wasm-host.test.ts": "01f93c2965a1d4f922f4403ee657fd50f2e72747dd2374f9bc79b653b18a430b",
+   "packages/audio-engine/src/portable-wasm-protocol.test.ts": "90af46bf2abbf573ac8c20fd21485b5831cd0942ab81422442e9daae1fc7b7b2",
    "packages/audio-engine/src/portable-wasm-worklet.test.ts": "e9bdac5adebf54a2d4e501cd301b510425db02af7f2f44be3d3ecc909ededff9",
-   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "85f8ee6e746c0b53df86331315ec4d96f8facd59a354b32a51c72d710928a98b",
+   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "bb8763b8f9b0e86aabdc782acb2a9ca1625d249c706550135baac50f97d8410f",
    "tools/acceptance/analyze-ae-08-continuity.ts": "33a61fc7dba85ab143b79e3f97b0d7403768afd7a760efc515e913d73d28c734",
    "tools/acceptance/ae-08-phase-5-fixture.ts": "18cee089fb283290e3d2ce4e83075e94f1859f9b1df4cdc3c2f7a15e64e59cdd",
    "tools/acceptance/ae-08-live-graph.ts": "28172913dc52c18bde74ee68164ab799354987738dd7a1e0f1202d698065c0c9",
@@ -1228,7 +1228,7 @@
    "judge": {
     "kind": "ctest",
     "exit": 0,
-    "total": 63
+    "total": 65
    }
   },
   {
@@ -1360,7 +1360,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 106,
+     "pass": 107,
      "skip": 0,
      "fail": 0
     },
@@ -1475,7 +1475,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 16,
+     "pass": 17,
      "skip": 0,
      "fail": 0
     },
@@ -2072,7 +2072,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 158,
+     "pass": 159,
      "skip": 0,
      "fail": 0
     },
@@ -2406,7 +2406,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 81,
+      "pass": 82,
       "skip": 0,
       "fail": 0
      },
@@ -2591,7 +2591,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
-      "pass": 9,
+      "pass": 10,
       "skip": 0,
       "fail": 0
      },
@@ -2913,7 +2913,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 438,
+     "pass": 439,
      "skip": 3,
      "fail": 0
     },
@@ -3315,7 +3315,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/portable-wasm-host.test.ts": {
-      "pass": 81,
+      "pass": 82,
       "skip": 0,
       "fail": 0
      },
@@ -3500,7 +3500,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
-      "pass": 9,
+      "pass": 10,
       "skip": 0,
       "fail": 0
      },
@@ -3732,11 +3732,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "fdbedb45aefecf1ba3a3818069d0524e99c19b65a5ad8daadf2e4ce969f60b76",
+    "value": "2488e93af31e071bdf699e6ea4e95bd772193b0764d34824c1e706389e33fc7f",
     "files": {
-     "public/audio-core/daw-audio-core.wasm": "e723de479f3b191dc90b0eb16a6cfc0e68e41533428cfacb2deb620f34ba9e4b",
-     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "e723de479f3b191dc90b0eb16a6cfc0e68e41533428cfacb2deb620f34ba9e4b",
-     "public/audio-core/daw-audio-core.manifest.json": "074a506a690afd45322ee7d1c5b61d32cd212ed1cdabe474c29c63fea0877882"
+     "public/audio-core/daw-audio-core.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
+     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
+     "public/audio-core/daw-audio-core.manifest.json": "2774775ba9f6b62102f60da3cc8c96b93ccd8038fc6086b5a55469e3566e6367"
     }
    }
   },
@@ -35096,7 +35096,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -35274,7 +35274,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 156,
+      "pass": 157,
       "skip": 0,
       "fail": 2
      },
@@ -41357,7 +41357,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -41487,7 +41487,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 143,
+      "pass": 144,
       "skip": 0,
       "fail": 15
      },
@@ -41617,7 +41617,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -41750,7 +41750,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 140,
+      "pass": 141,
       "skip": 0,
       "fail": 18
      },
@@ -41883,7 +41883,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -42012,7 +42012,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 156,
+      "pass": 157,
       "skip": 0,
       "fail": 2
      },
@@ -42254,7 +42254,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -42384,7 +42384,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 151,
+      "pass": 152,
       "skip": 0,
       "fail": 7
      },
@@ -46520,7 +46520,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -46703,7 +46703,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 153,
+      "pass": 154,
       "skip": 0,
       "fail": 5
      },
@@ -46882,7 +46882,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -47007,7 +47007,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 156,
+      "pass": 157,
       "skip": 0,
       "fail": 2
      },
@@ -47120,7 +47120,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -47314,7 +47314,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 114,
+      "pass": 115,
       "skip": 0,
       "fail": 44
      },
@@ -47570,7 +47570,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -47694,7 +47694,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 157,
+      "pass": 158,
       "skip": 0,
       "fail": 1
      },
@@ -49622,7 +49622,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -49747,7 +49747,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 152,
+      "pass": 153,
       "skip": 0,
       "fail": 6
      },
@@ -49864,7 +49864,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 158,
+      "pass": 159,
       "skip": 0,
       "fail": 0
      },
@@ -49989,7 +49989,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 141,
+      "pass": 142,
       "skip": 0,
       "fail": 17
      },

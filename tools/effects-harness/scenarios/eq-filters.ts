@@ -8,7 +8,7 @@ import type { Family } from './index'
 import type { Scenario } from '../harness'
 import { coherentFrequency, concat, impulse, linearToDb, noise, seededRandom, sine, sineWithPeakAt, silence } from '../signals'
 import { createDefaultEqParams, designEqBand, eqCurveResponseDb } from '../../../packages/shared/src'
-import { parityFixtures, parityScenario, robustnessScenarios } from './shared'
+import { parityScenario, robustnessScenarios } from './shared'
 
 const bandTypes = ['peaking', 'lowshelf', 'highshelf', 'lowpass', 'highpass'] as const
 
@@ -190,6 +190,22 @@ const modes: Scenario = {
     h.within('Output -6 dB', out[0], -6, 0.05, 'dB')
     const adaptive = await gainOf(eqWith(bell, { adaptiveQ: true }), [input, input])
     h.within('Adaptive Q leaves the centre gain unchanged', adaptive[0], 12, 0.3, 'dB')
+
+    // The width where the bell is 3 dB below its peak, measured on the impulse response. Adaptive Q scales Q by 1 + |gain| / 24,
+    // so a +18 dB bell gets 1.75 times narrower.
+    const frequencies = logFrequencies(100, 10000, 2048)
+
+    const bandwidthHz = async (adaptiveQ: boolean) => {
+      const response = responseDb(await impulseResponse(h, eqWith({ type: 'peaking', frequency: 1000, gainDb: 18, q: 1 }, { adaptiveQ })), h.rate, frequencies)
+      const inside = frequencies.filter((_, i) => response[i] >= Math.max(...response) - 3)
+
+      return inside[inside.length - 1] - inside[0]
+    }
+
+    const [plain, narrowed] = [await bandwidthHz(false), await bandwidthHz(true)]
+    h.info('-3 dB bandwidth of a +18 dB Q 1 bell at 1 kHz, Adaptive Q off', plain, 'Hz')
+    h.info('-3 dB bandwidth of the same bell, Adaptive Q on', narrowed, 'Hz')
+    h.within('Adaptive Q narrows a +18 dB bell: bandwidth off / on', plain / narrowed, 1.75, 0.15, 'ratio', 'Q * (1 + |gain| / 24)')
     const ms = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, input])
     h.within('M/S mode: curve A shapes the mid of a mono signal', ms[0], 12, 0.3, 'dB')
     const side = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, Float32Array.from(input, (v) => -v)])
@@ -258,6 +274,30 @@ const autofilterDrive: Scenario = {
   },
 }
 
+// A filter with Drive 0 and Clip off has no nonlinearity in its path, so level and resonance must not add distortion.
+const driveZeroLinearity: Scenario = {
+  effect: 'autofilter',
+  name: 'drive-zero-linearity',
+  run: async (h) => {
+    const frames = h.rate
+
+    const thd = async (spec: EffectSpec, frequency: number, amplitude: number) => {
+      const f = coherentFrequency(frequency, frames / 2, h.rate)
+      const { output } = await h.render(spec, { input: [sine(frames, f, h.rate, amplitude)] }, { parity: false })
+
+      return measureThdPlusNoise(output[0].slice(frames / 2), f, h.rate)
+    }
+
+    for (const hiQuality of [false, true]) {
+      for (const dbfs of [-6, 0, 6]) {
+        h.atMost(`THD+N, 100 Hz at ${dbfs} dBFS, 1 kHz low-pass, resonance 0, Drive 0, Hi-Quality ${hiQuality ? 'on' : 'off'}`, await thd(fx.autofilter({ frequencyHz: 1000, resonance: 0, driveDb: 0, hiQuality }), 100, 10 ** (dbfs / 20)), -90, 'dB')
+      }
+    }
+
+    h.atMost('THD+N, 1 kHz at -12 dBFS at the cutoff, resonance 1 (Q 8), Drive 0', await thd(fx.autofilter({ frequencyHz: coherentFrequency(1000, frames / 2, h.rate), resonance: 1, driveDb: 0, hiQuality: false }), 1000, 10 ** (-12 / 20)), -90, 'dB')
+  },
+}
+
 const resonanceLevel: Scenario = {
   effect: 'autofilter',
   name: 'resonance-level',
@@ -311,18 +351,72 @@ const hiQualityLatency: Scenario = {
 
 const windowedDb = (signal: Float32Array, window: number) => Array.from({ length: Math.floor(signal.length / window) }, (_, index) => linearToDb(rms(signal.subarray(index * window, (index + 1) * window), 1) + 1e-9))
 
+// The LFO shapes of lfo_shape in autofilter_kernel.h, as a function of the cycle fraction.
+const lfoWaves = {
+  sine: (fraction: number) => Math.sin(2 * Math.PI * fraction),
+  triangle: (fraction: number) => 1 - 4 * Math.abs(fraction - 0.5),
+  sawDown: (fraction: number) => 1 - 2 * fraction,
+  sawUp: (fraction: number) => 2 * fraction - 1,
+  square: (fraction: number) => (fraction < 0.5 ? 1 : -1),
+}
+
 const lfoWaveforms: Scenario = {
   effect: 'autofilter',
   name: 'lfo-shapes',
   rates: [48000],
   run: async (h) => {
-    const input = sine(4 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
+    const tone = coherentFrequency(2000, h.rate, h.rate)
+    const input = sine(4 * h.rate, tone, h.rate, 0.1)
+    const window = Math.round(h.rate / 100)
+    const base = 500
+    const depth = 2
+    const rate = 2
+    const lfo = { ...autofilterLfo, rateHz: rate, depthOctaves: depth }
+
+    // What the 2 kHz tone's level is for a fixed cutoff, at quarter-octave steps over the sweep: the map from the cutoff the
+    // LFO picks to the level the render shows.
+    const octaves = Array.from({ length: 4 * 2 * depth + 1 }, (_, index) => -depth + index / 4)
+
+    const calibration = await Promise.all(octaves.map(async (octave) => {
+      const { output } = await h.render(fx.autofilter({ frequencyHz: base * 2 ** octave, resonance: 0, hiQuality: false }), { input: [input.subarray(0, h.rate)] }, { parity: false })
+      const levels = windowedDb(output[0].subarray(h.rate / 2), window)
+
+      return levels.reduce((sum, level) => sum + level, 0) / levels.length
+    }))
+
+    const levelAt = (octave: number) => {
+      const position = Math.min(Math.max((octave + depth) * 4, 0), octaves.length - 1)
+      const low = Math.min(Math.floor(position), octaves.length - 2)
+
+      return calibration[low] + (calibration[low + 1] - calibration[low]) * (position - low)
+    }
+
+    // Windows right after a jump of the square or saw shapes are skipped: the filter is still settling there.
+    const settled = (index: number) => ((index * window) / h.rate * rate * 2) % 1 > 0.2 && index * window > h.rate / 4
+
+    const deviation = (levels: number[], wave: (fraction: number) => number) => Math.max(...levels.map((level, index) => {
+      if (!settled(index)) return 0
+
+      const fraction = (((index + 0.5) * window) / h.rate * rate) % 1
+
+      return Math.abs(level - levelAt(depth * wave(fraction)))
+    }))
 
     for (const waveform of ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold'] as const) {
-      const { output } = await h.render(fx.autofilter({ frequencyHz: 500, resonance: 0, hiQuality: false, lfo: { ...autofilterLfo, waveform, rateHz: 2, depthOctaves: 2 } }), { input: [input] }, { parity: false })
-      const levels = windowedDb(output[0].subarray(h.rate), Math.round(h.rate / 100))
+      const { output } = await h.render(fx.autofilter({ frequencyHz: base, resonance: 0, hiQuality: false, lfo: { ...lfo, waveform } }), { input: [input] }, { parity: false })
+      const levels = windowedDb(output[0].subarray(h.rate), window)
 
       h.atLeast(`2 kHz level swing through a 2-octave ${waveform} sweep of a 500 Hz low-pass`, Math.max(...levels) - Math.min(...levels), 6, 'dB', 'A5: every shape moves the cutoff')
+
+      if (waveform === 'sampleHold') continue
+
+      const measured = windowedDb(output[0], window)
+      const own = deviation(measured, lfoWaves[waveform])
+
+      const others = Object.entries(lfoWaves).filter(([name]) => name !== waveform).map(([, wave]) => deviation(measured, wave))
+
+      h.atMost(`${waveform}: worst gap between the measured level path and the expected ${waveform} cutoff path`, own, 0.5, 'dB', 'the cutoff follows the shape')
+      h.atLeast(`${waveform}: smallest gap to any other shape's expected path`, Math.min(...others), 4, 'dB', 'the shapes can be told apart')
     }
   },
 }
@@ -332,12 +426,33 @@ const tempoSync: Scenario = {
   name: 'lfo-tempo-sync',
   rates: [48000],
   run: async (h) => {
-    const input = sine(2 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
-    const lfo = { ...autofilterLfo, depthOctaves: 2 }
-    const free = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, rateHz: 2 } }), { input: [input] }, { parity: false })
-    const synced = await h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: { ...lfo, sync: true, division: 5 } }), { input: [input] }, { parity: false })
+    const input = sine(6 * h.rate, coherentFrequency(2000, h.rate, h.rate), h.rate, 0.1)
+    const lfo = { ...autofilterLfo, depthOctaves: 2, phaseOffset: 0.3 }
+    const render = (lfoState: typeof lfo, startFrame: number, tempoBpm?: number) => h.render(fx.autofilter({ frequencyHz: 500, hiQuality: false, lfo: lfoState }), { input: [input.subarray(startFrame)], startFrame, tempoBpm }, { parity: false })
+    const bar = 2 * h.rate
+    const free = await render({ ...lfo, rateHz: 2 }, 0)
+    const fromBar1 = await render({ ...lfo, sync: true, division: 5 }, 0)
 
-    h.atMost('1/4 note at the core default 120 bpm against a 2 Hz free LFO', Math.max(...free.output[0].map((value, index) => Math.abs(value - synced.output[0][index]))), 1e-3, 'abs', 'A5: tempo sync')
+    // A 1/4 note is 2 Hz at 120 bpm, the tempo the core falls back to when the transport carries none (the renders above send none).
+    h.atMost('1/4 note at the 120 bpm fallback against a 2 Hz free LFO started at bar 1', Math.max(...free.output[0].map((value, index) => Math.abs(value - fromBar1.output[0][index]))), 1e-3, 'abs', 'A5: tempo sync')
+
+    // The transport's tempo reaches the sync: 1/4 note is 1.5 Hz at 90 bpm, the rate native's daw-autofilter-modulation row checks.
+    const free90 = await render({ ...lfo, rateHz: 1.5 }, 0)
+    const synced90 = await render({ ...lfo, sync: true, division: 5 }, 0, 90)
+
+    h.atMost('1/4 note at the 90 bpm the transport carries against a 1.5 Hz free LFO started at bar 1', maxAbsDiff(free90.output[0], synced90.output[0]), 1e-3, 'abs', 'A5: tempo sync follows the project tempo')
+
+    // Bar 3 starts at frame 2 * bar. Both renders have run for over a bar by then, so the filter state of the earlier start has settled.
+    // Division 0 is two bars, so a start at bar 2 sits half a cycle away from a start at bar 1.
+    const twoBars = { ...lfo, sync: true, division: 0 }
+    const fromBar1TwoBars = await render(twoBars, 0)
+    const fromBar2 = await render(twoBars, bar)
+    const bar3 = (rendered: { output: Float32Array[] }, from: number) => rendered.output[0].subarray(2 * bar - from + 2000, 3 * bar - from)
+    const resumedFrame = bar + h.rate / 8
+    const resumed = await render(twoBars, resumedFrame)
+
+    h.atMost('bar 3 of a 2-bar synced Auto Filter rendered from bar 1 against bar 3 rendered from bar 2', maxAbsDiff(bar3(fromBar1TwoBars, 0), bar3(fromBar2, bar)), 1e-3, 'abs', 'the synced LFO follows song position, not the render start')
+    h.atMost('bar 3 rendered from bar 1 against bar 3 rendered from an eighth of a second into bar 2', maxAbsDiff(bar3(fromBar1TwoBars, 0), bar3(resumed, resumedFrame)), 1e-3, 'abs', 'an arbitrary start frame gives the same sweep')
   },
 }
 
@@ -386,30 +501,29 @@ const nanInputGuard: Scenario = {
   },
 }
 
-// The Web Audio fallback worklet keeps its own filter (tanh drive, six frames of delay, no limiter), so the core is no longer
-// expected to match it; the rows show how far the two sit apart for settings the fallback can express.
-const legacyFallbackComparison: Scenario = {
-  effect: 'autofilter',
-  name: 'legacy-fallback-difference',
-  run: async (h) => {
-    const spec = fx.autofilter({ frequencyHz: 800, resonance: 0.3, hiQuality: false, driveDb: 0, envelope: { amountOctaves: 1, attackMs: 10, releaseMs: 100, hold: false, link: false } })
+// The Web Audio fallback worklet is a port of the core's kernel, so the two must agree to the same 1e-5 as the dynamics family.
+// The fallback has no song position or tempo: its synced LFO free-runs from frame 0, which is where the harness transport starts.
+// The saw's jump must not land exactly on a sample: there the core's position-derived phase and the fallback's running sum differ by rounding noise, and one sample flips between the rails.
+const autofilterParity = (name: string, state: Parameters<typeof fx.autofilter>[0]): Scenario => ({ ...parityScenario('autofilter', fx.autofilter({ frequencyHz: 800, resonance: 0.3, ...state })), name })
 
-    for (const [name, input] of parityFixtures(h.rate)) {
-      const { output, legacy } = await h.render(spec, { input: [input] })
-
-      if (legacy === null) h.info(`legacy fallback difference, ${name}`, null, '', 'not measured: legacy implementation is a Web Audio node chain')
-      else h.info(`legacy fallback difference, ${name}`, Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), 'abs', 'by design: the fallback keeps its own filter')
-    }
-  },
-}
+const autofilterParityScenarios: Scenario[] = [
+  autofilterParity('parity-hi-quality-off', { hiQuality: false, driveDb: 6 }),
+  autofilterParity('parity-hi-quality-on', { hiQuality: true, driveDb: 6 }),
+  autofilterParity('parity-lfo', { hiQuality: false, mode: 'bandpass', slope: 24, lfo: { ...autofilterLfo, waveform: 'triangle', rateHz: 3, depthOctaves: 1.5, phaseOffset: 0.2, stereoPhase: 0.25 } }),
+  autofilterParity('parity-lfo-hi-quality-spin', { hiQuality: true, lfo: { ...autofilterLfo, waveform: 'sampleHold', rateHz: 5, depthOctaves: 2, stereoMode: 'spin', stereoPhase: 0.2 } }),
+  autofilterParity('parity-lfo-sync', { hiQuality: false, lfo: { ...autofilterLfo, waveform: 'sawUp', sync: true, division: 8, depthOctaves: 2, phaseOffset: 0.3711 } }),
+  autofilterParity('parity-envelope', { hiQuality: false, mode: 'highpass', envelope: { amountOctaves: 2, attackMs: 5, releaseMs: 80, hold: true, link: true } }),
+  autofilterParity('parity-envelope-hi-quality', { hiQuality: true, mode: 'notch', envelope: { amountOctaves: -1.5, attackMs: 20, releaseMs: 200, hold: false, link: false } }),
+  autofilterParity('parity-output-clip', { hiQuality: true, driveDb: 12, outputDb: 6, clip: true, mix: 0.7 }),
+]
 
 export const eqFilters: Family = {
   scenarios: [
     bandResponseScenario, bandResponseHq, referenceBands, referenceBandsHq, slopes12, modes, graphMatchesRender, hqLatency, precision, gainStepClick, slopes, nanInputGuard,
-    autofilterDrive, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
+    autofilterDrive, driveZeroLinearity, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
     parityScenario('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 })),
     ...robustnessScenarios('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 }), () => 0),
-    legacyFallbackComparison,
+    ...autofilterParityScenarios,
     ...robustnessScenarios('autofilter', fx.autofilter(), null),
   ],
   notEncoded: [

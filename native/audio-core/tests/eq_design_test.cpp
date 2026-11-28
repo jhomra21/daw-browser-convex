@@ -1,6 +1,7 @@
 // Tests for the EQ band designs in src/dsp/eq_band.h against the analog prototypes (RBJ cookbook s-domain filters).
-// Run with a group name (accuracy, slopes, stability) or with no argument for all. Every check prints its measured value.
+// Run with a group name (accuracy, nearNyquistPoles, poleTable, slopes, stability) or with no argument for all. Every check prints its measured value.
 #include "../src/dsp/eq_band.h"
+#include "../tools/eq_pole_table_fit.h"
 
 #include <algorithm>
 #include <complex>
@@ -9,6 +10,7 @@
 #include <random>
 
 namespace dsp = daw::audio_core::dsp;
+namespace tools = daw::audio_core::dsp::tools;
 using Complex = std::complex<double>;
 using Type = dsp::EqBandType;
 
@@ -116,6 +118,32 @@ void accuracy() {
   }
 }
 
+// Bands whose pole or corner is near Nyquist: the impulse-invariant poles alone leave 0.46 to 0.57 dB (low shelf pole at
+// omega0 / sqrt(a) = 1.9 omega0; bell at 0.4 fs). Limits are the ones of the harness row band-response-vs-analog.
+void nearNyquistPoles() {
+  for (const double rate : {44100.0, 48000.0, 96000.0}) {
+    const double limit = rate >= 96000.0 ? 0.25 : 0.5;
+    std::printf("  at %.0f Hz\n", rate);
+    expectAtMost("low shelf 11.4 kHz Q 0.29 -22 dB", worstError(Type::Lowshelf, 11401.0, 0.287, -22.04, rate, rate), limit);
+    expectAtMost("bell 19 kHz Q 0.45 +22.4 dB", worstError(Type::Peaking, 19050.0, 0.45, 22.4, rate, rate), limit);
+  }
+}
+
+// The checked-in pole tables must be what the fit in tools/eq_pole_table_fit.h produces; regenerate them with
+// tools/eq_pole_table_generator.cpp after changing the fit or the prototypes. The tolerance covers libm differences between
+// platforms: the fit is deterministic, but a flat valley of the worst error can settle a little differently.
+void poleTable() {
+  const auto compare = [](const char *name, tools::Shape shape, const double *checkedIn) {
+    const std::vector<double> fitted = tools::fitTable(shape);
+    double worst = 0.0;
+    for (size_t i = 0; i < fitted.size(); ++i) worst = std::max(worst, std::fabs(fitted[i] - checkedIn[i]));
+    expectAtMost(name, worst, 2.0e-3);
+  };
+  compare("bell table, largest difference from a fresh fit", tools::Shape::Bell, dsp::detail::kBellPoleTable);
+  compare("low shelf table, largest difference from a fresh fit", tools::Shape::LowShelf, dsp::detail::kLowShelfPoleTable);
+  compare("low-pass table, largest difference from a fresh fit", tools::Shape::LowPass, dsp::detail::kLowPassPoleTable);
+}
+
 void slopes() {
   for (const bool high : {false, true}) {
     const Type type = high ? Type::Highpass48 : Type::Lowpass48;
@@ -158,7 +186,7 @@ void stability() {
 
 int main(int argc, char **argv) {
   const char *group = argc > 1 ? argv[1] : nullptr;
-  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"slopes", slopes}, {"stability", stability}};
+  const struct { const char *name; void (*run)(); } cases[] = {{"accuracy", accuracy}, {"nearNyquistPoles", nearNyquistPoles}, {"poleTable", poleTable}, {"slopes", slopes}, {"stability", stability}};
   for (const auto &testCase : cases) {
     if (group != nullptr && std::strcmp(group, testCase.name) != 0) continue;
     std::printf("%s\n", testCase.name);

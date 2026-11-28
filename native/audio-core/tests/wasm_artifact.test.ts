@@ -1003,7 +1003,7 @@ test('the planar graph bridge validates bounded buses and forwards epoch-scoped 
     new Uint8Array(exports.memory.buffer, allocation, graph.byteLength).set(graph)
     expect(exports.daw_audio_core_wasm_graph_prepare(allocation, graph.byteLength)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_publish(1)).toBe(0)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n, 0)).toBe(0)
     const pointers = allocation + graph.byteLength
     const planes = pointers + 8 * 4
     const view = new DataView(exports.memory.buffer)
@@ -1109,7 +1109,7 @@ test('the planar graph bridge preserves eager channels above the paged ABI limit
     expect(exports.daw_audio_core_wasm_graph_create_paged_asset(
       1n, 48_000, 3, assetHandleOffset,
     )).toBe(1)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n, 0)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_schedule_sample_source(
       1, 1n, 1n, asset, 0n, 1n, 0n, 1n, 1, 0n, 0n, 1n, 1n, 0,
       0, 0.5, 0, 0.5,
@@ -1120,7 +1120,7 @@ test('the planar graph bridge preserves eager channels above the paged ABI limit
     expect(view.getFloat32(output0Offset, true)).toBeCloseTo(0.25, 6)
     expect(view.getFloat32(output1Offset, true)).toBeCloseTo(-0.5, 6)
     expect(view.getFloat32(output2Offset, true)).toBeCloseTo(-0.5, 6)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(2, 0, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(2, 0, 0n, 0)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_release_asset(asset)).toBe(0)
   } finally {
     exports.free(allocation)
@@ -1203,13 +1203,13 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
       assetFrames, 48_000, 2, assetPointersOffset, assetHandleOffset,
     )).toBe(0)
     const asset = view.getBigUint64(assetHandleOffset, true)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 0n, 0)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_schedule_sample_source(
       1, 1n, 1n, asset, 0n, 100n, 0n, BigInt(assetFrames), 1,
       0n, 4n, 100n, 100n, 0,
       1, 0.25, 0, 0.5,
     )).toBe(0)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n, 0)).toBe(0)
     expect(exports.daw_audio_core_wasm_graph_process_planar(
       processFrames, 0, 2, 0, outputPointersOffset, 1, 0, 0, 0, 0, 0, 0,
     )).toBe(0)
@@ -1221,7 +1221,7 @@ test('the production Wasm graph bridge renders curved fades and silence after a 
       expectedFade.map((gain) => expect.closeTo(gain * -0.125, 5)),
     )
 
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 2n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 0, 2n, 0)).toBe(0)
     new Float32Array(exports.memory.buffer, leftOutputOffset, processFrames).fill(1)
     new Float32Array(exports.memory.buffer, rightOutputOffset, processFrames).fill(-1)
     expect(exports.daw_audio_core_wasm_graph_process_planar(
@@ -1321,7 +1321,7 @@ test('the Wasm graph bridge renders asset-backed sampler voices', async () => {
     view.setUint32(zoneOffset + 52, 0, true)
     view.setUint32(zoneOffset + 56, 4, true)
     expect(exports.daw_audio_core_wasm_graph_configure_sampler(1n, stateOffset, zoneOffset)).toBe(0)
-    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n)).toBe(0)
+    expect(exports.daw_audio_core_wasm_graph_set_transport(1, 1, 0n, 0)).toBe(0)
     view.setUint32(pointersOffset, pointersOffset + 8, true)
     view.setUint32(pointersOffset + 4, pointersOffset + 12, true)
     view.setUint32(eventsOffset, 1, true)

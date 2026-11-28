@@ -15,6 +15,7 @@ namespace {
 
 using daw::audio_core::AutoFilterConfig;
 using daw::audio_core::AutoFilterKernel;
+using daw::audio_core::AutoFilterTransport;
 using daw::audio_core::AutoFilterValues;
 
 constexpr double kPi = 3.14159265358979323846;
@@ -39,7 +40,7 @@ struct Rig {
   AutoFilterKernel kernel;
   AutoFilterValues values;
   AutoFilterConfig config;
-  double bpm = 120.0;
+  AutoFilterTransport transport{.tempo_bpm = 120.0, .frame = 0, .running = false};
   explicit Rig(double sampleRate = 48000.0) : rate(sampleRate) {
     kernel.prepare(rate);
     values.frequency_hz = 20000.0F;
@@ -50,7 +51,8 @@ struct Rig {
     if (right != nullptr) right->assign(input.size(), 0.0F);
     for (size_t n = 0; n < input.size(); ++n) {
       float l = 0.0F, r = 0.0F;
-      kernel.process(values, config, bpm, 0.0F, input[n], input[n], l, r);
+      kernel.process(values, config, transport, 0.0F, input[n], input[n], l, r);
+      if (transport.running) ++transport.frame;
       out[n] = l;
       if (right != nullptr) (*right)[n] = r;
     }
@@ -337,6 +339,23 @@ void switchClick() {
   }
 }
 
+// Hi-Quality runs the filter at twice the rate, so its coefficients must be redesigned when the setting flips, not only when the cutoff moves.
+void qualityToggleKeepsCutoff() {
+  for (const bool toHq : {false, true}) {
+    Rig toggled, reference;
+    toggled.config.hi_quality = !toHq;
+    reference.config.hi_quality = toHq;
+    for (Rig *rig : {&toggled, &reference}) rig->values.frequency_hz = 1000.0F;
+    toggled.run(noise(24000, 0.3, 9));
+    toggled.config.hi_quality = toHq;
+    const double f = coherent(4000.0, 24000, toggled.rate);
+    const auto tone = sine(48000, f, toggled.rate, 0.1);
+    const double after = toDb(fitTone(toggled.run(tone), 24000, f, toggled.rate).amplitude / 0.1);
+    const double expected = toDb(fitTone(reference.run(tone), 24000, f, reference.rate).amplitude / 0.1);
+    expectNear(toHq ? "gain at 4 kHz of a 1 kHz low-pass after switching Hi-Quality on, vs always on (dB)" : "gain at 4 kHz of a 1 kHz low-pass after switching Hi-Quality off, vs always off (dB)", after, expected, 0.3);
+  }
+}
+
 // ---- A4/A5: modulation ---------------------------------------------------------------------------------------------------------
 
 void lfoShapes() {
@@ -377,11 +396,84 @@ void tempoSync() {
   rig.values.frequency_hz = 1000.0F;
   rig.values.lfo_depth_octaves = 1.0F;
   rig.values.lfo_rate_hz = 7.0F;
-  rig.bpm = 120.0;
   rig.run(std::vector<float>(12000, 0.0F));
   const float quarter = rig.kernel.cutoff_hz(0);
   rig.run(std::vector<float>(24000, 0.0F));
   expectNear("a synced LFO returns after 2 beats at 120 BPM (cutoff Hz)", rig.kernel.cutoff_hz(0), quarter, quarter * 0.02);
+}
+
+// With Sync on and the transport running, the LFO follows the song position, so where rendering starts does not matter.
+void syncFollowsSongPosition() {
+  constexpr size_t bar = 96000;  // 4 beats at 120 BPM and 48 kHz
+  const auto cutoffAtBar3 = [&](size_t startBar) {
+    Rig rig;
+    rig.config.sync = true;
+    rig.config.division = 5;
+    rig.config.waveform = 5;  // sample and hold: the strictest shape, it also depends on the cycle count
+    rig.values.frequency_hz = 1000.0F;
+    rig.values.lfo_depth_octaves = 2.0F;
+    rig.values.lfo_phase_offset = 0.3F;
+    rig.transport.running = true;
+    rig.transport.frame = static_cast<int64_t>(startBar * bar);
+    rig.run(std::vector<float>((3 - startBar) * bar + 1000, 0.0F));
+    return rig.kernel.cutoff_hz(0);
+  };
+  expectTrue("the cutoff at bar 3 is the same when rendering starts at bar 1 or bar 2 (Hz)", cutoffAtBar3(1) == cutoffAtBar3(2));
+  expectTrue("it also matches a render that started at bar 0 (Hz)", cutoffAtBar3(0) == cutoffAtBar3(2));
+
+  const auto rateAt = [&](double bpm) {
+    Rig rig;
+    rig.config.sync = true;
+    rig.config.division = 5;
+    rig.values.frequency_hz = 1000.0F;
+    rig.values.lfo_depth_octaves = 1.0F;
+    rig.transport = {.tempo_bpm = bpm, .frame = 7000, .running = true};
+    rig.run(std::vector<float>(1, 0.0F));
+    const float start = rig.kernel.cutoff_hz(0);
+    // One beat later the sine is back where it started; half a beat later it is not.
+    const size_t beat = static_cast<size_t>(std::llround(60.0 / bpm * rig.rate));
+    rig.transport.frame = 7000 + static_cast<int64_t>(beat);
+    rig.run(std::vector<float>(1, 0.0F));
+    const float afterBeat = rig.kernel.cutoff_hz(0);
+    rig.transport.frame = 7000 + static_cast<int64_t>(beat / 4);
+    rig.run(std::vector<float>(1, 0.0F));
+    return std::array<float, 3>{start, afterBeat, rig.kernel.cutoff_hz(0)};
+  };
+  const auto at90 = rateAt(90.0);
+  expectNear("90 BPM: a 1/4-note LFO is back after one beat of 0.667 s (cutoff Hz)", at90[1], at90[0], at90[0] * 0.002);
+  expectTrue("90 BPM: a quarter of a beat later it has moved", std::fabs(at90[2] - at90[0]) > at90[0] * 0.2);
+  expectNear("tempo 90 gives 1.5 Hz for a 1/4 note", AutoFilterKernel::sync_rate_hz(5, 90.0), 1.5, 1.0e-4);
+
+  Rig stopped;
+  stopped.config.sync = true;
+  stopped.config.division = 5;
+  stopped.values.frequency_hz = 1000.0F;
+  stopped.values.lfo_depth_octaves = 1.0F;
+  stopped.transport.frame = 5000;
+  stopped.run(std::vector<float>(6000, 0.0F));
+  const float first = stopped.kernel.cutoff_hz(0);
+  stopped.run(std::vector<float>(6000, 0.0F));
+  expectTrue("a stopped transport leaves the synced LFO free-running", std::fabs(stopped.kernel.cutoff_hz(0) - first) > first * 0.05);
+}
+
+// Resonance 1, loud noise and a cutoff swept by an a-rate LFO at the fastest rate: the state guard must never be what keeps it finite.
+void automationStability() {
+  for (const bool hq : {false, true}) {
+    for (const uint32_t slope : {0u, 1u}) {
+      Rig rig;
+      rig.config.hi_quality = hq;
+      rig.config.slope = slope;
+      rig.config.waveform = 4;  // square: the cutoff jumps three octaves every half cycle
+      rig.values.frequency_hz = 200.0F;
+      rig.values.resonance = 1.0F;
+      rig.values.lfo_rate_hz = 20.0F;
+      rig.values.lfo_depth_octaves = 3.0F;
+      const auto out = rig.run(noise(4 * 48000, 2.0, 41));
+      expectAtMost(hq ? (slope == 0 ? "hq 12 dB peak output under square cutoff automation at Q 8 (abs)" : "hq 24 dB peak output under square cutoff automation at Q 8 (abs)")
+                      : (slope == 0 ? "12 dB peak output under square cutoff automation at Q 8 (abs)" : "24 dB peak output under square cutoff automation at Q 8 (abs)"),
+        peakAbs(out), 200.0);
+    }
+  }
 }
 
 void envelopeInDb() {
@@ -413,7 +505,7 @@ void envelopeLinkAndHold() {
     rig.values.env_attack_ms = 1.0F;
     for (size_t n = 0; n < 24000; ++n) {
       float l = 0.0F, r = 0.0F;
-      rig.kernel.process(rig.values, rig.config, rig.bpm, 0.0F, static_cast<float>(0.3 * std::sin(2.0 * kPi * 1000.0 * n / rig.rate)), 0.01F, l, r);
+      rig.kernel.process(rig.values, rig.config, rig.transport, 0.0F, static_cast<float>(0.3 * std::sin(2.0 * kPi * 1000.0 * n / rig.rate)), 0.01F, l, r);
     }
     const double ratio = static_cast<double>(rig.kernel.cutoff_hz(0)) / rig.kernel.cutoff_hz(1);
     expectTrue(link ? "linked envelopes give identical cutoffs for L and R" : "unlinked envelopes follow each channel", link ? std::fabs(ratio - 1.0) < 1.0e-4 : ratio > 1.5);
@@ -506,10 +598,10 @@ const Case kCases[] = {
   {"resonance", "resonanceMapping", resonanceMapping}, {"resonance", "resonanceLevel", resonanceLevel},
   {"resonance", "resonancePeakHeight", resonancePeakHeight}, {"resonance", "bandPassUnity", bandPassUnity},
   {"resonance", "clipAndOutput", clipAndOutput}, {"slope", "slopes", slopes},
-  {"switch", "cutoffStepClick", cutoffStepClick}, {"switch", "switchClick", switchClick},
-  {"modulation", "lfoShapes", lfoShapes}, {"modulation", "tempoSync", tempoSync}, {"modulation", "envelopeInDb", envelopeInDb},
+  {"switch", "cutoffStepClick", cutoffStepClick}, {"switch", "switchClick", switchClick}, {"switch", "qualityToggleKeepsCutoff", qualityToggleKeepsCutoff},
+  {"modulation", "lfoShapes", lfoShapes}, {"modulation", "tempoSync", tempoSync}, {"modulation", "syncFollowsSongPosition", syncFollowsSongPosition}, {"modulation", "envelopeInDb", envelopeInDb},
   {"modulation", "envelopeLinkAndHold", envelopeLinkAndHold}, {"modulation", "stereoPhase", stereoPhase},
-  {"safety", "safety", safety}, {"cost", "cost", cost},
+  {"safety", "safety", safety}, {"safety", "automationStability", automationStability}, {"cost", "cost", cost},
 };
 
 }  // namespace

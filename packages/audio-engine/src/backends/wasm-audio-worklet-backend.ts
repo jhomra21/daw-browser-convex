@@ -700,6 +700,13 @@ export class PortableWasmPlaybackSession {
     this.active = running
   }
 
+  // The project tempo, which tempo-synced effects follow. It applies from the next block, so a tempo edit while playing
+  // changes the rate without a new transport epoch.
+  setTempo(bpm: number) {
+    if (this.disposed) throw new Error('Portable playback session was disposed.')
+    this.node.port.postMessage({ version: portableWasmProtocolVersion, type: 'tempo', bpm })
+  }
+
   async installSchedule(schedule: PortableFrameSchedule) {
     const response = await this.request({ type: 'install-schedule', schedule })
 

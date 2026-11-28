@@ -3525,7 +3525,7 @@ void test_wasm_planar_preserves_requested_eager_channels() {
   expect(daw_audio_core_wasm_graph_create_paged_asset(
     1, 48000, 3, &rejected_paged_asset), DAW_AUDIO_CORE_INVALID_ARGUMENT);
 
-  expect(daw_audio_core_wasm_graph_set_transport(1, 1, 0), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_wasm_graph_set_transport(1, 1, 0, 0.0), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_wasm_graph_schedule_sample_source(
     1, 1, 1, asset, 0, 1, 0, 1, 1.0F, 0, 0, 1, 1, 0.0F, 0.0F, 0.5F, 0.0F, 0.5F), DAW_AUDIO_CORE_OK);
   const std::array<float, 1> input_left{};
@@ -3539,7 +3539,7 @@ void test_wasm_planar_preserves_requested_eager_channels() {
   expect(daw_audio_core_wasm_graph_process_planar(
     1, 1, 3, inputs, outputs, 1, nullptr, 0, nullptr, 0, nullptr, 0), DAW_AUDIO_CORE_OK);
   assert(output_left[0] == 0.25F && output_right[0] == -0.5F && output_third[0] == -0.5F);
-  expect(daw_audio_core_wasm_graph_set_transport(2, 0, 0), DAW_AUDIO_CORE_OK);
+  expect(daw_audio_core_wasm_graph_set_transport(2, 0, 0, 0.0), DAW_AUDIO_CORE_OK);
   expect(daw_audio_core_wasm_graph_release_asset(asset), DAW_AUDIO_CORE_OK);
 }
 

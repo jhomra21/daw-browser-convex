@@ -101,7 +101,7 @@ export const renderInstrument = async (instrument: Instrument, rate: number, opt
   host.handleMessage({ version: protocolVersion, type: 'publish-graph', requestId: 2, revision: 1 })
   expectReply('graph-published', 'published')
   const epoch = options.transportRunning === false ? 2 : 1
-  host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 3, epoch: 1, running: false, frame: 0 })
+  host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 3, epoch: 1, running: options.transportRunning !== false, frame: 0 })
 
   if (epoch !== 1) host.handleMessage({ version: protocolVersion, type: 'transport', requestId: 5, epoch, running: false, frame: 0 })
 

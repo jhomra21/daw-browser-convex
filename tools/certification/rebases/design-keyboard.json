@@ -1,0 +1,72 @@
+{
+ "name": "design-keyboard",
+ "sequence": 118,
+ "createdAt": "2026-11-23T22:27:38.246Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "c34e9523ad66733773f80805dea3ddee549c0bc2c2ff562d5fb56eba6e68a26d",
+   "to": "cca7951fc35684076536fe0d91bf26bab449b753dd1a5ffd5cde31a5f5c99d77"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+   "from": "7b74d9bbbb913da16896efaf98ba15786cdcf11729c040176d2a8d87aefa0ea9",
+   "to": "cd09163df02d227ba9ef6bc43f6ac15abcb47d05735be876f2663683e0fad97d"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8",
+   "new": "827a5964ce44ce8c768363d77499a4805448674ea83b6fc69fcdec4c999e462b"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8",
+   "new": "827a5964ce44ce8c768363d77499a4805448674ea83b6fc69fcdec4c999e462b"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "7b0a4fb8d3702d2f69ee94c546d6b548de5fde82",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "56a31ce2a765108cc4fdffdb13403eafc5bb1a7adcd809fa528ede042c63cbfd",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "56a31ce2a765108cc4fdffdb13403eafc5bb1a7adcd809fa528ede042c63cbfd",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/dk-bless2/live",
+   "resultSha256": "c69b585ed3a57cc4b9ed4f1dc879fbbab6a9ff5e02090d49327147b8783ee081",
+   "seconds": 1786.91032525,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

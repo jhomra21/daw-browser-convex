@@ -349,8 +349,8 @@ try {
   await browserCommand(session, ["tab", targetId])
   await cdp.call("Page.enable")
   await cdp.call("Runtime.enable")
-  await cdpEval(cdp, `(()=>{const b=document.querySelector('button[aria-label="Toggle snap to grid"]');if(b?.getAttribute('aria-pressed')==='true')b.click();return b?.getAttribute('aria-pressed')})()`)
-  await cdpEval(cdp, `(()=>{const b=document.querySelector('button[aria-label="Toggle Follow"]');if(b?.getAttribute('aria-pressed')==='true')b.click();return b?.getAttribute('aria-pressed')})()`)
+  await cdpEval(cdp, `(()=>{const b=document.querySelector('button[aria-label="Snap to grid"]');if(b?.getAttribute('aria-pressed')==='true')b.click();return b?.getAttribute('aria-pressed')})()`)
+  await cdpEval(cdp, `(()=>{const b=document.querySelector('button[aria-label="Follow"]');if(b?.getAttribute('aria-pressed')==='true')b.click();return b?.getAttribute('aria-pressed')})()`)
 
   // Capture actual pointer delivery, including the hit-tested element. A CDP
   // dispatch alone is not evidence that the ruler received the event.
@@ -410,8 +410,8 @@ try {
     await button("Stop")
     await waitFor(async () => (await readTransport()).state !== "playing")
     await mutate(`reset-${label}`, [{ kind: "project.settings.set", loopEnabled: loop, loopStartSec: 0, loopEndSec: 8 }])
-    await toggle("Toggle Follow", follow)
-    await toggle("Toggle snap to grid", false)
+    await toggle("Follow", follow)
+    await toggle("Snap to grid", false)
     await pause(350)
     await observe(`reset-${label}`)
   }
@@ -527,8 +527,8 @@ try {
   await cdp.call("Page.reload")
   await waitFor(async () => Boolean(await cdpEval(cdp!, `document.querySelector('button[aria-label="Play"]') && document.querySelector('[data-timeline-ruler="1"]')`)))
   await pause(500)
-  await toggle("Toggle Follow",false)
-  await toggle("Toggle snap to grid",false)
+  await toggle("Follow",false)
+  await toggle("Snap to grid",false)
   await installObservers()
   const coldSeek = await rulerClick(35)
   await play()
@@ -581,10 +581,10 @@ try {
   }
 
   const beforeHostStops = await hostStops()
-  await button("Toggle loop region")
+  await button("Loop region")
   await pause(300)
   const afterToggle = await observe("R6-enabled")
-  await button("Toggle loop region")
+  await button("Loop region")
   await pause(300)
   const afterDisable = await observe("R6-disabled")
   const toggleMessages = (await transitions()).slice(beforeMessages.length)

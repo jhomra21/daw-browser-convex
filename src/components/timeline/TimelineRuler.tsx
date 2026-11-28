@@ -1,5 +1,7 @@
 import { createMemo, createSignal, type Component, For, Show, onCleanup } from 'solid-js'
-import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, quantizeSecToGrid } from '~/lib/timeline-utils'
+import { ARRANGEMENT_OVERVIEW_HEIGHT, RULER_HEIGHT, gridStepSec, quantizeSecToGrid } from '~/lib/timeline-utils'
+import { formatBarsBeatsSixteenths } from '~/lib/musical-time-format'
+import { nudgeLoopRegion, resizeLoopRegionEnd, stepPlayheadSec } from '~/lib/timeline-keyboard-navigation'
 import { musicalBarLabelAtTime, selectTimelineGridIntervals } from '~/lib/timeline-view'
 import { timelineGridPhasePx } from '~/lib/timeline-grid-phase'
 import { isKeyboardEventOwnedByOverlay } from '~/lib/keyboard-event-target'
@@ -19,6 +21,8 @@ type TimelineRulerProps = {
   loopStartSec?: number
   loopEndSec?: number
   onSetLoopRegion?: (startSec: number, endSec: number) => void
+  playheadSec?: number
+  onLocatePlayhead?: (sec: number) => void
 }
 
 const formatTimeInterval = (seconds: number) => {
@@ -252,6 +256,42 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
     if (rootEl) rootEl.style.cursor = ''
   }
 
+  const playheadSec = () => props.playheadSec ?? 0
+  // The handle follows the playhead but stays inside the ruler, so focusing it never scrolls the arrangement.
+  const playheadHandleLeftPx = () => Math.min(Math.max(0, props.timeToX(playheadSec()) - 6), Math.max(0, rulerWidthPx() - 12))
+
+  const keyDirection = (event: KeyboardEvent) => (
+    event.key === 'ArrowLeft' ? -1 : event.key === 'ArrowRight' ? 1 : undefined
+  )
+
+  const onPlayheadKeyDown = (event: KeyboardEvent, locate: (sec: number) => void) => {
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return
+    const direction = keyDirection(event)
+
+    if (event.key === 'Home') locate(0)
+    else if (direction) locate(stepPlayheadSec(playheadSec(), gridStepSec(props.bpm, props.denom), direction, props.durationSec))
+    else return
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
+  // Arrows nudge the brace and Cmd/Ctrl+arrows resize its end, committing like a released pointer drag.
+  const onLoopKeyDown = (event: KeyboardEvent) => {
+    const direction = keyDirection(event)
+
+    if (!direction || event.altKey || event.shiftKey || dragging || !props.onSetLoopRegion) return
+    const region = { startSec: props.loopStartSec ?? 0, endSec: props.loopEndSec ?? 0 }
+    const stepSec = gridStepSec(props.bpm, props.denom)
+
+    const next = event.ctrlKey || event.metaKey
+      ? resizeLoopRegionEnd(region, stepSec, direction)
+      : nudgeLoopRegion(region, stepSec, direction, Math.max(props.durationSec, region.endSec))
+
+    props.onSetLoopRegion(next.startSec, next.endSec)
+    event.preventDefault()
+    event.stopPropagation()
+  }
+
   onCleanup(() => {
     cancelGesture()
   })
@@ -360,10 +400,31 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
       onPointerMove={onLocalPointerMove}
       onPointerLeave={onLocalPointerLeave}
     >
+      <Show when={props.onLocatePlayhead}>
+        {(locate) => (
+          <div
+            role="slider"
+            tabindex={0}
+            aria-label="Playhead position"
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={props.durationSec}
+            aria-valuenow={playheadSec()}
+            aria-valuetext={formatBarsBeatsSixteenths(playheadSec(), props.bpm)}
+            class="pointer-events-none absolute inset-y-0 z-40 w-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
+            style={{ left: `${playheadHandleLeftPx()}px` }}
+            onKeyDown={(event) => onPlayheadKeyDown(event, locate())}
+          />
+        )}
+      </Show>
       <Show when={showLoop()}>
         <div
-          class="absolute top-0 bottom-0 bg-green-400/10 border-y border-green-400/40"
+          role="group"
+          tabindex={0}
+          aria-label={`Loop region, ${formatBarsBeatsSixteenths(props.loopStartSec ?? 0, props.bpm)} to ${formatBarsBeatsSixteenths(props.loopEndSec ?? 0, props.bpm)}`}
+          class="absolute top-0 bottom-0 bg-green-400/10 border-y border-green-400/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary"
           style={{ left: `${loopStartPx()}px`, width: `${loopWidthPx()}px` }}
+          onKeyDown={onLoopKeyDown}
         />
       </Show>
       <For each={minorMarkerIndices()} keyed={false}>

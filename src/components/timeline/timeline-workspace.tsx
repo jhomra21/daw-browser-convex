@@ -26,6 +26,8 @@ import AutomationLane from "~/components/timeline/automation-lane";
 import { TimelineLeftBrowser } from "~/components/timeline/browser/timeline-left-browser";
 import type { TimelineLeftBrowserModel } from "~/lib/timeline-browser/browser-types";
 import TimelineOverlays from "~/components/timeline/timeline-overlays";
+import { isClipWithinRenderRange } from "~/components/timeline/clip-render-range";
+import { resolveClipTabStopId } from "~/lib/timeline-keyboard-navigation";
 import {
   DEFAULT_AUTOMATION_LANE_HEIGHT,
   LANE_HEIGHT,
@@ -130,6 +132,7 @@ type Props = {
   loopStartSec: number;
   loopEndSec: number;
   playheadSec: number;
+  onLocatePlayhead: (sec: number) => void;
   onSetLoopRegion: (startSec: number, endSec: number) => void;
   onLanePointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
   onReturnPointerDown: JSX.EventHandler<HTMLDivElement, PointerEvent>;
@@ -302,6 +305,22 @@ export default function TimelineWorkspace(props: Props) {
     )
   ));
 
+  const keyboardTracks = createMemo(() => props.tracks.map((track) => ({
+    id: track.id,
+    collapsed: track.collapsed === true || (track.groupId ? collapsedGroupIds().has(track.groupId) : false),
+    clips: track.clips,
+  })));
+
+  const clipTabStopId = createMemo(() => resolveClipTabStopId(
+    keyboardTracks(),
+    props.selection.selectedClip()?.clipId ?? null,
+    (clipId) => {
+      const clip = props.trackLookup.clipById.get(clipId);
+
+      return clip !== undefined && isClipWithinRenderRange(clip, props.viewport.overscanRange);
+    },
+  ));
+
   const trackAreaHeight = () =>
     props.trackLayout.scrollingHeightPx +
     (props.dropAtNewTrack ? LANE_HEIGHT : 0);
@@ -376,6 +395,7 @@ export default function TimelineWorkspace(props: Props) {
             layout={laneProps.layout}
             isDropTarget={laneProps.isDropTarget}
             selectedClipIds={props.selection.selectedClipIds()}
+            clipTabStopId={clipTabStopId()}
             rangeSelection={props.selection.rangeSelection()}
             onClipPointerDown={props.onClipPointerDown}
             onClipPointerUp={props.onClipPointerUp}
@@ -505,6 +525,8 @@ export default function TimelineWorkspace(props: Props) {
                 loopStartSec={props.loopStartSec}
                 loopEndSec={props.loopEndSec}
                 onSetLoopRegion={props.onSetLoopRegion}
+                playheadSec={props.playheadSec}
+                onLocatePlayhead={props.onLocatePlayhead}
               />
 
               <div

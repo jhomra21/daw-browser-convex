@@ -92,6 +92,10 @@ test("routes only the exact browser chord and preserves editable-target exclusio
       onAddInstrumentTrack: () => {},
       onOpenExport: () => {},
       onToggleFollow: () => {},
+      onToggleLoop: () => {},
+      onLocateStart: () => {},
+      onNudgeClips: () => false,
+      onNavigateClips: () => false,
       executeExtensionShortcut: (chord, context) => {
         calls.push({
           chord: `${chord.mod}:${chord.alt}:${chord.shift}:${chord.key ?? chord.code}`,

@@ -23,6 +23,9 @@ type ClipFadeOverlayClip = {
 
 type ClipFadeOverlayProps = {
   clip: FadeOverlayInput
+  clipName: string
+  // Handles join the tab order only with their selected clip, so a keyboard user does not tab through every clip's handles.
+  clipSelected: boolean
   bpm: number
   canEdit: Accessor<boolean>
   onCommit: (fades: ClipFades, baseline: ClipFades) => void
@@ -338,6 +341,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
     }
   }
 
+  const handleTabIndex = () => props.clipSelected ? 0 : -1
+
   const showCurveHandle = (side: 'fadeIn' | 'fadeOut') => {
     return hoveredSide() === side
       || focusedCurveSide() === side
@@ -368,7 +373,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <button
             type="button"
             role="slider"
-            aria-label="Adjust fade in start"
+            aria-label={`Adjust fade in start, ${props.clipName}`}
+            tabindex={handleTabIndex()}
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeInStart')}
@@ -384,7 +390,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <button
             type="button"
             role="slider"
-            aria-label="Adjust fade in end"
+            aria-label={`Adjust fade in end, ${props.clipName}`}
+            tabindex={handleTabIndex()}
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeInEnd')}
@@ -400,7 +407,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <button
             type="button"
             role="slider"
-            aria-label="Adjust fade out start"
+            aria-label={`Adjust fade out start, ${props.clipName}`}
+            tabindex={handleTabIndex()}
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeOutStart')}
@@ -416,7 +424,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <button
             type="button"
             role="slider"
-            aria-label="Adjust fade out end"
+            aria-label={`Adjust fade out end, ${props.clipName}`}
+            tabindex={handleTabIndex()}
             aria-valuemin={0}
             aria-valuemax={props.clip.duration}
             aria-valuenow={endpointValue('fadeOutEnd')}
@@ -432,7 +441,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <Show when={showCurveHandle('fadeIn')}>
             <button
               type="button"
-              aria-label="Adjust fade in curve, use left and right for position and up and down for gain"
+              aria-label={`Adjust fade in curve, use left and right for position and up and down for gain, ${props.clipName}`}
+              tabindex={handleTabIndex()}
               aria-valuetext={curveFadeControlValueText(curveValue('fadeIn'))}
               class="pointer-events-auto absolute z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full bg-transparent touch-none"
               style={curvePosition('fadeIn')}
@@ -451,7 +461,8 @@ const ClipFadeOverlay: Component<ClipFadeOverlayProps> = (props) => {
           <Show when={showCurveHandle('fadeOut')}>
             <button
               type="button"
-              aria-label="Adjust fade out curve, use left and right for position and up and down for gain"
+              aria-label={`Adjust fade out curve, use left and right for position and up and down for gain, ${props.clipName}`}
+              tabindex={handleTabIndex()}
               aria-valuetext={curveFadeControlValueText(curveValue('fadeOut'))}
               class="pointer-events-auto absolute z-40 size-4 -translate-x-1/2 -translate-y-1/2 cursor-move rounded-full bg-transparent touch-none"
               style={curvePosition('fadeOut')}

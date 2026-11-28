@@ -88,6 +88,7 @@ describe("native application menu", () => {
       expect.objectContaining({ id: applicationMenuItemIds.paste, accelerator: "CmdOrCtrl+V" }),
       expect.objectContaining({ id: applicationMenuItemIds.selectAll, accelerator: "CmdOrCtrl+A" }),
       expect.objectContaining({ id: applicationMenuItemIds.duplicate, accelerator: "CmdOrCtrl+D" }),
+      expect.objectContaining({ id: applicationMenuItemIds.loop, accelerator: "CmdOrCtrl+L" }),
       expect.objectContaining({ id: applicationMenuItemIds.follow, accelerator: "Alt+Shift+F" }),
     ])
     expect(macFileMenu?.submenu?.at(-1)).toEqual(expect.objectContaining({ role: "close" }))
@@ -100,6 +101,8 @@ describe("native application menu", () => {
     expect(windowsEditMenu?.submenu?.[0]).toMatchObject({ id: applicationMenuItemIds.undo, accelerator: "CmdOrCtrl+Z", registerAccelerator: false })
     expect(windowsEditMenu?.submenu?.find((item) => item.id === applicationMenuItemIds.delete)).toMatchObject({ accelerator: "Delete", registerAccelerator: false })
     expect(windowsEditMenu?.submenu?.find((item) => item.id === applicationMenuItemIds.copy)).toMatchObject({ accelerator: "CmdOrCtrl+C", registerAccelerator: false })
+    const windowsViewMenu = windowsTemplate.find((item) => item.label === "View")
+    expect(windowsViewMenu?.submenu?.find((item) => item.id === applicationMenuItemIds.loop)).toMatchObject({ accelerator: "CmdOrCtrl+L", registerAccelerator: false })
 
     const allItems = flatten(macTemplate)
     expect(allItems.find((item) => item.id === applicationMenuItemIds.metronome)?.type).toBe("checkbox")

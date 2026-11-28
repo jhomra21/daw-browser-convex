@@ -24,9 +24,9 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "c34e9523ad66733773f80805dea3ddee549c0bc2c2ff562d5fb56eba6e68a26d",
+   "src/components/Timeline.tsx": "cca7951fc35684076536fe0d91bf26bab449b753dd1a5ffd5cde31a5f5c99d77",
    "src/components/Timeline.test.ts": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d",
-   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "7b74d9bbbb913da16896efaf98ba15786cdcf11729c040176d2a8d87aefa0ea9",
+   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "cd09163df02d227ba9ef6bc43f6ac15abcb47d05735be876f2663683e0fad97d",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
@@ -3660,7 +3660,7 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8",
+     "results.json": "827a5964ce44ce8c768363d77499a4805448674ea83b6fc69fcdec4c999e462b",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
      "README.md": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
     }
@@ -3688,7 +3688,7 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8",
+     "results.json": "827a5964ce44ce8c768363d77499a4805448674ea83b6fc69fcdec4c999e462b",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
      "README.md": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
     }

@@ -20,6 +20,7 @@ import { getAudioEngine } from "~/lib/audio-engine-singleton";
 import { TIMELINE_HEADER_HEIGHT, timelineDurationSec } from "~/lib/timeline-utils";
 import { useTimelineViewport } from "~/hooks/useTimelineViewport";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
+import { createClipNavigator, keepNudgedClipFocus } from "~/lib/clip-keyboard-navigation";
 import { useNavigate } from "@tanstack/solid-router";
 import { replaceEqualDeep } from "@tanstack/solid-query";
 import { useTimelineClipImport } from "~/hooks/useTimelineClipImport";
@@ -1704,6 +1705,18 @@ const Timeline: Component<TimelineProps> = (props) => {
   const addGroupTrack = () => addTrack({ channelRole: "group" });
   const addInstrumentTrack = () => addTrack({ kind: "instrument" });
 
+  // The ruler's locate: Follow resumes so the view recenters on the new position.
+  const locatePlayhead = (sec: number) => {
+    setPlayhead(Math.max(0, sec), renderTracks());
+    setFollowPaused(false);
+  };
+
+  const navigateClips = createClipNavigator({
+    tracks: renderTracks,
+    selection,
+    revealTime: timelineViewport.setVisibleStart,
+  });
+
   useTimelineKeyboard({
     enabled: () => props.dashboardView() === null,
     onSpace: recordingTransport.space,
@@ -1758,6 +1771,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
     onOpenExport: () => setExportOpen(true),
     onToggleFollow: toggleFollow,
+    onToggleLoop: toggleLoopSafely,
+    onLocateStart: () => locatePlayhead(0),
+    onNudgeClips: keepNudgedClipFocus(clipDrag.nudgeSelection),
+    onNavigateClips: navigateClips,
     executeExtensionShortcut: timelineExtensionHost.shortcuts.execute,
   });
 
@@ -2709,6 +2726,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         loopStartSec={loopStartSec()}
         loopEndSec={loopEndSec()}
         playheadSec={playheadSec()}
+        onLocatePlayhead={locatePlayhead}
         onSetLoopRegion={(s, e) => setLoopRegion(s, e)}
         onLanePointerDown={handleLanePointerDown}
         onReturnPointerDown={handleReturnPointerDown}

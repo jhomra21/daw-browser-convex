@@ -66,6 +66,10 @@ const dispose = render(() => {
     onAddInstrumentTrack: record('instrument'),
     onOpenExport: record('export'),
     onToggleFollow: record('follow'),
+    onToggleLoop: record('loop'),
+    onLocateStart: record('locate-start'),
+    onNudgeClips: () => false,
+    onNavigateClips: () => false,
     executeExtensionShortcut: () => { calls.push('extension');
 
  return true },

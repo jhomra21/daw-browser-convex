@@ -2,16 +2,29 @@ import { expect, test } from "bun:test";
 import { createTimelineKeyboardHandler } from "./useTimelineKeyboard";
 
 class TestElement extends EventTarget {
-  readonly tagName = "DIV";
   readonly isContentEditable = false;
+
+  constructor(
+    readonly tagName = "DIV",
+    private readonly isClip = false,
+  ) {
+    super();
+  }
+
   closest(): null {
     return null;
+  }
+
+  matches(selector: string) {
+    return this.isClip && selector === '[data-timeline-clip="1"]';
   }
 }
 
 type Chord = { key?: string; code?: string; ctrl?: boolean; meta?: boolean; alt?: boolean; shift?: boolean };
 
-const press = (chord: Chord, options: { copyHandled?: boolean } = {}) => {
+type PressOptions = { copyHandled?: boolean; target?: TestElement; clipsHandled?: boolean };
+
+const press = (chord: Chord, options: PressOptions = {}) => {
   const previousElement = globalThis.Element;
   const previousHTMLElement = globalThis.HTMLElement;
   Reflect.set(globalThis, "Element", TestElement);
@@ -29,7 +42,7 @@ const press = (chord: Chord, options: { copyHandled?: boolean } = {}) => {
   };
 
   try {
-    const target = new TestElement();
+    const target = options.target ?? new TestElement();
     let prevented = false;
     let stopped = false;
     createTimelineKeyboardHandler({
@@ -47,6 +60,18 @@ const press = (chord: Chord, options: { copyHandled?: boolean } = {}) => {
       onAddInstrumentTrack: record("add-instrument"),
       onOpenExport: record("export"),
       onToggleFollow: record("follow"),
+      onToggleLoop: record("loop"),
+      onLocateStart: record("locate-start"),
+      onNudgeClips: (direction) => {
+        calls.push(`nudge:${direction}`);
+
+        return options.clipsHandled ?? false;
+      },
+      onNavigateClips: (axis, direction) => {
+        calls.push(`navigate:${axis}:${direction}`);
+
+        return options.clipsHandled ?? false;
+      },
       executeExtensionShortcut: () => {
         calls.push("extension");
 
@@ -109,4 +134,43 @@ test("every timeline shortcut keeps its chord, handler and consumption", () => {
   expect(press({ key: "x", ctrl: true })).toEqual(ignored);
   expect(press({ key: "t" })).toEqual(ignored);
   expect(press({ key: "t", ctrl: true, alt: true, shift: true })).toEqual(consumed("add-instrument"));
+  expect(press({ key: "l", ctrl: true })).toEqual(consumed("loop"));
+  expect(press({ key: "L", meta: true })).toEqual(consumed("loop"));
+  expect(press({ key: "l", ctrl: true, shift: true })).toEqual(ignored);
+  expect(press({ key: "l", ctrl: true, alt: true })).toEqual(ignored);
+});
+
+test("arrow and Home keys drive the arrangement only from the page or a clip", () => {
+  const body = new TestElement("BODY");
+  const clip = new TestElement("DIV", true);
+  const control = new TestElement("DIV");
+
+  expect(press({ key: "Home" }, { target: body })).toEqual(consumed("locate-start"));
+  expect(press({ key: "Home" }, { target: clip })).toEqual(consumed("locate-start"));
+  expect(press({ key: "Home" }, { target: control })).toEqual(ignored);
+  expect(press({ key: "Home", shift: true }, { target: body })).toEqual(ignored);
+
+  expect(press({ key: "ArrowRight" }, { target: clip, clipsHandled: true })).toEqual(consumed("nudge:1"));
+  expect(press({ key: "ArrowLeft" }, { target: body, clipsHandled: true })).toEqual(consumed("nudge:-1"));
+  expect(press({ key: "ArrowRight" }, { target: control, clipsHandled: true })).toEqual(ignored);
+  expect(press({ key: "ArrowRight", shift: true }, { target: clip, clipsHandled: true })).toEqual(ignored);
+  expect(press({ key: "ArrowUp" }, { target: clip, clipsHandled: true })).toEqual(ignored);
+});
+
+test("arrow keys keep their default when no clip is selected", () => {
+  const clip = new TestElement("DIV", true);
+
+  expect(press({ key: "ArrowRight" }, { target: clip })).toEqual({ calls: ["nudge:1"], prevented: false, stopped: false });
+  expect(press({ key: "ArrowDown", alt: true }, { target: clip })).toEqual({ calls: ["navigate:track:1"], prevented: false, stopped: false });
+});
+
+test("Alt arrows move clip focus along the track or across tracks", () => {
+  const clip = new TestElement("DIV", true);
+
+  expect(press({ key: "ArrowLeft", alt: true }, { target: clip, clipsHandled: true })).toEqual(consumed("navigate:time:-1"));
+  expect(press({ key: "ArrowRight", alt: true }, { target: clip, clipsHandled: true })).toEqual(consumed("navigate:time:1"));
+  expect(press({ key: "ArrowUp", alt: true }, { target: clip, clipsHandled: true })).toEqual(consumed("navigate:track:-1"));
+  expect(press({ key: "ArrowDown", alt: true }, { target: clip, clipsHandled: true })).toEqual(consumed("navigate:track:1"));
+  expect(press({ key: "ArrowDown", alt: true, ctrl: true }, { target: clip, clipsHandled: true })).toEqual(ignored);
+  expect(press({ key: "ArrowDown", alt: true }, { target: new TestElement("DIV"), clipsHandled: true })).toEqual(ignored);
 });

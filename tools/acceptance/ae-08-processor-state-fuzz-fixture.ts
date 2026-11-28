@@ -372,7 +372,8 @@ export default function createControllerFixture(
       if (!compiled.supported) throw new Error("Fixture snapshot unsupported")
 
       const projection = compileLiveNativeProjection({ tracks: compiled.snapshot.tracks, bpm: 120,
-        sampleRateHz: 48_000, revision: 1, epoch: h.epoch, firstSequence: 1, fx: compiled.snapshot.mixer.fx })
+        sampleRateHz: 48_000, revision: 1, epoch: h.epoch, firstSequence: 1, fx: compiled.snapshot.mixer.fx,
+        sidechainRoutes: compiled.snapshot.mixer.sidechainRoutes })
 
       if (!projection.supported) throw new Error("Fixture graph unsupported")
 

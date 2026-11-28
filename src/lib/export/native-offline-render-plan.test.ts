@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
-import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, createDefaultLimiterParams, externalAutomationParameterId, type AutomationEnvelope, type SamplerZone } from '@daw-browser/shared'
+import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, createDefaultCompressorParams, createDefaultLimiterParams, externalAutomationParameterId, type AutomationEnvelope, type SamplerZone } from '@daw-browser/shared'
 import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
@@ -1296,4 +1296,37 @@ test('a bypassed VST3 adds no latency to the render', () => {
 
   expect(latencyFrames).toBe(0)
   expect(plan.totalFrames).toBe(RANGE_FRAMES)
+})
+
+test('exports a sidechain route to the compressor by its instance id', () => {
+  const { plan } = compileNativeOfflineRenderPlan({
+    tracks: [track, { ...track, id: 'track-2', clips: [] }],
+    fx: {
+      trackFx: { 'track-2': { instances: [{ id: 'compressor-1', kind: 'compressor', params: createDefaultCompressorParams() }] } },
+      masterFxInstances: [],
+      masterVolume: 1,
+    },
+    automationEnvelopes: [],
+    sidechainRoutes: [{ sourceTrackId: 'track-1', targetTrackId: 'track-2', effectInstanceId: 'compressor-1' }],
+    bpm: 120,
+    range: { mode: 'custom', startSec: 0, endSec: RANGE_FRAMES / 48_000 },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 1,
+  })
+
+  // After the 12-byte frame header and the 24-byte envelope header come the nodes (132 bytes), edges (48), then processors (48 + state).
+  const view = new DataView(plan.graph.buffer, plan.graph.byteOffset, plan.graph.byteLength)
+  const nodeCount = view.getUint32(12 + 8, true)
+  const edgeCount = view.getUint32(12 + 12, true)
+  const edgesAt = 12 + 24 + nodeCount * 132
+  const processorsAt = edgesAt + edgeCount * 48
+
+  const sidechainTargets = Array.from({ length: edgeCount }, (_, index) => edgesAt + index * 48)
+    .filter((edge) => view.getUint32(edge + 40, true) === 1)
+    .map((edge) => view.getBigUint64(edge + 24, true))
+
+  expect(view.getUint32(processorsAt + 8, true)).toBe(11)
+  expect(sidechainTargets).toEqual([BigInt(view.getUint32(processorsAt + 20, true))])
 })

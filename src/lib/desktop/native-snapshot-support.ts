@@ -93,13 +93,11 @@ export const nativeVstParameterEventsForSnapshot = (
 
 // What the native graph does not support yet, by design (E6). A live edit that hits one is a limitation, not a defect.
 // Each names the elements its routing belongs to, which carry the notice: the mapped device, or the track holding
-// a mapping that targets no device; the device whose sidechain input is set.
+// a mapping that targets no device.
 export const nativeSnapshotLimitations = (snapshot: LivePlaybackSnapshot) => [
   { reason: "Native VST3 playback does not support MIDI expression automation yet.",
     carriers: snapshot.tracks.flatMap((track) => track.clips.flatMap((clip) =>
       (clip.midi?.mappings ?? []).map((mapping) => mapping.target.effectInstanceId ?? track.id))) },
-  { reason: "The native VST3 graph cannot activate with the current sidechain routing.",
-    carriers: snapshot.mixer.sidechainRoutes.map((route) => route.effectInstanceId) },
 ].filter((limitation) => limitation.carriers.length > 0)
 
 export const nativeSnapshotSupportError = (snapshot: LivePlaybackSnapshot): string | undefined => {

@@ -1,0 +1,54 @@
+{
+ "name": "instruments-foundations",
+ "sequence": 138,
+ "createdAt": "2026-11-28T04:08:23.878Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "ed2309148770fcd7f0b82732470644dab31532a676d4814fd5e7f937435528c8",
+   "to": "04c38749303e54799a90735c0e2f7568d02b5f2924f42feae81fe59fbf43982c"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "28b9d9c3153070c3e29570c95158ea94cd1aaf1439d2ebdaae6140433d893241",
+   "new": "7ce1bb37729a56e773cde4720d2a13d48956ecb7c0e612fdf193808404abefa1"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "4b04b4fdc80dc2af44889e3d2b7ff8fe8d06ab91",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "265bfe077dfa9d070ebc7f7ebb23f7d55886a311e85ae95f407fbd0ebdd8117e",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "265bfe077dfa9d070ebc7f7ebb23f7d55886a311e85ae95f407fbd0ebdd8117e",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/if-bless/live",
+   "resultSha256": "b5e5b9b6084e8d954d7c33f634d4214811a464705ef99d0573070e083ec5fa9f",
+   "seconds": 1385.027630459,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

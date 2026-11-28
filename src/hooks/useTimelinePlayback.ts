@@ -6,7 +6,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
-import type { LivePlaybackCompileContext } from '~/lib/live-playback-snapshot'
+import type { LivePlaybackCompileContext, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createAudioLifecycle } from './playback-audio-lifecycle'
 import { createDeferredStretch } from './deferred-stretch'
 import { createScheduleReconciliation } from './playback-session-reconciliation'
@@ -123,10 +123,10 @@ export function useTimelinePlayback(
     return { enabled, start, end, length, isActive }
   }
 
-  const pausedLiveTransport = () => {
+  const pausedLiveTransport = (): LivePlaybackTransport => {
     const { isActive, start, end } = getLoopParams()
 
-    return { state: "paused" as const, playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end }
+    return { state: "paused", playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end }
   }
 
   const cancelRaf = () => {

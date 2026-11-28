@@ -21,6 +21,7 @@ import {
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
   mergeOwnedProcessorParams,
+  mergeSpectrumParamsEnvelope,
   serializeCompressorParams,
   serializeDelayParams,
   serializeEqParams,
@@ -128,14 +129,14 @@ const delayParamsValidator = v.object({
 
 const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
 const processorEffectValidator = v.union(v.literal("utility"), v.literal("gate"), v.literal("limiter"), v.literal("spectral"))
-const modulationEffectValidator = v.union(v.literal("autofilter"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("lofi"))
-const canonicalAudioEffectKindValidator = v.union(v.literal("utility"), v.literal("eq"), v.literal("autofilter"), v.literal("gate"), v.literal("compressor"), v.literal("saturator"), v.literal("limiter"), v.literal("lofi"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("delay"), v.literal("reverb"), v.literal("spectral"))
+const modulationEffectValidator = v.union(v.literal("autofilter"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("lofi"), v.literal("spectrum"))
+const canonicalAudioEffectKindValidator = v.union(v.literal("utility"), v.literal("eq"), v.literal("autofilter"), v.literal("gate"), v.literal("compressor"), v.literal("saturator"), v.literal("limiter"), v.literal("lofi"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("delay"), v.literal("reverb"), v.literal("spectral"), v.literal("spectrum"))
 const audioEffectOrderItemValidator = v.union(
   canonicalAudioEffectKindValidator,
   v.object({ id: v.string(), kind: canonicalAudioEffectKindValidator }),
 )
 
-type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral'
+type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
 type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | AudioEffectKind
 type MasterAudioEffectType = AudioEffectKind
 type SharedAudioEffectType = TrackAudioEffectType | MasterAudioEffectType
@@ -162,7 +163,7 @@ type ReorderRowsResult =
 const isCanonicalAudioEffectKind = (type: string): type is AudioEffectKind => (
   type === 'utility' || type === 'eq' || type === 'autofilter' || type === 'gate' || type === 'compressor' || type === 'saturator' || type === 'limiter'
   || type === 'lofi' || type === 'chorus' || type === 'flanger' || type === 'phaser' || type === 'tremolo' || type === 'autopan' || type === 'ensemble'
-  || type === 'delay' || type === 'reverb' || type === 'spectral'
+  || type === 'delay' || type === 'reverb' || type === 'spectral' || type === 'spectrum'
 )
 
 const audioEffectPersistenceDescriptors = {
@@ -213,6 +214,7 @@ const audioEffectPersistenceDescriptors = {
   autopan: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autopan', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.autopan.serializeParams },
   ensemble: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('ensemble', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams },
   spectral: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('spectral', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.spectral.serializeParams },
+  spectrum: { normalizeParamsForUpdate: mergeSpectrumParamsEnvelope, serializeParams: AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams },
 }
 type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
 const deletedStatus = () => ({ status: 'deleted' })

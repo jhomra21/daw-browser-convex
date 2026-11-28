@@ -414,9 +414,9 @@ const expectedPresetSections = {
   'effects:': [
     {
       id: 'builtin-effects',
-      leafCount: 23,
+      leafCount: 24,
       rows: [
-        '0|folder|builtin-audio-effects|Audio Effects|17|audio effects builtin',
+        '0|folder|builtin-audio-effects|Audio Effects|18|audio effects builtin',
         '1|leaf|builtin:audio-effect:utility|undefined',
         '1|leaf|builtin:audio-effect:eq|undefined',
         '1|leaf|builtin:audio-effect:autofilter|undefined',
@@ -434,6 +434,7 @@ const expectedPresetSections = {
         '1|leaf|builtin:audio-effect:delay|undefined',
         '1|leaf|builtin:audio-effect:reverb|undefined',
         '1|leaf|builtin:audio-effect:spectral|undefined',
+        '1|leaf|builtin:audio-effect:spectrum|undefined',
         '0|folder|builtin-audio-effect-chains|Audio Effect Chains|5|audio effect chains presets builtin',
         '1|folder|builtin-audio-effect-chain-folder:mixing|Mixing|2|mixing audio effect chains builtin',
         '2|leaf|builtin:audio-effect-chain:vocal-chain|mixing',

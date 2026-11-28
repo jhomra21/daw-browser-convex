@@ -1,4 +1,4 @@
-import { nativeGraphNodeId } from "@daw-browser/audio-engine/native-host-wire"
+import { nativeGraphNodeId, nativeMasterNodeId } from "@daw-browser/audio-engine/native-host-wire"
 import type { NativeHostMeterBatch, NativeHostSpectrumFrame } from "@daw-browser/audio-engine/native-host-wire"
 import type { SpectrumFrame, TrackStereoLevels, TrackStereoLevelsBatch } from "@daw-browser/audio-engine/audio-engine"
 import type { DesktopBridge } from "~/types/desktop-bridge"
@@ -158,11 +158,11 @@ export const createNativeObservation = (host: NativeObservationHost) => {
     maps: (tracks: readonly { id: string }[]): NativeObservationMaps => ({
       meters: new Map<bigint, string>([
         ...tracks.map((track) => [nativeGraphNodeId(track.id), track.id] as const),
-        [nativeGraphNodeId("master"), "master"],
+        [nativeMasterNodeId, "master"],
       ]),
       spectrum: new Map<string, bigint>([
         ...tracks.map((track) => [track.id, nativeGraphNodeId(track.id)] as const),
-        ["master", nativeGraphNodeId("master")] as const,
+        ["master", nativeMasterNodeId] as const,
       ]),
     }),
     promote: (revision: number, candidate: NativeObservationMaps) => {
@@ -210,12 +210,12 @@ export const createNativeObservation = (host: NativeObservationHost) => {
       latestMeterSequence = 0n
       meterNodeIds = new Map([
         ...tracks.map((track) => [nativeGraphNodeId(track.id), track.id] as const),
-        [nativeGraphNodeId("master"), "master"],
+        [nativeMasterNodeId, "master"],
       ])
       resetMeters()
       spectrumNodeIds = new Map([
         ...tracks.map((track) => [track.id, nativeGraphNodeId(track.id)] as const),
-        ["master", nativeGraphNodeId("master")] as const,
+        ["master", nativeMasterNodeId] as const,
       ])
       latestSpectrumSequence = 0n
       for (const listener of spectrumListeners) listener(null)

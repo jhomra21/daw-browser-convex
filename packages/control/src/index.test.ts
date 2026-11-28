@@ -1116,3 +1116,19 @@ test('rejects duplicate MIDI event and mapping IDs while permitting legacy mappi
     })),
   }).success).toBe(true)
 })
+
+test('accepts a Spectrum device insertion on a track and on the master', () => {
+  const upsert = (target: ProcessorTargetV1) => controlActionSchemaV1.safeParse({
+    kind: 'effect.upsert',
+    target,
+    clientRef: 'new-spectrum',
+    effectKind: 'spectrum',
+    params: { version: 1, state: { enabled: true, view: 'spectrogram' } },
+  })
+  expect(upsert(masterTarget).success).toBe(true)
+  expect(upsert(trackTarget(persisted('track-1'))).success).toBe(true)
+  expect(controlActionSchemaV1.safeParse({
+    kind: 'effect.upsert', target: masterTarget, clientRef: 'bad', effectKind: 'spectrum', params: { version: 1, state: { view: 'bogus' } },
+  }).success).toBe(false)
+})
+

@@ -1,5 +1,5 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
+import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SpectrumParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
 import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { MidiEditorNote } from '~/lib/midi-editor-grid'
@@ -110,6 +110,7 @@ export type EffectParamsByEffect = {
   autopan: AutoPanParamsEnvelope
   ensemble: EnsembleParamsEnvelope
   spectral: SpectralParamsEnvelope
+  spectrum: SpectrumParamsEnvelope
   synth: SynthParams
   instrument: TrackInstrumentParams
   arp: ArpeggiatorParams
@@ -130,6 +131,7 @@ export type EffectParamsByEffect = {
   'master-autopan': AutoPanParamsEnvelope
   'master-ensemble': EnsembleParamsEnvelope
   'master-spectral': SpectralParamsEnvelope
+  'master-spectrum': SpectrumParamsEnvelope
 }
 
 export type TrackAudioEffectSnapshot = {

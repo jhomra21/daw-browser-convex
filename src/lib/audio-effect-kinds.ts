@@ -181,6 +181,16 @@ export const audioEffectForms = (kind: AudioEffectKind, from: JsonValue | undefi
           : { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "ensemble", params: toParams, instanceId } },
       };
     }
+    case "spectrum": {
+      const [fromParams, toParams] = normalized(AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams);
+      return {
+        track: { effect: "spectrum", from: fromParams, to: toParams },
+        master: { effect: "master-spectrum", from: fromParams, to: toParams },
+        persist: (targetId, instanceId) => targetId === "master"
+          ? { kind: "effects.setMasterModulationParams", payload: { effect: "spectrum", params: toParams, instanceId } }
+          : { kind: "effects.setModulationParams", payload: { trackId: targetId, effect: "spectrum", params: toParams, instanceId } },
+      };
+    }
     case "lofi": {
       const [fromParams, toParams] = normalized(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams);
       return {

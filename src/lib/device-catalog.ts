@@ -89,6 +89,7 @@ const AUDIO_EFFECT_METADATA = {
   delay: { label: "Delay", description: "Synchronized or free-time echo" },
   reverb: { label: "Reverb", description: "Algorithmic room and space reverb" },
   spectral: { label: "Spectral", description: "FFT spectral processing and freeze" },
+  spectrum: { label: "Spectrum", description: "Spectrum and spectrogram analyzer" },
 } satisfies Record<AudioEffectKind, AudioEffectMetadata>;
 
 const INSTRUMENT_METADATA = {

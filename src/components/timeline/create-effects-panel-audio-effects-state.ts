@@ -27,6 +27,8 @@ import {
   type ReverbParams,
   type SaturatorParams,
   type SpectralParamsEnvelope,
+  type SpectrumParamsEnvelope,
+  type DspAudioEffectKind,
   type GateParamsEnvelope,
   type EnsembleParamsEnvelope,
   type FlangerParamsEnvelope,
@@ -133,6 +135,7 @@ type EffectsPanelAudioDevice = {
   tremolo: AudioEffectInstanceBinding<TremoloParamsEnvelope>;
   autopan: AudioEffectInstanceBinding<AutoPanParamsEnvelope>;
   ensemble: AudioEffectInstanceBinding<EnsembleParamsEnvelope>;
+  spectrum: AudioEffectInstanceBinding<SpectrumParamsEnvelope>;
   eq: {
     add: () => void;
     changeInstance: (instanceId: string, updates: (params: EqParams) => EqParams) => void;
@@ -156,7 +159,7 @@ type EffectsPanelAudioDevice = {
   snapshotExportRows: (targetIds: readonly string[]) => ExportEffectRow[];
   snapshotSidechainRoutes: () => ExternalSidechainRoute[];
   flushPending: () => Promise<ParameterDrain<{ targetId: string; instanceId: string; kind: AudioEffectKind }>>;
-  paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
+  paramsForInstance: (instance: AudioEffectInstance) => UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | SpectrumParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope | undefined;
   orderedEffects: Accessor<AudioEffectInstance[]>;
   effectIndexForTarget: (targetId: string, instanceId: string) => number | undefined;
   removeAllFromTarget: (targetId: Track["id"] | "master") => Promise<boolean>;
@@ -207,7 +210,7 @@ export function createEffectsPanelAudioDevice(
     return publication;
   };
 
-  type AudioEffectParams = UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope;
+  type AudioEffectParams = UtilityParamsEnvelope | AutoFilterParamsEnvelope | EqParams | GateParamsEnvelope | LimiterParamsEnvelope | LoFiParamsEnvelope | CompressorParams | SaturatorParams | DelayParams | ReverbParams | SpectralParamsEnvelope | SpectrumParamsEnvelope | ChorusParamsEnvelope | FlangerParamsEnvelope | PhaserParamsEnvelope | TremoloParamsEnvelope | AutoPanParamsEnvelope | EnsembleParamsEnvelope;
   type AudioEffectParamsByKind = {
     utility: UtilityParamsEnvelope;
     autofilter: AutoFilterParamsEnvelope;
@@ -226,6 +229,7 @@ export function createEffectsPanelAudioDevice(
     tremolo: TremoloParamsEnvelope;
     autopan: AutoPanParamsEnvelope;
     ensemble: EnsembleParamsEnvelope;
+    spectrum: SpectrumParamsEnvelope;
   };
   type AudioEffectInstanceBindings = {
     [Kind in AudioEffectKind]: AudioEffectInstanceBinding<AudioEffectParamsByKind[Kind]>;
@@ -289,6 +293,7 @@ export function createEffectsPanelAudioDevice(
     autopan: (previous, next) => AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.autopan.serializeParams(AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(next)),
     lofi: (previous, next) => AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.lofi.serializeParams(AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(next)),
     ensemble: (previous, next) => AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(next)),
+    spectrum: (previous, next) => AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams(AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(previous)) === AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams(AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(next)),
   } satisfies Record<AudioEffectKind, (previous: AudioEffectParams, next: AudioEffectParams) => boolean>;
   const areParamsForKindEqual = (kind: AudioEffectKind, previous: AudioEffectParams, next: AudioEffectParams) => paramsEqualByKind[kind](previous, next);
 
@@ -314,6 +319,7 @@ export function createEffectsPanelAudioDevice(
     autopan: () => ({ kind: "autopan", params: AUDIO_EFFECT_CONTRACTS.autopan.createDefaultParams() }),
     lofi: () => ({ kind: "lofi", params: AUDIO_EFFECT_CONTRACTS.lofi.createDefaultParams() }),
     ensemble: () => ({ kind: "ensemble", params: AUDIO_EFFECT_CONTRACTS.ensemble.createDefaultParams() }),
+    spectrum: () => ({ kind: "spectrum", params: AUDIO_EFFECT_CONTRACTS.spectrum.createDefaultParams() }),
   } satisfies Record<AudioEffectKind, () => AudioEffectChainPresetStep>;
   const createDefaultPresetStep = (kind: AudioEffectKind): AudioEffectChainPresetStep => defaultPresetStepByKind[kind]();
 
@@ -537,7 +543,7 @@ export function createEffectsPanelAudioDevice(
     const replaceAudioEffectTargets: ExportEffectsProjection["replaceAudioEffectTargets"] = [];
     for (const targetId of ownedTargetIds) {
       const rows: ExportEffectRow[] = [];
-      for (const [index, instance] of currentOrderForTarget(targetId).entries()) {
+      for (const [index, instance] of currentOrderForTarget(targetId).filter(isDspInstance).entries()) {
         const params = effectiveParamsForInstance(targetId, instance);
         if (params === undefined) continue;
         rows.push(exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params)));
@@ -567,7 +573,10 @@ export function createEffectsPanelAudioDevice(
     return row?.instanceId ?? instance.id;
   }
 
-  function runtimeInstanceForParams(instance: AudioEffectInstance, params: AudioEffectParams): AudioEffectRuntimeInstance {
+  // The Spectrum device only observes: it never reaches the engine, the native graph or an export.
+  const isDspInstance = (instance: AudioEffectInstance): instance is AudioEffectInstance & { kind: DspAudioEffectKind } => instance.kind !== "spectrum";
+
+  function runtimeInstanceForParams(instance: AudioEffectInstance & { kind: DspAudioEffectKind }, params: AudioEffectParams): AudioEffectRuntimeInstance {
     if (instance.kind === "utility") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) };
     if (instance.kind === "autofilter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(params) };
     if (instance.kind === "limiter") return { id: instance.id, kind: instance.kind, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) };
@@ -588,7 +597,7 @@ export function createEffectsPanelAudioDevice(
   }
 
   function buildRuntimeInstancesForTarget(targetId: string, order: AudioEffectInstance[]): AudioEffectRuntimeInstance[] {
-    return order.flatMap((instance) => {
+    return order.filter(isDspInstance).flatMap((instance) => {
       const params = effectiveParamsForInstance(targetId, instance);
       return params ? [runtimeInstanceForParams(instance, params)] : [];
     });
@@ -722,6 +731,7 @@ export function createEffectsPanelAudioDevice(
     const order = currentOrderForTarget(target.targetId);
     const instance = order.find((entry) => entry.id === target.instanceId && entry.kind === target.kind);
     if (!instance) return "superseded";
+    if (!isDspInstance(instance)) return "skipped";
     const structural = ensureStructuralApplication(target.targetId, order);
     const runtime = runtimeInstanceForParams(instance, params);
     const engine = context.audioEngine();
@@ -848,6 +858,7 @@ export function createEffectsPanelAudioDevice(
     tremolo: createInstanceBinding("tremolo", (prev) => AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(prev)),
     autopan: createInstanceBinding("autopan", (prev) => AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(prev)),
     ensemble: createInstanceBinding("ensemble", (prev) => AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(prev)),
+    spectrum: createInstanceBinding("spectrum", (prev) => AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(prev)),
   } satisfies AudioEffectInstanceBindings;
 
   const updateReverb = (updater: (prev: ReverbParams) => ReverbParams) => {
@@ -1080,7 +1091,7 @@ export function createEffectsPanelAudioDevice(
   return {
     snapshotExportProjection,
     snapshotExportRows: (targetIds) => targetIds.flatMap((targetId) => {
-      const rows = currentOrderForTarget(targetId).flatMap((instance, index) => {
+      const rows = currentOrderForTarget(targetId).filter(isDspInstance).flatMap((instance, index) => {
         const params = committedParamsForInstance(targetId, instance);
         if (params === undefined) return [];
         return [exportRowForRuntime(targetId, instance.id, index, runtimeInstanceForParams(instance, params))];
@@ -1128,6 +1139,7 @@ export function createEffectsPanelAudioDevice(
     lofi: {
       ...instanceBindingByKind.lofi,
     },
+    spectrum: instanceBindingByKind.spectrum,
     spectral: {
       ...instanceBindingByKind.spectral,
       setSidechainSource,

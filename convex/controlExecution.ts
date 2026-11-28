@@ -57,6 +57,7 @@ import { deleteSampleRow, findSampleRow } from "./sampleRows";
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { requireProjectRow, type ProjectEdit } from "./projectRows";
 import { enqueueR2DeleteRows } from "./r2Deletes";
+import { currentEffectRows } from "./effectRowParams";
 import { captureRecoveryPayload, createRecovery, isRecoverableAction, restoreRecovery } from "./controlRecovery";
 
 type ExecutedActionChange = { changed: boolean; revision?: number }
@@ -657,7 +658,7 @@ export async function executeControlPlanV1(
 
       case "instrument.set": {
         const trackId = resolveRef(ctx, "tracks", trackRefs, action.target.track)
-        const rows = await ctx.db.query("effects").withIndex("by_track", (query: any) => query.eq("trackId", trackId)).collect()
+        const rows = currentEffectRows(await ctx.db.query("effects").withIndex("by_track", (query: any) => query.eq("trackId", trackId)).collect())
         const existing = rows.find((row: any) => row.targetType === "track" && (row.type === "instrument" || row.type === "synth"))
         const current = existing ? normalizeTrackInstrumentParams(existing.params) : undefined
 

@@ -30,7 +30,7 @@ import {
 } from "@daw-browser/control-core";
 import { currentAutomationDocs } from "./automationRowValues";
 import { currentEffectDocs, writtenRestoreEffects } from "./effectRowParams";
-import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, effectParamsByInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { AUDIO_EFFECT_KINDS, automationTargetKey, automationValuesVersionStamp, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, effectParamsByInstanceId, effectRowParamsVersionStamp, granularAutomationKey, INSTRUMENT_PARAMS_VERSION, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -481,6 +481,7 @@ export const createTrackRow = async (
         instanceId,
         params: createDefaultSynthParams(),
       },
+      paramsVersion: INSTRUMENT_PARAMS_VERSION.synth,
       createdAt: Date.now(),
     });
   }
@@ -1940,7 +1941,7 @@ export const serverRestoreUngroup = mutation({
             type: effect.type,
             instanceId: effect.instanceId,
             params: effect.params,
-            ...audioEffectParamsVersionStamp(effect.type),
+            ...effectRowParamsVersionStamp(effect.type, effect.params),
             createdAt: Date.now(),
           });
         }

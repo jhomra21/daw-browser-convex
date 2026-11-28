@@ -1,4 +1,4 @@
-import { audioEffectParamsVersionStamp, migrateAudioEffectParams } from './audio-effect-param-versions'
+import { AUDIO_EFFECT_PARAMS_VERSIONING, audioEffectParamsVersionStamp, migrateAudioEffectParams, type AudioEffectParamsVersioning } from './audio-effect-param-versions'
 import { isAudioEffectKind } from './audio-effect-registry'
 import { INSTRUMENT_PARAMS_VERSION, migrateInstrumentParams, type VersionedInstrumentKind } from './instrument-param-versions'
 import { isInstrumentKind } from './instrument-params'
@@ -15,17 +15,20 @@ const instrumentRowKind = (type: string, params: JsonValue): VersionedInstrument
  * The single migration for any stored effect row: audio effects, instruments, legacy synths and arpeggiators.
  * `type` is the row's type, so an 'instrument' row migrates the params inside its envelope by the envelope's kind.
  */
-export const migrateEffectRowParams = (type: string, params: JsonValue, storedVersion: number | undefined): JsonValue => {
-  if (isAudioEffectKind(type)) return migrateAudioEffectParams(type, params, storedVersion)
+export const migrateEffectRowParams = (
+  type: string,
+  params: JsonValue,
+  storedVersion: number | undefined,
+  versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
+): JsonValue => {
+  if (isAudioEffectKind(type)) return migrateAudioEffectParams(type, params, storedVersion, versioning)
   const kind = instrumentRowKind(type, params)
 
   if (!kind) return params
 
-  if (type === 'instrument' && isJsonObject(params) && params.params !== undefined) {
-    return { ...params, params: migrateInstrumentParams(kind, params.params, storedVersion) }
-  }
+  if (type !== 'instrument') return migrateInstrumentParams(kind, params, storedVersion)
 
-  return migrateInstrumentParams(kind, params, storedVersion)
+  return isJsonObject(params) && params.params !== undefined ? { ...params, params: migrateInstrumentParams(kind, params.params, storedVersion) } : params
 }
 
 /** The storage field to write with every persisted effect row of any type; empty for rows outside the catalog. */

@@ -1,7 +1,6 @@
 import {
   AUDIO_EFFECT_PARAMS_VERSIONING,
-  isAudioEffectKind,
-  migrateAudioEffectParams,
+  migrateEffectRowParams,
   migrateWrittenAudioEffectParams,
   type AudioEffectParamsVersioning,
   type JsonValue,
@@ -11,16 +10,14 @@ import type { Doc } from './_generated/dataModel'
 
 type EffectParamsRow = Pick<Doc<'effects'>, 'type' | 'params' | 'paramsVersion'>
 
-/** The single read boundary for stored effect rows: migrates params to the current version and drops the storage field. */
+/** The single read boundary for stored effect rows, instruments and arpeggiators included: migrates params to the current version and drops the storage field. */
 export const currentEffectRow = <Row extends EffectParamsRow>(
   row: Row,
   versioning: AudioEffectParamsVersioning = AUDIO_EFFECT_PARAMS_VERSIONING,
 ): Omit<Row, 'paramsVersion'> => {
   const { paramsVersion, ...stored } = row
 
-  if (!isAudioEffectKind(row.type)) return stored
-
-  return { ...stored, params: migrateAudioEffectParams(row.type, row.params, paramsVersion, versioning) }
+  return { ...stored, params: migrateEffectRowParams(row.type, row.params, paramsVersion, versioning) }
 }
 
 export const currentEffectRows = <Row extends EffectParamsRow>(

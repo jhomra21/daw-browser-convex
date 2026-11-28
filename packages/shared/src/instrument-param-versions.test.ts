@@ -18,6 +18,8 @@ import { createDefaultSamplerParams } from './sampler-params'
 import { createDefaultSynthParams, normalizeSynthParams } from './synth-params'
 import { synthAutomationKey } from './synth-automation'
 
+const kinds = ['synth', 'sampler', 'drum-rack', 'granular', 'arpeggiator'] as const
+
 const defaults: Readonly<Record<VersionedInstrumentKind, JsonValue>> = {
   synth: createDefaultSynthParams(),
   sampler: createDefaultSamplerParams(),
@@ -30,7 +32,7 @@ const legacySynth = { wave1: 'square', wave2: 'sine', gain: 0.5, attackMs: 40, r
 
 describe('instrument parameter versions', () => {
   it('loads an unversioned saved params object of every kind as the same value', () => {
-    for (const kind of Object.keys(defaults) as VersionedInstrumentKind[]) {
+    for (const kind of kinds) {
       expect(migrateInstrumentParams(kind, defaults[kind], undefined)).toEqual(defaults[kind])
     }
   })
@@ -41,6 +43,7 @@ describe('instrument parameter versions', () => {
     for (const kind of ['synth', 'sampler', 'drum-rack', 'granular'] as const) {
       expect(effectRowParamsVersionStamp('instrument', envelope(kind))).toEqual({ paramsVersion: INSTRUMENT_PARAMS_VERSION[kind] })
     }
+
     expect(effectRowParamsVersionStamp('synth', defaults.synth)).toEqual({ paramsVersion: 2 })
     expect(effectRowParamsVersionStamp('arpeggiator', defaults.arpeggiator)).toEqual({ paramsVersion: 1 })
     expect(effectRowParamsVersionStamp('reverb', {})).toEqual({ paramsVersion: 2 })
@@ -102,7 +105,7 @@ describe('instrument parameter versions', () => {
   })
 
   it('has a step for every version below current for every kind', () => {
-    for (const kind of Object.keys(INSTRUMENT_PARAMS_VERSION) as VersionedInstrumentKind[]) {
+    for (const kind of kinds) {
       for (let version = 1; version < INSTRUMENT_PARAMS_VERSIONING.current[kind]; version += 1) {
         expect(INSTRUMENT_PARAMS_VERSIONING.migrations[kind]?.[version]).toBeFunction()
       }

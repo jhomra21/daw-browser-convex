@@ -1109,7 +1109,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await Promise.all([
       tx.store.put(toEntityRow(TRACK_ROW_KIND, persistedGroup.id, persistedGroup, timestamp)),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_ROW_KIND, track.id, track, timestamp))),
-      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_ROW_KIND, effect.id, { ...effect, ...localEffectParamsVersionStamp(effect.effect) }, timestamp))),
+      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_ROW_KIND, effect.id, { ...effect, ...localEffectParamsVersionStamp(effect.effect, effect.params) }, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_ROW_KIND, envelope.targetKey, localAutomationRowValue(envelope), timestamp))),
       ...sidechainRoutes.map((route) => tx.store.put(toEntityRow(
         SIDECHAIN_ROW_KIND,

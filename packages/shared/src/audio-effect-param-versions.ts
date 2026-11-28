@@ -130,6 +130,7 @@ export const audioEffectParamsVersionStamp = (kind: string): { paramsVersion?: n
 // Automation envelopes that target a processor parameter carry the same storage field idea: `valuesVersion` (absent = 1) is the
 // version of the effect or instrument kind whose parameter units the point values were written in. Mixer lanes have no kind.
 const automationParameterOwner = (parameterId: string) => getAutomationParameterDescriptor(parameterId)?.owner ?? null
+
 /** Stored params of each effect instance by id: the owners a lane's migration reads. */
 export const effectParamsByInstanceId = (effects: Iterable<{ instanceId?: string; params: JsonValue }>): ReadonlyMap<string, JsonValue> => {
   const owners = new Map<string, JsonValue>()
@@ -163,7 +164,9 @@ export const migrateAutomationPointValues = <Point extends { value: number }>(
 export const automationValuesVersionStamp = (parameterId: string): { valuesVersion?: number } => {
   const owner = automationParameterOwner(parameterId)
 
-  if (isAudioEffectKind(owner)) return { valuesVersion: AUDIO_EFFECT_PARAMS_VERSION[owner] }
+  const version = isAudioEffectKind(owner)
+    ? AUDIO_EFFECT_PARAMS_VERSION[owner]
+    : isInstrumentKind(owner) ? INSTRUMENT_PARAMS_VERSION[owner] : undefined
 
-  return isInstrumentKind(owner) ? { valuesVersion: INSTRUMENT_PARAMS_VERSION[owner] } : {}
+  return version === undefined ? {} : { valuesVersion: version }
 }

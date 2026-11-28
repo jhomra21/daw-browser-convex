@@ -274,10 +274,10 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 10 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 60 }, "tombstone": { "const": false },
+            "id": { "const": 10 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 76 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "mode", "thresholdDb", "ratio", "attackMs", "holdMs", "releaseMs", "hysteresisDb", "rangeDb", "lookaheadMs", "detector", "link", "sidechain"],
+              "required": ["enabled", "mode", "thresholdDb", "ratio", "attackMs", "holdMs", "releaseMs", "hysteresisDb", "rangeDb", "lookaheadMs", "detector", "link", "flip", "sidechain"],
               "properties": {
                 "enabled": { "type": "boolean" }, "mode": { "enum": ["gate", "expander"] },
                 "thresholdDb": { "type": "number", "default": -40, "minimum": -80, "maximum": 0, "portableParameter": true},
@@ -287,16 +287,17 @@
                 "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 2000, "portableParameter": true},
                 "hysteresisDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
                 "rangeDb": { "type": "number", "default": -80, "minimum": -80, "maximum": 0, "portableParameter": true},
-                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "lookaheadMs": { "enum": [0, 1, 10] },
                 "detector": { "enum": ["peak", "rms"] }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
-                "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "frequencyHz", "q"], "properties": {
-                  "enabled": { "type": "boolean" }, "frequencyHz": { "type": "number", "default": 80, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
+                "flip": { "type": "boolean" },
+                "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "filterType", "frequencyHz", "q", "gainDb", "mix"], "properties": {
+                  "enabled": { "type": "boolean" }, "filterType": { "enum": ["lowpass", "highpass", "bandpass"] }, "frequencyHz": { "type": "number", "default": 80, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true},
+                  "gainDb": { "type": "number", "default": 0, "minimum": -70, "maximum": 24, "portableParameter": true}, "mix": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}
                 }}
               }
             }
           }
-        },
-        "compressor": {
+        },        "compressor": {
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {

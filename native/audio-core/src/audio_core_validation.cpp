@@ -229,11 +229,14 @@ bool valid_gate_state(const daw_audio_gate_state &state) {
     && std::isfinite(state.release_ms) && state.release_ms >= 5.0F && state.release_ms <= 2000.0F
     && std::isfinite(state.hysteresis_db) && state.hysteresis_db >= 0.0F && state.hysteresis_db <= 24.0F
     && std::isfinite(state.range_db) && state.range_db >= -80.0F && state.range_db <= 0.0F
-    && std::isfinite(state.lookahead_ms) && state.lookahead_ms >= 0.0F && state.lookahead_ms <= 2.0F
+    && (state.lookahead_ms == 0.0F || state.lookahead_ms == 1.0F || state.lookahead_ms == 10.0F)
     && state.detector <= 1 && std::isfinite(state.link) && state.link >= 0.0F && state.link <= 1.0F
     && state.sidechain_enabled <= 1 && std::isfinite(state.sidechain_frequency_hz)
     && state.sidechain_frequency_hz >= 20.0F && state.sidechain_frequency_hz <= 20000.0F
-    && std::isfinite(state.sidechain_q) && state.sidechain_q >= 0.1F && state.sidechain_q <= 18.0F;
+    && std::isfinite(state.sidechain_q) && state.sidechain_q >= 0.1F && state.sidechain_q <= 18.0F
+    && state.flip <= 1 && state.sidechain_filter_type <= 2
+    && std::isfinite(state.sidechain_gain_db) && state.sidechain_gain_db >= DAW_AUDIO_CORE_GATE_SIDECHAIN_GAIN_DB_MIN && state.sidechain_gain_db <= DAW_AUDIO_CORE_GATE_SIDECHAIN_GAIN_DB_MAX
+    && std::isfinite(state.sidechain_mix) && state.sidechain_mix >= DAW_AUDIO_CORE_GATE_SIDECHAIN_MIX_MIN && state.sidechain_mix <= DAW_AUDIO_CORE_GATE_SIDECHAIN_MIX_MAX;
 }
 
 bool valid_compressor_state(const daw_audio_compressor_state &state) {
@@ -413,7 +416,7 @@ bool decode_processor_state(
     out_processor->ensemble = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE && descriptor.state_size == 60) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE && descriptor.state_size == 76) {
     const daw_audio_gate_state state{
       .enabled = read_u32_le(descriptor.state), .mode = read_u32_le(descriptor.state + 4),
       .threshold_db = read_f32_le(descriptor.state + 8), .ratio = read_f32_le(descriptor.state + 12),
@@ -422,7 +425,9 @@ bool decode_processor_state(
       .range_db = read_f32_le(descriptor.state + 32), .lookahead_ms = read_f32_le(descriptor.state + 36),
       .detector = read_u32_le(descriptor.state + 40), .link = read_f32_le(descriptor.state + 44),
       .sidechain_enabled = read_u32_le(descriptor.state + 48), .sidechain_frequency_hz = read_f32_le(descriptor.state + 52),
-      .sidechain_q = read_f32_le(descriptor.state + 56),
+      .sidechain_q = read_f32_le(descriptor.state + 56), .flip = read_u32_le(descriptor.state + 60),
+      .sidechain_filter_type = read_u32_le(descriptor.state + 64), .sidechain_gain_db = read_f32_le(descriptor.state + 68),
+      .sidechain_mix = read_f32_le(descriptor.state + 72),
     };
     if (!valid_gate_state(state)) return false;
     out_processor->gate = state;
@@ -587,8 +592,12 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_DELAY_MS
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_MIX;
     case DAW_AUDIO_PROCESSOR_KIND_GATE:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_THRESHOLD_DB
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_Q;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_THRESHOLD_DB
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_RANGE_DB)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_LINK
+        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_Q)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_GAIN_DB
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_MIX;
     case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_THRESHOLD_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_KNEE_DB)
@@ -738,10 +747,11 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_RELEASE_MS) return value >= DAW_AUDIO_CORE_GATE_RELEASE_MS_MIN && value <= DAW_AUDIO_CORE_GATE_RELEASE_MS_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_HYSTERESIS_DB) return value >= DAW_AUDIO_CORE_GATE_HYSTERESIS_DB_MIN && value <= DAW_AUDIO_CORE_GATE_HYSTERESIS_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_RANGE_DB) return value >= DAW_AUDIO_CORE_GATE_RANGE_DB_MIN && value <= DAW_AUDIO_CORE_GATE_RANGE_DB_MAX;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_LOOKAHEAD_MS) return value >= DAW_AUDIO_CORE_GATE_LOOKAHEAD_MS_MIN && value <= DAW_AUDIO_CORE_GATE_LOOKAHEAD_MS_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_LINK) return value >= DAW_AUDIO_CORE_GATE_LINK_MIN && value <= DAW_AUDIO_CORE_GATE_LINK_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_FREQUENCY_HZ) return value >= DAW_AUDIO_CORE_GATE_SIDECHAIN_FREQUENCY_HZ_MIN && value <= DAW_AUDIO_CORE_GATE_SIDECHAIN_FREQUENCY_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_Q) return value >= DAW_AUDIO_CORE_GATE_SIDECHAIN_Q_MIN && value <= DAW_AUDIO_CORE_GATE_SIDECHAIN_Q_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_GAIN_DB) return value >= DAW_AUDIO_CORE_GATE_SIDECHAIN_GAIN_DB_MIN && value <= DAW_AUDIO_CORE_GATE_SIDECHAIN_GAIN_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_GATE_SIDECHAIN_MIX) return value >= DAW_AUDIO_CORE_GATE_SIDECHAIN_MIX_MIN && value <= DAW_AUDIO_CORE_GATE_SIDECHAIN_MIX_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_THRESHOLD_DB) return value >= DAW_AUDIO_CORE_COMPRESSOR_THRESHOLD_DB_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_THRESHOLD_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_RATIO) return value >= DAW_AUDIO_CORE_COMPRESSOR_RATIO_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_RATIO_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_ATTACK_MS) return value >= DAW_AUDIO_CORE_COMPRESSOR_ATTACK_MS_MIN && value <= DAW_AUDIO_CORE_COMPRESSOR_ATTACK_MS_MAX;

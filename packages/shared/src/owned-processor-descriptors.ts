@@ -20,7 +20,7 @@ export const OWNED_PROCESSOR_KINDS = AUDIO_EFFECT_KINDS.filter(isOwnedProcessorK
 export const OWNED_PROCESSOR_PARAMETER_IDS = {
   utility: ['utility.gainDb', 'utility.pan', 'utility.balance', 'utility.width'],
   autofilter: ['autofilter.frequencyHz', 'autofilter.resonance', 'autofilter.driveDb', 'autofilter.mix', 'autofilter.envelope.amountOctaves', 'autofilter.envelope.attackMs', 'autofilter.envelope.releaseMs', 'autofilter.lfo.rateHz', 'autofilter.lfo.depthOctaves', 'autofilter.lfo.phaseOffset', 'autofilter.lfo.stereoPhase', 'autofilter.outputDb'],
-  gate: ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.lookaheadMs', 'gate.link'],
+  gate: ['gate.thresholdDb', 'gate.ratio', 'gate.attackMs', 'gate.holdMs', 'gate.releaseMs', 'gate.hysteresisDb', 'gate.rangeDb', 'gate.link', 'gate.sidechain.frequencyHz', 'gate.sidechain.q', 'gate.sidechain.gainDb', 'gate.sidechain.mix'],
   limiter: ['limiter.gainDb', 'limiter.ceiling', 'limiter.release', 'limiter.link'],
   lofi: ['lofi.bitDepth', 'lofi.sampleRateRatio', 'lofi.jitter', 'lofi.noiseDb', 'lofi.mix'],
   chorus: ['chorus.delayMs', 'chorus.depthMs', 'chorus.rateHz', 'chorus.feedback', 'chorus.stereoPhase', 'chorus.mix'],

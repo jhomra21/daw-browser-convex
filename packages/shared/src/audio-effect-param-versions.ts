@@ -1,4 +1,5 @@
 import { migrateCompressorParamsV1 } from './compressor-params-migration'
+import { migrateGateParamsV1 } from './gate-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -14,7 +15,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   delay: 1,
   reverb: 1,
   autofilter: 2,
-  gate: 1,
+  gate: 2,
   limiter: 2,
   lofi: 1,
   chorus: 1,
@@ -58,6 +59,8 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     eq: { 1: migrateEqV1ToV2 },
     // Compressor: Auto Makeup off, lookahead snapped to the nearest 0/1/10 ms step.
     compressor: { 1: migrateCompressorParamsV1 },
+    // Gate: Flip off, sidechain Gain 0 dB, Dry/Wet 100 %, lookahead snapped to the nearest 0/1/10 ms step.
+    gate: { 1: migrateGateParamsV1 },
     // Limiter: Gain 0 dB, Auto off, lookahead snapped to the nearest 1.5/3/6 ms step.
     limiter: { 1: migrateLimiterParamsV1 },
   },

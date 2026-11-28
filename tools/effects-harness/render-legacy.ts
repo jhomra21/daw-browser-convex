@@ -103,7 +103,17 @@ export const renderLegacy = async (spec: EffectSpec, rate: number, options: Rend
     left.set(options.input[0].subarray(offset, offset + count))
     right.set((options.input[1] ?? options.input[0]).subarray(offset, offset + count))
     const blockOutput = [new Float32Array(blockFrames), new Float32Array(blockFrames)]
-    worklet.process([[left, right]], [blockOutput], parametersFor(spec.kind, state, descriptors))
+    const buses = [[left, right]]
+
+    if (options.key) {
+      const keyLeft = new Float32Array(blockFrames)
+      const keyRight = new Float32Array(blockFrames)
+      keyLeft.set(options.key[0].subarray(offset, offset + count))
+      keyRight.set((options.key[1] ?? options.key[0]).subarray(offset, offset + count))
+      buses.push([keyLeft, keyRight])
+    }
+
+    worklet.process(buses, [blockOutput], parametersFor(spec.kind, state, descriptors))
     output[0].set(blockOutput[0].subarray(0, count), offset)
     output[1].set(blockOutput[1].subarray(0, count), offset)
   }

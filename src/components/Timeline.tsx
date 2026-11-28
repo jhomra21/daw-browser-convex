@@ -89,6 +89,7 @@ import { useDesktopApplicationMenu } from "~/hooks/useDesktopApplicationMenu";
 import { useTimelineProjectionState } from "~/hooks/useTimelineProjectionState";
 import { useTimelineSelectionState } from "~/hooks/useTimelineSelectionState";
 import { useTimelinePersistenceController } from "~/hooks/useTimelinePersistenceController";
+import { useLocalSidechainRoutes } from "~/hooks/useLocalSidechainRoutes";
 import { useTimelineAudioLifecycle } from "~/hooks/useTimelineAudioLifecycle";
 import { useTimelineAudioWarp } from "~/hooks/useTimelineAudioWarp";
 import { useTimelineBottomPanelState } from "~/hooks/useTimelineBottomPanelState";
@@ -372,11 +373,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
   });
 
+  const localSidechainRoutes = useLocalSidechainRoutes(projectId);
+
   const sidechainRoutes = createMemo<ExternalSidechainRoute[]>(() => {
     const id = projectId();
 
-    if (id && isLocalId("project", id))
-      return mediaRecovery.localTimelineSnapshot()?.sidechainRoutes ?? [];
+    if (id && isLocalId("project", id)) return localSidechainRoutes();
 
     return (fullView.data?.sidechainRoutes ?? []).map((route) => ({
       sourceTrackId: String(route.sourceTrackId),

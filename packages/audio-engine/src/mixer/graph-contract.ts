@@ -419,10 +419,11 @@ const toPortableProcessor = (
         { id: 'gate.releaseMs', target: 109 },
         { id: 'gate.hysteresisDb', target: 110 },
         { id: 'gate.rangeDb', target: 111 },
-        { id: 'gate.lookaheadMs', target: 112 },
         { id: 'gate.link', target: 113 },
         { id: 'gate.sidechain.frequencyHz', target: 114 },
         { id: 'gate.sidechain.q', target: 115 },
+        { id: 'gate.sidechain.gainDb', target: 171 },
+        { id: 'gate.sidechain.mix', target: 172 },
       ], bypassed: !instance.params.state.enabled,
     }
   }
@@ -630,10 +631,6 @@ export const createPortableGraphSnapshot = ({
 
     if (!target || !isSidechainCapableKind(target.kind)) {
       throw new Error(`Portable sidechain target "${route.effectInstanceId}" is not a supported detector processor.`)
-    }
-
-    if (target.kind === 'gate' && !target.params.state.sidechain.enabled) {
-      throw new Error(`Portable Gate sidechain target "${route.effectInstanceId}" requires its detector filter to be enabled for legacy parity.`)
     }
 
     edges.push({

@@ -8,15 +8,21 @@ import {
 import { getEffectChainTimingWithExternal, getEffectTiming } from './timing'
 
 describe('utility and gate timing', () => {
-  test('keeps utility at zero latency and gate at fixed two millisecond latency', () => {
+  test('keeps utility at zero latency and gate at the latency its lookahead chooses', () => {
     expect(getEffectTiming(
       { id: 'utility-1', kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } },
       48_000,
     ).latencyFrames).toBe(0)
-    expect(getEffectTiming(
-      { id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), enabled: false } } },
+
+    const gateLatency = (lookaheadMs: 0 | 1 | 10, enabled = true) => getEffectTiming(
+      { id: 'gate-1', kind: 'gate', params: { version: 1, state: { ...createDefaultGateParams(), enabled, lookaheadMs } } },
       44_100,
-    ).latencyFrames).toBe(89)
+    ).latencyFrames
+
+    expect(gateLatency(0)).toBe(0)
+    expect(gateLatency(1)).toBe(45)
+    expect(gateLatency(10)).toBe(441)
+    expect(gateLatency(10, false)).toBe(441)
   })
 })
 

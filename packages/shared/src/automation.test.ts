@@ -338,12 +338,20 @@ describe('automation helpers', () => {
       'reverb.wet',
       'reverb.preDelayMs',
       'reverb.stereoWidth',
+      'gate.thresholdDb',
+      'gate.hysteresisDb',
+      'gate.rangeDb',
+      'gate.sidechain.frequencyHz',
+      'gate.sidechain.q',
+      'gate.sidechain.gainDb',
+      'gate.sidechain.mix',
     ]) {
       expect(options.some((option) => option.id === parameterId)).toBe(true)
       expect(getAutomationParameterDescriptor(parameterId)?.targetKinds).toEqual(['track', 'master'])
     }
 
     expect(getAutomationParameterDescriptor('compressor.lookaheadMs')).toBeUndefined()
+    expect(getAutomationParameterDescriptor('gate.lookaheadMs')).toBeUndefined()
     expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
   })
 

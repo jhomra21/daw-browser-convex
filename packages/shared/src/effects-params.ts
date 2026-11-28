@@ -793,6 +793,29 @@ export type GateMode = 'gate' | 'expander'
 
 export type GateDetector = 'peak' | 'rms'
 
+export const GATE_LOOKAHEAD_STEPS_MS = [0, 1, 10] as const
+
+export type GateLookaheadMs = (typeof GATE_LOOKAHEAD_STEPS_MS)[number]
+
+// The nearest step; a value between two steps goes to the longer one.
+export const snapGateLookaheadMs = (lookaheadMs: number): GateLookaheadMs => (
+  GATE_LOOKAHEAD_STEPS_MS.reduce((best, step) => Math.abs(step - lookaheadMs) <= Math.abs(best - lookaheadMs) ? step : best)
+)
+
+export const GATE_SIDECHAIN_GAIN_DB_MIN = -70
+export const GATE_SIDECHAIN_GAIN_DB_MAX = 24
+
+export type GateSidechainParams = {
+  enabled: boolean
+  filterType: CompressorSidechainFilterType
+  frequencyHz: number
+  q: number
+  // Scales the key from another track before it is blended with the gate's own input and filtered.
+  gainDb: number
+  // How much of the key is the other track's: 1 is the other track alone, 0 the gate's own input.
+  mix: number
+}
+
 export type GateParams = {
   enabled: boolean
   mode: GateMode
@@ -803,22 +826,25 @@ export type GateParams = {
   releaseMs: number
   hysteresisDb: number
   rangeDb: number
-  lookaheadMs: number
+  lookaheadMs: GateLookaheadMs
   detector: GateDetector
   link: number
-  sidechain: { enabled: boolean; filterType: 'highpass'; frequencyHz: number; q: number }
+  // Passes what the gate would close on and closes on what it would pass.
+  flip: boolean
+  sidechain: GateSidechainParams
 }
 
-export type GateParamsInput = Partial<Omit<GateParams, 'mode' | 'detector' | 'sidechain'>> & {
+export type GateParamsInput = Partial<Omit<GateParams, 'mode' | 'detector' | 'lookaheadMs' | 'sidechain'>> & {
   mode?: JsonValue
   detector?: JsonValue
-  sidechain?: Partial<GateParams['sidechain']>
+  lookaheadMs?: number
+  sidechain?: Partial<Omit<GateSidechainParams, 'filterType'>> & { filterType?: JsonValue }
 }
 
 export type GateParamsEnvelope = ProcessorStateEnvelope<GateParams>
 
 export function createDefaultGateParams(): GateParams {
-  return { enabled: true, mode: 'gate', thresholdDb: -40, ratio: 4, attackMs: 1, holdMs: 20, releaseMs: 120, hysteresisDb: 6, rangeDb: -80, lookaheadMs: 0, detector: 'peak', link: 1, sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707 } }
+  return { enabled: true, mode: 'gate', thresholdDb: -40, ratio: 4, attackMs: 1, holdMs: 20, releaseMs: 120, hysteresisDb: 6, rangeDb: -80, lookaheadMs: 0, detector: 'peak', link: 1, flip: false, sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 80, q: 0.707, gainDb: 0, mix: 1 } }
 }
 
 export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
@@ -840,14 +866,17 @@ export function normalizeGateParams(input: GateParamsInput = {}): GateParams {
     releaseMs: number(input.releaseMs, defaults.releaseMs, 5, 2000),
     hysteresisDb: number(input.hysteresisDb, defaults.hysteresisDb, 0, 24),
     rangeDb: number(input.rangeDb, defaults.rangeDb, -80, 0),
-    lookaheadMs: number(input.lookaheadMs, defaults.lookaheadMs, 0, 2),
+    lookaheadMs: input.lookaheadMs === undefined || !Number.isFinite(input.lookaheadMs) ? defaults.lookaheadMs : snapGateLookaheadMs(input.lookaheadMs),
     detector: input.detector === 'rms' ? 'rms' : 'peak',
     link: number(input.link, defaults.link, 0, 1),
+    flip: isJsonBoolean(input.flip) ? input.flip : defaults.flip,
     sidechain: {
       enabled: isJsonBoolean(input.sidechain?.enabled) ? input.sidechain.enabled : defaults.sidechain.enabled,
-      filterType: 'highpass',
+      filterType: isCompressorSidechainFilterType(input.sidechain?.filterType) ? input.sidechain.filterType : defaults.sidechain.filterType,
       frequencyHz: number(input.sidechain?.frequencyHz, defaults.sidechain.frequencyHz, 20, 20000),
       q: number(input.sidechain?.q, defaults.sidechain.q, 0.1, 18),
+      gainDb: number(input.sidechain?.gainDb, defaults.sidechain.gainDb, GATE_SIDECHAIN_GAIN_DB_MIN, GATE_SIDECHAIN_GAIN_DB_MAX),
+      mix: number(input.sidechain?.mix, defaults.sidechain.mix, 0, 1),
     },
   }
 }
@@ -874,10 +903,14 @@ export const normalizeGateParamsEnvelope = (value: JsonValue): GateParamsEnvelop
       lookaheadMs: isJsonNumber(state.lookaheadMs) ? state.lookaheadMs : undefined,
       detector: state.detector,
       link: isJsonNumber(state.link) ? state.link : undefined,
+      flip: state.flip === true || state.flip === false ? state.flip : undefined,
       sidechain: {
         enabled: sidechain.enabled === true || sidechain.enabled === false ? sidechain.enabled : undefined,
+        filterType: sidechain.filterType,
         frequencyHz: isJsonNumber(sidechain.frequencyHz) ? sidechain.frequencyHz : undefined,
         q: isJsonNumber(sidechain.q) ? sidechain.q : undefined,
+        gainDb: isJsonNumber(sidechain.gainDb) ? sidechain.gainDb : undefined,
+        mix: isJsonNumber(sidechain.mix) ? sidechain.mix : undefined,
       },
     }),
   }

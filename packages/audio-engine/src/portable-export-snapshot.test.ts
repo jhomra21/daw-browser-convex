@@ -772,7 +772,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
             {
               id: 'portable-gate',
               kind: 'gate',
-              params: { version: 1, state: createDefaultGateParams() },
+              params: { version: 1, state: { ...createDefaultGateParams(), lookaheadMs: 1 } },
             },
             {
               id: 'portable-compressor',
@@ -806,7 +806,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     ['tremolo', 0, 0],
     ['autopan', 0, 0],
     ['ensemble', 0, 1_152],
-    ['gate', 96, 0],
+    ['gate', 48, 0],
     ['compressor', 0, 0],
     ['limiter', 144, 0],
   ])

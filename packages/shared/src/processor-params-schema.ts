@@ -73,10 +73,12 @@ const utility = envelope(z.object({
 const gate = envelope(z.object({
   enabled: z.boolean(), mode: z.enum(['gate', 'expander']), thresholdDb: finiteNumber,
   ratio: finiteNumber, attackMs: finiteNumber, holdMs: finiteNumber, releaseMs: finiteNumber,
-  hysteresisDb: finiteNumber, rangeDb: finiteNumber, lookaheadMs: finiteNumber,
-  detector: z.enum(['peak', 'rms']), link: finiteNumber,
+  hysteresisDb: finiteNumber, rangeDb: finiteNumber,
+  lookaheadMs: z.union([z.literal(0), z.literal(1), z.literal(10)]),
+  detector: z.enum(['peak', 'rms']), link: finiteNumber, flip: z.boolean(),
   sidechain: z.object({
-    enabled: z.boolean(), filterType: z.literal('highpass'), frequencyHz: finiteNumber, q: finiteNumber,
+    enabled: z.boolean(), filterType: z.enum(['lowpass', 'highpass', 'bandpass']), frequencyHz: finiteNumber, q: finiteNumber,
+    gainDb: finiteNumber, mix: finiteNumber,
   }).strict(),
 }).strict())
 

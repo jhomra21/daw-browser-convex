@@ -1,14 +1,6 @@
 #include "audio_core_internal.h"
 
 namespace daw::audio_core_internal {
-namespace {
-
-// The state's filter type (0 high-pass, 1 low-pass, 2 band-pass) as the RBJ designer the Gate and the EQ share names it.
-uint32_t sidechain_band_type(uint32_t filter_type) {
-  return filter_type == 1 ? DAW_AUDIO_EQ_BAND_LOWPASS : filter_type == 2 ? DAW_AUDIO_EQ_BAND_BANDPASS : DAW_AUDIO_EQ_BAND_HIGHPASS;
-}
-
-}  // namespace
 
 void render_compressor_processor(
   Core &core,

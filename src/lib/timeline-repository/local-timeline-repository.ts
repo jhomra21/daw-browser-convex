@@ -479,6 +479,10 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
   attachLifecycleFlush()
   const markChanged = () => notifyLocalProjectChanged(projectId)
 
+  const loadSidechainRoutes = async (): Promise<ExternalSidechainRoute[]> => (
+    (await readEntityRowsByKind(projectId, SIDECHAIN_ROW_KIND)).flatMap((row) => isSidechainRoute(row.value) ? [row.value] : [])
+  )
+
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
@@ -1214,6 +1218,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
   return {
     loadSnapshot,
+    loadSidechainRoutes,
     createTrack: (input) => trackRepositoryWrite(projectId, () => createTrack(input)),
     updateTrack: (input) => trackRepositoryWrite(projectId, () => updateTrack(input)),
     createClip: (input) => trackRepositoryWrite(projectId, () => createClip(input)),

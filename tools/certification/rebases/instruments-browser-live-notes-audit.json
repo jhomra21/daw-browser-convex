@@ -1,0 +1,39 @@
+{
+ "name": "instruments-browser-live-notes-audit",
+ "sequence": 142,
+ "createdAt": "2026-11-28T11:41:24.934Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 3
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 3
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Browser live-note retirement (instruments-browser-live-notes b8db14cc, 9c02602e; hand record, no --bless; a direct audit like instruments-single-source-removal). The browser plays live notes and previews through the portable session (portable-browser-playback-controller live-note handle); AudioEngine.startLiveMidiNote, releaseLiveMidiNote, panicLiveMidi, the live-note bookkeeping (liveMidiNotes, the cleanup scheduler constructor parameter) and the preview* instrument arms are deleted in b8db14cc and have no caller (rg over src, tools/acceptance, packages and apps finds those names only on the native playback controller's own live-MIDI API, which is a different object; packages/audio-engine defines none). A removed test cannot go through --allow-removal as a whole-file change, but this is a per-file count change, so only the two `pass` fields move. Verified with `bun --conditions=browser test packages/audio-engine/src/audio-engine-live-midi.test.ts` at c9739e1b (7 pass, 0 fail) and at d5b16920 (3 pass, 0 fail), and the whole packages/audio-engine/src directory at both commits (924 pass at c9739e1b; 920 at d5b16920 with the only other per-file difference the new arpeggiator test counted in this file: no other engine file moved its count). Direct audit of the 4 tests that no longer exist in audio-engine-live-midi.test.ts, all under describe 'AudioEngine granular live MIDI ownership' (the fifth, 'reports the arpeggiator equality skip and applied update', is unchanged apart from its describe, now 'AudioEngine arpeggiator'; the file keeps 'AudioEngine tempo' tests too): (1) 'keeps bounded live notes owned through ordinary note-off, then clears expiry and close cleanup': drove startLiveMidiNote/releaseLiveMidiNote/panicLiveMidi through a fake granular runtime and the injected cleanup scheduler; the methods, the scheduler and the expiry timer no longer exist. The portable counterpart of the ownership rules (a held note, a note whose release has not been sent, teardown) is in portable-browser-playback-controller.test.ts: 'teardown drops held and waiting live notes without sending to the next session', 'a forced release drops a live note whose note-on has not been sent yet', 'live note on and off reach the paused prepared session in order, in its epoch, for its node' (7 live-note tests added in da20a2ca, f-portable 159 -> 166, rc1-i4-consumers 439 -> 446 and six rc2/ledger portable arms rise by 7: rises are not pinned here, the next bless records them). (2) 'gated granular release stops without changing ordinary release behavior': the gate argument of releaseLiveMidiNote and the granular live runtime start/stop pair are deleted; granular now sounds only through the WASM core, and src/hooks/live-notes.browser.test.ts (new, 1 test, 40 checks) plays and releases a granular note through the real hooks, controller and core and asserts it is silent after the release. (3) 'removes sampler and drum one-shot ownership when their sources end': asserted that the engine drops a sampler or Drum Rack handle when its Web Audio source ends; there are no engine-owned handles or Web Audio sources for live notes any more. The same live-notes.browser.test.ts checks every instrument, including the Drum Rack one-shot that ends inside its audition (pads 36 and 37). (4) 'binds synth live releases to the generation that created the handle': the synth voice generation guard of releaseLiveMidiNote; the equivalent stale-handle guard is the portable session epoch, tested by 'a locate between live note on and off leaves no hung note and sends nothing in the old epoch' and 'a locate in flight holds a live note until its epoch is the session epoch'. No killer is removed: none of the four tests is named in an arm's expect.fails or a gate's judge.fails (rg of each leaf name over expectations.json finds only the f-engine and last-engine file keys). Counts: f-engine and last-engine files: audio-engine-live-midi.test.ts pass 7 -> 3. The engine judge pins per-file counts only; this branch adds no engine test file. Measured with each command, with the arm's mutation applied in memory and the preload dropped, at c9739e1b and d5b16920: every non-retired arm that runs src/hooks/useTimelinePlayback.test.ts, src/lib/instrument-buffer-sync.test.ts and tools/acceptance/device-control-cost.browser.test.ts (except the portable controller's seven added tests) and every gate that runs src/hooks/useTimelinePlayback.test.ts, src/lib/instrument-buffer-sync.test.ts or tools/acceptance/device-control-cost.browser.test.ts keep their counts at d5b16920 (281/1, 221, 53/2). Not run: x-matrix and x-probe160 (preloads in /tmp/dv01-b6 absent), the B6F5PROBE matrix arms and the STEP7B3 arms (probe or child-preload overlays); their -t patterns match none of the removed tests. Watched hashes of the changed sources move with the next bless --full, not with this record.",
+  "expectationsSha256": "5cede13f238b8a6cee1850634b57b6ec9fef2c6623529be22d4d224504c529f7"
+ }
+}

@@ -2431,7 +2431,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
-      "pass": 7,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },
@@ -3335,7 +3335,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
-      "pass": 7,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },

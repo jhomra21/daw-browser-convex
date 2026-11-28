@@ -59,13 +59,15 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
       || (mixer != nullptr && !valid_mixer_parameter_value(event.parameter_target, event.value))
       || (has_previous && (event.processor_instance_id < previous_processor
         || (event.processor_instance_id == previous_processor && event.frame_offset < previous_offset)))) return false;
-    if (processor != nullptr && (!has_previous || event.processor_instance_id != previous_processor)) {
-      core.event_starts[processor_index] = event_index;
-      if (has_previous && find_processor((*core.published_graph), previous_processor, &processor_index) != nullptr) {
-        uint32_t previous_index = 0;
-        find_processor((*core.published_graph), previous_processor, &previous_index);
+    if (has_previous && event.processor_instance_id != previous_processor) {
+      // The previous instance's events end here, whether the next instance is a processor or a mixer node.
+      uint32_t previous_index = 0;
+      if (find_processor((*core.published_graph), previous_processor, &previous_index) != nullptr) {
         core.event_ends[previous_index] = event_index;
       }
+    }
+    if (processor != nullptr && (!has_previous || event.processor_instance_id != previous_processor)) {
+      core.event_starts[processor_index] = event_index;
     }
     previous_processor = event.processor_instance_id;
     previous_offset = event.frame_offset;

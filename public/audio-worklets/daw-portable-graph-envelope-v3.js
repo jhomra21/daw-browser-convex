@@ -20,7 +20,9 @@ export const stableId = (value) => {
 }
 
 export const writeId = (view, offset, id) => view.setBigUint64(offset, stableId(id), true)
-const writeOptionalProcessorId = (view, offset, id) => view.setBigUint64(offset, id ? stableId(id) : 0n, true)
+
+// An edge names its target processor by the same 32-bit instance id the processor record carries.
+const writeOptionalProcessorId = (view, offset, instanceIds, id) => view.setBigUint64(offset, BigInt(instanceIds.get(id) ?? 0), true)
 
 const processorStateUint32 = (state, offset) => state.byteLength >= offset + 4
   ? new DataView(state.buffer, state.byteOffset, state.byteLength).getUint32(offset, true)
@@ -50,6 +52,7 @@ export const graphEnvelope = (snapshot) => {
   const hasExtendedNode = hasExternalLatency
   const nodeBytes = hasExtendedNode ? 136 : 132
   const processors = snapshot.nodes.flatMap((node) => node.processorOrder.map((processor) => ({ node, processor })))
+  const processorInstanceIds = new Map(processors.map(({ processor }) => [processor.id, processor.instanceId]))
   let bytes = 24 + snapshot.nodes.length * nodeBytes + snapshot.edges.length * 48
 
   for (const { processor } of processors) bytes += 48 + processor.state.byteLength + processor.parameterTargets.length * 4
@@ -96,7 +99,7 @@ export const graphEnvelope = (snapshot) => {
     writeId(view, offset, edge.id)
     writeId(view, offset + 8, edge.fromNodeId)
     writeId(view, offset + 16, edge.toNodeId)
-    writeOptionalProcessorId(view, offset + 24, edge.targetProcessorId)
+    writeOptionalProcessorId(view, offset + 24, processorInstanceIds, edge.targetProcessorId)
     view.setFloat32(offset + 32, edge.gain, true)
     view.setUint32(offset + 36, edge.tap === 'pre-fx' ? 1 : edge.tap === 'pre-fader' ? 2 : 3, true)
     view.setUint32(offset + 40, edge.sidechain ? 1 : 0, true)

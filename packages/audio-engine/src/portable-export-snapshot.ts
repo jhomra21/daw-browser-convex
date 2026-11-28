@@ -15,7 +15,10 @@ import { resolveMixerTiming, type ExternalNodeLatencyFrames } from './mixer/reso
 import { projectPortableClipEvents } from './portable-clip-projector'
 import { portableWasmCapabilityMatrix } from './backends/portable-wasm-capabilities'
 import { nativeAudioCoreProcessorKinds } from './backends/native-audio-core-capabilities'
+import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
+import { compilePortableExportAutomation } from './portable-automation-schedule'
+import type { PortableFrameScheduleEvent } from './portable-frame-scheduling'
 import type { ResolvedMixerGraph } from './mixer/types'
 import {
   validatePortablePreparedStretchAsset,
@@ -31,6 +34,7 @@ import {
   compilePortableSessionInput,
   graphWithInstruments,
   instrumentConfigurations,
+  targetReasons,
 } from './portable-session-compiler'
 import {
   localizeSampledInstrumentSample,
@@ -55,6 +59,8 @@ export type PortableExportSnapshot =
     assets: readonly PortableExportAsset[]
     instrumentRegionSources?: readonly { sourceAssetKey: string; buffer: AudioBuffer }[]
     events: readonly AudioCoreSampleSourceEventDto[]
+    /** Mixer and processor automation in render frames (frame 0 is the range start), ordered by frame. */
+    automation: readonly PortableFrameScheduleEvent[]
   }
   | {
     supported: false
@@ -72,6 +78,7 @@ export type PortableExportSnapshotInput = {
   firstSequence: number
   fx?: ExportFx
   sidechainRoutes?: readonly ExternalSidechainRoute[]
+  automationEnvelopes?: readonly AutomationEnvelope[]
   hasExternalPlugins?: boolean
   projectGeneration?: number
   preparedStretchAssets?: readonly (PortablePreparedStretchAsset | PortablePagedStretchAsset | NativePreparedStretchAsset)[]
@@ -661,7 +668,7 @@ export const compilePortableExportSnapshot = (
         fx: portableFx,
       }),
       fx: portableFx ?? { masterVolume: 1, masterFxInstances: [], trackFx: {} },
-      automationEnvelopes: [],
+      automationEnvelopes: input.automationEnvelopes ?? [],
       assetRegistry: {
         projectGeneration: 1,
         assets: [...rawAssetsBySourceAssetKey.entries()].flatMap(([projectAssetId, asset], slot) => {
@@ -722,9 +729,24 @@ export const compilePortableExportSnapshot = (
       ], diagnostics)
     }
 
+    const automation = compilePortableExportAutomation({
+      envelopes: input.automationEnvelopes ?? [],
+      startSec: range.startSec,
+      endSec: range.endSec,
+      sampleRateHz: input.sampleRateHz,
+      bpm: input.bpm,
+      revision: input.revision,
+      epoch: input.epoch,
+    })
+
+    const { graph } = instrumentGraph
+    const automationReasons = [...new Set(automation.flatMap((event) => targetReasons(event, graph)))]
+
+    if (automationReasons.length > 0) return unsupported([...reasons, ...automationReasons], diagnostics)
+
     const snapshot = {
       supported: true,
-      graph: instrumentGraph.graph,
+      graph,
       graphLatencyFrames: resolveMixerTiming(
         mixerGraph,
         input.sampleRateHz,
@@ -733,6 +755,7 @@ export const compilePortableExportSnapshot = (
       ).graphLatencyFrames,
       assets,
       events,
+      automation,
     } satisfies Extract<PortableExportSnapshot, { supported: true }>
 
     if (input.instrumentRegionMode !== 'metadata') return snapshot

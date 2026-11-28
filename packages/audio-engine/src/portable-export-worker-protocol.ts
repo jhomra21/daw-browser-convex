@@ -1,5 +1,6 @@
 import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
 import type { PortableExportAsset } from './portable-export-snapshot'
+import type { PortableFrameScheduleEvent } from './portable-frame-scheduling'
 import {
   portableWasmMaxAssets,
   portableWasmMaxGraphEdges,
@@ -17,6 +18,7 @@ export type PortableExportWorkerSnapshot = {
   graph: AudioCoreGraphSnapshot
   assets: readonly PortableExportAsset[]
   events: readonly AudioCoreSampleSourceEventDto[]
+  automation: readonly PortableFrameScheduleEvent[]
 }
 
 export type PortableExportWorkerRequest =

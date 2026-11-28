@@ -143,10 +143,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       clips: track.clips.filter(isPortableStretchClip),
     }))
 
-    const mayRenderPortableTimeline = !input.nativeRendererRequired
-      && input.renderStateSnapshot.automationEnvelopes.length === 0
-      && input.sidechainRoutes.length === 0
-      && Boolean(input.resolveAudioSource)
+    const mayRenderPortableTimeline = !input.nativeRendererRequired && Boolean(input.resolveAudioSource)
 
     const preparation = await Promise.allSettled([
       mixdownModule,
@@ -434,7 +431,7 @@ export async function runTimelineExport(input: TimelineExportRequest): Promise<E
       throw new Error(
         input.nativeRendererRequired
           ? NATIVE_EXPORT_UNAVAILABLE_MESSAGE
-          : 'Portable timeline export does not support automation, sidechain routing, or unavailable source paging.',
+          : 'Portable timeline export is unavailable for this project.',
       )
     }
   } catch (err) {

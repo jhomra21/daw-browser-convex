@@ -4,6 +4,7 @@ import { projectControlSnapshotV1, projectControlSnapshotV2 } from "./controlPro
 import { listProjectTracksWithMixerChannels } from "./mixerChannels";
 import { getProjectMixerSettings } from "./projectMixerSettings";
 import { requireProjectRow } from "./projectRows";
+import { currentEffectRows } from "./effectRowParams";
 
 type SnapshotContext = { db: DatabaseReader };
 
@@ -36,7 +37,7 @@ const readProjectControlSnapshot = async <Snapshot>(
     clips,
     masterVolume: mixerSettings.masterVolume,
     automationEnvelopes,
-    effects,
+    effects: currentEffectRows(effects),
     sidechainRoutes,
     assets,
     assetFolders,

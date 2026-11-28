@@ -1,5 +1,5 @@
 import { normalizeLocalAutomationEnvelopes } from "~/lib/local-automation"
-import { isLocalEffectRow, type LocalEffectRow } from "~/lib/local-effects"
+import { currentLocalEffectRows, type LocalEffectRow } from "~/lib/local-effects"
 import { openLocalProjectDb } from "~/lib/local-project-db"
 import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND } from "~/lib/local-project-rows"
 import type { JsonValue } from "@daw-browser/shared"
@@ -24,7 +24,7 @@ export const captureLocalExportRenderRowsSnapshot = async (
   await tx.done
 
   return {
-    effects: effectRows.flatMap((row) => isLocalEffectRow(row.value) ? [row.value] : []),
+    effects: currentLocalEffectRows(effectRows),
     automationEnvelopes: normalizeLocalAutomationEnvelopes(automationRows.map((row) => row.value)),
   }
 }

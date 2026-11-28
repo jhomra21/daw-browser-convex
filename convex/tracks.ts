@@ -28,7 +28,8 @@ import {
   deriveTrackUngroupAfterStatesV1,
   type NormalizedTrackControlStateV1,
 } from "@daw-browser/control-core";
-import { AUDIO_EFFECT_KINDS, automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
+import { currentEffectDocs } from "./effectRowParams";
+import { AUDIO_EFFECT_KINDS, audioEffectParamsVersionStamp, automationTargetKey, canonicalTrackCreation, collectTrackDescendantIds, createDefaultSynthParams, createInstrumentInstanceId, granularAutomationKey, hasTrackGroupCycle, hasValidReturnTrackPartition, instrumentAutomationKey, isSidechainCapableKind, normalizeClipColor, normalizeMixerVolume, normalizeSharedUngroupRestoreAutomation, normalizeSharedUngroupRestoreEffects, normalizeTrackColor, parseGranularAutomationKey, parseInstrumentAutomationKey, parseSynthAutomationKey, sidechainEligibilityError, sidechainTargetEligibilityError, synthAutomationKey, trackCreationCollapsed } from "@daw-browser/shared";
 
 type DeleteOwnedTrackOptions = {
   onlyIfEmpty?: boolean
@@ -1617,7 +1618,7 @@ const ungroupTrackForUser = async (ctx: any, userId: string, projectId: string, 
     .withIndex("by_project_track", (q: any) => q.eq("projectId", group.projectId).eq("trackId", normalizedGroupId))
     .collect();
 
-  const effects = await ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect();
+  const effects = await currentEffectDocs(ctx.db.query("effects").withIndex("by_track", (q: any) => q.eq("trackId", normalizedGroupId)).collect());
 
   const [sourceSidechains, targetSidechains] = await Promise.all([
     ctx.db.query("sidechainRoutes").withIndex("by_source", (q: any) => q.eq("sourceTrackId", normalizedGroupId)).collect(),
@@ -1935,6 +1936,7 @@ export const serverRestoreUngroup = mutation({
             type: effect.type,
             instanceId: effect.instanceId,
             params: effect.params,
+            ...audioEffectParamsVersionStamp(effect.type),
             createdAt: Date.now(),
           });
         }

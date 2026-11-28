@@ -33,7 +33,7 @@ import type {
 } from '~/lib/timeline-repository/types'
 import type { ExternalSidechainRoute } from '@daw-browser/timeline-core/types'
 import { buildTimelineTrackRow } from './track-row-builder'
-import { localSidechainRouteRowId } from '~/lib/local-effects'
+import { localEffectParamsVersionStamp, localSidechainRouteRowId } from '~/lib/local-effects'
 import { externalPluginEntityKind } from '@daw-browser/external-plugins'
 import {
   applyLocalExternalProcessorDeletionPlanToStores,
@@ -1104,7 +1104,7 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     await Promise.all([
       tx.store.put(toEntityRow(TRACK_ROW_KIND, persistedGroup.id, persistedGroup, timestamp)),
       ...changedTracks.map((track) => tx.store.put(toEntityRow(TRACK_ROW_KIND, track.id, track, timestamp))),
-      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_ROW_KIND, effect.id, effect, timestamp))),
+      ...persistedEffects.map((effect) => tx.store.put(toEntityRow(EFFECT_ROW_KIND, effect.id, { ...effect, ...localEffectParamsVersionStamp(effect.effect) }, timestamp))),
       ...input.automation.map((envelope) => tx.store.put(toEntityRow(AUTOMATION_ROW_KIND, envelope.targetKey, envelope, timestamp))),
       ...sidechainRoutes.map((route) => tx.store.put(toEntityRow(
         SIDECHAIN_ROW_KIND,

@@ -36,6 +36,8 @@ export * from './drum-rack-params'
 
 export * from './effects-params'
 
+export * from './audio-effect-param-versions'
+
 export * from './export-audio-formats'
 
 export * from './instrument-params'

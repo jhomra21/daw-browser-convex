@@ -1,0 +1,54 @@
+{
+ "name": "effects-param-versions",
+ "sequence": 120,
+ "createdAt": "2026-11-24T02:26:46.654Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/lib/local-effects.ts",
+   "from": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40",
+   "to": "ed2309148770fcd7f0b82732470644dab31532a676d4814fd5e7f937435528c8"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "7bfc56aa353ba93899e9ba055533d9e4e9effebfec069c357769f6c0d5f740a6",
+   "new": "4a57ad7b942fdd8990a421d8583f41001809899a2dd98792933608567c4ccd91"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "b3924e8c775e620195a0ce00b66473e19fc95b4a",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "c6fe0865929c7b193a7d7f0fc263de16b952f39ffe558c60153a866ab55a5536",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "c6fe0865929c7b193a7d7f0fc263de16b952f39ffe558c60153a866ab55a5536",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/pv-bless/live",
+   "resultSha256": "a82d972a95aafa32fbb38e4663c08921728a3b53fb2318a0ce3fbb1f6648dd90",
+   "seconds": 1548.828913708,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

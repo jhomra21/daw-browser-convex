@@ -10,6 +10,10 @@ import { saturationUtility } from './saturation-utility'
 import { saturator } from './saturator'
 import { utility } from './utility'
 import { spectral } from './spectral'
+import { synth } from './synth'
+import { sampler } from './sampler'
+import { drumRack } from './drum-rack'
+import { granular } from './granular'
 
 export type Family = { scenarios: Scenario[]; notEncoded: readonly string[] }
 
@@ -25,6 +29,10 @@ export const families = {
   utility,
   'saturation-utility': saturationUtility,
   spectral,
+  synth,
+  sampler,
+  'drum-rack': drumRack,
+  granular,
 }
 
 /** Families whose effects are rebuilt: certification fails on any of their rows. Add a family here once its effects pass. */

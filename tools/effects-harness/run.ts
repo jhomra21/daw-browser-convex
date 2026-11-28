@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 // Effects measurement harness: renders fixed signals through the real audio-core wasm (and the legacy worklets for parity)
-// and writes JSON metrics, a markdown summary and short WAVs. Usage: bun tools/effects-harness/run.ts [--family <name>] [--out <dir>] [--gate]
+// and writes JSON metrics, a markdown summary and short WAVs. Usage: bun tools/effects-harness/run.ts [--family <name>[,<name>...]] [--out <dir>] [--gate]
 // --gate runs the gated families (or --family) and exits 1 when any judged row fails; informational rows never fail it.
 import path from 'node:path'
 import { jsonReplacer, markdownSummary, runScenarios } from './report'
@@ -22,17 +22,18 @@ const git = async (...args: string[]) => {
   return (await new Response(process.stdout).text()).trim()
 }
 
-const wanted = option('family')
+const wanted = option('family')?.split(',')
 const known = Object.entries(families)
 const names = known.map(([name]) => name)
+const unknown = wanted?.filter((name) => !names.includes(name))
 
-if (wanted !== undefined && !names.includes(wanted)) {
-  console.error(`Unknown family "${wanted}". Available: ${names.join(', ')}`)
+if (unknown !== undefined && unknown.length > 0) {
+  console.error(`Unknown family "${unknown.join(', ')}". Available: ${names.join(', ')}`)
   process.exit(1)
 }
 
 const gate = process.argv.includes('--gate')
-const selected = known.filter(([name]) => wanted === undefined ? !gate || gatedFamilies.some((gated) => gated === name) : name === wanted)
+const selected = known.filter(([name]) => wanted === undefined ? !gate || gatedFamilies.some((gated) => gated === name) : wanted.includes(name))
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')
 const outDir = path.resolve(option('out') ?? `${defaultOutRoot}/${stamp}`)
 const wavDir = `${outDir}/wav`

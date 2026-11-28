@@ -1,0 +1,59 @@
+{
+ "name": "untangle-native-core-split-hashes",
+ "sequence": 104,
+ "createdAt": "2026-11-21T09:13:48.485Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-core/src/audio_core.cpp",
+   "from": "4d921681bf67d32788ee5a10dc679e5381c11cc7e5916d0749fe1004ec0d5adb",
+   "to": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e"
+  },
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "045e21beaafeba54cfac3974a3c0c20293cecc505cc9fb3812545236284a8a17",
+   "to": "cdf9ca491268e000ad026b0c365c99f1ea0f88e55e8915ffb2ed9a4aee3dc711"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "5a787734b6762d48b8c2ecb0503f098202d1c4a0d724c602165ed5a25a155822",
+   "to": "cc7eb2eb74a740e26eaacc11286d0b60537cf03581ba19bc01578a1a186342b9"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "b59dc65870ab2cdb8ddb65021c21080ad101a87e9731360ea4879fe083365ff6",
+   "to": "c18cf4fe1b5711010cb1c808c1d9d129e681f5480888366ad08035bf5d9222d2"
+  }
+ ],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "e98c747ef9416cb4a48e5a8a06c084e485ba75ab",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "7af8c54974a3b3ff9b78be7f69c172c1809d8ca4da8a2cc2d333b87049efe235",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "7af8c54974a3b3ff9b78be7f69c172c1809d8ca4da8a2cc2d333b87049efe235",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b12b-bless/live",
+   "resultSha256": "bdf48f45cad8d28f0bb0bea9d626ea197e7382eb961361346ebbd98f0ffdbf29",
+   "seconds": 1270.837072333,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

@@ -55,7 +55,7 @@ if(BUILD_TESTING)
   add_test(NAME daw-host-recording-spool-test COMMAND daw-host-recording-spool-test)
   # A private core copy supplies indexed post-admission failures. The production
   # core/runtime (including BUILD_TESTING builds) never contains the hook.
-  add_executable(daw-audio-host-macos-test tests/audio_host_test.cpp ../audio-core/src/audio_core.cpp ${DAW_AUDIO_HOST_SOURCES})
+  add_executable(daw-audio-host-macos-test tests/audio_host_test.cpp ${DAW_AUDIO_CORE_SOURCES} ${DAW_AUDIO_HOST_SOURCES})
   target_compile_definitions(daw-audio-host-macos-test PRIVATE
     DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION=1 DAW_AUDIO_HOST_TEST_MEMORY_LOCK=1
     DAW_AUDIO_HOST_TEST_PATCH_CLAIM=1)

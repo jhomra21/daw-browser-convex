@@ -16,7 +16,7 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8",
+   "src/lib/desktop/native-playback-controller.ts": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
    "src/lib/desktop/native-processor-state-owner.ts": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
    "src/hooks/useTimelinePlayback.ts": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f",
    "src/lib/desktop/native-playback-controller.test.ts": "3b44147e3afed2b449cf7a8182e6f07af45b6e7f4b339e3e6d2e8b729335cac2",
@@ -126,8 +126,8 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8",
-   "src/lib/desktop/native-schedule-coordinator.ts": "059ef5ff7fc5c19c8fb2bcc367983e6d557769793cbdc98f1c21ffc476bcbfd7",
+   "src/lib/desktop/native-playback-controller.ts": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
+   "src/lib/desktop/native-schedule-coordinator.ts": "702e457db755553d65eccb93693f2482c00dab6c874f08adca05bf6021d472cf",
    "src/lib/desktop/native-processor-state-owner.ts": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
    "src/lib/live-processor-control.ts": "3fdfa747f55ddd77895e6f26956d754d102507f24dad85055aaef93be4fa2c61",
@@ -144,13 +144,13 @@
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "0e64f95c223e3d04047a08272ab4b3a0cd26a9a13897e5e7f6dc1cd74130f5b8",
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "fc64facaeb3694c3ff38ddc810799d0611dff956daefb20bd8f0af74e96ec51a",
    "src/lib/desktop/native-publication-transaction.ts": "f5fb94a4b20df818500ba99bd61dca72254ecdc44fd5786ba4ec031e635637f6",
-   "src/lib/desktop/native-schedule-publication.ts": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb",
+   "src/lib/desktop/native-schedule-publication.ts": "60c068bb251fcd65a3ea2b83048ece885c72d0d3028f758f903a15fa962f065e",
    "src/lib/desktop/native-observation.ts": "00dd7b0593e8d743d7bbbb23994ba359c192cbef173a4996d74ecdf4a2274a46",
    "src/lib/desktop/native-recording-session.ts": "26c5c2ae59c353d3e3a0d2c0d94a28c03911ee7985eefd5f9f0f4f87ea4c5786",
    "src/lib/desktop/native-live-midi.ts": "9f152404893b4f9280cc73474ff9bd8035740d8f23dd1012089a18a091984948",
    "src/lib/desktop/native-state-patches.ts": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b",
    "src/lib/desktop/native-graph-targets.ts": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a",
-   "src/lib/desktop/native-snapshot-support.ts": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347",
+   "src/lib/desktop/native-snapshot-support.ts": "49e39dec1f0931a9089bafaa71e11b4c47048e1a3e1fa41d709f7d6ca1a5a731",
    "src/lib/desktop/native-host-connection-loss.ts": "86f2ec8e05d566ec461b5a7b945e52462f1e4215e86ef752878d41c2735acccd",
    "src/lib/desktop/native-retirement.ts": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae",
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
@@ -158,7 +158,7 @@
   "hook": {
    "src/hooks/useTimelinePlayback.ts": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
-   "src/lib/desktop/native-playback-controller.ts": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8",
+   "src/lib/desktop/native-playback-controller.ts": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
    "src/lib/local-effects.ts": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40",
    "src/lib/desktop/native-processor-state-owner.ts": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
@@ -188,13 +188,13 @@
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "fc64facaeb3694c3ff38ddc810799d0611dff956daefb20bd8f0af74e96ec51a",
    "tools/acceptance/ae-08-processor-state-fuzz-witness.ts": "1b37db2bacb964ce8128caa2a5abd99f55356c4a85b069d244f4ce210be8ff6f",
    "src/lib/desktop/native-publication-transaction.ts": "f5fb94a4b20df818500ba99bd61dca72254ecdc44fd5786ba4ec031e635637f6",
-   "src/lib/desktop/native-schedule-publication.ts": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb",
+   "src/lib/desktop/native-schedule-publication.ts": "60c068bb251fcd65a3ea2b83048ece885c72d0d3028f758f903a15fa962f065e",
    "src/lib/desktop/native-observation.ts": "00dd7b0593e8d743d7bbbb23994ba359c192cbef173a4996d74ecdf4a2274a46",
    "src/lib/desktop/native-recording-session.ts": "26c5c2ae59c353d3e3a0d2c0d94a28c03911ee7985eefd5f9f0f4f87ea4c5786",
    "src/lib/desktop/native-live-midi.ts": "9f152404893b4f9280cc73474ff9bd8035740d8f23dd1012089a18a091984948",
    "src/lib/desktop/native-state-patches.ts": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b",
    "src/lib/desktop/native-graph-targets.ts": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a",
-   "src/lib/desktop/native-snapshot-support.ts": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347",
+   "src/lib/desktop/native-snapshot-support.ts": "49e39dec1f0931a9089bafaa71e11b4c47048e1a3e1fa41d709f7d6ca1a5a731",
    "src/lib/desktop/native-host-connection-loss.ts": "86f2ec8e05d566ec461b5a7b945e52462f1e4215e86ef752878d41c2735acccd",
    "src/lib/desktop/native-retirement.ts": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae",
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
@@ -4188,13 +4188,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "0d9e938c1fe82f439b9494ba9947a4a0ebd6f14a974367c6c469528d9c94bf5e",
+   "treeSha256": "389c3e698ca881b2a3cb291dd422be4f4ec760b585eb441189fae04b0f81de21",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "500f208ed67f9e9dfd31e6c38f1676dafa1df42fd8ff9c3c3c34684df0cb1223",
+   "treeSha256": "72a51788907d391f1946c0137f5181f7a684e1c2a1f0301640816fb4aa42b511",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -16169,9 +16169,9 @@
      "id": "273-0-mutant",
      "changes": [
       {
-       "file": "/src/lib/desktop/native-playback-controller.ts",
-       "from": "      const record = processorState.capturePublication(attempt,",
-       "to": "      const record = processorState.capturePublication(attempt,"
+       "file": "/src/lib/desktop/native-publication-executor.ts",
+       "from": "  const record = host.processorState.capturePublication(attempt,",
+       "to": "  const record = host.processorState.capturePublication(attempt,"
       },
       {
        "file": "/src/lib/desktop/native-playback-controller.ts",
@@ -53012,8 +53012,8 @@
      "changes": [
       {
        "file": "src/lib/desktop/native-schedule-publication.ts",
-       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
-       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },
@@ -53130,8 +53130,8 @@
      "changes": [
       {
        "file": "src/lib/desktop/native-schedule-publication.ts",
-       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)",
-       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+       "from": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+       "to": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
       }
      ]
     },

@@ -6,8 +6,8 @@ import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { createDefaultGranularParams, createDefaultReverbParams, createDefaultSynthParams, externalAutomationParameterId, type AutomationEnvelope } from "@daw-browser/shared"
 import type { NativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol"
 import type { NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire"
+import { arrangementFrameForLoop } from "@daw-browser/audio-engine/loop-frame-schedule"
 import {
-  arrangementFrameForNativeFrame,
   createNativeScheduleCoordinator,
   nativeVstAutomationSegmentsForSnapshot,
   scheduleEndFrameFor,
@@ -489,7 +489,6 @@ test("staged source hydration continues the retained cursor without a seam resta
 
 test("opt-in refill diagnostics aggregate progress and synchronous compilation per coordinator", async () => {
   const fixture = bridgeFor()
-  const reports: Array<{ progressCount: number; compileCount: number; compileTotalMs: number; compileMaxMs: number }> = []
 
   const coordinator = createNativeScheduleCoordinator({
     bridge: fixture.bridge,
@@ -499,7 +498,7 @@ test("opt-in refill diagnostics aggregate progress and synchronous compilation p
     capacity: { maximumFramesPerBlock: 128 },
     assets: [],
     startFrame: 0,
-    onRefillDiagnostics: (snapshot) => reports.push(snapshot),
+    collectRefillDiagnostics: true,
   })
 
   coordinator.install()
@@ -516,8 +515,6 @@ test("opt-in refill diagnostics aggregate progress and synchronous compilation p
   expect(snapshot.compileCount).toBeGreaterThan(0)
   expect(snapshot.compileTotalMs).toBeGreaterThanOrEqual(snapshot.compileMaxMs)
   expect(snapshot.compileMaxMs).toBeGreaterThanOrEqual(0)
-  expect(reports.length).toBeLessThan(1000)
-  expect(reports.at(-1)?.compileCount).toBeLessThanOrEqual(snapshot.compileCount)
 
   const other = createNativeScheduleCoordinator({
     bridge: bridgeFor().bridge,
@@ -1458,12 +1455,12 @@ test("projects repeated loop iterations onto monotonic native frames", async () 
 })
 
 test("wraps the public arrangement frame at the integer loop boundary", () => {
-  expect(arrangementFrameForNativeFrame(72_000, {
+  expect(arrangementFrameForLoop(72_000, {
     startFrame: 24_000,
     endFrame: 72_000,
     lengthFrames: 48_000,
   })).toBe(24_000)
-  expect(arrangementFrameForNativeFrame(96_000, {
+  expect(arrangementFrameForLoop(96_000, {
     startFrame: 24_000,
     endFrame: 72_000,
     lengthFrames: 48_000,

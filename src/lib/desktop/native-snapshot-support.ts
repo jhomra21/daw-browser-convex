@@ -160,3 +160,6 @@ export const attachmentsChanged = (previous: LivePlaybackSnapshot, snapshot: Liv
 
   return bindings(snapshot) !== bindings(previous)
 }
+
+export const sameBytes = (left: Uint8Array, right: Uint8Array) =>
+  left.length === right.length && left.every((byte, index) => byte === right[index])

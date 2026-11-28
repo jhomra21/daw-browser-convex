@@ -7385,7 +7385,11 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     timelineReschedule, resumingRebuild, mark: () => world.seq, liveSession: () => world.sessions.filter((session) => !session.closed).at(-1) }
 }
 
-const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promise<void>, nativeEnabled = true) => {
+const runB6fLive = async (
+  body: (live: ReturnType<typeof mountB6fLive>) => Promise<void>,
+  nativeEnabled = true,
+  audioHost?: ReturnType<typeof createNativeHookBridge>['audioHost'],
+) => {
   const previous = {
     window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
     AudioContext: Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'),
@@ -7434,7 +7438,7 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
 
   const manifest = await readFile(new URL('../../public/audio-core/daw-audio-core.manifest.json', import.meta.url), 'utf8')
   const wasm = await readFile(new URL('../../public/audio-core/daw-audio-core.wasm', import.meta.url))
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: audioHost ? { dawDesktop: { audioHost } } : {} })
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: FakeAudioContext })
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: string | URL) => (
@@ -7480,6 +7484,24 @@ test('B6f a Pause or Stop that cancels a pending Play leaves a live paused porta
     await Promise.allSettled([play, cancel])
     await live.expectLive(false, action === 'stop' ? 0 : 1, mark, 'none')
   })
+})
+
+test('B6f a Pause that cancels a pending Play with native playback disabled requests no native preview', async () => {
+  const fixture = createNativeHookBridge()
+
+  await runB6fLive(async (live) => {
+    live.playback.setPlayhead(1, live.tracks())
+    live.holds.compile.armed = true
+    const play = live.playback.handlePlay(live.tracks())
+    await live.holds.compile.reached.promise
+    const mark = live.mark()
+    const pause = live.playback.handlePause()
+    releaseB6fLive(live.holds.compile)
+    await Promise.allSettled([play, pause])
+    await live.expectLive(false, 1, mark, 'none')
+    expect(fixture.calls).not.toContain('begin')
+    expect(live.playback.isNativePlaybackPrepared()).toBeFalse()
+  }, false, fixture.audioHost)
 })
 
 test('B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit', async () => {

@@ -295,7 +295,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
     expect.objectContaining({ name: 'reverb', id: 14, stateBytes: 72 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
-    expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 60, tombstone: false }),
+    expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
     expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 36, schemaVersion: 1, tombstone: false }),
   ])
 })

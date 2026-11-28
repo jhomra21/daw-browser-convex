@@ -36,6 +36,7 @@ import {
   type SaturatorProcessorState,
   type SpectralProcessorState,
 } from '../../../packages/audio-core-contract/src/index'
+import { AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES } from '../../../packages/shared/src/effects-params'
 
 export type PortableModulationKind = 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble'
 
@@ -298,13 +299,16 @@ const utilityState = (gainDb = 0, enabled = true) => encodeUtilityProcessorState
 const autoFilterState = (overrides: Partial<AutoFilterProcessorState> = {}): AutoFilterProcessorState => ({
   enabled: true,
   mode: 'lowpass',
-  quality: '2x',
+  slope: 12,
+  hiQuality: false,
   frequencyHz: 1_000,
   resonance: 0.25,
   driveDb: 0,
   mix: 1,
-  envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
-  lfo: { waveform: 'sine', rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0 },
+  outputDb: 0,
+  clip: false,
+  envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100, hold: false, link: false },
+  lfo: { waveform: 'sine', sync: false, division: 5, rateHz: 1, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0 },
   ...overrides,
 })
 
@@ -930,8 +934,6 @@ const liveControlPair = (
     },
   ]
 }
-
-const bypassInput = stereo(sine(16, 1_000, 48_000), sine(16, 2_000, 48_000, 0.25))
 
 // A Saturator or EQ that is bypassed when its graph is first built has nothing
 // sounding to ramp away from, so it passes its input dry from the first sample.
@@ -2609,9 +2611,12 @@ const loFiFixtures: readonly PortableGraphParityFixture[] = [44_100, 48_000, 96_
   return liveControlPair(fixture, 131, 16)
 })
 
-const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
-  {
-    name: 'autofilter-lowpass-impulse-partitions-reset',
+const autoFilterImpulseFixture = (hiQuality: boolean): PortableGraphParityFixture => {
+  const latency = hiQuality ? AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES : 0
+  const frames = latency + 64
+
+  return {
+    name: hiQuality ? 'autofilter-lowpass-hi-quality-impulse-partitions-reset' : 'autofilter-lowpass-impulse-partitions-reset',
     capability: 'chains',
     processorKind: 'autofilter',
     sampleRateHz: 48_000,
@@ -2622,20 +2627,34 @@ const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
       nodeId: 2n,
       instanceId: 11,
       kindId: 16,
-      state: encodeAutoFilterProcessorState(autoFilterState()),
+      state: encodeAutoFilterProcessorState(autoFilterState({ hiQuality })),
       parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
-      latencyFrames: 6,
+      latencyFrames: latency,
     }),
-    frames: 64,
-    blockPartitions: [1, 3, 12, 16, 32],
-    input: stereo([1, ...Array.from({ length: 63 }, () => 0)], [-0.5, ...Array.from({ length: 63 }, () => 0)]),
+    frames,
+    // Uneven blocks up to the 32-frame maximum; the sizes must add up to the frame count.
+    blockPartitions: hiQuality ? [1, 3, 12, 16, 32, 32, 31] : [1, 3, 12, 16, 32],
+    input: stereo([1, ...Array.from({ length: frames - 1 }, () => 0)], [-0.5, ...Array.from({ length: frames - 1 }, () => 0)]),
     assertReset: true,
-    expectedLatencyFrames: 6,
+    expectedLatencyFrames: latency,
     nativeWasmTolerance: 2e-5,
-    assertOutput: (output) => finite(output)
-      && output[0]?.slice(0, 6).every((sample) => sample === 0)
-      && output[0]?.slice(6).some((sample) => Math.abs(sample) > 1e-6),
-  },
+    // The Hi-Quality oversampler is linear phase, so it rings slightly before its peak: almost no energy may arrive
+    // before the declared latency, and the peak must not.
+    assertOutput: (output) => {
+      const left = output[0]
+
+      if (!finite(output) || left === undefined) return false
+      const energy = (samples: Float32Array) => samples.reduce((sum, sample) => sum + sample * sample, 0)
+      const peak = left.reduce((best, sample, index) => Math.abs(sample) > Math.abs(left[best] ?? 0) ? index : best, 0)
+
+      return energy(left) > 1e-12 && energy(left.slice(0, latency)) <= 1e-3 * energy(left) && peak >= latency
+    },
+  }
+}
+
+const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
+  autoFilterImpulseFixture(false),
+  autoFilterImpulseFixture(true),
   ...(['highpass', 'bandpass', 'notch', 'peak'] as const).map((mode): PortableGraphParityFixture => ({
     name: `autofilter-${mode}-extreme`,
     capability: 'chains',
@@ -2653,18 +2672,17 @@ const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
         frequencyHz: 20_000,
         resonance: 1,
         driveDb: 24,
-        envelope: { amountOctaves: 0, attackMs: 10, releaseMs: 100 },
-        lfo: { waveform: 'triangle', rateHz: 3, depthOctaves: 0, phaseOffset: 0, stereoPhase: 0.25 },
+        lfo: { waveform: 'triangle', sync: false, division: 5, rateHz: 3, depthOctaves: 0, phaseOffset: 0, stereoMode: 'phase', stereoPhase: 0.25 },
       })),
       parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
-      latencyFrames: 6,
+      latencyFrames: 0,
     }),
     frames: 128,
     input: new Float32Array([
       Number.NaN, Number.POSITIVE_INFINITY, ...Array.from({ length: 126 }, (_, index) => Math.sin(index * 0.31) * 4),
       Number.NEGATIVE_INFINITY, Number.NaN, ...Array.from({ length: 126 }, (_, index) => -Math.sin(index * 0.31) * 4),
     ]),
-    expectedLatencyFrames: 6,
+    expectedLatencyFrames: 0,
     nativeWasmTolerance: 2e-5,
     assertOutput: finite,
   })),
@@ -2682,12 +2700,12 @@ const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
       kindId: 16,
       state: encodeAutoFilterProcessorState(autoFilterState({ mode: 'bandpass', resonance: 0.5 })),
       parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
-      latencyFrames: 6,
+      latencyFrames: 0,
     }),
     frames: 68,
     input: stereo(sine(68, 440, 96_000), sine(68, 880, 96_000, 0.25)),
     parameters: parameterEnvelopeForTarget(30, Array.from({ length: 68 }, (_, frame) => 200 + frame * 25)),
-    expectedLatencyFrames: 6,
+    expectedLatencyFrames: 0,
     nativeWasmTolerance: 2e-5,
     assertOutput: (output) => finite(output) && changedFromInput(output, stereo(
       sine(68, 440, 96_000), sine(68, 880, 96_000, 0.25),
@@ -2705,18 +2723,19 @@ const autoFilterFixtures: readonly PortableGraphParityFixture[] = [
       nodeId: 2n,
       instanceId: 11,
       kindId: 16,
-      state: encodeAutoFilterProcessorState(autoFilterState({ enabled: false })),
+      state: encodeAutoFilterProcessorState(autoFilterState({ enabled: false, hiQuality: true })),
       parameterTargets: [30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40],
-      latencyFrames: 6,
+      latencyFrames: AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES,
       bypassed: true,
     }),
-    frames: 16,
-    input: bypassInput,
-    expectedLatencyFrames: 6,
+    frames: AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES + 16,
+    blockPartitions: [16, 16, 16, 16, 15],
+    input: stereo(sine(AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES + 16, 1_000, 44_100), sine(AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES + 16, 2_000, 44_100, 0.25)),
+    expectedLatencyFrames: AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES,
     nativeWasmTolerance: 2e-5,
     assertOutput: (output) => finite(output)
-      && output.every((plane) => plane.slice(0, 6).every((sample) => sample === 0))
-      && output.some((plane) => plane.slice(6).some((sample) => Math.abs(sample) > 1e-6)),
+      && output.every((plane) => plane.slice(0, AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES).every((sample) => sample === 0))
+      && output.some((plane) => plane.slice(AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES).some((sample) => Math.abs(sample) > 1e-6)),
   },
 ]
 

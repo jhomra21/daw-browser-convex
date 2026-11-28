@@ -9,6 +9,8 @@ import {
   isJsonNumber,
   isJsonObject,
   isJsonString,
+  automationValuesVersionStamp,
+  migrateAutomationPointValues,
   parseJsonValue,
   type AutomationEnvelope,
   type AutomationPoint,
@@ -86,10 +88,17 @@ const normalizeLocalAutomationEnvelope = (value: JsonValueInput): AutomationEnve
     targetKey: automationTargetKey(target, parsed.parameterId),
     parameterId: parsed.parameterId,
     enabled: parsed.enabled,
-    points: normalizeAutomationPoints(points, descriptor),
+    // The stored valuesVersion is consumed here: callers only ever see point values in current units.
+    points: normalizeAutomationPoints(
+      migrateAutomationPointValues(parsed.parameterId, points, isJsonNumber(parsed.valuesVersion) ? parsed.valuesVersion : undefined),
+      descriptor,
+    ),
     updatedAt: parsed.updatedAt,
   }
 }
+
+/** The stored form of an envelope: current-unit points plus the version stamp for effect lanes. */
+export const localAutomationRowValue = (envelope: AutomationEnvelope) => ({ ...envelope, ...automationValuesVersionStamp(envelope.parameterId) })
 
 type RecognizedLocalAutomationEnvelope = {
   envelope: AutomationEnvelope
@@ -159,13 +168,14 @@ export const setLocalAutomationEnvelope = async (
 
   const db = await openLocalProjectDb(projectId)
   const tx = db.transaction('entities', 'readwrite')
-  const incoming = recognizeLocalAutomationEnvelope(envelope)
+  // The caller's points are already in current units; the stamp keeps the read-side migration from rescaling them.
+  const incoming = recognizeLocalAutomationEnvelope(localAutomationRowValue(envelope))
 
   if (!incoming) throw new Error('Automation envelope does not have a recognized logical identity.')
   await tx.store.put(createLocalProjectEntityRow(
     AUTOMATION_ROW_KIND,
     incoming.logicalKey,
-    incoming.envelope,
+    localAutomationRowValue(incoming.envelope),
     incoming.envelope.updatedAt,
   ))
   await tx.done

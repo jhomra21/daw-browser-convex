@@ -7009,10 +7009,7 @@ void test_phase3_every_kind_bypass_ramps_alike() {
     // must be the straight line between them, whatever the kind does to a signal.
     Phase3Rig edited, wet_reference, dry_reference;
     const uint32_t ramp = bypass_ramp_frames(edited.sample_rate);
-    // The auto filter writes its mix into its latency line, so its ramp reaches the
-    // output that many frames late. Every other kind ramps at its output.
-    const uint32_t lag = std::strcmp(kBypassKindNames[which], "autofilter") == 0
-      ? compiled_processor("autofilter").latency_frames : 0;
+
     bypass_subject(edited, which, 0);
     bypass_subject(wet_reference, which, 0);
     bypass_subject(dry_reference, which, 1);
@@ -7041,8 +7038,7 @@ void test_phase3_every_kind_bypass_ramps_alike() {
       for (uint32_t index = 0; index < ramp / Phase3Rig::frames + 4; ++index) {
         const auto blocks = step();
         for (uint32_t frame = 0; frame < Phase3Rig::frames; ++frame, ++elapsed) {
-          const float moved = std::clamp(static_cast<float>(elapsed + 1) - static_cast<float>(lag), 0.0F, static_cast<float>(ramp))
-            / static_cast<float>(ramp);
+          const float moved = std::min(static_cast<float>(elapsed + 1), static_cast<float>(ramp)) / static_cast<float>(ramp);
           const float toward = bypassed != 0 ? moved : 1.0F - moved;
           for (uint32_t channel = 0; channel < 2; ++channel) {
             const float expected = blocks[1][channel][frame] + toward * (blocks[2][channel][frame] - blocks[1][channel][frame]);

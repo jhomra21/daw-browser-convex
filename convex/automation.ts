@@ -10,7 +10,9 @@ import {
   parseInstrumentAutomationKey,
   parseGranularAutomationKey,
   parseSynthAutomationKey,
+  automationValuesVersionStamp,
 } from "@daw-browser/shared";
+import { currentAutomationRow } from "./automationRowValues";
 import { requireProjectRole } from "./projectAccess";
 import { requireAuthenticatedUserId } from "./identity";
 import { editProject } from "./projectRows";
@@ -206,10 +208,11 @@ export const setAutomationEnvelopeRow = async (
     parameterId: input.parameterId,
     enabled: input.enabled,
     points: normalized.points,
+    ...automationValuesVersionStamp(input.parameterId),
   };
 
   if (existing) {
-    if (sameEnvelopeState(existing, row)) {
+    if (sameEnvelopeState(currentAutomationRow(existing), row)) {
       return { changed: false, status: "noop", envelopeId: existing._id };
     }
 

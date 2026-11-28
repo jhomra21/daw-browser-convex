@@ -419,6 +419,8 @@ export default defineSchema({
     parameterId: v.string(),
     enabled: v.boolean(),
     points: v.array(automationPointValidator),
+    // Version of the effect kind whose parameter units the point values are in; absent = 1. Unset for mixer and instrument lanes.
+    valuesVersion: v.optional(v.number()),
     updatedAt: v.number(),
   })
     .index("by_project", ["projectId"])

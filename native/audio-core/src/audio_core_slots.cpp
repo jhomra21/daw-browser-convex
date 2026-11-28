@@ -96,8 +96,7 @@ bool compatible_processor_history(
       return current.spectral.fft_size == next.spectral.fft_size
         && current.spectral.overlap == next.spectral.overlap;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER:
-      return current.autofilter.mode == next.autofilter.mode
-        && current.autofilter.quality == next.autofilter.quality;
+      return current.autofilter.hi_quality == next.autofilter.hi_quality;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
       return current.lofi.bit_depth == next.lofi.bit_depth
         && current.lofi.quantization == next.lofi.quantization

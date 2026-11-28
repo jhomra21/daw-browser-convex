@@ -24,14 +24,28 @@ export type UtilityProcessorContract = {
 export type AutoFilterProcessorState = {
   enabled: boolean
   mode: 'lowpass' | 'highpass' | 'bandpass' | 'notch' | 'peak'
-  quality: '2x'
+  slope: 12 | 24
+  hiQuality: boolean
   frequencyHz: number
   resonance: number
   driveDb: number
   mix: number
-  envelope: { amountOctaves: number; attackMs: number; releaseMs: number }
-  lfo: { waveform: 'sine' | 'triangle'; rateHz: number; depthOctaves: number; phaseOffset: number; stereoPhase: number }
+  outputDb: number
+  clip: boolean
+  envelope: { amountOctaves: number; attackMs: number; releaseMs: number; hold: boolean; link: boolean }
+  lfo: {
+    waveform: 'sine' | 'triangle' | 'sawDown' | 'sawUp' | 'square' | 'sampleHold'
+    sync: boolean
+    division: number
+    rateHz: number
+    depthOctaves: number
+    phaseOffset: number
+    stereoMode: 'phase' | 'spin'
+    stereoPhase: number
+  }
 }
+
+const autoFilterWaveforms = ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold'] as const
 
 export type LoFiProcessorState = {
   enabled: boolean
@@ -784,11 +798,11 @@ export const encodeUtilityProcessorState = (state: UtilityProcessorState): Uint8
 }
 
 export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState): Uint8Array => {
-  const output = new Uint8Array(60)
+  const output = new Uint8Array(92)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
   view.setUint32(4, state.mode === 'highpass' ? 1 : state.mode === 'bandpass' ? 2 : state.mode === 'notch' ? 3 : state.mode === 'peak' ? 4 : 0, true)
-  view.setUint32(8, 0, true)
+  view.setUint32(8, state.hiQuality ? 1 : 0, true)
   view.setFloat32(12, state.frequencyHz, true)
   view.setFloat32(16, state.resonance, true)
   view.setFloat32(20, state.driveDb, true)
@@ -796,11 +810,19 @@ export const encodeAutoFilterProcessorState = (state: AutoFilterProcessorState):
   view.setFloat32(28, state.envelope.amountOctaves, true)
   view.setFloat32(32, state.envelope.attackMs, true)
   view.setFloat32(36, state.envelope.releaseMs, true)
-  view.setUint32(40, state.lfo.waveform === 'triangle' ? 1 : 0, true)
+  view.setUint32(40, Math.max(0, autoFilterWaveforms.indexOf(state.lfo.waveform)), true)
   view.setFloat32(44, state.lfo.rateHz, true)
   view.setFloat32(48, state.lfo.depthOctaves, true)
   view.setFloat32(52, state.lfo.phaseOffset, true)
   view.setFloat32(56, state.lfo.stereoPhase, true)
+  view.setUint32(60, state.slope === 24 ? 1 : 0, true)
+  view.setFloat32(64, state.outputDb, true)
+  view.setUint32(68, state.clip ? 1 : 0, true)
+  view.setUint32(72, state.envelope.hold ? 1 : 0, true)
+  view.setUint32(76, state.envelope.link ? 1 : 0, true)
+  view.setUint32(80, state.lfo.sync ? 1 : 0, true)
+  view.setUint32(84, state.lfo.division, true)
+  view.setUint32(88, state.lfo.stereoMode === 'spin' ? 1 : 0, true)
 
   return output
 }

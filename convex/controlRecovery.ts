@@ -24,6 +24,7 @@ import type { NormalizedTrackControlStateV1, TimelineRangeDeletePatchV1 } from "
 import {
   audioEffectParamsVersionStamp,
   automationTargetKey,
+  automationValuesVersionStamp,
   granularAutomationKey,
   instrumentAutomationKey,
   normalizeLegacyMidiClip,
@@ -39,6 +40,7 @@ import {
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { ControlDomainError } from "./controlPreflight";
+import { currentAutomationDocs, type CurrentAutomationDoc } from "./automationRowValues";
 import { currentEffectRow } from "./effectRowParams";
 import type { ProjectEdit } from "./projectRows";
 import { readProjectControlSnapshotV2 } from "./controlSnapshot";
@@ -262,7 +264,7 @@ const assetPayload = (row: Doc<"samples">) => ({
   updatedAt: row.updatedAt,
 });
 
-const automationPayload = (row: Doc<"automationEnvelopes">) => ({
+const automationPayload = (row: CurrentAutomationDoc) => ({
   projectId: row.projectId,
   targetKind: row.targetKind,
   trackId: row.trackId === undefined ? undefined : String(row.trackId),
@@ -292,7 +294,7 @@ const effectPayload = (row: Doc<"effects">): RecoveryEffect => ({
   createdAt: row.createdAt,
 });
 
-const removeInstrumentAutomation = (rows: Doc<"automationEnvelopes">[], instruments: Doc<"effects">[]) => {
+const removeInstrumentAutomation = (rows: CurrentAutomationDoc[], instruments: Doc<"effects">[]) => {
   const instanceIds = new Set(instruments.flatMap((row) => {
     const instrument = normalizePersistedInstrumentParams(row.type, row.instanceId ?? null, row.params);
 
@@ -403,7 +405,7 @@ export const captureRecoveryPayload = async (
     }));
 
     if (deleted.some((entry) => entry === null)) return null;
-    const automationRows = await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect();
+    const automationRows = await currentAutomationDocs(ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect());
 
     return {
       range: { trackIds: patch.trackIds, startSec: action.startSec, endSec: action.endSec },
@@ -518,7 +520,7 @@ export const captureRecoveryPayload = async (
     const effects = (await ctx.db.query("effects").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
       .filter((effect) => effect.targetType === "track" && effect.trackId && selectedIds.has(String(effect.trackId)));
 
-    const automation = (await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect())
+    const automation = (await currentAutomationDocs(ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect()))
       .filter((row) => row.trackId && selectedIds.has(String(row.trackId)));
 
     const sidechains = (await ctx.db.query("sidechainRoutes").withIndex("by_room", (q) => q.eq("projectId", input.projectId)).collect())
@@ -615,7 +617,7 @@ export const captureRecoveryPayload = async (
   if (action.kind === "automation.delete") {
     const trackId = action.target.kind === "track" ? input.resolveRef("tracks", action.target.track) : undefined;
     const effect = action.effect === undefined ? undefined : await ctx.db.get(input.resolveRef("effects", action.effect));
-    const rows = await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect();
+    const rows = await currentAutomationDocs(ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect());
 
     const row = rows.find((entry) => (
       entry.targetKind === action.target.kind
@@ -655,7 +657,7 @@ export const captureRecoveryPayload = async (
       ));
 
   if (effects.length === 0) return null;
-  const automationRows = await ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect();
+  const automationRows = await currentAutomationDocs(ctx.db.query("automationEnvelopes").withIndex("by_project", (q) => q.eq("projectId", input.projectId)).collect());
 
   const automation = action.kind === "effect.remove"
     ? automationRows.filter((row) => effects.some((effect) => (
@@ -887,6 +889,7 @@ const restoreEffectBundle = async (
       parameterId: automation.parameterId,
       enabled: automation.enabled,
       points: automation.points,
+      ...automationValuesVersionStamp(automation.parameterId),
       updatedAt: automation.updatedAt,
     });
 
@@ -1165,7 +1168,7 @@ const restoreTrackBundle = async (
     const id = await ctx.db.insert("automationEnvelopes", {
       projectId: automation.projectId, targetKind: automation.targetKind, trackId,
       effectInstanceId: automation.effectInstanceId,
-      targetKey, parameterId, enabled: automation.enabled, points: automation.points, updatedAt: automation.updatedAt,
+      targetKey, parameterId, enabled: automation.enabled, points: automation.points, ...automationValuesVersionStamp(parameterId), updatedAt: automation.updatedAt,
     });
 
     mappings.push({ entity: "automation", sourceId: item.id, restoredId: String(id) });
@@ -1388,6 +1391,7 @@ const restoreTimelineRange = async (
     await ctx.db.patch(current._id, {
       enabled: update.before.enabled,
       points: update.before.points,
+      ...automationValuesVersionStamp(current.parameterId),
       updatedAt: Date.now(),
     });
   }
@@ -1531,6 +1535,7 @@ export const restoreRecovery = async (
       parameterId: data.automation.parameterId,
       enabled: data.automation.enabled,
       points: data.automation.points,
+      ...automationValuesVersionStamp(data.automation.parameterId),
       updatedAt: data.automation.updatedAt,
     });
 

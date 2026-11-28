@@ -1,6 +1,7 @@
 import type { ControlPlanV1 } from "@daw-browser/control-core";
 import { collectDeletedTrackIdsV1, resolveControlMidiActionV1 } from "@daw-browser/control-core";
 import {
+  automationValuesVersionStamp,
   createAudioEffectInstanceId,
   createDefaultSynthParams,
   normalizeAudioWarp,
@@ -509,7 +510,7 @@ export async function executeControlPlanV1(
           ))
 
           if (!current) throw new Error("Automation envelope was not found.")
-          await ctx.db.patch(current._id, { enabled: update.after.enabled, points: update.after.points, updatedAt: Date.now() })
+          await ctx.db.patch(current._id, { enabled: update.after.enabled, points: update.after.points, ...automationValuesVersionStamp(current.parameterId), updatedAt: Date.now() })
         }
 
         result = {

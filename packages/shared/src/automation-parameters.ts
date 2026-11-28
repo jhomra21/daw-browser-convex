@@ -150,6 +150,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'autofilter.lfo.depthOctaves', label: 'Auto Filter LFO Depth', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: 0, max: 6, defaultValue: 0, scale: 'linear' },
   { id: 'autofilter.lfo.phaseOffset', label: 'Auto Filter LFO Phase', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 0, scale: 'linear' },
   { id: 'autofilter.lfo.stereoPhase', label: 'Auto Filter LFO Stereo Phase', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: -0.5, max: 0.5, defaultValue: 0, scale: 'linear' },
+  { id: 'autofilter.outputDb', label: 'Auto Filter Output', group: 'Audio Effects', device: 'Auto Filter', owner: 'autofilter', targetKinds: ['track', 'master'], min: -24, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' },
   { id: 'gate.thresholdDb', label: 'Gate Threshold', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: -80, max: 0, defaultValue: -40, scale: 'linear', unit: 'db' },
   { id: 'gate.ratio', label: 'Gate Ratio', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: 1, max: 20, defaultValue: 4, scale: 'linear' },
   { id: 'gate.attackMs', label: 'Gate Attack', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: 0.1, max: 100, defaultValue: 1, scale: 'linear' },

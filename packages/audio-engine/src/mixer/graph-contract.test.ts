@@ -570,6 +570,7 @@ describe('mixer routing plan', () => {
         { id: 'autofilter.lfo.depthOctaves', target: 38 },
         { id: 'autofilter.lfo.phaseOffset', target: 39 },
         { id: 'autofilter.lfo.stereoPhase', target: 40 },
+        { id: 'autofilter.outputDb', target: 143 },
       ],
       [
         { id: 'lofi.sampleRateRatio', target: 41 },

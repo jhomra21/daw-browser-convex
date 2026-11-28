@@ -1,5 +1,6 @@
 import {
   automationTargetKey,
+  automationValuesVersionStamp,
   createAutomationTarget,
   createAudioEffectInstanceId,
   createInstrumentInstanceId,
@@ -369,6 +370,7 @@ export const materializeLocalControlSnapshot = (
       parameterId: item.parameterId,
       enabled: item.enabled,
       points: item.points,
+      ...automationValuesVersionStamp(item.parameterId),
       updatedAt: timestamp,
     }, timestamp))
   }

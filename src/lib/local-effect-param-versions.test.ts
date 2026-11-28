@@ -8,6 +8,7 @@ import { currentLocalEffectRows, currentLocalEffectValue, getLocalEffect, listLo
 
 // Test-only chain: eq is pretended to be at version 3 with a rename step then an added field.
 const exampleVersioning: AudioEffectParamsVersioning = {
+  parameterValues: {},
   current: { ...AUDIO_EFFECT_PARAMS_VERSION, eq: 3 },
   migrations: {
     eq: {

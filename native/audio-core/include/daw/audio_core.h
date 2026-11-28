@@ -522,7 +522,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION = 139,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DENSITY = 140,
   DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ = 141,
-  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ = 142
+  DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ = 142,
+  DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB = 143
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -884,10 +885,13 @@ typedef enum daw_audio_autofilter_mode {
   DAW_AUDIO_AUTOFILTER_MODE_PEAK = 4
 } daw_audio_autofilter_mode;
 
+/* Discrete settings are u32; the LFO waveform is 0 sine, 1 triangle, 2 saw down, 3 saw up, 4 square, 5 sample and hold;
+ * lfo_stereo_mode is 0 phase offset, 1 rate spin; slope is 0 for 12 dB and 1 for 24 dB per octave; lfo_division indexes
+ * the 16 tempo-sync lengths. hi_quality runs drive, filter and clip at twice the rate and adds 63 frames of latency. */
 typedef struct daw_audio_autofilter_state {
   uint32_t enabled;
   uint32_t mode;
-  uint32_t quality;
+  uint32_t hi_quality;
   float frequency_hz;
   float resonance;
   float drive_db;
@@ -900,6 +904,14 @@ typedef struct daw_audio_autofilter_state {
   float lfo_depth_octaves;
   float lfo_phase_offset;
   float lfo_stereo_phase;
+  uint32_t slope;
+  float output_db;
+  uint32_t clip;
+  uint32_t envelope_hold;
+  uint32_t envelope_link;
+  uint32_t lfo_sync;
+  uint32_t lfo_division;
+  uint32_t lfo_stereo_mode;
 } daw_audio_autofilter_state;
 
 typedef enum daw_audio_lofi_quantization {

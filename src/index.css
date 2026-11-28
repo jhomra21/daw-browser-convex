@@ -244,7 +244,7 @@
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-primary;
   }
   body {
     @apply bg-background text-foreground;
@@ -277,6 +277,25 @@
 }
 
 @layer utilities {
+  /* Scrollbars are hidden app-wide; the device chain overflows sideways and needs a visible cue. A non-auto scrollbar-width
+     would make Chromium ignore the ::-webkit-scrollbar styles below and fall back to auto-hiding overlay bars on macOS. */
+  .device-chain-scroll {
+    scrollbar-width: auto;
+  }
+
+  .device-chain-scroll::-webkit-scrollbar {
+    display: block;
+    height: 6px;
+  }
+
+  .device-chain-scroll::-webkit-scrollbar-track {
+    background: var(--border);
+  }
+
+  .device-chain-scroll::-webkit-scrollbar-thumb {
+    background: var(--muted-foreground);
+  }
+
   .effect-shell[data-device-collapsed="true"] {
     width: 26px !important;
     min-width: 26px !important;

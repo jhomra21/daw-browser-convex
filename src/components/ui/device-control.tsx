@@ -15,7 +15,7 @@ export function DeviceToggleButton(props: DeviceToggleButtonProps) {
       type="button"
       class={cn(
         'whitespace-nowrap border border-border px-1 py-1 text-center text-2xs font-medium leading-none disabled:cursor-not-allowed disabled:opacity-50',
-        props.active ? 'bg-amber-400 text-background' : 'bg-secondary text-foreground',
+        props.active ? 'bg-amber-400 text-black' : 'bg-secondary text-foreground',
         props.class,
       )}
       disabled={props.disabled}

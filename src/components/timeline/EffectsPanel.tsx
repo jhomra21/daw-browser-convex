@@ -1071,7 +1071,7 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
             <div class="flex h-full min-h-0 flex-col">
               <div class="flex flex-1 flex-col overflow-hidden min-h-0">
                 <div
-                  class="min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
+                  class="device-chain-scroll min-h-0 flex-1 overflow-x-auto overflow-y-hidden px-1 py-1"
                 >
                   <div class="flex h-full min-h-0 min-w-min items-stretch gap-3">
                     <Show when={target.isInstrumentTrack()}>

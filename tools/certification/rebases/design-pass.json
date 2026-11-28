@@ -1,0 +1,61 @@
+{
+ "name": "design-pass",
+ "sequence": 117,
+ "createdAt": "2026-11-23T18:04:16.101Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad",
+   "new": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad",
+   "new": "882ff9e949dc4d82497398da78962d5d1a44919f594317400f144de2c44792d8"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "4ab56118f19b71c9d5e48e2d3dcd152485970fdd",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "57487d749d3e7dd6a3beecf59af62ecb8a57077d2b83071b2bc4ebb59c848713",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "57487d749d3e7dd6a3beecf59af62ecb8a57077d2b83071b2bc4ebb59c848713",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/dp-bless/live",
+   "resultSha256": "cd55554347125c4906f1dd69772a7b319ba45d1f01efb2cb6c5e0c16d23de177",
+   "seconds": 1469.197567709,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

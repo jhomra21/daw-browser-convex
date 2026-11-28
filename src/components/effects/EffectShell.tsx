@@ -110,7 +110,7 @@ export default function EffectShell(props: EffectShellProps) {
           <button
             type="button"
             data-device-interactive="true"
-            class={["effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-cyan-300/70", {
+            class={["effect-shell-chevron flex size-6 shrink-0 items-center justify-center text-muted-foreground hover:bg-muted hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-primary dark:focus-visible:ring-cyan-300/70", {
               '-my-1 -ml-2 border-r border-border': !collapsed(),
             }]}
             aria-expanded={!collapsed() ? "true" : "false"}
@@ -178,12 +178,15 @@ export default function EffectShell(props: EffectShellProps) {
               {(onToggleEnabled) => (
                 <button
                   class={cn(
-                    'flex w-9 items-center justify-center border-l border-border text-xs disabled:cursor-not-allowed disabled:opacity-50',
+                    'flex w-9 items-center justify-center border-l border-border text-xs focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-[-2px] focus-visible:outline-primary disabled:cursor-not-allowed disabled:opacity-50',
                     props.enabled
-                      ? 'bg-cyan-500/10 text-cyan-300 hover:bg-cyan-500/15'
+                      ? 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300 hover:bg-cyan-500/15'
                       : 'bg-transparent text-muted-foreground hover:bg-muted',
                   )}
+                  type="button"
                   disabled={isDisabled()}
+                  aria-pressed={props.enabled ? "true" : "false"}
+                  aria-label={props.enabled ? `Disable ${props.title}` : `Enable ${props.title}`}
                   onClick={() => onToggleEnabled(!props.enabled)}
                   title={props.enabled ? `Disable ${props.title}` : `Enable ${props.title}`}
                 >
@@ -201,7 +204,7 @@ export default function EffectShell(props: EffectShellProps) {
               class={cn(
                 'flex min-h-6 min-w-6 shrink-0 items-center justify-center border-t border-border text-[10px] disabled:cursor-not-allowed disabled:opacity-50',
                 props.enabled
-                  ? 'bg-cyan-500/10 text-cyan-300'
+                  ? 'bg-cyan-500/10 text-cyan-700 dark:text-cyan-300'
                   : 'bg-transparent text-muted-foreground',
               )}
               disabled={isDisabled()}

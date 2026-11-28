@@ -256,7 +256,7 @@ extern "C" daw_audio_core_result daw_audio_core_stage_processor_state_patch(
   staged.spectral_slot = current->spectral_slot;
   staged.state_size = patch->state_size;
   for (uint32_t index = 0; index < patch->state_size; ++index) staged.state[index] = patch->state[index];
-  if (!decode_processor_state(descriptor, &staged)) {
+  if (!decode_processor_state(descriptor, core->config.sample_rate_hz, &staged)) {
     slot->state.store(0, std::memory_order_release);
     return DAW_AUDIO_CORE_PROCESSOR_STATE_INVALID;
   }

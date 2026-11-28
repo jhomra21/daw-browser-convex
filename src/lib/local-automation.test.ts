@@ -25,6 +25,17 @@ describe('normalizeLocalAutomationEnvelopes', () => {
     expect(rows[0]?.id).toBe('a')
   })
 
+  test('drops a local lane saved for the retired Gate Lookahead parameter', () => {
+    const target: AutomationTarget = { kind: 'track', trackId: 'track:one', effectInstanceId: 'gate:one' }
+
+    const rows = normalizeLocalAutomationEnvelopes([
+      envelope({ id: 'retired', target, targetKey: automationTargetKey(target, 'gate.lookaheadMs'), parameterId: 'gate.lookaheadMs', updatedAt: 1 }),
+      envelope({ id: 'kept', target, targetKey: automationTargetKey(target, 'gate.releaseMs'), parameterId: 'gate.releaseMs', updatedAt: 1 }),
+    ])
+
+    expect(rows.map((row) => row.id)).toEqual(['kept'])
+  })
+
   test('normalizes mixer rows to the canonical target key', () => {
     const target: AutomationTarget = { kind: 'track', trackId: 'track:one' }
 

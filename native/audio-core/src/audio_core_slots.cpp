@@ -78,9 +78,7 @@ bool compatible_processor_history(
         && current.gate.flip == next.gate.flip
         && current.gate.sidechain_enabled == next.gate.sidechain_enabled
         && current.gate.sidechain_filter_type == next.gate.sidechain_filter_type
-        && same_float(current.gate.lookahead_ms, next.gate.lookahead_ms)
-        && same_float(current.gate.sidechain_frequency_hz, next.gate.sidechain_frequency_hz)
-        && same_float(current.gate.sidechain_q, next.gate.sidechain_q);
+        && same_float(current.gate.lookahead_ms, next.gate.lookahead_ms);
     case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR:
       return current.compressor.auto_release == next.compressor.auto_release
         && current.compressor.detector_mode == next.compressor.detector_mode
@@ -88,9 +86,7 @@ bool compatible_processor_history(
         && current.compressor.envelope_curve == next.compressor.envelope_curve
         && current.compressor.sidechain_enabled == next.compressor.sidechain_enabled
         && current.compressor.sidechain_filter_type == next.compressor.sidechain_filter_type
-        && same_float(current.compressor.lookahead_ms, next.compressor.lookahead_ms)
-        && same_float(current.compressor.sidechain_frequency_hz, next.compressor.sidechain_frequency_hz)
-        && same_float(current.compressor.sidechain_q, next.compressor.sidechain_q);
+        && same_float(current.compressor.lookahead_ms, next.compressor.lookahead_ms);
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER:
       return same_float(current.limiter.lookahead_ms, next.limiter.lookahead_ms);
     case DAW_AUDIO_PROCESSOR_KIND_SPECTRAL:

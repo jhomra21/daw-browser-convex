@@ -67,7 +67,7 @@ export default function Limiter(props: LimiterProps) {
           </div>
         </div>
         <div class="border border-border bg-background/80 px-1.5 py-1 text-center text-2xs text-muted-foreground">
-          Gain reduction <span class="text-yellow-300">{formatDeviceDb(-gainReductionDb(), 1)}</span>
+          Gain reduction <span class="text-yellow-700 dark:text-yellow-300">{formatDeviceDb(-gainReductionDb(), 1)}</span>
         </div>
       </div>
     </EffectShell>

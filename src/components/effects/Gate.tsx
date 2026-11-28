@@ -79,7 +79,7 @@ export default function Gate(props: GateProps) {
             <span class="text-center text-2xs uppercase leading-none text-muted-foreground">Look</span>
             <div class="grid grid-cols-3 gap-1">
               <For each={GATE_LOOKAHEAD_STEPS_MS}>{(lookaheadMs) => (
-                <DeviceToggleButton class="px-0" label={String(lookaheadMs)} active={props.params.lookaheadMs === lookaheadMs} disabled={!props.params.enabled} onClick={() => props.onChange({ lookaheadMs })} />
+                <DeviceToggleButton class="px-0" label={String(lookaheadMs)} ariaLabel={`Lookahead ${lookaheadMs} ms`} active={props.params.lookaheadMs === lookaheadMs} disabled={!props.params.enabled} onClick={() => props.onChange({ lookaheadMs })} />
               )}</For>
             </div>
           </div>

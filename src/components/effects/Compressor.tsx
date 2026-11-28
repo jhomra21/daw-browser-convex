@@ -134,11 +134,10 @@ function CompressorGraph(props: { params: CompressorParams; makeupDb: number; vi
 
 export default function Compressor(props: CompressorProps) {
   const externalKey = () => props.sourceTrackId !== undefined
-  // Auto Makeup gives back what the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move.
-
-  const makeupDb = () => props.params.autoMakeup && !externalKey() && props.params.dynamicsMode === 'compress'
-    ? -computeCompressorStaticCurveDb(0, props.params)
-    : props.params.makeupDb
+  // Auto Makeup gives back what the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move. It is a
+  // Compress-mode feature without an external key; in Expand and with a key the Makeup knob applies.
+  const autoMakeupActive = () => props.params.autoMakeup && !externalKey() && props.params.dynamicsMode === 'compress'
+  const makeupDb = () => autoMakeupActive() ? -computeCompressorStaticCurveDb(0, props.params) : props.params.makeupDb
 
   const [viewMode, setViewMode] = createSignal<ViewMode>('transfer')
   const [meter, setMeter] = createSignal<CompressorMeterFrame | null>(null)
@@ -181,11 +180,10 @@ export default function Compressor(props: CompressorProps) {
           <DeviceToggleButton class="mt-auto h-6 py-0" label="Auto" active={props.params.autoRelease} disabled={!props.params.enabled} onClick={() => props.onChange({ autoRelease: !props.params.autoRelease })} />
         </div>
         <div class="flex min-w-0 flex-col gap-1.5">
-          <div class="grid grid-cols-4 gap-1">
+          <div class="grid grid-cols-3 gap-1">
             <MiniStatus label="Thresh" value={formatDb(props.params.thresholdDb)} tone="cyan" />
             <MiniStatus label="GR" value={formatDb(meter()?.gainReductionDb ?? 0)} tone="yellow" />
             <MiniStatus label="Output" value={formatDb(meter()?.outputDb ?? -120)} />
-            <MiniStatus label="Out" value={formatDb(props.params.outputDb)} />
           </div>
           <CompressorGraph params={props.params} makeupDb={makeupDb()} viewMode={viewMode()} history={history()} />
           <div class="grid grid-cols-[auto_1fr] items-start gap-2">
@@ -201,7 +199,7 @@ export default function Compressor(props: CompressorProps) {
                 <span class="text-center text-2xs uppercase leading-none text-muted-foreground">Look</span>
                 <div class="grid grid-cols-3 gap-1">
                   <For each={COMPRESSOR_LOOKAHEAD_STEPS_MS}>{(lookaheadMs) => (
-                    <DeviceToggleButton class="px-0" label={String(lookaheadMs)} active={props.params.lookaheadMs === lookaheadMs} disabled={!props.params.enabled} onClick={() => props.onChange({ lookaheadMs })} />
+                    <DeviceToggleButton class="px-0" label={String(lookaheadMs)} ariaLabel={`Lookahead ${lookaheadMs} ms`} active={props.params.lookaheadMs === lookaheadMs} disabled={!props.params.enabled} onClick={() => props.onChange({ lookaheadMs })} />
                   )}</For>
                 </div>
               </div>
@@ -209,14 +207,17 @@ export default function Compressor(props: CompressorProps) {
           </div>
         </div>
         <div class="flex min-h-0 flex-col gap-2">
-          <AutomatedKnob label="Makeup" valueLabel={formatDb(props.params.makeupDb)} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || (props.params.autoMakeup && !externalKey())} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
-          <DeviceToggleButton class="h-6 py-0" label="Auto Makeup" active={props.params.autoMakeup && !externalKey()} disabled={!props.params.enabled || externalKey()} onClick={() => props.onChange({ autoMakeup: !props.params.autoMakeup })} />
+          <AutomatedKnob label="Makeup" valueLabel={formatDb(props.params.makeupDb)} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || autoMakeupActive()} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
+          <DeviceToggleButton class="h-6 py-0" label="Auto Makeup" active={autoMakeupActive()} disabled={!props.params.enabled || externalKey() || props.params.dynamicsMode === 'expand'} onClick={() => props.onChange({ autoMakeup: !props.params.autoMakeup })} />
           <div class="grid grid-cols-2 gap-1">
             <For each={DETECTOR_MODES}>{(mode) => <DeviceToggleButton label={mode.toUpperCase()} active={props.params.detectorMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ detectorMode: mode })} />}</For>
             <For each={DYNAMICS_MODES}>{(mode) => <DeviceToggleButton label={label(mode)} active={props.params.dynamicsMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ dynamicsMode: mode })} />}</For>
             <For each={ENVELOPE_CURVES}>{(mode) => <DeviceToggleButton label={label(mode)} active={props.params.envelopeCurve === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ envelopeCurve: mode })} />}</For>
           </div>
-          <AutomatedKnob label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={COMPRESSOR_DRY_WET_MIN} max={COMPRESSOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} parameterId="compressor.dryWet" automation={props} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+          <div class="grid grid-cols-2 gap-1">
+            <AutomatedKnob size={32} label="Dry/Wet" valueLabel={formatPercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={COMPRESSOR_DRY_WET_MIN} max={COMPRESSOR_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} parameterId="compressor.dryWet" automation={props} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+            <AutomatedKnob size={32} label="Output" valueLabel={formatDb(props.params.outputDb)} value={props.params.outputDb} resetValue={DEFAULT_PARAMS.outputDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled} parameterId="compressor.outputDb" automation={props} onValueChange={(outputDb) => props.onChange({ outputDb })} />
+          </div>
         </div>
         <div class="flex min-h-0 flex-col gap-1.5 border-l border-border pl-2">
           <span class="text-2xs uppercase leading-none text-muted-foreground">Sidechain</span>

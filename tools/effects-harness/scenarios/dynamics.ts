@@ -4,7 +4,7 @@
 import { countNonFinite, lowpass, maxAbsDiff, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
 import { measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { ebuTruePeakCases } from '../ebu3341'
-import { fx } from '../effects'
+import { declaredLatencyFrames, fx } from '../effects'
 import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
@@ -12,8 +12,6 @@ import { clickTrain, coherentFrequency, concat, constant, dbToLinear, linearToDb
 import { parityScenario, robustnessScenarios } from './shared'
 
 const normalizePeak = (signal: Float32Array, db: number) => scale(signal, dbToLinear(db) / peakAbs(signal))
-
-const msFrames = (ms: number, rate: number) => Math.ceil(ms * rate / 1000)
 
 const lookaheads = [1.5, 3, 6] as const
 
@@ -111,6 +109,30 @@ const limiterTruePeak: Scenario = {
   },
 }
 
+// Bluetooth headsets run at 16 and 24 kHz, where 1.5 ms is shorter than the limiter's smoothing boxes.
+const limiterLowRate: Scenario = {
+  effect: 'limiter',
+  name: 'l2-true-peak-low-rate',
+  rates: [16000, 24000],
+  run: async (h) => {
+    const frames = 2 * h.rate
+    const ceiling = -1
+    const atCeiling = dbToLinear(ceiling) * 0.99999
+
+    const sources: [string, Float32Array][] = [
+      ['noise low-passed at 0.45 fs, +4 dB', normalizePeak(bandLimitedNoise(frames, h.rate, 22), ceiling + 4)],
+      ['fs/4 sine at 45 deg, +6 dB', Float32Array.from({ length: frames }, (_, n) => dbToLinear(ceiling + 6) * Math.sin(Math.PI / 2 * n + Math.PI / 4))],
+    ]
+
+    for (const [name, input] of sources) {
+      const { output } = await h.render(fx.limiter({ ceilingDbtp: ceiling, lookaheadMs: 1.5 }), { input: [concat(input, silence(4096))] })
+      h.atMost(`output true peak: ${name}, lookahead 1.5 ms`, truePeakDb(output[0]), ceiling + 0.05, 'dBTP')
+      // The gain aims under the ceiling, so a sample at the ceiling is the safety clip acting.
+      h.atMost(`output samples at the ceiling: ${name}, lookahead 1.5 ms`, output[0].filter((sample) => Math.abs(sample) >= atCeiling).length, 0, 'samples')
+    }
+  },
+}
+
 const meterSelfCheck: Scenario = {
   effect: 'limiter',
   name: 'ebu-3341-meter-self-check',
@@ -170,6 +192,23 @@ const limiterAuto: Scenario = {
   },
 }
 
+// The core crossfades the bypass over 10 ms; the worklet used to switch between wet and dry on a single sample.
+const limiterBypassToggle: Scenario = {
+  effect: 'limiter',
+  name: 'parity-enabled-toggle',
+  run: async (h) => {
+    const frames = 2 * h.rate
+    const off = Math.round(0.5 * h.rate / 128) * 128
+    const on = Math.round(1.25 * h.rate / 128) * 128
+    const spec = fx.limiter({ ceilingDbtp: -6 })
+    const input = sine(frames, 1000, h.rate, 0.8)
+    const { output, legacy } = await h.render(spec, { input: [input], enabledSteps: [{ frame: off, enabled: false }, { frame: on, enabled: true }] })
+
+    if (legacy === null) throw new Error('limiter has a legacy worklet')
+    h.atMost('parity, enabled off at 0.5 s and back on at 1.25 s', Math.max(maxAbsDiff(output[0], legacy[0]), maxAbsDiff(output[1], legacy[1])), 1e-5, 'abs')
+  },
+}
+
 const limiterGain: Scenario = {
   effect: 'limiter',
   name: 'l4-input-gain',
@@ -189,7 +228,7 @@ const limiterLatency: Scenario = {
   name: 'l5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of lookaheads) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.limiter({ lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.limiter({ lookaheadMs })), declaredLatencyFrames(fx.limiter({ lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -234,7 +273,7 @@ const compressorLatency: Scenario = {
   name: 'c5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of [0, 1, 10] as const) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs })), declaredLatencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -364,6 +403,45 @@ const compressorAutoMakeup: Scenario = {
     const f = coherentFrequency(1000, h.rate, h.rate)
     const { output } = await h.render(spec, { input: [sine(3 * h.rate, f, h.rate, 1)] })
     h.within('steady output peak, 1 kHz at 0 dBFS, auto makeup (expected 0)', peakDb(output[0].slice(2 * h.rate)), 0, 0.1, 'dBFS')
+  },
+}
+
+// Expand is upward expansion, as in Live: a ratio of 1:2 adds 1 dB of output per dB of input above the threshold.
+const compressorExpand: Scenario = {
+  effect: 'compressor',
+  name: 'c9-expand-curve',
+  run: async (h) => {
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const base = { thresholdDb: -24, ratio: 2, kneeDb: 0, attackMs: 0.1, releaseMs: 50, autoRelease: false, detectorMode: 'peak', dynamicsMode: 'expand' } as const
+
+    const gainAt = async (levelDb: number, state: Parameters<typeof fx.compressor>[0] = base) => {
+      const input = sine(2 * h.rate, f, h.rate, dbToLinear(levelDb))
+      const { output } = await h.render(fx.compressor(state), { input: [input] })
+
+      return peakDb(output[0].slice(h.rate)) - peakDb(input.slice(h.rate))
+    }
+
+    h.within('gain at -12 dBFS, 1:2 over threshold -24 (expected +12)', await gainAt(-12), 12, 0.1, 'dB')
+    h.within('gain at -6 dBFS, 1:2 over threshold -24 (expected +18)', await gainAt(-6), 18, 0.1, 'dB')
+    h.within('gain at -30 dBFS, below the threshold (expected 0)', await gainAt(-30), 0, 0.05, 'dB')
+    h.within('gain at -6 dBFS, ratio 1:1 (expected 0)', await gainAt(-6, { ...base, ratio: 1 }), 0, 0.05, 'dB')
+    h.within('gain at 0 dBFS, ratio 1:100 stops at the limit', await gainAt(0, { ...base, ratio: 100 }), 24, 0.1, 'dB', 'COMPRESSOR_EXPAND_MAX_GAIN_DB')
+
+    // A knee of 6 dB centred on the threshold: 0 dB at its lower edge, 0.75 dB at the threshold, 3 dB at its upper edge.
+    const soft = { ...base, kneeDb: 6 }
+    const levels = Array.from({ length: 17 }, (_, index) => -28 + index * 0.5)
+    const gains = await Promise.all(levels.map((level) => gainAt(level, soft)))
+    h.within('knee 6 dB: gain at the threshold', gains[8], 0.75, 0.05, 'dB')
+    h.within('knee 6 dB: gain at the lower edge', gains[2], 0, 0.05, 'dB')
+    h.within('knee 6 dB: gain at the upper edge', gains[14], 3, 0.05, 'dB')
+    const steps = gains.slice(1).map((gain, index) => gain - gains[index])
+    // The line's slope is 1 dB per dB, so a half-dB step is at most 0.5 dB; a jump in value would exceed it.
+    h.atMost('knee 6 dB: largest gain change per 0.5 dB step, 28 to 20 dB under full scale', Math.max(...steps), 0.55, 'dB')
+    // A slope that jumps shows as a second difference far above the knee's curvature (slope / knee * 0.5 dB squared = 0.042 dB).
+    h.atMost('knee 6 dB: largest change of slope per 0.5 dB step', Math.max(...steps.slice(1).map((step, index) => Math.abs(step - steps[index]))), 0.09, 'dB')
+
+    const makeup = await h.render(fx.compressor({ ...base, makeupDb: 3, autoMakeup: true }), { input: [sine(2 * h.rate, f, h.rate, dbToLinear(-40))] })
+    h.within('Auto Makeup on in Expand, Makeup 3 dB: gain below the threshold (the knob applies)', peakDb(makeup.output[0].slice(h.rate)) - -40, 3, 0.05, 'dB')
   },
 }
 
@@ -577,7 +655,7 @@ const gateLatency: Scenario = {
   name: 'g5-lookahead-latency',
   run: async (h) => {
     for (const lookaheadMs of [0, 1, 10] as const) {
-      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.gate({ lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
+      h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.gate({ lookaheadMs })), declaredLatencyFrames(fx.gate({ lookaheadMs }), h.rate), 0, 'frames')
     }
   },
 }
@@ -594,23 +672,24 @@ const gateCpu: Scenario = {
 const limiterSpec = fx.limiter({ ceilingDbtp: -6 })
 const gateSpec = fx.gate({ thresholdDb: -20 })
 
-const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => number): Scenario[] => [
+const familyOf = (effect: string, spec: EffectSpec): Scenario[] => [
   parityScenario(effect, spec),
-  ...robustnessScenarios(effect, spec, latency),
+  ...robustnessScenarios(effect, spec, (rate) => declaredLatencyFrames(spec, rate)),
 ]
 
 export const dynamics: Family = {
   scenarios: [
-    limiterClick, limiterThd, limiterTruePeak, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
+    limiterClick, limiterThd, limiterTruePeak, limiterLowRate, limiterBypassToggle, meterSelfCheck, limiterAuto, limiterGain, limiterLatency, limiterCpu,
     compressorThd('c1-thd-peak', 'peak', 10, 120, -55),
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),
-    compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup,
+    compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup, compressorExpand,
     makeupStep, compressorLatency, gateChatter, gateTiming, gateGuards, gateFlip, gateKey, gateKeyFilter, gateParityKey, gateLatency, gateCpu,
-    ...familyOf('limiter', limiterSpec, (rate) => msFrames(3, rate)),
-    ...familyOf('compressor', compressorSpec, () => 0),
+    ...familyOf('limiter', limiterSpec),
+    ...familyOf('compressor', compressorSpec),
+    { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 3, kneeDb: 6, dynamicsMode: 'expand', autoMakeup: true, makeupDb: 2, envelopeCurve: 'linear', sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-expand' },
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
-    ...familyOf('gate', gateSpec, () => 0),
+    ...familyOf('gate', gateSpec),
   ],
   notEncoded: [
     'L2: the limiter\'s own detector reading on EBU 3341 cases 15 to 23 is internal; the harness instead validates its own true-peak meter against those cases and limits the signals above 0 dBTP.',

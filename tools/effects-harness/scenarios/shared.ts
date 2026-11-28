@@ -91,7 +91,7 @@ export const robustnessScenarios = (effect: string, spec: EffectSpec, expectedLa
       const measured = await h.latencyFrames(spec)
 
       if (expectedLatency === null) h.info('impulse peak delay', measured, 'frames')
-      else h.within('impulse peak delay vs declared latency', measured, expectedLatency(h.rate), 1, 'frames')
+      else h.within('impulse peak delay vs declared latency', measured, expectedLatency(h.rate), 0, 'frames')
       h.info('CPU relative to empty graph', await h.cpuNsPerFrame(spec), 'ns/frame')
     },
   },

@@ -373,7 +373,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     notify,
   });
 
-  const localSidechainRoutes = useLocalSidechainRoutes(projectId);
+  const localSidechainRoutes = useLocalSidechainRoutes(projectId, mediaRecovery.localTimelineSnapshot);
 
   const sidechainRoutes = createMemo<ExternalSidechainRoute[]>(() => {
     const id = projectId();

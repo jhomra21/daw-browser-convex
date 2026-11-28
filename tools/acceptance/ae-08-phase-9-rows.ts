@@ -92,8 +92,8 @@ export const burstRows: BurstRow[] = [
     portable: { from: "spec512", to: "spec1024", latency: true } },
   { name: "raise-lower-burst", latencyClass: "raise", packaged: { repeat: "burst", periodSec: null, fixture: raiseState, start: "spectral-512", judge: "latency",
     cycle: [{ edits: ["fft-4096", "fft-512"], state: "spectral-512" }] } },
-  // The limiter's path delay stays fixed at 5 ms, so a lookahead change is a live parameter write
-  // (limiter.lookaheadMs in native-built-in-parameter-mapper.ts) and publishes no graph.
+  // The limiter's path delay follows its lookahead (limiterLatencyFrames in timing.ts), so a lookahead change replaces
+  // the processor state (the second list of mapLimiter in native-built-in-parameter-mapper.ts), not a live parameter write.
   { name: "lookahead-transition", latencyClass: "plain", packaged: { repeat: "burst", periodSec: null, fixture: "phase5:limiter-state", start: "limiter-lookahead-5",
     judge: "states", settle: "sequence",
     cycle: [{ edits: ["lookahead-1ms"], state: "limiter-lookahead-1" }, { edits: ["lookahead-5ms"], state: "limiter-lookahead-5" }] } },

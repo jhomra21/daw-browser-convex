@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { createDefaultCompressorParams, createDefaultDrumRackParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
+import { AUDIO_EFFECT_PARAMS_VERSION, createDefaultCompressorParams, createDefaultDrumRackParams, createDefaultSynthParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import { normalizePersistedHistory, serializePersistedHistory } from './persisted-history'
 import type { HistoryEntry } from './types'
 
@@ -188,6 +188,18 @@ describe('persisted undo history', () => {
     })
   })
 
+  test('drops a history written under other effect params versions', () => {
+    const current = serializePersistedHistory({ undo: [compressorEntry], redo: [] })
+    const stale = { ...current, effectParamsVersions: { ...AUDIO_EFFECT_PARAMS_VERSION, compressor: AUDIO_EFFECT_PARAMS_VERSION.compressor - 1 } }
+    const { effectParamsVersions: _unrecorded, ...unrecorded } = current
+    const { compressor: _removed, ...missingKind } = AUDIO_EFFECT_PARAMS_VERSION
+
+    expect(normalizePersistedHistory(current)).toEqual({ undo: [compressorEntry], redo: [] })
+    expect(normalizePersistedHistory(stale)).toEqual({ undo: [], redo: [] })
+    expect(normalizePersistedHistory(unrecorded)).toEqual({ undo: [], redo: [] })
+    expect(normalizePersistedHistory({ ...current, effectParamsVersions: missingKind })).toEqual({ undo: [], redo: [] })
+  })
+
   test('keeps readable version 2 effect and track entries', () => {
     const trackVolumeEntry: HistoryEntry = {
       type: 'track-volume',
@@ -202,6 +214,7 @@ describe('persisted undo history', () => {
 
     expect(normalizePersistedHistory({
       version: 2,
+      effectParamsVersions: AUDIO_EFFECT_PARAMS_VERSION,
       undo: [compressorEntry],
       redo: [trackVolumeEntry],
     })).toEqual({
@@ -230,6 +243,7 @@ describe('persisted undo history', () => {
     for (const version of [2, 3]) {
       expect(normalizePersistedHistory({
         version,
+        effectParamsVersions: AUDIO_EFFECT_PARAMS_VERSION,
         undo: [clipDeleteEntry],
         redo: [],
       })).toEqual({
@@ -345,6 +359,7 @@ describe('persisted undo history', () => {
 
     expect(normalizePersistedHistory({
       version: 3,
+      effectParamsVersions: AUDIO_EFFECT_PARAMS_VERSION,
       undo: [entry],
       redo: [],
     })).toEqual({ undo: [entry], redo: [] })
@@ -398,6 +413,7 @@ describe('persisted undo history', () => {
 
     expect(normalizePersistedHistory({
       version: 3,
+      effectParamsVersions: AUDIO_EFFECT_PARAMS_VERSION,
       undo: [
         { type: 'section-edit', projectId: 'project-1', data: { entries: 'invalid' } },
         {

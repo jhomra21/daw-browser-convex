@@ -77,11 +77,11 @@ const gate = (enabled: boolean): Instance => ({
 // A hard compressor with full lookahead and a detector low-pass wide enough to pass
 // a steady key. The peak detector settles within the matrix test's 40 ms window; the RMS detector's 10 ms time
 // constant needs longer.
-const compressor = (enabled: boolean, thresholdDb: number): Instance => ({
+const compressor = (enabled: boolean, thresholdDb: number, lookaheadMs = 10): Instance => ({
   id: 'subject', kind: 'compressor',
   params: {
     ...createDefaultCompressorParams(), enabled, thresholdDb, ratio: 100, attackMs: 0.1, releaseMs: 5, autoRelease: false,
-    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 0, lookaheadMs: 10, detectorMode: 'peak',
+    makeupDb: 0, outputDb: 0, dryWet: 1, kneeDb: 0, lookaheadMs, detectorMode: 'peak',
     sidechain: { enabled: true, filterType: 'lowpass', frequencyHz: 20000, q: 0.707 },
   },
 })
@@ -170,8 +170,9 @@ const subjects: readonly (readonly [string, string, Instance])[] = [
   ['added-node-stage', 'added-node-stage', utility({ dcBlock: false })],
   ['added-source-trim', 'added-source-trim', utility({ gainDb: -3, dcBlock: false })],
   ['return-trim', 'return-trim', utility({ gainDb: -6.0206, dcBlock: false })],
-  // The matrix gives this one a latency of zero (see matrix_build in audio_core_test.cpp).
-  ['key-compressor', 'key-compressor', compressor(true, -12)],
+  // The matrix gives this one a latency of zero (see matrix_build in audio_core_test.cpp), which the
+  // core only accepts for a compressor without lookahead.
+  ['key-compressor', 'key-compressor', compressor(true, -12, 0)],
   ['eq', 'eq-subject', eq(true)],
   ['eq-off', 'eq-subject', eq(false)],
   ['gate', 'gate-subject', gate(true)],

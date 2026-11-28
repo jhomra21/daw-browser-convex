@@ -1,6 +1,36 @@
 import { describe, expect, test } from 'bun:test'
 import { computeCompressorStaticCurveDb, normalizeCompressorParams, type CompressorParamsInput } from '@daw-browser/shared'
-import { computeCompressorWorkletCurveDb, readCompressorMeterFrame } from './compressor-worklet'
+import { readCompressorMeterFrame } from './compressor-worklet'
+import { compressorWorklet } from '../worklet-manifest'
+
+type CurveKernel = {
+  designCurve: (threshold: number, ratio: number, knee: number, expand: boolean, rms: boolean) => void
+  targetDb: (db: number) => number
+}
+
+type ProcessorConstructor = new () => { kernel: CurveKernel }
+
+const publicRoot = new URL('../../../../public/', import.meta.url)
+
+// The legacy worklet carries its own copy of the gain computer; it must draw the same curve as the shared one the panel uses.
+const loadWorkletKernel = async () => {
+  const source = await Bun.file(new URL(compressorWorklet.modulePath, publicRoot)).text()
+  let registered: ProcessorConstructor | undefined
+
+  class FakeAudioWorkletProcessor {
+    port = { onmessage: null, postMessage: () => undefined }
+  }
+
+  new Function('AudioWorkletProcessor', 'registerProcessor', 'sampleRate', source)(
+    FakeAudioWorkletProcessor,
+    (_name: string, processor: ProcessorConstructor) => { registered = processor },
+    48000,
+  )
+
+  if (!registered) throw new Error(`${compressorWorklet.processorName} did not register.`)
+
+  return new registered().kernel
+}
 
 describe('compressor worklet curve', () => {
   const cases: { name: string; inputDb: number; params: CompressorParamsInput }[] = [
@@ -17,9 +47,12 @@ describe('compressor worklet curve', () => {
   ]
 
   for (const item of cases) {
-    test(`matches shared static curve for ${item.name}`, () => {
+    test(`matches shared static curve for ${item.name}`, async () => {
       const params = normalizeCompressorParams(item.params)
-      expect(computeCompressorWorkletCurveDb(item.inputDb, params)).toBeCloseTo(computeCompressorStaticCurveDb(item.inputDb, params), 8)
+      const kernel = await loadWorkletKernel()
+      kernel.designCurve(params.thresholdDb, params.ratio, params.kneeDb, params.dynamicsMode === 'expand', params.detectorMode === 'rms')
+
+      expect(item.inputDb + kernel.targetDb(item.inputDb)).toBeCloseTo(computeCompressorStaticCurveDb(item.inputDb, params), 8)
     })
   }
 })

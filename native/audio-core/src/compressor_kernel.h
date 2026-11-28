@@ -5,7 +5,7 @@
 // Signal path per sample: key (mean of the sidechain pair) -> optional sidechain biquad -> detector (RMS with a 10 ms time
 // constant, or a 5 ms peak hold with a one-pole release) -> level in dB -> gain computer (quadratic soft knee) -> envelope in
 // dB (branching attack / release, log or linear, program-dependent release) -> gain on the audio delayed by exactly the
-// lookahead. Threshold, ratio, knee, makeup, output and dry/wet are smoothed so a jump or an automation step never clicks.
+// lookahead. Expand mode is upward expansion, as in Live: above the threshold every dB in adds (ratio - 1) dB of gain. Threshold, ratio, knee, makeup, output and dry/wet are smoothed so a jump or an automation step never clicks.
 //
 // Everything runs in double and the coefficients are cached until the value they come from changes, so a steady-state
 // sample costs one logarithm and one exponential. The legacy worklet (public/audio-worklets/daw-compressor-processor-v1.js)
@@ -60,8 +60,12 @@ class CompressorKernel {
   static constexpr double kAutoDecayMs = 1000.0;
   static constexpr double kEngagedDb = -0.1;
   static constexpr double kRecoveredDb = -0.5;
-  // Below this the signal is silence: it is the level floor, and an expander never pushes the gain further down.
+  // Below this the signal is silence: it is the level floor.
   static constexpr double kFloorDb = -120.0;
+  // Neither Live's manual nor Cycling '74's abl.device.compressor~ reference documents a separate ratio range for Expand
+  // mode (the latter lists 1 to 64 for compression), so the ratio keeps its 1 to 100 range. A ratio of 100 would add
+  // 99 dB per dB over the threshold, so the added gain stops at this limit.
+  static constexpr double kMaxExpandGainDb = 24.0;
   static constexpr double kDbToNeper = 0.11512925464970228420;  // ln(10) / 20
   static constexpr double kEnvelopeEpsilonDb = 1.0e-9;
 
@@ -107,7 +111,7 @@ class CompressorKernel {
     sidechain_coefficients_ = coefficients;
   }
 
-  // Gain reduction of the envelope in dB, at most 0.
+  // The envelope in dB: at most 0 while compressing, the gain added (at least 0) in Expand.
   float gain_reduction_db() const { return static_cast<float>(envelope_db_); }
 
   void process(const CompressorValues &values, const CompressorConfig &config, float bypass, float input_left, float input_right,
@@ -135,7 +139,8 @@ class CompressorKernel {
       design_curve(threshold, ratio, knee, config.expand, config.rms);
     }
     // Auto Makeup glides in and out through the same smoother as the knob, and follows the curve as it moves.
-    const float makeup_target = config.auto_makeup ? static_cast<float>(curve_.auto_makeup_db) : values.makeup_db;
+    // Auto Makeup is a Compress-mode feature: in Expand the knob applies.
+    const float makeup_target = config.auto_makeup && !config.expand ? static_cast<float>(curve_.auto_makeup_db) : values.makeup_db;
     if (!makeup_primed_) {
       makeup_.reset(makeup_target);
       makeup_primed_ = true;
@@ -178,22 +183,25 @@ class CompressorKernel {
     // A level on the quiet side of the gain computer's edge needs no logarithm: the target is 0 dB there.
     const double level = config.rms ? mean_square_ : peak_;
     double target = 0.0;
-    if (config.expand ? level < curve_.edge_level : level > curve_.edge_level) {
+    if (level > curve_.edge_level) {
       target = std::max(target_db(curve_.db_scale * std::log(std::max(level, curve_.floor_level))), kFloorDb);
     }
 
+    // The gain leaves 0 dB downwards when compressing and upwards when expanding; the sign reads both as depth.
+    const double sign = config.expand ? -1.0 : 1.0;
+    const bool attacking = sign * target < sign * envelope_db_;
     if (config.linear) {
-      const double step = target < envelope_db_ ? attack_step_ : release_step(config.auto_release);
+      const double step = attacking ? attack_step_ : release_step(config.auto_release);
       envelope_db_ += std::clamp(target - envelope_db_, -step, step);
     } else {
-      const double coefficient = target < envelope_db_ ? attack_ : release_coefficient(config.auto_release);
+      const double coefficient = attacking ? attack_ : release_coefficient(config.auto_release);
       envelope_db_ = target + coefficient * (envelope_db_ - target);
     }
     if (std::fabs(envelope_db_) < kEnvelopeEpsilonDb) envelope_db_ = 0.0;
     if (config.auto_release) {
       // The sustain holds while the gain is still coming back, so the slow stage lasts as long as the release it governs.
-      if (target < kEngagedDb) sustain_ += (1.0 - sustain_) * auto_build_;
-      else if (envelope_db_ > kRecoveredDb) sustain_ = dsp::flushDenormal(sustain_ * auto_decay_);
+      if (sign * target < kEngagedDb) sustain_ += (1.0 - sustain_) * auto_build_;
+      else if (sign * envelope_db_ > kRecoveredDb) sustain_ = dsp::flushDenormal(sustain_ * auto_decay_);
     }
 
     const double gain_db = envelope_db_ + static_cast<double>(makeup) + output;
@@ -242,20 +250,20 @@ class CompressorKernel {
     return automatic ? release_step_[1] + (release_step_[2] - release_step_[1]) * sustain_ : release_step_[0];
   }
 
-  // Gain change in dB for a level in dB: the static curve minus the identity.
+  // Gain change in dB for a level in dB: the static curve minus the identity. Compress and Expand share the shape, a
+  // quadratic knee that meets the line above the threshold in value and slope; only the slope differs.
   double target_db(double db) const {
     const double threshold = curve_.threshold;
-    if (curve_.expand) {
-      if (db >= threshold) return 0.0;
-      if (curve_.knee <= 0.0F || db <= curve_.lower) return (db - threshold) * curve_.slope;
-      const double distance = threshold - db;
-      return -2.0 * curve_.slope * distance * distance / curve_.knee;
+    double gain = 0.0;
+    if (curve_.knee <= 0.0F) {
+      if (db > threshold) gain = (db - threshold) * curve_.slope;
+    } else if (db >= curve_.upper) {
+      gain = (db - threshold) * curve_.slope;
+    } else if (db > curve_.lower) {
+      const double x = db - curve_.lower;
+      gain = curve_.slope * x * x / (2.0 * curve_.knee);
     }
-    if (curve_.knee <= 0.0F) return db <= threshold ? 0.0 : (db - threshold) * curve_.slope;
-    if (db <= curve_.lower) return 0.0;
-    if (db >= curve_.upper) return (db - threshold) * curve_.slope;
-    const double x = db - curve_.lower;
-    return curve_.slope * x * x / (2.0 * curve_.knee);
+    return curve_.expand ? std::min(gain, kMaxExpandGainDb) : gain;
   }
 
   void design_curve(float threshold, float ratio, float knee, bool expand, bool rms) {
@@ -270,7 +278,7 @@ class CompressorKernel {
     // The detector's level is a mean square in RMS mode and a magnitude in peak mode.
     const double per_db = rms ? 2.0 * kDbToNeper : kDbToNeper;
     curve_.db_scale = 1.0 / per_db;
-    curve_.edge_level = std::exp((expand ? static_cast<double>(threshold) : curve_.lower) * per_db);
+    curve_.edge_level = std::exp(curve_.lower * per_db);
     curve_.floor_level = std::exp(kFloorDb * per_db);
     curve_.auto_makeup_db = 0.0;
     if (!expand) curve_.auto_makeup_db = -target_db(0.0);

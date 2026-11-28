@@ -7,6 +7,7 @@ import {
   encodeReverbProcessorState, encodeSaturatorProcessorState, encodeSpectralProcessorState, encodeTremoloProcessorState,
   encodeUtilityProcessorState,
 } from '../../packages/audio-core-contract/src'
+import { gateCompressorLatencyFrames, limiterLatencyFrames } from '../../packages/audio-engine/src/effects/timing'
 import type {
   AmplitudeModulationProcessorState, AutoFilterProcessorState, CompressorProcessorState, DelayModulationProcessorState,
   DelayProcessorState, EnsembleProcessorState, EqProcessorBandState, EqProcessorState, GateProcessorState,
@@ -62,9 +63,20 @@ export const encodeSpec = (spec: EffectSpec): Uint8Array => {
   }
 }
 
+export const withEnabled = <S extends EffectSpec>(spec: S, enabled: boolean): S => ({ ...spec, state: { ...spec.state, enabled } })
+
 /** Latency the graph validator requires a descriptor to declare (audio_core_validation.cpp); zero for everything else. */
-export const declaredLatencyFrames = (spec: EffectSpec): number =>
-  spec.kind === 'autofilter' ? (spec.state.hiQuality ? 63 : 0) : spec.kind === 'eq' ? (spec.state.highQuality ? 3 : 0) : spec.kind === 'spectral' ? spec.state.fftSize : 0
+export const declaredLatencyFrames = (spec: EffectSpec, rate: number): number => {
+  switch (spec.kind) {
+    case 'autofilter': return spec.state.hiQuality ? 63 : 0
+    case 'eq': return spec.state.highQuality ? 3 : 0
+    case 'spectral': return spec.state.fftSize
+    case 'gate':
+    case 'compressor': return gateCompressorLatencyFrames(spec.state.lookaheadMs, rate)
+    case 'limiter': return limiterLatencyFrames(spec.state.lookaheadMs, rate)
+    default: return 0
+  }
+}
 
 const range = (first: number, keys: readonly string[]): Record<string, number> =>
   Object.fromEntries(keys.map((key, index) => [key, first + index]))

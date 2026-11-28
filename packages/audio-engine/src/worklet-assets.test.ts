@@ -185,18 +185,20 @@ describe('checked-in worklet assets', () => {
     if (!Processor) throw new Error('Limiter processor was not registered.')
     const processor = new Processor()
     processor.port.onmessage?.({ data: { type: 'configure', version: 1, revision: 1, state: { enabled: false, lookaheadMs: 6 } } })
-    const input = new Float32Array(300)
-    input[0] = 1
-    const output = new Float32Array(300)
+    // The bypass fades in over 10 ms (480 frames at 48 kHz), so the impulse comes after it settled.
+    const input = new Float32Array(1200)
+    input[600] = 1
+    const output = new Float32Array(1200)
     expect(processor.process([[input]], [[output]], {
       'limiter.gainDb': Float32Array.of(0),
       'limiter.ceiling': Float32Array.of(-1),
       'limiter.release': Float32Array.of(100),
       'limiter.link': Float32Array.of(1),
     })).toBe(true)
-    expect(output[287]).toBe(0)
-    expect(output[288]).toBe(1)
+    expect(output[887]).toBe(0)
+    expect(output[888]).toBe(1)
   })
+
   test('registers and processes the exact compressor asset with curve parity', async () => {
     const evaluated = await evaluateAsset(compressorWorklet.modulePath)
     const Processor = evaluated.registered.get(compressorWorklet.processorName)
@@ -217,19 +219,21 @@ describe('checked-in worklet assets', () => {
     expect(output[480]).toBe(0.25)
     expect(output[481]).toBe(-0.5)
 
-    const params = normalizeCompressorParams({ thresholdDb: -18, ratio: 6, kneeDb: 8, attackMs: 1, autoRelease: false, detectorMode: 'peak' })
+    for (const dynamicsMode of ['compress', 'expand'] as const) {
+      const params = normalizeCompressorParams({ thresholdDb: -18, ratio: 6, kneeDb: 8, attackMs: 1, autoRelease: false, detectorMode: 'peak', dynamicsMode })
 
-    for (const inputDb of [-40, -20, -18, -12, 0]) {
-      const fresh = new Processor()
-      fresh.port.onmessage?.({ data: { type: 'params', params } })
-      const level = 10 ** (inputDb / 20)
-      const steady = new Float32Array(9600).fill(level)
-      const settled = new Float32Array(steady.length)
-      fresh.process([[steady]], [[settled]])
-      expect(20 * Math.log10((settled[settled.length - 1] ?? 0) / level)).toBeCloseTo(
-        computeCompressorStaticCurveDb(inputDb, params) - inputDb,
-        2,
-      )
+      for (const inputDb of [-40, -20, -18, -12, -6, 0]) {
+        const fresh = new Processor()
+        fresh.port.onmessage?.({ data: { type: 'params', params } })
+        const level = 10 ** (inputDb / 20)
+        const steady = new Float32Array(9600).fill(level)
+        const settled = new Float32Array(steady.length)
+        fresh.process([[steady]], [[settled]])
+        expect(20 * Math.log10((settled[settled.length - 1] ?? 0) / level)).toBeCloseTo(
+          computeCompressorStaticCurveDb(inputDb, params) - inputDb,
+          2,
+        )
+      }
     }
   })
 

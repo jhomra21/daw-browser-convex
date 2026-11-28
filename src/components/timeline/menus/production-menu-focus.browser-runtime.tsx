@@ -13,6 +13,7 @@ const toolbar: TransportControlsProps = {
   playback: {
     isPlaying: false,
     playheadSec: 0,
+    onLocate: record("transport:locate"),
     onPlay: record("transport:play"),
     onPause: record("transport:pause"),
     onStop: record("transport:stop"),

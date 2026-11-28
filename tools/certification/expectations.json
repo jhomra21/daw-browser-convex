@@ -24,7 +24,7 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "cca7951fc35684076536fe0d91bf26bab449b753dd1a5ffd5cde31a5f5c99d77",
+   "src/components/Timeline.tsx": "fdc877bb071ab7efe026d5cc4b6ea92fb4d3a0d216148eac309838b508923ebb",
    "src/components/Timeline.test.ts": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "cd09163df02d227ba9ef6bc43f6ac15abcb47d05735be876f2663683e0fad97d",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
@@ -55,7 +55,7 @@
    "native/audio-core/src/audio_core.cpp": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e",
    "native/audio-core/include/daw/audio_core.h": "a3c9b1ed429bf9ca9c93f0b8dd9cefdc867d602c5941e575a877eb9abb3d4a44",
    "native/audio-core/tests/audio_core_test.cpp": "cdf9ca491268e000ad026b0c365c99f1ea0f88e55e8915ffb2ed9a4aee3dc711",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "135f3b47cce301ef7b80d611c7fb248f0793302602494203066b8cc67faf667e",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "272b192713391387770e786fb29d93e3cb3f3ef1dbcce3c054bb5a55dd148d41",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
    "public/audio-core/daw-audio-core.wasm": "c18cf4fe1b5711010cb1c808c1d9d129e681f5480888366ad08035bf5d9222d2",
    "public/audio-core/daw-audio-core.manifest.json": "cc7eb2eb74a740e26eaacc11286d0b60537cf03581ba19bc01578a1a186342b9",
@@ -134,7 +134,7 @@
    "src/components/timeline/create-processor-edit-registry.ts": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc",
    "src/lib/live-playback-snapshot.ts": "3a3d721a6b275cf05a36c22cae25bc239638592178d2d5ca7cded60ecd527bf5",
    "packages/audio-engine/src/native-host-wire.ts": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
-   "apps/desktop/audio-host.ts": "4f5c0d7353606f6b939cac7913f6f0a655998aa058030039d332ee60b9590156",
+   "apps/desktop/audio-host.ts": "f3cebe2bdc83c11d84d3070eff016c87ad51eed2d0eb4147ecd05b10507085d1",
    "native/audio-host-macos/src/audio-host.cpp": "29ba6ac37fe96f017d230d749a4f4200b490c0548a1b7a2e3e88bb8de7112ad4",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
@@ -2830,7 +2830,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 145,
+     "pass": 146,
      "skip": 3,
      "fail": 0
     },
@@ -2967,7 +2967,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 450,
+     "pass": 451,
      "skip": 1,
      "fail": 0
     },
@@ -4188,7 +4188,7 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "250a76f01105b76c179f97bd01afd87261cfb5fb89d7b87a885c4c3b84f3aa33",
+   "treeSha256": "01d790b9a0486bf83469d8c63e4520527144f133e8eb397f26c476b218063365",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"

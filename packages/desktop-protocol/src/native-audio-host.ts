@@ -9,7 +9,7 @@ import {
 } from "@daw-browser/plugin-host-protocol"
 import { z } from "zod"
 
-export const nativeAudioHostProtocolVersion = 30
+export const nativeAudioHostProtocolVersion = 31
 export const nativeRecordingSpoolImportVersion = 1
 
 export type NativeRecordingSpoolImportVersion = typeof nativeRecordingSpoolImportVersion
@@ -208,7 +208,21 @@ export const nativeAudioHostControlTypes = {
   processorStatePatchStatus: 61,
   deviceInventoryQuery: 62,
   deviceInventory: 63,
+  cpuLoadQuery: 64,
+  cpuLoad: 65,
 } as const
+
+export const nativeAudioHostCpuLoadPayloadBytes = 24
+
+/** Audio callback cost since the previous read: the host resets it on every read, so each reader owns one interval. */
+export const nativeAudioHostCpuLoadSchema = z.object({
+  callbackNanoseconds: z.number().int().nonnegative().safe(),
+  bufferNanoseconds: z.number().int().nonnegative().safe(),
+  /** The worst single callback in millionths of its own buffer time (1_000_000 is 100%). */
+  peakLoadPerMillion: z.number().int().nonnegative().safe(),
+}).strict()
+
+export type NativeAudioHostCpuLoad = z.infer<typeof nativeAudioHostCpuLoadSchema>
 
 export const nativeAudioHostMaximumDeviceIdBytes = 4_096
 export const nativeAudioHostAssetInstallHeaderBytes = 24

@@ -14,6 +14,8 @@ import {
   nativeAudioHostArtifactId,
   nativeAudioHostCodeName,
   nativeAudioHostControlTypes,
+  nativeAudioHostCpuLoadPayloadBytes,
+  nativeAudioHostCpuLoadSchema,
   nativeAudioHostLifecycleStates,
   nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
   nativeAudioHostNotificationKinds,
@@ -26,7 +28,7 @@ import {
   nativeAudioHostRevisionStatusCodes,
   nativeAudioHostScheduleProgressBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
-import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostCpuLoad, NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import type {
   NativeAudioDevice,
@@ -444,6 +446,20 @@ const deviceStringReader = (payload: Buffer, start: number) => {
       return value
     },
   }
+}
+
+export const decodeCpuLoad = (frame: Buffer): NativeAudioHostCpuLoad | undefined => {
+  const payload = frame.subarray(headerBytes)
+
+  if (payload.byteLength !== nativeAudioHostCpuLoadPayloadBytes) return undefined
+
+  const parsed = nativeAudioHostCpuLoadSchema.safeParse({
+    callbackNanoseconds: Number(payload.readBigUInt64BE(0)),
+    bufferNanoseconds: Number(payload.readBigUInt64BE(8)),
+    peakLoadPerMillion: Number(payload.readBigUInt64BE(16)),
+  })
+
+  return parsed.success ? parsed.data : undefined
 }
 
 export const decodeDeviceInventory = (frame: Buffer): NativeAudioDevice[] | undefined => {

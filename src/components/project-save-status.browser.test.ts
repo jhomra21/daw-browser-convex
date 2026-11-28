@@ -14,6 +14,9 @@ const buildFixture = async () => {
   const source = `
 import { createComponent, createSignal } from 'solid-js'
 import { render } from '@solidjs/web'
+import { ColorModeProvider } from '@kobalte/core/color-mode'
+import { AppPreferencesProvider } from '~/context/app-preferences'
+import { defaultAppPreferences } from '~/lib/preferences/app-preferences'
 import TransportControls from '~/components/timeline/TransportControls'
 import { DashboardProjectsView } from '~/components/dashboard/projects-view'
 import { getLocalEntityWriteQueue } from '~/lib/local-write-queue'
@@ -42,7 +45,7 @@ window.saveFixture = {
     queue = getLocalEntityWriteQueue(projectId())
     const host = document.createElement('div')
     document.body.append(host)
-    dispose = render(() => {
+    const mountSurfaces = () => {
       const surfaces = document.createElement('div')
       const noop = () => {}
       const projectMenu = {
@@ -59,7 +62,7 @@ window.saveFixture = {
       surfaces.append(
         createComponent(TransportControls, {
           projectMenu,
-          playback: { isPlaying: false, get playheadSec() { return playhead() }, onPlay: noop, onPause: noop, onStop: noop },
+          playback: { isPlaying: false, get playheadSec() { return playhead() }, onLocate: noop, onPlay: noop, onPause: noop, onStop: noop },
           recording: { isRecording: false, onToggleRecord: noop },
           onAddAudio: noop, tracksMenu: {},
           timeline: {
@@ -73,7 +76,11 @@ window.saveFixture = {
         createComponent(DashboardProjectsView, { model: { projectMenu } }),
       )
       return surfaces
-    }, host)
+    }
+    // The CPU meter reads its options from the app preferences.
+    dispose = render(() => createComponent(ColorModeProvider, {
+      get children() { return createComponent(AppPreferencesProvider, { initialPreferences: defaultAppPreferences, get children() { return mountSurfaces() } }) },
+    }), host)
   },
   scheduleWrite: () => queue.schedulePut(createLocalProjectEntityRow('track', 'e2e-track', { name: 'Track' })),
   failTransaction: () => Object.defineProperty(db, 'transaction', {
@@ -87,8 +94,8 @@ window.saveFixture = {
   flush: async () => { try { await queue.flush() } catch {} },
   switchProject: (id) => setProjectId(id),
   setPlayhead: (sec) => setPlayheadSec(sec),
-  playheadLabel: () => [...document.querySelectorAll('span')]
-    .find((node) => node.previousElementSibling?.textContent === 'Playhead')?.textContent?.trim() ?? null,
+  playheadLabel: () => [...document.querySelectorAll('[role="spinbutton"][aria-label^="Arrangement position"]')]
+    .map((node) => node.textContent?.trim()).join('.') || null,
   labels: () => Array.from(document.querySelectorAll('[aria-label], [title]'))
     .map((node) => node.getAttribute('aria-label') ?? node.getAttribute('title'))
     .filter((label) => ['Saved locally on this device', 'Saving locally', 'Some changes could not be saved', 'Shared change rejected: Project was archived'].includes(label)),

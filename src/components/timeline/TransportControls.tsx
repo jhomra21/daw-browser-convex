@@ -11,12 +11,14 @@ import {
 } from "~/components/ui/dropdown-menu";
 import { Menubar } from "~/components/ui/menubar";
 import { useTransportTempoController } from "~/hooks/useTransportTempoController";
-import { formatBarsBeatsSixteenths } from "~/lib/musical-time-format";
 import { cn } from "~/lib/utils";
 import { nativeMenuTriggerClass } from "./toolbar-context";
 import type { TransportControlsProps } from "~/hooks/transport-types";
 import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
 import { useSharedOutboxFailure } from "~/hooks/useSharedOutboxFailure";
+import ArrangementPosition from "./ArrangementPosition";
+import CpuMeter from "./CpuMeter";
+import { cpuLoadSourceKind } from "~/lib/audio-cpu-load-source";
 import { EditMenu } from "./menus/edit-menu";
 import { FileMenu } from "./menus/file-menu";
 import { SettingsMenu } from "./menus/settings-menu";
@@ -405,21 +407,28 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         </Show>
       </div>
 
-      <TransportBar
-        transport={{
-          ...props.recording,
-          ...props.playback,
-          ...props.timeline,
-          tempoDraft: tempo.tempoDraft,
-          setTempoDraft: tempo.setTempoDraft,
-          tempoEditing: tempo.tempoEditing,
-          setTempoEditing: tempo.setTempoEditing,
-          commitTempo: tempo.commitTempo,
-          beginTempoDrag: tempo.beginTempoDrag,
-          updateTempoDrag: tempo.updateTempoDrag,
-          endTempoDrag: tempo.endTempoDrag,
-        }}
-      />
+      <div class="justify-self-center flex items-center gap-2">
+        <ArrangementPosition
+          playheadSec={props.playback.playheadSec}
+          bpm={props.timeline.bpm}
+          onLocate={props.playback.onLocate}
+        />
+        <TransportBar
+          transport={{
+            ...props.recording,
+            ...props.playback,
+            ...props.timeline,
+            tempoDraft: tempo.tempoDraft,
+            setTempoDraft: tempo.setTempoDraft,
+            tempoEditing: tempo.tempoEditing,
+            setTempoEditing: tempo.setTempoEditing,
+            commitTempo: tempo.commitTempo,
+            beginTempoDrag: tempo.beginTempoDrag,
+            updateTempoDrag: tempo.updateTempoDrag,
+            endTempoDrag: tempo.endTempoDrag,
+          }}
+        />
+      </div>
 
       <div class="justify-self-end flex items-center gap-3">
         <Show when={props.automation.overrideCount > 0}>
@@ -433,12 +442,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         </Show>
         <MidiKeyboardToggle midiKeyboard={props.midiKeyboard} />
         <SaveStatus projectMenu={props.projectMenu} />
-        <div class="flex items-center gap-2 text-xs">
-          <span class="text-muted-foreground">Playhead</span>
-          <span class="tabular-nums text-foreground">
-            {formatBarsBeatsSixteenths(props.playback.playheadSec, props.timeline.bpm)}
-          </span>
-        </div>
+        <Show when={cpuLoadSourceKind()}>
+          <CpuMeter />
+        </Show>
       </div>
     </div>
   );

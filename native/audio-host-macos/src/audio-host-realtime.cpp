@@ -674,6 +674,8 @@ void AudioHost::RecordOutputCallback(
   const std::uint32_t frame_count,
   const std::uint64_t duration_nanoseconds
 ) noexcept {
+  // The meter reads this while stopped too, so it records before the transport gate that guards the diagnostics.
+  impl_->cpu_load.Record(frame_count, impl_->config.sample_rate_hz, duration_nanoseconds);
   if (!impl_->applied_transport_running.load(std::memory_order_acquire)
     || frame_count == 0 || duration_nanoseconds == 0) return;
   impl_->callback_frames.store(frame_count, std::memory_order_relaxed);
@@ -692,6 +694,10 @@ void AudioHost::RecordOutputCallback(
   }
   impl_->callback_timing_buckets[detail::RealtimeDurationHistogramBucket(duration_nanoseconds)]
     .fetch_add(1, std::memory_order_relaxed);
+}
+
+detail::CpuLoadSample AudioHost::TakeCpuLoad() noexcept {
+  return impl_->cpu_load.Take();
 }
 
 }  // namespace daw::audio_host_macos

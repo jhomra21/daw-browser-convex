@@ -5,7 +5,7 @@ import { nativeEditorCommandSchema, nativeSessionEnvelopeSchema, positiveUnsigne
 import { nativeSessionOperations, type nativeSessionAssetSchema } from "./native-session-operations"
 import { sha256HexPattern, sha256HexSchema, unsigned32Schema, uuidSchema } from "@daw-browser/desktop-protocol/wire-patterns"
 import { projectIdSchemaV1, recordingSpoolMaximumReadBytes } from "@daw-browser/desktop-protocol"
-import { diagnosticsChannel, lifecycleChannel, listDevicesChannel, recordingSpoolListChannel, recordingSpoolReadChannel, recordingSpoolReleaseChannel, recoveryCompleteChannel, recoveryRetryChannel, resolveInputDeviceChannel, resolveOutputDeviceChannel, sessionBeginTransactionChannel, sessionCancelRecordingChannel, sessionCommitTransactionChannel, sessionConfigureChannel, sessionCoordinateVstAttachmentsChannel, sessionEditorChannel, sessionGetVstStateChannel, sessionPrepareGraphRevisionChannel, sessionPublishGraphRevisionChannel, sessionInspectGraphRevisionChannel, sessionRollbackGraphRevisionChannel, sessionRetireGraphRevisionChannel, sessionRollbackTransactionChannel, sessionStartChannel, sessionStopChannel, sessionTeardownChannel, vstEditorStateChannel } from "@daw-browser/desktop-protocol/ipc-channels"
+import { cpuLoadChannel, diagnosticsChannel, lifecycleChannel, listDevicesChannel, recordingSpoolListChannel, recordingSpoolReadChannel, recordingSpoolReleaseChannel, recoveryCompleteChannel, recoveryRetryChannel, resolveInputDeviceChannel, resolveOutputDeviceChannel, sessionBeginTransactionChannel, sessionCancelRecordingChannel, sessionCommitTransactionChannel, sessionConfigureChannel, sessionCoordinateVstAttachmentsChannel, sessionEditorChannel, sessionGetVstStateChannel, sessionPrepareGraphRevisionChannel, sessionPublishGraphRevisionChannel, sessionInspectGraphRevisionChannel, sessionRollbackGraphRevisionChannel, sessionRetireGraphRevisionChannel, sessionRollbackTransactionChannel, sessionStartChannel, sessionStopChannel, sessionTeardownChannel, vstEditorStateChannel } from "@daw-browser/desktop-protocol/ipc-channels"
 import { recordingSpoolReleaseSchema } from "../recording-spool"
 import { registerNativeSessionTransportIpc } from "./native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./native-session-recording-ipc"
@@ -18,7 +18,7 @@ import { completeDesktopAudioRecovery } from "../../../src/lib/desktop-audio-lif
 import type { NativeAudioDevice, NativeHostDeviceConfiguration, NativeHostPcmAsset } from "@daw-browser/audio-engine/native-host-wire"
 import { stampGraphRevision } from "@daw-browser/audio-engine/native-host-wire"
 import { decodeNativeExternalAttachmentPlan, maxVst3WorkerSampleRateHz, maxVst3WorkerStateBytes } from "@daw-browser/plugin-host-protocol"
-import { nativeAudioHostMaximumPayloadBytes, nativeAudioHostMaximumSerializedPlanBytes } from "@daw-browser/desktop-protocol/native-audio-host"
+import { nativeAudioHostMaximumPayloadBytes, nativeAudioHostMaximumSerializedPlanBytes, type NativeAudioHostCpuLoad } from "@daw-browser/desktop-protocol/native-audio-host"
 import { sanitizeNativeVst3DiagnosticError } from "../native-vst3-diagnostic-error"
 import type { createRecordingSessionOwner } from "../recording-session-owner"
 import type { createAe08Evidence } from "../ae08-evidence"
@@ -185,6 +185,18 @@ export const registerNativeAudioSessionIpc = (options: {
 
     try {
       return { ok: true, devices: await audio.supervisor.listDevices() }
+    } catch {
+      return { ok: false, error: "The native audio host is unavailable." }
+    }
+  })
+
+  ipcMain.handle(cpuLoadChannel, async (event): Promise<{ ok: true; load: NativeAudioHostCpuLoad | null } | { ok: false; error: string }> => {
+    if (!audio.allowed(event) || !audio.supervisor) {
+      return { ok: false, error: "The native audio host is unavailable." }
+    }
+
+    try {
+      return { ok: true, load: await audio.supervisor.cpuLoad() }
     } catch {
       return { ok: false, error: "The native audio host is unavailable." }
     }

@@ -15,7 +15,7 @@ import {
 export { parseHexColor } from "~/lib/color"
 
 export const APP_PREFERENCES_STORAGE_KEY = "daw-browser.app-preferences.v1"
-export const APP_PREFERENCES_VERSION = 9
+export const APP_PREFERENCES_VERSION = 10
 export const TIMELINE_DEFAULT_TRACK_COLOR = "timeline-surface"
 export const TIMELINE_DEFAULT_GROUP_COLOR = "timeline-surface"
 const LEGACY_DARK_TIMELINE_SURFACE_COLOR = "#181824"
@@ -66,6 +66,12 @@ export type AppPreferences = {
   }
   audio: AudioPreferences
   recording: RecordingPreferences
+  /** Ableton's CPU meter: which readings the bar draws (both off hides it) and which one the text prints. */
+  cpuMeter: {
+    average: boolean
+    current: boolean
+    text: "average" | "current"
+  }
   midi: {
     selectedInputIds: string[]
   }
@@ -107,6 +113,11 @@ export const defaultAppPreferences: AppPreferences = {
     invertPolarity: false,
     manualOffsetFrames: 0,
     calibrations: []
+  },
+  cpuMeter: {
+    average: true,
+    current: false,
+    text: "average",
   },
   midi: {
     selectedInputIds: []
@@ -245,6 +256,7 @@ export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
   const audio = version.audio && isJsonObject(value.audio) ? value.audio : {}
   const recording = version.recording && isJsonObject(value.recording) ? value.recording : {}
   const midi = version.midi && isJsonObject(value.midi) ? value.midi : {}
+  const cpuMeter = isJsonObject(value.cpuMeter) ? value.cpuMeter : {}
 
   return {
     version: APP_PREFERENCES_VERSION,
@@ -299,6 +311,11 @@ export const normalizeAppPreferences = (value: JsonValue): AppPreferences => {
           : defaultAppPreferences.recording.manualOffsetFrames,
       ),
       calibrations: normalizeRecordingCalibrations(recording.calibrations)
+    },
+    cpuMeter: {
+      average: parseBoolean(cpuMeter.average, defaultAppPreferences.cpuMeter.average),
+      current: parseBoolean(cpuMeter.current, defaultAppPreferences.cpuMeter.current),
+      text: cpuMeter.text === "current" ? "current" : "average",
     },
     midi: {
       selectedInputIds: normalizeMidiSelectedInputIds(midi.selectedInputIds)

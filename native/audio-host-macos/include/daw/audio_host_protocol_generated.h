@@ -7,7 +7,7 @@
 namespace daw::audio_host_macos {
 
 constexpr std::uint32_t kFrameMagic = 0x44415748U;
-constexpr std::uint32_t kControlProtocolVersion = 30;
+constexpr std::uint32_t kControlProtocolVersion = 31;
 constexpr std::string_view kArtifactId = "daw-audio-host-macos/v10";
 constexpr std::uint32_t kHostCapabilities = 0x000003ffU;
 constexpr std::size_t kControlFrameHeaderBytes = 16;
@@ -109,6 +109,8 @@ enum class ControlType : std::uint32_t {
   kProcessorStatePatchStatus = 61,
   kDeviceInventoryQuery = 62,
   kDeviceInventory = 63,
+  kCpuLoadQuery = 64,
+  kCpuLoad = 65,
 };
 
 // The status word of a ControlType::kAck; the ACK text is for people and is never classified.

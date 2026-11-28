@@ -32,6 +32,7 @@ import {
   capabilityCommitChannel,
   capabilityReadChunkChannel,
   capabilityWriteChunkChannel,
+  cpuLoadChannel,
   diagnosticsChannel,
   diagnosticsV2TraceChannel,
   exportPickOutputDirectoryChannel,
@@ -433,6 +434,7 @@ const desktopBridge = {
       resolveOutputDevice: invokeNativeOutputDevice,
       resolveInputDevice: invokeNativeInputDevice,
       listDevices: invokeNativeDeviceList,
+      cpuLoad: () => ipcRenderer.invoke(cpuLoadChannel),
       session: {
         revisions: {
           prepare: (input) => ipcRenderer.invoke(sessionPrepareGraphRevisionChannel, input),

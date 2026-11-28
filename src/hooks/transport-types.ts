@@ -38,6 +38,7 @@ export type TransportControlsProps = {
     isPlaying: boolean;
     isPlayPending?: boolean;
     playheadSec: number;
+    onLocate: (sec: number) => void;
     onPlay: () => void;
     onPause: () => void;
     onStop: () => void;

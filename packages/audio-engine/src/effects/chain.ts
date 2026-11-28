@@ -1,4 +1,4 @@
-import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, isOwnedProcessorKind, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
 import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
 import { scheduleAudioParamRamp } from '../audio-param-ramp'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
@@ -499,10 +499,7 @@ export function connectFxChain(
       }
     }
 
-    if (stageConfig.kind === 'utility' || stageConfig.kind === 'autofilter' || stageConfig.kind === 'gate' ||
-      stageConfig.kind === 'limiter' || stageConfig.kind === 'lofi' || stageConfig.kind === 'chorus' ||
-      stageConfig.kind === 'flanger' || stageConfig.kind === 'phaser' || stageConfig.kind === 'tremolo' ||
-      stageConfig.kind === 'autopan' || stageConfig.kind === 'ensemble' || stageConfig.kind === 'spectral') {
+    if (isOwnedProcessorKind(stageConfig.kind)) {
       if (!staticWorklet) return null
       disconnectAudioNodes([staticWorklet.node])
 

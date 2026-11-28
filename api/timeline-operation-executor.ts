@@ -156,6 +156,18 @@ const verifyTimelineOperationTargets = async (
   }
 }
 
+// The processor operations that share one convex mutation, which takes the kind as an argument.
+const processorEffectByOperation = {
+  'effects.setUtilityParams': 'utility',
+  'effects.setGateParams': 'gate',
+  'effects.setLimiterParams': 'limiter',
+  'effects.setSpectralParams': 'spectral',
+  'effects.setMasterUtilityParams': 'utility',
+  'effects.setMasterGateParams': 'gate',
+  'effects.setMasterLimiterParams': 'limiter',
+  'effects.setMasterSpectralParams': 'spectral',
+} as const
+
 export const executeTimelineOperation = async (
   context: TimelineOperationContext,
   operation: SharedTimelineOperation,
@@ -325,10 +337,11 @@ export const executeTimelineOperation = async (
     case 'effects.setUtilityParams':
     case 'effects.setGateParams':
     case 'effects.setLimiterParams':
+    case 'effects.setSpectralParams':
       return await context.convex.mutation(convexApi.effects.serverSetProcessorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
-        effect: operation.kind === 'effects.setUtilityParams' ? 'utility' : operation.kind === 'effects.setGateParams' ? 'gate' : 'limiter',
+        effect: processorEffectByOperation[operation.kind],
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
@@ -355,14 +368,6 @@ export const executeTimelineOperation = async (
       return await context.convex.mutation(convexApi.effects.serverSetSaturatorParams, {
         projectId: context.projectId,
         trackId: operation.payload.trackId,
-        instanceId: operation.payload.instanceId,
-        params: operation.payload.params,
-      })
-    case 'effects.setSpectralParams':
-      return await context.convex.mutation(convexApi.effects.serverSetProcessorParams, {
-        projectId: context.projectId,
-        trackId: operation.payload.trackId,
-        effect: 'spectral',
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
@@ -433,9 +438,10 @@ export const executeTimelineOperation = async (
     case 'effects.setMasterUtilityParams':
     case 'effects.setMasterGateParams':
     case 'effects.setMasterLimiterParams':
+    case 'effects.setMasterSpectralParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterProcessorParams, {
         projectId: context.projectId,
-        effect: operation.kind === 'effects.setMasterUtilityParams' ? 'utility' : operation.kind === 'effects.setMasterGateParams' ? 'gate' : 'limiter',
+        effect: processorEffectByOperation[operation.kind],
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })
@@ -465,13 +471,6 @@ export const executeTimelineOperation = async (
     case 'effects.setMasterDelayParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterDelayParams, {
         projectId: context.projectId,
-        instanceId: operation.payload.instanceId,
-        params: operation.payload.params,
-      })
-    case 'effects.setMasterSpectralParams':
-      return await context.convex.mutation(convexApi.effects.serverSetMasterProcessorParams, {
-        projectId: context.projectId,
-        effect: 'spectral',
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
       })

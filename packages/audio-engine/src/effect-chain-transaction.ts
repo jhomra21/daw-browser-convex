@@ -1,4 +1,4 @@
-import { normalizeCompressorParams } from '@daw-browser/shared'
+import { isOwnedProcessorKind, normalizeCompressorParams } from '@daw-browser/shared'
 import { createCompressorNodeChain } from './effects/chain'
 import { createEqChainState, type EqChainState } from './effects/eq-chain-state'
 import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
@@ -7,14 +7,14 @@ import { createReverbChainState, type ReverbChainState } from './effects/reverb-
 import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
-import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletBudget } from './effects/live-worklet-budget'
+import { countStaticWorklets, type LiveWorkletBudget } from './effects/live-worklet-budget'
 import type { EngineDisposition } from './engine-disposition'
 
 type EffectInstance = AudioEffectRuntimeInstance
 
 const isStaticWorkletInstance = (
   instance: EffectInstance,
-): instance is Extract<EffectInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
+): instance is Extract<EffectInstance, { kind: StaticWorkletKind }> => isOwnedProcessorKind(instance.kind)
 
 export type InstanceResources = {
   eqs: Map<string, EqChainState>
@@ -346,7 +346,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
 
       if (!prior || prior.kind !== instance.kind || held === undefined || JSON.stringify(held) !== JSON.stringify(instance.params)) return false
 
-      if (isStaticWorkletKind(instance.kind)) return live.staticWorklets.get(instance.id)?.state === 'active'
+      if (isOwnedProcessorKind(instance.kind)) return live.staticWorklets.get(instance.id)?.state === 'active'
 
       if (instance.kind === 'compressor') return !instance.params.enabled || live.compressors.get(instance.id)?.chain()?.state === 'active'
 

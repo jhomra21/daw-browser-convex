@@ -1,33 +1,25 @@
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import type {
   ArpeggiatorParams,
-  AudioEffectKind,
   AudioEffectOrderItem,
-  AutoFilterParamsEnvelope,
-  AutoPanParamsEnvelope,
-  ChorusParamsEnvelope,
   CompressorParams,
   CompressorParamsInput,
   DelayParams,
   DelayParamsInput,
   EqParams,
-  EnsembleParamsEnvelope,
-  FlangerParamsEnvelope,
   GateParamsEnvelope,
   LimiterParamsEnvelope,
-  LoFiParamsEnvelope,
-  PhaserParamsEnvelope,
   ReverbParamsInput,
   SaturatorParams,
   SaturatorParamsInput,
-  SpectrumParamsEnvelope,
-  TremoloParamsEnvelope,
   UtilityParamsEnvelope,
 } from './effects-params'
+import { isAudioEffectKind, isModulationOperationKind, type AudioEffectKind, type ModulationOperationKind, type ProcessorOperationKind } from './audio-effect-registry'
+import { normalizeAudioEffectRow, type NormalizedAudioEffectRow } from './audio-effect-normalization'
+import { buildEffectParamsOperation } from './effect-params-operation'
 import { parseStrictSynthParams, type SynthParams } from './synth-params'
 import { normalizeLegacyMidiClip, normalizeMidiClip, type LegacyMidiClip, type MidiClip } from './midi'
 import {
-  isAudioEffectKind,
   isAudioEffectInstance,
   isCompressorDetectorMode,
   isCompressorDynamicsMode,
@@ -40,7 +32,6 @@ import {
   normalizeCompressorParams,
   normalizeDelayParams,
   normalizeEqParams,
-  AUDIO_EFFECT_CONTRACTS,
   normalizeSaturatorParams,
 } from './effects-params'
 import { normalizeSpectralParamsEnvelope, type SpectralParamsEnvelope } from './spectral-params'
@@ -124,27 +115,7 @@ export type SharedUngroupRestoreAutomation = {
   updatedAt: number
 }
 
-type SharedModulationEffectPayload =
-  | { effect: 'autofilter'; instanceId: string; params: AutoFilterParamsEnvelope }
-  | { effect: 'chorus'; instanceId: string; params: ChorusParamsEnvelope }
-  | { effect: 'flanger'; instanceId: string; params: FlangerParamsEnvelope }
-  | { effect: 'phaser'; instanceId: string; params: PhaserParamsEnvelope }
-  | { effect: 'tremolo'; instanceId: string; params: TremoloParamsEnvelope }
-  | { effect: 'autopan'; instanceId: string; params: AutoPanParamsEnvelope }
-  | { effect: 'ensemble'; instanceId: string; params: EnsembleParamsEnvelope }
-  | { effect: 'lofi'; instanceId: string; params: LoFiParamsEnvelope }
-  | { effect: 'spectrum'; instanceId: string; params: SpectrumParamsEnvelope }
-
-type SharedModulationEffectEnvelope =
-  | { effect: 'autofilter'; params: AutoFilterParamsEnvelope }
-  | { effect: 'chorus'; params: ChorusParamsEnvelope }
-  | { effect: 'flanger'; params: FlangerParamsEnvelope }
-  | { effect: 'phaser'; params: PhaserParamsEnvelope }
-  | { effect: 'tremolo'; params: TremoloParamsEnvelope }
-  | { effect: 'autopan'; params: AutoPanParamsEnvelope }
-  | { effect: 'ensemble'; params: EnsembleParamsEnvelope }
-  | { effect: 'lofi'; params: LoFiParamsEnvelope }
-  | { effect: 'spectrum'; params: SpectrumParamsEnvelope }
+type SharedModulationEffectPayload = NormalizedAudioEffectRow<ModulationOperationKind> & { instanceId: string }
 
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { name?: string; index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
@@ -333,41 +304,22 @@ const readRequiredInstanceId = (value: JsonValue | undefined): string | null => 
   isJsonString(value) && value.length > 0 ? value : null
 )
 
+// Processor-operation kinds with a shared parse path; spectral has its own envelope parser.
+type ProcessorEnvelopeKind = Exclude<ProcessorOperationKind, 'spectral'>
+
 const readProcessorEnvelope = (
-  kind: 'utility' | 'gate' | 'limiter',
+  kind: ProcessorEnvelopeKind,
   value: JsonValue,
 ): UtilityParamsEnvelope | GateParamsEnvelope | LimiterParamsEnvelope | null => {
   if (!isJsonObject(value) || value.version !== 1 || !isJsonObject(value.state)) return null
 
-  return kind === 'utility'
-    ? AUDIO_EFFECT_CONTRACTS.utility.normalizeParams({ version: 1, state: value.state })
-    : kind === 'gate'
-      ? AUDIO_EFFECT_CONTRACTS.gate.normalizeParams({ version: 1, state: value.state })
-      : AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams({ version: 1, state: value.state })
+  return normalizeAudioEffectRow(kind, { version: 1, state: value.state }).params
 }
 
-const readModulationEnvelope = (effect: JsonValue, value: JsonValue): SharedModulationEffectEnvelope | null => {
+const readModulationEnvelope = (effect: JsonValue, value: JsonValue): NormalizedAudioEffectRow<ModulationOperationKind> | null => {
   if (!isJsonObject(value) || value.version !== 1 || !isJsonObject(value.state)) return null
 
-  if (effect === 'autofilter') return { effect, params: AUDIO_EFFECT_CONTRACTS.autofilter.normalizeParams(value) }
-
-  if (effect === 'chorus') return { effect, params: AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams(value) }
-
-  if (effect === 'flanger') return { effect, params: AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams(value) }
-
-  if (effect === 'phaser') return { effect, params: AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams(value) }
-
-  if (effect === 'tremolo') return { effect, params: AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams(value) }
-
-  if (effect === 'autopan') return { effect, params: AUDIO_EFFECT_CONTRACTS.autopan.normalizeParams(value) }
-
-  if (effect === 'ensemble') return { effect, params: AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams(value) }
-
-  if (effect === 'lofi') return { effect, params: AUDIO_EFFECT_CONTRACTS.lofi.normalizeParams(value) }
-
-  if (effect === 'spectrum') return { effect, params: AUDIO_EFFECT_CONTRACTS.spectrum.normalizeParams(value) }
-
-  return null
+  return isAudioEffectKind(effect) && isModulationOperationKind(effect) ? normalizeAudioEffectRow(effect, value) : null
 }
 
 const effectPayload = <Params>(
@@ -983,21 +935,13 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
     if (!isAudioEffectKind(effect.type) && (instanceId !== undefined || index !== undefined)) return null
 
     const params = (() => {
+      if (isAudioEffectKind(effect.type) && isModulationOperationKind(effect.type)) return readModulationEnvelope(effect.type, effect.params)?.params ?? null
+
       switch (effect.type) {
         case 'utility':
           return readProcessorEnvelope('utility', effect.params)
         case 'eq':
           return readEqParams(effect.params)
-        case 'autofilter':
-        case 'lofi':
-        case 'chorus':
-        case 'flanger':
-        case 'phaser':
-        case 'tremolo':
-        case 'autopan':
-        case 'ensemble':
-        case 'spectrum':
-          return readModulationEnvelope(effect.type, effect.params)?.params ?? null
         case 'gate':
           return readProcessorEnvelope('gate', effect.params)
         case 'limiter':
@@ -1237,8 +1181,7 @@ const parseTrackEq = (payload: JsonObject): SharedTimelineOperation | null => {
 }
 
 const parseTrackProcessor = (
-  kind: 'utility' | 'gate' | 'limiter',
-  operationKind: 'effects.setUtilityParams' | 'effects.setGateParams' | 'effects.setLimiterParams',
+  kind: ProcessorEnvelopeKind,
   payload: JsonObject,
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
@@ -1246,11 +1189,7 @@ const parseTrackProcessor = (
 
   if (!isJsonString(payload.trackId) || !params || !instanceId) return null
 
-  return operationKind === 'effects.setUtilityParams'
-    ? { kind: operationKind, payload: { trackId: payload.trackId, instanceId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) } }
-    : operationKind === 'effects.setGateParams'
-      ? { kind: operationKind, payload: { trackId: payload.trackId, instanceId, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(params) } }
-      : { kind: operationKind, payload: { trackId: payload.trackId, instanceId, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) } }
+  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId, payload.trackId)
 }
 
 const parseModulationEffect = (
@@ -1262,37 +1201,9 @@ const parseModulationEffect = (
 
   if (!instanceId || !envelope) return null
 
-  if (target === 'track') {
-    if (!isJsonString(payload.trackId)) return null
+  if (target === 'master') return buildEffectParamsOperation(envelope, instanceId)
 
-    if (envelope.effect === 'autofilter') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    if (envelope.effect === 'chorus') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    if (envelope.effect === 'flanger') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    if (envelope.effect === 'phaser') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    if (envelope.effect === 'tremolo') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    if (envelope.effect === 'autopan') return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-
-    return { kind: 'effects.setModulationParams', payload: { ...envelope, instanceId, trackId: payload.trackId } }
-  }
-
-  if (envelope.effect === 'autofilter') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  if (envelope.effect === 'chorus') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  if (envelope.effect === 'flanger') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  if (envelope.effect === 'phaser') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  if (envelope.effect === 'tremolo') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  if (envelope.effect === 'autopan') return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
-
-  return { kind: 'effects.setMasterModulationParams', payload: { ...envelope, instanceId } }
+  return isJsonString(payload.trackId) ? buildEffectParamsOperation(envelope, instanceId, payload.trackId) : null
 }
 
 const parseTrackReverb = (payload: JsonObject): SharedTimelineOperation | null => {
@@ -1453,8 +1364,7 @@ const parseMasterEq = (payload: JsonObject): SharedTimelineOperation | null => {
 }
 
 const parseMasterProcessor = (
-  kind: 'utility' | 'gate' | 'limiter',
-  operationKind: 'effects.setMasterUtilityParams' | 'effects.setMasterGateParams' | 'effects.setMasterLimiterParams',
+  kind: ProcessorEnvelopeKind,
   payload: JsonObject,
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
@@ -1462,11 +1372,7 @@ const parseMasterProcessor = (
 
   if (!params || !instanceId) return null
 
-  return operationKind === 'effects.setMasterUtilityParams'
-    ? { kind: operationKind, payload: { instanceId, params: AUDIO_EFFECT_CONTRACTS.utility.normalizeParams(params) } }
-    : operationKind === 'effects.setMasterGateParams'
-      ? { kind: operationKind, payload: { instanceId, params: AUDIO_EFFECT_CONTRACTS.gate.normalizeParams(params) } }
-      : { kind: operationKind, payload: { instanceId, params: AUDIO_EFFECT_CONTRACTS.limiter.normalizeParams(params) } }
+  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId)
 }
 
 const parseMasterReverb = (payload: JsonObject): SharedTimelineOperation | null => {
@@ -1714,10 +1620,10 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'tracks.setMix', parse: parseTrackMix, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'mixer.setMasterVolume', parse: parseMasterVolume, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setEqParams', parse: parseTrackEq, targets: readTrackIdTargets, durableQueue: true },
-  { kind: 'effects.setUtilityParams', parse: (payload) => parseTrackProcessor('utility', 'effects.setUtilityParams', payload), targets: readTrackIdTargets, durableQueue: true },
-  { kind: 'effects.setLimiterParams', parse: (payload) => parseTrackProcessor('limiter', 'effects.setLimiterParams', payload), targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setUtilityParams', parse: (payload) => parseTrackProcessor('utility', payload), targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setLimiterParams', parse: (payload) => parseTrackProcessor('limiter', payload), targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setModulationParams', parse: (payload) => parseModulationEffect(payload, 'track'), targets: readTrackIdTargets, durableQueue: true },
-  { kind: 'effects.setGateParams', parse: (payload) => parseTrackProcessor('gate', 'effects.setGateParams', payload), targets: readTrackIdTargets, durableQueue: true },
+  { kind: 'effects.setGateParams', parse: (payload) => parseTrackProcessor('gate', payload), targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setCompressorParams', parse: parseTrackCompressor, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setSaturatorParams', parse: parseTrackSaturator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setDelayParams', parse: parseTrackDelay, targets: readTrackIdTargets, durableQueue: true },
@@ -1737,10 +1643,10 @@ const sharedTimelineOperationDescriptors: OperationDescriptor[] = [
   { kind: 'effects.setArpeggiatorParams', parse: parseTrackArpeggiator, targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.removeArpeggiator', parse: (payload) => parseTrackDeviceRemoval('effects.removeArpeggiator', payload), targets: readTrackIdTargets, durableQueue: true },
   { kind: 'effects.setMasterEqParams', parse: parseMasterEq, targets: emptyTargets, durableQueue: true },
-  { kind: 'effects.setMasterUtilityParams', parse: (payload) => parseMasterProcessor('utility', 'effects.setMasterUtilityParams', payload), targets: emptyTargets, durableQueue: true },
-  { kind: 'effects.setMasterLimiterParams', parse: (payload) => parseMasterProcessor('limiter', 'effects.setMasterLimiterParams', payload), targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterUtilityParams', parse: (payload) => parseMasterProcessor('utility', payload), targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterLimiterParams', parse: (payload) => parseMasterProcessor('limiter', payload), targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterModulationParams', parse: (payload) => parseModulationEffect(payload, 'master'), targets: emptyTargets, durableQueue: true },
-  { kind: 'effects.setMasterGateParams', parse: (payload) => parseMasterProcessor('gate', 'effects.setMasterGateParams', payload), targets: emptyTargets, durableQueue: true },
+  { kind: 'effects.setMasterGateParams', parse: (payload) => parseMasterProcessor('gate', payload), targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterCompressorParams', parse: parseMasterCompressor, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterSaturatorParams', parse: parseMasterSaturator, targets: emptyTargets, durableQueue: true },
   { kind: 'effects.setMasterDelayParams', parse: parseMasterDelay, targets: emptyTargets, durableQueue: true },

@@ -1,3 +1,5 @@
+import { processorRegistry } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
+
 type PortableWasmCapabilityMatrix = {
   version: 1
   processorKinds: readonly string[]
@@ -20,7 +22,7 @@ type PortableWasmCapabilityMatrix = {
  * runtime matrix is derived from it rather than maintained independently. */
 const portableWasmParityFixtureCoverage = {
   version: 1,
-  processorKinds: ['utility', 'saturator', 'eq', 'autofilter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'gate', 'compressor', 'limiter', 'delay', 'reverb', 'spectral'],
+  processorKinds: processorRegistry.filter((processor) => !processor.tombstone).map((processor) => processor.name),
   sidechains: true,
   synthMidi: true,
   mixerAutomation: true,

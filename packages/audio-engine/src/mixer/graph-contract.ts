@@ -25,13 +25,14 @@ import {
   type AudioCoreSynthState,
   synthParameterRegistry,
 } from '../../../audio-core-contract/src/index'
-import { portableGraphContractHash } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
+import { portableGraphContractHash, processorIds } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
 import {
   createEqBandParameterId,
   normalizeDelayParams,
   normalizeLoFiParamsEnvelope,
   normalizeReverbParams,
   normalizeSynthParams,
+  isSidechainCapableKind,
   type SynthParamsInput,
 } from '@daw-browser/shared'
 import { getEffectChainTiming, getEffectTiming } from '../effects/timing'
@@ -229,7 +230,7 @@ const toPortableProcessor = (
     return {
       ...common,
       kind: 'utility',
-      kindId: 1,
+      kindId: processorIds.utility,
       state: encodeUtilityProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'utility.gainDb', target: 1 },
@@ -245,7 +246,7 @@ const toPortableProcessor = (
     const params = instance.params.state
 
     return {
-      ...common, kind: 'autofilter', kindId: 16, state: encodeAutoFilterProcessorState(params),
+      ...common, kind: 'autofilter', kindId: processorIds.autofilter, state: encodeAutoFilterProcessorState(params),
       parameterTargets: [
         { id: 'autofilter.frequencyHz', target: 30 },
         { id: 'autofilter.resonance', target: 31 },
@@ -267,7 +268,7 @@ const toPortableProcessor = (
     return {
       ...common,
       kind: 'saturator',
-      kindId: 2,
+      kindId: processorIds.saturator,
       state: encodeSaturatorProcessorState(instance.params),
       parameterTargets: [
         { id: 'saturator.driveDb', target: 69 },
@@ -284,7 +285,7 @@ const toPortableProcessor = (
     return {
       ...common,
       kind: 'eq',
-      kindId: 3,
+      kindId: processorIds.eq,
       state: encodeEqProcessorState({
         enabled: instance.params.enabled,
         channelMode: instance.params.channelMode,
@@ -306,7 +307,7 @@ const toPortableProcessor = (
   }
 
   if (instance.kind === 'chorus' || instance.kind === 'flanger') {
-    const kindId = instance.kind === 'chorus' ? 4 : 5
+    const kindId = processorIds[instance.kind]
 
     return {
       ...common,
@@ -338,7 +339,7 @@ const toPortableProcessor = (
 
   if (instance.kind === 'phaser') {
     return {
-      ...common, kind: 'phaser', kindId: 6, state: encodePhaserProcessorState(instance.params.state),
+      ...common, kind: 'phaser', kindId: processorIds.phaser, state: encodePhaserProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'phaser.centerHz', target: 86 },
         { id: 'phaser.depthOctaves', target: 87 },
@@ -351,7 +352,7 @@ const toPortableProcessor = (
   }
 
   if (instance.kind === 'tremolo' || instance.kind === 'autopan') {
-    const kindId = instance.kind === 'tremolo' ? 7 : 8
+    const kindId = processorIds[instance.kind]
 
     return {
       ...common, kind: instance.kind, kindId,
@@ -376,7 +377,7 @@ const toPortableProcessor = (
 
   if (instance.kind === 'ensemble') {
     return {
-      ...common, kind: 'ensemble', kindId: 9, state: encodeEnsembleProcessorState(instance.params.state),
+      ...common, kind: 'ensemble', kindId: processorIds.ensemble, state: encodeEnsembleProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'ensemble.delayMs', target: 100 },
         { id: 'ensemble.depthMs', target: 101 },
@@ -389,7 +390,7 @@ const toPortableProcessor = (
 
   if (instance.kind === 'gate') {
     return {
-      ...common, kind: 'gate', kindId: 10, state: encodeGateProcessorState(instance.params.state),
+      ...common, kind: 'gate', kindId: processorIds.gate, state: encodeGateProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'gate.thresholdDb', target: 105 },
         { id: 'gate.ratio', target: 106 },
@@ -412,7 +413,7 @@ const toPortableProcessor = (
       : { ...instance.params, makeupDb: 0, outputDb: 0 }
 
     return {
-      ...common, kind: 'compressor', kindId: 11, state: encodeCompressorProcessorState(state),
+      ...common, kind: 'compressor', kindId: processorIds.compressor, state: encodeCompressorProcessorState(state),
       parameterTargets: [
         { id: 'compressor.thresholdDb', target: 116 },
         { id: 'compressor.ratio', target: 117 },
@@ -431,7 +432,7 @@ const toPortableProcessor = (
 
   if (instance.kind === 'limiter') {
     return {
-      ...common, kind: 'limiter', kindId: 12, state: encodeLimiterProcessorState(instance.params.state),
+      ...common, kind: 'limiter', kindId: processorIds.limiter, state: encodeLimiterProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'limiter.ceiling', target: 127 },
         { id: 'limiter.release', target: 128 },
@@ -445,7 +446,7 @@ const toPortableProcessor = (
     const params = normalizeLoFiParamsEnvelope(instance.params).state
 
     return {
-      ...common, kind: 'lofi', kindId: 17, state: encodeLoFiProcessorState(params),
+      ...common, kind: 'lofi', kindId: processorIds.lofi, state: encodeLoFiProcessorState(params),
       parameterTargets: [
         { id: 'lofi.sampleRateRatio', target: 41 },
         { id: 'lofi.jitter', target: 42 },
@@ -461,7 +462,7 @@ const toPortableProcessor = (
     const params = normalizeDelayParams(instance.params)
 
     return {
-      ...common, kind: 'delay', kindId: 13, state: encodeDelayProcessorState({
+      ...common, kind: 'delay', kindId: processorIds.delay, state: encodeDelayProcessorState({
         enabled: params.enabled,
         delayMs: resolvePortableDelayMs(params, bpm),
         feedback: params.feedback,
@@ -486,7 +487,7 @@ const toPortableProcessor = (
     const params = normalizeReverbParams(instance.params)
 
     return {
-      ...common, kind: 'reverb', kindId: 14, state: encodeReverbProcessorState(params),
+      ...common, kind: 'reverb', kindId: processorIds.reverb, state: encodeReverbProcessorState(params),
       parameterTargets: [
         { id: 'reverb.wet', target: 10 },
         { id: 'reverb.preDelayMs', target: 11 },
@@ -513,7 +514,7 @@ const toPortableProcessor = (
     const params = instance.params.state
 
     return {
-      ...common, kind: 'spectral', kindId: 15, state: encodeSpectralProcessorState(params),
+      ...common, kind: 'spectral', kindId: processorIds.spectral, state: encodeSpectralProcessorState(params),
       parameterTargets: [
         { id: 'spectral.freeze', target: 15 },
         { id: 'spectral.gateThresholdDb', target: 16 },
@@ -608,7 +609,7 @@ export const createPortableGraphSnapshot = ({
       .find((entry) => entry.channel.id === route.targetTrackId)
       ?.fx?.instances.find((instance) => instance.id === route.effectInstanceId)
 
-    if (target?.kind !== 'compressor' && target?.kind !== 'gate' && target?.kind !== 'spectral') {
+    if (!target || !isSidechainCapableKind(target.kind)) {
       throw new Error(`Portable sidechain target "${route.effectInstanceId}" is not a supported detector processor.`)
     }
 

@@ -19,6 +19,7 @@ import {
   parseSynthAutomationKey,
   SYNTH_AUTOMATION_DESCRIPTORS,
   assertDefined,
+  isNonlinearKind,
 } from '@daw-browser/shared'
 import { createSynthOutputChain, scheduleSynthVoice, type SynthVoiceHandle } from './synth-voice'
 import { chooseSynthVoiceVictim, isSynthVoiceSoundingAt, pruneSynthVoiceAllocations } from './synth-voice-allocation'
@@ -1254,9 +1255,7 @@ export function createStemRenderPlan(
     master: stem.mode === 'full-master-contribution' ? graph.master : emptyMasterFx(graph),
   }
 
-  const nonlinearMaster = graph.master.instances.some((instance) =>
-    instance.kind === 'compressor' || instance.kind === 'saturator' || instance.kind === 'limiter' || instance.kind === 'gate',
-  )
+  const nonlinearMaster = graph.master.instances.some((instance) => isNonlinearKind(instance.kind))
 
   return {
     sourceTrackIds,

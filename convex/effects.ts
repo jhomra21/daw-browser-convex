@@ -6,32 +6,26 @@ import { requireAuthenticatedUserId, requireMasterBusWriteAccess, requireProject
 import { getTrackWriteAccess } from "./trackWrites";
 import { runSharedOperationOnce } from "./sharedOperationResults";
 import { withProjectEdit, type ProjectEdit } from "./projectRows";
+import { literalUnion } from "./effectKindValidators";
 import { legacySynthParamsValidator, synthParamsValidator, trackInstrumentValidator } from "./synthValidators";
 import {
-  normalizeEqParamsForUpdate,
-  normalizeCompressorParamsForUpdate,
-  normalizeDelayParamsForUpdate,
-  normalizeReverbParamsForUpdate,
-  normalizeSaturatorParamsForUpdate,
   normalizeSynthParams,
   normalizeTrackInstrumentParams,
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
-  AUDIO_EFFECT_CONTRACTS,
+  AUDIO_EFFECT_KINDS,
+  audioEffectKindsWithOperation,
   audioEffectOrderItemId,
   audioEffectOrderItemKind,
-  mergeOwnedProcessorParams,
-  mergeSpectrumParamsEnvelope,
-  serializeCompressorParams,
-  serializeDelayParams,
-  serializeEqParams,
-  serializeReverbParams,
-  serializeSaturatorParams,
   parseGranularAutomationKey,
   parseInstrumentAutomationKey,
   parseSynthAutomationKey,
+  isAudioEffectKind,
+  serializeAudioEffectParams,
   isJsonObject,
   isJsonString,
+  type AudioEffectKind,
+  type InstrumentKind,
   type JsonValue,
 } from "@daw-browser/shared";
 
@@ -128,16 +122,14 @@ const delayParamsValidator = v.object({
 })
 
 const processorEnvelopeValidator = v.object({ version: v.literal(1), state: v.any() })
-const processorEffectValidator = v.union(v.literal("utility"), v.literal("gate"), v.literal("limiter"), v.literal("spectral"))
-const modulationEffectValidator = v.union(v.literal("autofilter"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("lofi"), v.literal("spectrum"))
-const canonicalAudioEffectKindValidator = v.union(v.literal("utility"), v.literal("eq"), v.literal("autofilter"), v.literal("gate"), v.literal("compressor"), v.literal("saturator"), v.literal("limiter"), v.literal("lofi"), v.literal("chorus"), v.literal("flanger"), v.literal("phaser"), v.literal("tremolo"), v.literal("autopan"), v.literal("ensemble"), v.literal("delay"), v.literal("reverb"), v.literal("spectral"), v.literal("spectrum"))
+const processorEffectValidator = literalUnion(audioEffectKindsWithOperation("processor"))
+const modulationEffectValidator = literalUnion(audioEffectKindsWithOperation("modulation"))
+const canonicalAudioEffectKindValidator = literalUnion(AUDIO_EFFECT_KINDS)
 
 const audioEffectOrderItemValidator = v.union(
   canonicalAudioEffectKindValidator,
   v.object({ id: v.string(), kind: canonicalAudioEffectKindValidator }),
 )
-
-type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
 
 type TrackAudioEffectType = 'instrument' | 'synth' | 'arpeggiator' | AudioEffectKind
 
@@ -169,65 +161,6 @@ type EffectRowReorderResult = {
 type ReorderRowsResult =
   | { changed: false }
   | { changed: true; revision: number }
-
-const isCanonicalAudioEffectKind = (type: string): type is AudioEffectKind => (
-  type === 'utility' || type === 'eq' || type === 'autofilter' || type === 'gate' || type === 'compressor' || type === 'saturator' || type === 'limiter'
-  || type === 'lofi' || type === 'chorus' || type === 'flanger' || type === 'phaser' || type === 'tremolo' || type === 'autopan' || type === 'ensemble'
-  || type === 'delay' || type === 'reverb' || type === 'spectral' || type === 'spectrum'
-)
-
-const audioEffectPersistenceDescriptors = {
-  utility: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('utility', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.utility.serializeParams,
-  },
-  eq: {
-    normalizeParamsForUpdate: normalizeEqParamsForUpdate,
-    serializeParams: serializeEqParams,
-  },
-  autofilter: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autofilter', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.autofilter.serializeParams,
-  },
-  gate: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('gate', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.gate.serializeParams,
-  },
-  limiter: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('limiter', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.limiter.serializeParams,
-  },
-  lofi: {
-    normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('lofi', params, existing),
-    serializeParams: AUDIO_EFFECT_CONTRACTS.lofi.serializeParams,
-  },
-  compressor: {
-    normalizeParamsForUpdate: normalizeCompressorParamsForUpdate,
-    serializeParams: serializeCompressorParams,
-  },
-  saturator: {
-    normalizeParamsForUpdate: normalizeSaturatorParamsForUpdate,
-    serializeParams: serializeSaturatorParams,
-  },
-  delay: {
-    normalizeParamsForUpdate: normalizeDelayParamsForUpdate,
-    serializeParams: serializeDelayParams,
-  },
-  reverb: {
-    normalizeParamsForUpdate: normalizeReverbParamsForUpdate,
-    serializeParams: serializeReverbParams,
-  },
-  chorus: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('chorus', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.chorus.serializeParams },
-  flanger: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('flanger', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.flanger.serializeParams },
-  phaser: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('phaser', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.phaser.serializeParams },
-  tremolo: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('tremolo', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.tremolo.serializeParams },
-  autopan: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('autopan', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.autopan.serializeParams },
-  ensemble: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('ensemble', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.ensemble.serializeParams },
-  spectral: { normalizeParamsForUpdate: (params: any, existing?: any) => mergeOwnedProcessorParams('spectral', params, existing), serializeParams: AUDIO_EFFECT_CONTRACTS.spectral.serializeParams },
-  spectrum: { normalizeParamsForUpdate: mergeSpectrumParamsEnvelope, serializeParams: AUDIO_EFFECT_CONTRACTS.spectrum.serializeParams },
-}
-
-type AudioEffectPersistenceType = keyof typeof audioEffectPersistenceDescriptors
 
 const deletedStatus = () => ({ status: 'deleted' })
 const notFoundStatus = () => ({ status: 'not-found' })
@@ -266,9 +199,7 @@ const sanitizeArpParams = (params: {
   hold: boolean
 }) => normalizeArpeggiatorParams(params)
 
-const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectPersistenceType => (
-  type !== 'instrument' && type !== 'synth' && type !== 'arpeggiator'
-)
+const isAudioEffectPersistenceType = (type: SharedAudioEffectType): type is AudioEffectKind => isAudioEffectKind(type)
 
 const normalizeEffectParamsForUpdate = (
   type: SharedAudioEffectType,
@@ -298,10 +229,8 @@ const areEffectParamsEqual = (
   if (stableEffectParams(current) === stableEffectParams(next)) return true
 
   if (isAudioEffectPersistenceType(type)) {
-    const descriptor = audioEffectPersistenceDescriptors[type]
-
-    return descriptor.serializeParams(normalizeEffectParamsForUpdate(type, current))
-      === descriptor.serializeParams(normalizeEffectParamsForUpdate(type, next))
+    return serializeAudioEffectParams(type, normalizeEffectParamsForUpdate(type, current))
+      === serializeAudioEffectParams(type, normalizeEffectParamsForUpdate(type, next))
   }
 
   if (type === 'instrument') {
@@ -335,7 +264,7 @@ export const upsertTrackEffectRow = async (
     ))
 
   if (input.instanceId) {
-    const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isCanonicalAudioEffectKind(entry.type))
+    const audioRows = existing.filter((entry: EffectOrderRow) => entry.targetType === 'track' && isAudioEffectKind(entry.type))
     validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
 
@@ -420,7 +349,7 @@ export const setTrackInstrumentRow = async (
   input: {
     projectId: string
     trackId: Id<'tracks'>
-    instrument: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument: { kind: InstrumentKind; instanceId?: string; params: any }
   },
 ): Promise<EffectRowWriteResult> => {
   const params = normalizeTrackInstrumentParams(input.instrument)
@@ -459,7 +388,7 @@ export const upsertMasterEffectRow = async (
   const existing = await ctx.db.query('effects').withIndex('by_room_target', (q: any) => q.eq('projectId', input.projectId).eq('targetType', 'master')).collect()
 
   if (input.instanceId) {
-    const audioRows = existing.filter((entry: EffectOrderRow) => isCanonicalAudioEffectKind(entry.type))
+    const audioRows = existing.filter((entry: EffectOrderRow) => isAudioEffectKind(entry.type))
     validateAudioEffectInstanceId(audioRows, input.instanceId, input.type)
   }
 
@@ -518,7 +447,7 @@ const setTrackInstrumentForUser = async (
     projectId: string
     userId: string
     trackId: any
-    instrument: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument: { kind: InstrumentKind; instanceId?: string; params: any }
   },
 ) => {
   const access = await getTrackWriteAccess(ctx, input.trackId, input.userId)
@@ -595,7 +524,7 @@ const reorderRows = async (
   const revision = edit.revision;
 
   const audioRows = rows
-    .filter((row) => isCanonicalAudioEffectKind(row.type))
+    .filter((row) => isAudioEffectKind(row.type))
     .sort((a, b) => (a.index ?? 0) - (b.index ?? 0))
 
   const requestedIds = new Set<string>()
@@ -1273,14 +1202,14 @@ const sameRestoreChainState = async (
     projectId: string
     trackId: any
     audioEffects: Array<{ id: string; kind: AudioEffectKind; params: any }>
-    instrument?: { kind: 'synth' | 'drum-rack' | 'sampler' | 'granular'; instanceId?: string; params: any }
+    instrument?: { kind: InstrumentKind; instanceId?: string; params: any }
     arpeggiator?: ReturnType<typeof sanitizeArpParams>
   },
 ) => {
   const existing = await ctx.db.query('effects').withIndex('by_track', (q: any) => q.eq('trackId', input.trackId)).collect()
 
   const existingAudio = existing
-    .filter((effect: any) => effect.targetType === 'track' && isCanonicalAudioEffectKind(effect.type))
+    .filter((effect: any) => effect.targetType === 'track' && isAudioEffectKind(effect.type))
     .sort((left: any, right: any) => left.index - right.index)
 
   const expectedAudio = input.audioEffects.map((effect, index) => ({
@@ -1374,7 +1303,7 @@ export const serverRestoreChain = mutation({
         })) return { status: 'noop' as const }
 
         const removedAudioInstanceIds = new Set(existing.flatMap((effect: any) => (
-          effect.targetType === 'track' && isCanonicalAudioEffectKind(effect.type) && effect.instanceId
+          effect.targetType === 'track' && isAudioEffectKind(effect.type) && effect.instanceId
             ? [effect.instanceId]
             : []
         )))
@@ -1400,7 +1329,7 @@ export const serverRestoreChain = mutation({
           }
 
           for (const effect of existing) {
-            if (effect.targetType === 'track' && (isCanonicalAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
+            if (effect.targetType === 'track' && (isAudioEffectKind(effect.type) || effect.type === 'instrument' || effect.type === 'synth' || effect.type === 'arpeggiator')) {
               await ctx.db.delete(effect._id)
             }
           }

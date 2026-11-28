@@ -26,6 +26,7 @@ import {
   synthAutomationKey,
   sidechainEligibilityError,
   sidechainTargetEligibilityError,
+  isAudioEffectKind,
 } from '@daw-browser/shared'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { sha256 } from '@noble/hashes/sha2.js'
@@ -523,14 +524,6 @@ const validateGroups = (
 }
 
 const describe = (action: ControlActionV1) => action.kind.replaceAll('.', ' ')
-
-const isAudioEffectKind = (kind: string) => (
-  kind === 'utility' || kind === 'eq' || kind === 'autofilter' || kind === 'gate'
-  || kind === 'compressor' || kind === 'saturator' || kind === 'limiter' || kind === 'lofi'
-  || kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo'
-  || kind === 'autopan' || kind === 'ensemble' || kind === 'delay' || kind === 'reverb'
-  || kind === 'spectral' || kind === 'spectrum'
-)
 
 const compactTrackProcessorIndexes = (
   processors: ProjectSnapshotV1['processors'],

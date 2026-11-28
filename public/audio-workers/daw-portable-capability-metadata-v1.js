@@ -1,13 +1,12 @@
-// Emitted from the graph parity capability matrix. Keep this artifact in sync
-// with packages/audio-engine/src/backends/portable-wasm-capabilities.ts.
+// The processor kind list is generated from the processor contract (packages/audio-core-contract). The remaining
+// fields mirror packages/audio-engine/src/backends/portable-wasm-capabilities.ts; a worker test compares them.
 export const portableWasmCapabilityMatrix = Object.freeze({
   version: 1,
   processorKinds: Object.freeze([
+    // generated:processor-kinds:start
     'utility',
     'saturator',
     'eq',
-    'autofilter',
-    'lofi',
     'chorus',
     'flanger',
     'phaser',
@@ -20,6 +19,9 @@ export const portableWasmCapabilityMatrix = Object.freeze({
     'delay',
     'reverb',
     'spectral',
+    'autofilter',
+    'lofi',
+    // generated:processor-kinds:end
   ]),
   sidechains: true,
   synthMidi: true,

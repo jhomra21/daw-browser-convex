@@ -6,7 +6,8 @@ import {
   normalizeSaturatorParamsForUpdate,
   mergeSpectrumParamsEnvelope,
 } from './effects-params'
-import { isOwnedProcessorKind, mergeOwnedProcessorParams } from './owned-processor-descriptors'
+import { isOwnedProcessorKind } from './audio-effect-registry'
+import { mergeOwnedProcessorParams } from './owned-processor-descriptors'
 
 export const normalizeAudioEffectParamsForUpdate = (
   kind: string,

@@ -1,4 +1,5 @@
-import { assert, assertDefined } from '@daw-browser/shared'
+import { assert, assertDefined, isStereoWideningKind } from '@daw-browser/shared'
+import type { ModulationAudioEffectRuntimeInstance } from '../effects/runtime-instance'
 import type { ChannelLayout, MixerTrackFx, ResolvedMixerGraph } from './types'
 
 export const getSourceChannelLayout = (channelCounts: readonly number[] | undefined): ChannelLayout | undefined => {
@@ -19,13 +20,17 @@ const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pi
     (kind === 'reverb' && (params.stereoWidth ?? 0) > 0)
   )
 
+const isStereoWideningInstance = (
+  instance: MixerTrackFx['instances'][number],
+): instance is ModulationAudioEffectRuntimeInstance => isStereoWideningKind(instance.kind)
+
 const propagateEffects = (input: ChannelLayout, fx: MixerTrackFx | ResolvedMixerGraph['master']): ChannelLayout => {
   let layout = input
 
   for (const instance of fx.instances) {
     if (instance.kind === 'eq' && instance.params.enabled && instance.params.channelMode === 'mono') {
       layout = 'mono'
-    } else if (instance.kind === 'chorus' || instance.kind === 'autopan' || instance.kind === 'ensemble') {
+    } else if (isStereoWideningInstance(instance)) {
       if (instance.params.state.enabled) layout = 'stereo'
     } else if ((instance.kind === 'delay' || instance.kind === 'reverb') && expandsLayout(instance.kind, instance.params)) {
       layout = 'stereo'

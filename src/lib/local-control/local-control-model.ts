@@ -3,13 +3,12 @@ import {
   createAutomationTarget,
   createAudioEffectInstanceId,
   createInstrumentInstanceId,
-  AUDIO_EFFECT_ORDER,
+  isAudioEffectKind,
   isJsonNumber,
   isJsonObject,
   isJsonString,
   normalizeLegacyMidiClip,
   type AutomationTarget,
-  type AudioEffectKind,
   type AudioSourceKind,
   type JsonObject,
   type JsonValue,
@@ -103,10 +102,6 @@ const numberField = (value: JsonObject | undefined, key: string) => (
 
 const timeField = (value: JsonObject | undefined, key: string, fallback: number) => (
   isJsonNumber(value?.[key]) ? value[key] : fallback
-)
-
-const isAudioEffectKind = (kind: string): kind is AudioEffectKind => (
-  AUDIO_EFFECT_ORDER.some((effect) => effect === kind)
 )
 
 const isAudioSourceKind = (kind: string): kind is AudioSourceKind => (

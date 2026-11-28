@@ -1,6 +1,6 @@
 import type { AudioSourceKind, AudioSourceMetadata } from '~/lib/audio-source'
-import type { ArpeggiatorParams, AudioEffectKind, AutomationEnvelope, AutoFilterParamsEnvelope, AutoPanParamsEnvelope, ChorusParamsEnvelope, CompressorParams, DelayParams, EnsembleParamsEnvelope, EqParams, FlangerParamsEnvelope, GateParamsEnvelope, LimiterParamsEnvelope, LoFiParamsEnvelope, PhaserParamsEnvelope, ReverbParams, SaturatorParams, SpectralParamsEnvelope, SpectrumParamsEnvelope, SynthParams, TrackInstrumentParams, TremoloParamsEnvelope, UtilityParamsEnvelope } from '@daw-browser/shared'
-import type { AudioWarp, Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
+import type { ArpeggiatorParams, AudioEffectKind, AudioEffectParamsByKind, AutomationEnvelope, SynthParams, TrackInstrumentParams } from '@daw-browser/shared'
+import type { AudioWarp, Track, TrackChannelRole, TrackKind, TrackSend } from '@daw-browser/timeline-core/types'
 import type { ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { MidiEditorNote } from '~/lib/midi-editor-grid'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
@@ -84,7 +84,7 @@ export type TrackSnapshot = {
   volume: number
   muted?: boolean
   soloed?: boolean
-  kind?: 'audio' | 'instrument'
+  kind?: TrackKind
   channelRole?: TrackChannelRole
   groupRef?: TrackRef
   collapsed?: boolean
@@ -96,46 +96,12 @@ export type TrackEffect = AudioEffectKind | 'synth' | 'instrument' | 'arp'
 
 export type EffectType = TrackEffect | `master-${AudioEffectKind}`
 
-export type EffectParamsByEffect = {
-  utility: UtilityParamsEnvelope
-  eq: EqParams
-  autofilter: AutoFilterParamsEnvelope
-  gate: GateParamsEnvelope
-  compressor: CompressorParams
-  saturator: SaturatorParams
-  limiter: LimiterParamsEnvelope
-  lofi: LoFiParamsEnvelope
-  delay: DelayParams
-  reverb: ReverbParams
-  chorus: ChorusParamsEnvelope
-  flanger: FlangerParamsEnvelope
-  phaser: PhaserParamsEnvelope
-  tremolo: TremoloParamsEnvelope
-  autopan: AutoPanParamsEnvelope
-  ensemble: EnsembleParamsEnvelope
-  spectral: SpectralParamsEnvelope
-  spectrum: SpectrumParamsEnvelope
+export type EffectParamsByEffect = AudioEffectParamsByKind & {
+  [Kind in AudioEffectKind as `master-${Kind}`]: AudioEffectParamsByKind[Kind]
+} & {
   synth: SynthParams
   instrument: TrackInstrumentParams
   arp: ArpeggiatorParams
-  'master-utility': UtilityParamsEnvelope
-  'master-eq': EqParams
-  'master-autofilter': AutoFilterParamsEnvelope
-  'master-gate': GateParamsEnvelope
-  'master-compressor': CompressorParams
-  'master-saturator': SaturatorParams
-  'master-limiter': LimiterParamsEnvelope
-  'master-lofi': LoFiParamsEnvelope
-  'master-delay': DelayParams
-  'master-reverb': ReverbParams
-  'master-chorus': ChorusParamsEnvelope
-  'master-flanger': FlangerParamsEnvelope
-  'master-phaser': PhaserParamsEnvelope
-  'master-tremolo': TremoloParamsEnvelope
-  'master-autopan': AutoPanParamsEnvelope
-  'master-ensemble': EnsembleParamsEnvelope
-  'master-spectral': SpectralParamsEnvelope
-  'master-spectrum': SpectrumParamsEnvelope
 }
 
 export type TrackAudioEffectSnapshot = {
@@ -149,14 +115,8 @@ export type TrackAudioEffectSnapshot = {
 
 type EffectTargetId<Effect extends EffectType> = Effect extends TrackEffect ? Track['id'] : 'master'
 
-export type TrackEffectSnapshot = Partial<{
-  eq: EqParams
-  compressor: CompressorParams
-  saturator: SaturatorParams
-  limiter: LimiterParamsEnvelope
-  delay: DelayParams
-  reverb: ReverbParams
-  spectral: SpectralParamsEnvelope
+// The effect fields older history entries carry beside audioEffects.
+export type TrackEffectSnapshot = Partial<Pick<AudioEffectParamsByKind, 'eq' | 'compressor' | 'saturator' | 'limiter' | 'delay' | 'reverb' | 'spectral'> & {
   audioEffects: TrackAudioEffectSnapshot[]
   synth: SynthParams
   instrument: TrackInstrumentParams
@@ -301,13 +261,13 @@ export type HistoryEntry =
   | {
       type: 'track-create'
       projectId: string
-      data: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
+      data: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: TrackKind; channelRole?: TrackChannelRole; collapsed?: boolean; color?: string }
     }
   | {
       type: 'track-clip-create'
       projectId: string
       data: {
-        track: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: 'audio' | 'instrument'; channelRole?: TrackChannelRole }
+        track: { trackRef: TrackRef; currentTrackId?: string; name?: string; index: number; kind?: TrackKind; channelRole?: TrackChannelRole }
         clip: {
           trackRef: TrackRef
           clipRef: ClipRef

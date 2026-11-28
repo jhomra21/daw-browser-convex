@@ -1,6 +1,5 @@
 import { describe, expect, test } from 'bun:test'
 import {
-  AUDIO_EFFECT_ORDER,
   AUDIO_EFFECT_CONTRACTS,
   computeCompressorStaticCurveDb,
   COMPRESSOR_RATIO_MAX,
@@ -34,6 +33,7 @@ import {
   REVERB_WET_MAX,
   serializeNormalizedEqParams,
 } from './effects-params'
+import { AUDIO_EFFECT_KINDS } from './audio-effect-registry'
 import { normalizeSynthParams } from './synth-params'
 import { parseSharedTimelineOperation } from './shared-timeline-operations'
 
@@ -208,7 +208,7 @@ describe('Compressor params', () => {
   })
 
   test('adds compressor to audio effect order', () => {
-    expect(AUDIO_EFFECT_ORDER).toEqual(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum'])
+    expect(AUDIO_EFFECT_KINDS).toEqual(['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum'])
     expect(normalizeAudioEffectOrder(['delay', 'compressor'], ['eq', 'compressor', 'delay'])).toEqual(['delay', 'compressor', 'eq'])
   })
 
@@ -341,8 +341,8 @@ describe('Audio effect order', () => {
 
 describe('Modulation effect contracts', () => {
   test('normalizes v1 envelopes and includes all modulation kinds in order', () => {
-    expect(AUDIO_EFFECT_ORDER).toContain('chorus')
-    expect(AUDIO_EFFECT_ORDER).toContain('ensemble')
+    expect(AUDIO_EFFECT_KINDS).toContain('chorus')
+    expect(AUDIO_EFFECT_KINDS).toContain('ensemble')
     expect(AUDIO_EFFECT_CONTRACTS.chorus.normalizeParams({ delayMs: 100, feedback: -1 })).toEqual({
       version: 1,
       state: {

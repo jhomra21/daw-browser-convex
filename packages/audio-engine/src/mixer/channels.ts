@@ -1,4 +1,4 @@
-import type { Track, TrackChannelRole, TrackSend } from '@daw-browser/timeline-core/types'
+import type { Track, TrackChannelRole, TrackKind, TrackSend } from '@daw-browser/timeline-core/types'
 
 export type MixerChannelRole = TrackChannelRole | 'master'
 
@@ -13,7 +13,7 @@ export type MixerChannel = {
   sends: TrackSend[]
   outputTargetId?: Track['id']
   groupId?: Track['id']
-  kind?: 'audio' | 'instrument'
+  kind?: TrackKind
 }
 
 export function getMixerChannelRole(channel: Pick<MixerChannel, 'role'> | null | undefined): MixerChannelRole {

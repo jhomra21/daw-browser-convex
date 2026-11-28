@@ -3,10 +3,9 @@ import {
   isClipKindCompatibleWithTrack,
   normalizeTrackChannelRole,
   normalizeTrackRouting as normalizeTrackRoutingCore,
+  type ClipKind,
 } from '@daw-browser/shared'
 import type { Clip, Track, TrackChannelRole, TrackRouting } from './types'
-
-type ClipKind = 'audio' | 'midi'
 
 export function getTrackChannelRole(track: Pick<Track, 'channelRole'> | null | undefined): TrackChannelRole {
   return normalizeTrackChannelRole(track?.channelRole)

@@ -5,7 +5,7 @@ import {
 } from '~/lib/local-project-db'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import {
-  AUDIO_EFFECT_ORDER,
+  AUDIO_EFFECT_KINDS,
   assert,
   isDurableSharedTimelineOperationKind,
   midiClipReadSchema,
@@ -165,7 +165,7 @@ const automationEnvelopeSchema = z.object({
 })
 
 const audioEffectSnapshotSchema = z.object({
-  effect: z.enum(AUDIO_EFFECT_ORDER),
+  effect: z.enum(AUDIO_EFFECT_KINDS),
   instanceId: z.string().optional(),
   index: finiteNumberSchema.optional(),
   params: z.json(),

@@ -1,4 +1,4 @@
-import { assertDefined, getAutomationParameterDescriptor, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
+import { assertDefined, getAutomationParameterDescriptor, isOwnedProcessorKind, isSidechainCapableKind, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
 import type { ResolvedMixerGraph } from './types'
@@ -14,14 +14,9 @@ import { PROCESSOR_RESOURCE_LIMITS } from '../effects/processor-release-contract
 
 const MAX_OFFLINE_CHAINS = 32
 
-const isStaticWorkletKind = (kind: AudioEffectRuntimeInstance['kind']): kind is StaticWorkletKind =>
-  kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
-  || kind === 'spectral'
-
 const isStaticWorkletInstance = (
   instance: AudioEffectRuntimeInstance,
-): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
+): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isOwnedProcessorKind(instance.kind)
 
 type OfflineTrackNodes = {
   input: GainNode
@@ -149,7 +144,7 @@ const resolveFxAutomationBindings = (
   if (!descriptor || descriptor.owner === 'mixer' || descriptor.owner === 'sampler' || descriptor.owner === 'granular' || descriptor.owner === 'synth' || descriptor.owner === 'external' || descriptor.owner === 'compressor') return []
 
   if (effectInstanceId) {
-    if (isStaticWorkletKind(descriptor.owner)) return resolveStaticWorkletAutomationBinding(nodes.staticWorkletByInstanceId.get(effectInstanceId), parameterId)
+    if (isOwnedProcessorKind(descriptor.owner)) return resolveStaticWorkletAutomationBinding(nodes.staticWorkletByInstanceId.get(effectInstanceId), parameterId)
 
     if (descriptor.owner === 'eq') return resolveEqAutomationBindings(nodes.eqByInstanceId.get(effectInstanceId) ?? new Map(), parameterId)
 
@@ -195,7 +190,7 @@ export async function createOfflineMixerNodes(
   if (chains > MAX_OFFLINE_CHAINS) throw new Error(`Offline rendering is limited to ${MAX_OFFLINE_CHAINS} effect chains.`)
 
   const staticWorkletCount = [graph.master.instances, ...graph.channels.map((entry) => entry.fx?.instances)]
-    .reduce((count, instances) => count + (instances?.filter((instance) => isStaticWorkletKind(instance.kind)).length ?? 0), 0)
+    .reduce((count, instances) => count + (instances?.filter((instance) => isOwnedProcessorKind(instance.kind)).length ?? 0), 0)
 
   if (staticWorkletCount > PROCESSOR_RESOURCE_LIMITS.offlineOwnedWorklets) throw new Error(`Offline rendering is limited to ${PROCESSOR_RESOURCE_LIMITS.offlineOwnedWorklets} static worklets.`)
   const routingPlan = createMixerRoutingPlan(graph)
@@ -304,7 +299,7 @@ export async function createOfflineMixerNodes(
       const owned = target.fx.staticWorkletByInstanceId.get(route.effectInstanceId)
 
       const targetNode = assertDefined(
-        compressor?.workletNode ?? (owned?.kind === 'gate' || owned?.kind === 'spectral' ? owned.node : undefined),
+        compressor?.workletNode ?? (owned && isSidechainCapableKind(owned.kind) ? owned.node : undefined),
         `Invalid offline sidechain route for effect ${route.effectInstanceId}`,
       )
 

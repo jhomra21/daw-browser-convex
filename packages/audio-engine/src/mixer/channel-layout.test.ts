@@ -3,8 +3,11 @@ import {
   createDefaultCompressorParams,
   createDefaultDelayParams,
   createDefaultEqParams,
+  createDefaultFlangerParams,
+  createDefaultPhaserParams,
   createDefaultReverbParams,
   createDefaultSaturatorParams,
+  createDefaultTremoloParams,
 } from '@daw-browser/shared'
 import { convertStereoToMonoSample, duplicateMonoSample, getSourceChannelLayout } from './channel-layout'
 import { resolveMixerGraph } from './resolve-routing'
@@ -97,6 +100,22 @@ describe('runtime channel layouts', () => {
     })
 
     expect(reverb.channels[0]?.outputLayout).toBe('stereo')
+  })
+
+  test('stereo-widening modulation effects expand a mono bus, tremolo keeps it mono', () => {
+    const layoutAfterMonoEq = (effect: MixerTrackFx['instances'][number]) => resolveMixerGraph({
+      channels: [channel('bus')],
+      sourceChannelCounts: { bus: [1] },
+      trackFx: {
+        bus: {
+          instances: [{ id: 'eq', kind: 'eq', params: { ...createDefaultEqParams(), channelMode: 'mono' } }, effect],
+        },
+      },
+    }).channels[0]?.outputLayout
+
+    expect(layoutAfterMonoEq({ id: 'flanger', kind: 'flanger', params: { version: 1, state: createDefaultFlangerParams() } })).toBe('stereo')
+    expect(layoutAfterMonoEq({ id: 'phaser', kind: 'phaser', params: { version: 1, state: createDefaultPhaserParams() } })).toBe('stereo')
+    expect(layoutAfterMonoEq({ id: 'tremolo', kind: 'tremolo', params: { version: 1, state: createDefaultTremoloParams() } })).toBe('mono')
   })
 
   test('propagates stereo expansion through sends, groups, returns, and master', () => {

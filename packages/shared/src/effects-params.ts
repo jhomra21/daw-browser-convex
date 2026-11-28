@@ -1,3 +1,4 @@
+import { AUDIO_EFFECT_KINDS, isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
 import { clamp } from './numeric'
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
 import {
@@ -1108,13 +1109,6 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
   }
 }
 
-export type AudioEffectKind = 'utility' | 'eq' | 'autofilter' | 'gate' | 'compressor' | 'saturator' | 'lofi' | 'limiter' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'delay' | 'reverb' | 'spectral' | 'spectrum'
-
-export type PlannedAudioEffectKind = AudioEffectKind
-
-// The Spectrum device only observes: it has no processor in any audio graph.
-export type DspAudioEffectKind = Exclude<AudioEffectKind, 'spectrum'>
-
 export type MasterAudioEffectKind = `master-${AudioEffectKind}`
 
 export type AudioEffectInstance = {
@@ -1412,17 +1406,6 @@ export const normalizeArpeggiatorParams = (params: {
   hold: params.hold,
 })
 
-const AUDIO_EFFECT_CATALOG_ORDER: PlannedAudioEffectKind[] = ['utility', 'eq', 'autofilter', 'gate', 'compressor', 'saturator', 'limiter', 'lofi', 'chorus', 'flanger', 'phaser', 'tremolo', 'autopan', 'ensemble', 'delay', 'reverb', 'spectral', 'spectrum']
-export const AUDIO_EFFECT_ORDER: AudioEffectKind[] = AUDIO_EFFECT_CATALOG_ORDER
-
-export function isAudioEffectKind(value: JsonValue): value is AudioEffectKind {
-  return AUDIO_EFFECT_ORDER.some((kind) => value === kind)
-}
-
-export function isDspAudioEffectKind(value: JsonValue): value is DspAudioEffectKind {
-  return isAudioEffectKind(value) && value !== 'spectrum'
-}
-
 export function normalizeAudioEffectOrder(order: readonly JsonValue[], enabled: readonly AudioEffectKind[]): AudioEffectKind[] {
   const enabledSet = new Set(enabled)
   const seen = new Set<AudioEffectKind>()
@@ -1434,7 +1417,7 @@ export function normalizeAudioEffectOrder(order: readonly JsonValue[], enabled: 
     normalized.push(value)
   }
 
-  for (const kind of AUDIO_EFFECT_ORDER) {
+  for (const kind of AUDIO_EFFECT_KINDS) {
     if (!enabledSet.has(kind) || seen.has(kind)) continue
     seen.add(kind)
     normalized.push(kind)

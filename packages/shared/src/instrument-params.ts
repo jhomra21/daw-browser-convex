@@ -28,7 +28,12 @@ import {
   type GranularParamsInput,
 } from './granular-params'
 
-export type InstrumentKind = 'synth' | 'drum-rack' | 'sampler' | 'granular'
+export const INSTRUMENT_KINDS = ['synth', 'drum-rack', 'sampler', 'granular'] as const
+
+export type InstrumentKind = typeof INSTRUMENT_KINDS[number]
+
+// Instruments that play recorded audio and need buffers resolved before they can sound.
+export type SampledInstrumentKind = Extract<InstrumentKind, 'sampler' | 'granular'>
 
 export type TrackInstrumentParams =
   | { kind: 'synth'; instanceId: string; params: SynthParams }
@@ -107,7 +112,7 @@ export const INSTRUMENT_CONTRACTS = {
 } satisfies InstrumentContractByKind
 
 export function isInstrumentKind(value: JsonValue): value is InstrumentKind {
-  return value === 'synth' || value === 'drum-rack' || value === 'sampler' || value === 'granular'
+  return INSTRUMENT_KINDS.some((kind) => kind === value)
 }
 
 export function normalizeTrackInstrumentParams(value: JsonValue): TrackInstrumentParams | undefined {

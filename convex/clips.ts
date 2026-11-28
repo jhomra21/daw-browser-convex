@@ -9,7 +9,7 @@ import { canWriteProject, getProjectRole, requireAuthenticatedUserId, requirePro
 import { isClipKindCompatibleWithTrack } from './trackRouting'
 import { getTrackWriteAccess } from './trackWrites'
 import { findSampleRow } from './sampleRows'
-import { audioWarpEqual, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, sanitizeAudioSourceKind, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
+import { audioWarpEqual, type ClipKind, buildClipAudioSourceFields, isJsonString, normalizeAudioSourceMetadataPatch, normalizeAudioWarp, normalizeClipColor, normalizeClipGain, normalizeClipStartSec, normalizeClipTimingPatch, normalizeLegacyMidiClip, normalizeMidiClip, sanitizeAudioSourceKind, type AudioSourceKind, type AudioWarpPayload, type LegacyMidiClip } from '@daw-browser/shared'
 import { runSharedOperationOnce } from './sharedOperationResults'
 import { advanceProjectRevision } from './projectRows'
 import {
@@ -22,8 +22,6 @@ import { clipFadesValidator } from './clipFadesValidator'
 import { normalizeClipFades, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { midiValidator } from './midiValidator'
 import { hashCanonicalJsonSyncV1 } from '@daw-browser/control'
-
-type ClipKind = 'audio' | 'midi'
 
 type ClipMidiInput = LegacyMidiClip
 

@@ -1,7 +1,10 @@
 import {
+  isGainReductionMeterKind,
   isJsonNumber,
   isJsonObject,
   isJsonString,
+  isModulationGroupKind,
+  isSidechainCapableKind,
   OWNED_PROCESSOR_PARAMETER_IDS,
   type JsonValue,
   type OwnedProcessorKind,
@@ -32,9 +35,6 @@ export type StaticWorkletNodeChain = {
   gateMeterListeners: Set<GateMeterListener>
 }
 
-const isModulationKind = (kind: StaticWorkletKind) =>
-  kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble'
-
 const manifest = (kind: StaticWorkletKind) => kind === 'utility' ? utilityWorklet : kind === 'autofilter' ? autoFilterWorklet : kind === 'gate' ? gateWorklet : kind === 'limiter' ? limiterWorklet : kind === 'lofi' ? loFiWorklet : kind === 'spectral' ? spectralWorklet : modulationWorklet
 
 type StaticWorkletParams = Parameters<typeof normalizeOwnedProcessorAudioState>[1]
@@ -58,13 +58,13 @@ export async function createStaticWorkletNodeChain(
   const overlap = spectralState?.overlap
 
   const node = new AudioWorkletNode(ctx, asset.processorName, {
-    numberOfInputs: kind === 'gate' || kind === 'spectral' ? 2 : 1,
+    numberOfInputs: isSidechainCapableKind(kind) ? 2 : 1,
     numberOfOutputs: 1,
     outputChannelCount: [2],
     channelCount: 2,
     channelCountMode: 'explicit',
     channelInterpretation: 'speakers',
-    processorOptions: isModulationKind(kind)
+    processorOptions: isModulationGroupKind(kind)
       ? { processorKind: kind }
       : kind === 'spectral'
         ? {
@@ -143,7 +143,7 @@ export function applyStaticWorkletNodeParams(
     type: 'configure',
     version: 1,
     revision: chain.revision,
-    processorKind: isModulationKind(chain.kind) ? chain.kind : undefined,
+    processorKind: isModulationGroupKind(chain.kind) ? chain.kind : undefined,
     state: normalizedState,
   })
 
@@ -205,13 +205,13 @@ function readStaticWorkletFault(data: JsonValue): string | null {
 }
 
 const publishGateMeterReset = (chain: StaticWorkletNodeChain) => {
-  if (chain.kind !== 'gate' && chain.kind !== 'limiter') return
+  if (!isGainReductionMeterKind(chain.kind)) return
 
   for (const listener of chain.gateMeterListeners) listener({ gainReductionDb: 0 })
 }
 
 export function subscribeStaticGateMeter(chain: StaticWorkletNodeChain, listener: GateMeterListener) {
-  if ((chain.kind !== 'gate' && chain.kind !== 'limiter') || chain.state !== 'active') {
+  if (!isGainReductionMeterKind(chain.kind) || chain.state !== 'active') {
     listener({ gainReductionDb: 0 })
 
     return () => {}

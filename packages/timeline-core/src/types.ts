@@ -1,4 +1,4 @@
-import type { AudioSourceKind, AudioWarpPayload, MidiClip } from '@daw-browser/shared'
+import type { AudioSourceKind, AudioWarpPayload, MidiClip, TrackChannelRole, TrackKind } from '@daw-browser/shared'
 import type { ClipFades } from './clip-fades'
 
 export type { AudioWarpMode } from '@daw-browser/shared'
@@ -11,7 +11,7 @@ export type TrackSend = {
   tap?: 'pre-fx' | 'pre-fader' | 'post-fader'
 }
 
-export type TrackChannelRole = 'track' | 'group' | 'return'
+export type { TrackChannelRole, TrackKind } from '@daw-browser/shared'
 
 export type TrackRouting = {
   outputTargetId?: TrackId
@@ -64,7 +64,7 @@ export type Track<TBuffer = never> = {
   soloed?: boolean
   lockedBy?: string | null
   lockedAt?: number | null
-  kind?: 'audio' | 'instrument'
+  kind?: TrackKind
   channelRole?: TrackChannelRole
   groupId?: TrackId
   collapsed?: boolean

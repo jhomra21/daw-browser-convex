@@ -2,32 +2,16 @@ import type { AudioEffectRuntimeInstance, ExportFx } from '@daw-browser/audio-en
 import type { FunctionReturnType } from 'convex/server'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
 import {
-  AUDIO_EFFECT_CONTRACTS,
   type AutomationEnvelope,
   type JsonValue,
   arpeggiatorParamsSchema,
   isDspAudioEffectKind,
-  isJsonObject,
+  type DspAudioEffectKind,
+  normalizeAudioEffect,
+  normalizeAudioEffectRow,
   normalizeArpeggiatorParams,
-  normalizeAutoFilterParamsEnvelope,
-  normalizeAutoPanParamsEnvelope,
-  normalizeChorusParamsEnvelope,
-  normalizeCompressorParams,
-  normalizeDelayParams,
-  normalizeEnsembleParamsEnvelope,
-  normalizeEqParams,
-  normalizeFlangerParamsEnvelope,
-  normalizeGateParamsEnvelope,
-  normalizeLimiterParamsEnvelope,
-  normalizeLoFiParamsEnvelope,
-  normalizePhaserParamsEnvelope,
-  normalizeReverbParams,
-  normalizeSaturatorParams,
-  normalizeSpectralParamsEnvelope,
   normalizeSynthParams,
-  normalizeTremoloParamsEnvelope,
   normalizeTrackInstrumentParams,
-  normalizeUtilityParamsEnvelope,
   parseJsonValue,
 } from '@daw-browser/shared'
 import type { convexApi } from '~/lib/convex'
@@ -39,8 +23,6 @@ import type { ExportEffectRow, ExportEffectsProjection } from '~/lib/export/expo
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number]
 
 type RoomEffectParams = RoomEffectRow['params']
-
-type OwnedExportEffectParams = ExportEffectRow['params'] | LocalEffectRow<JsonValue>['params'] | RoomEffectParams
 
 export type ExportRenderStateSnapshot = {
   readonly fx: ExportFx
@@ -67,39 +49,7 @@ const cloneCloudEffectParams = (
   type: string,
   params: RoomEffectParams,
 ): RoomEffectParams => {
-  if (type === 'eq') return normalizeEqParams(params)
-
-  if (type === 'compressor') return normalizeCompressorParams(params)
-
-  if (type === 'saturator') return normalizeSaturatorParams(params)
-
-  if (type === 'delay') return normalizeDelayParams(params)
-
-  if (type === 'reverb') return normalizeReverbParams(params)
-
-  if (type === 'utility') return normalizeUtilityParamsEnvelope(params)
-
-  if (type === 'autofilter') return normalizeAutoFilterParamsEnvelope(params)
-
-  if (type === 'gate') return normalizeGateParamsEnvelope(params)
-
-  if (type === 'limiter') return normalizeLimiterParamsEnvelope(params)
-
-  if (type === 'lofi') return normalizeLoFiParamsEnvelope(params)
-
-  if (type === 'chorus') return normalizeChorusParamsEnvelope(params)
-
-  if (type === 'flanger') return normalizeFlangerParamsEnvelope(params)
-
-  if (type === 'phaser') return normalizePhaserParamsEnvelope(params)
-
-  if (type === 'tremolo') return normalizeTremoloParamsEnvelope(params)
-
-  if (type === 'autopan') return normalizeAutoPanParamsEnvelope(params)
-
-  if (type === 'ensemble') return normalizeEnsembleParamsEnvelope(params)
-
-  if (type === 'spectral') return normalizeSpectralParamsEnvelope(params)
+  if (isDspAudioEffectKind(type)) return normalizeAudioEffect(type, params).params
 
   if (type === 'arpeggiator') return normalizeArpeggiatorParams(params)
 
@@ -171,41 +121,9 @@ const cloneAudioBufferMap = <Value,>(buffers: ReadonlyMap<string, Value> | undef
   return clone
 }
 
-const cloneExportEffectInstance = (instance: AudioEffectRuntimeInstance): AudioEffectRuntimeInstance => {
-  if (instance.kind === 'eq') return { id: instance.id, kind: instance.kind, params: normalizeEqParams(instance.params) }
-
-  if (instance.kind === 'compressor') return { id: instance.id, kind: instance.kind, params: normalizeCompressorParams(instance.params) }
-
-  if (instance.kind === 'saturator') return { id: instance.id, kind: instance.kind, params: normalizeSaturatorParams(instance.params) }
-
-  if (instance.kind === 'delay') return { id: instance.id, kind: instance.kind, params: normalizeDelayParams(instance.params) }
-
-  if (instance.kind === 'reverb') return { id: instance.id, kind: instance.kind, params: normalizeReverbParams(instance.params) }
-
-  if (instance.kind === 'utility') return { id: instance.id, kind: instance.kind, params: normalizeUtilityParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'autofilter') return { id: instance.id, kind: instance.kind, params: normalizeAutoFilterParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'gate') return { id: instance.id, kind: instance.kind, params: normalizeGateParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'limiter') return { id: instance.id, kind: instance.kind, params: normalizeLimiterParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'lofi') return { id: instance.id, kind: instance.kind, params: normalizeLoFiParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'chorus') return { id: instance.id, kind: instance.kind, params: normalizeChorusParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'flanger') return { id: instance.id, kind: instance.kind, params: normalizeFlangerParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'phaser') return { id: instance.id, kind: instance.kind, params: normalizePhaserParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'tremolo') return { id: instance.id, kind: instance.kind, params: normalizeTremoloParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'autopan') return { id: instance.id, kind: instance.kind, params: normalizeAutoPanParamsEnvelope(instance.params) }
-
-  if (instance.kind === 'ensemble') return { id: instance.id, kind: instance.kind, params: normalizeEnsembleParamsEnvelope(instance.params) }
-
-  return { id: instance.id, kind: instance.kind, params: normalizeSpectralParamsEnvelope(instance.params) }
-}
+const cloneExportEffectInstance = (instance: AudioEffectRuntimeInstance): AudioEffectRuntimeInstance => (
+  { id: instance.id, ...normalizeAudioEffect(instance.kind, instance.params) }
+)
 
 export const cloneExportFx = (fx: ExportFx): ExportFx => {
   const trackFx = fx.trackFx
@@ -267,6 +185,8 @@ export const cloneAutomationEnvelope = (envelope: AutomationEnvelope): Automatio
   updatedAt: envelope.updatedAt,
 })
 
+const isDspEffectRow = (row: ExportEffectRow): row is Extract<ExportEffectRow, { effect: DspAudioEffectKind }> => isDspAudioEffectKind(row.effect)
+
 const cloneExportEffectRow = (row: ExportEffectRow): ExportEffectRow => {
   const metadata = {
     targetId: row.targetId,
@@ -274,39 +194,7 @@ const cloneExportEffectRow = (row: ExportEffectRow): ExportEffectRow => {
     index: row.index,
   }
 
-  if (row.effect === 'eq') return { ...metadata, effect: row.effect, params: normalizeEqParams(row.params) }
-
-  if (row.effect === 'compressor') return { ...metadata, effect: row.effect, params: normalizeCompressorParams(row.params) }
-
-  if (row.effect === 'saturator') return { ...metadata, effect: row.effect, params: normalizeSaturatorParams(row.params) }
-
-  if (row.effect === 'delay') return { ...metadata, effect: row.effect, params: normalizeDelayParams(row.params) }
-
-  if (row.effect === 'reverb') return { ...metadata, effect: row.effect, params: normalizeReverbParams(row.params) }
-
-  if (row.effect === 'utility') return { ...metadata, effect: row.effect, params: normalizeUtilityParamsEnvelope(row.params) }
-
-  if (row.effect === 'autofilter') return { ...metadata, effect: row.effect, params: normalizeAutoFilterParamsEnvelope(row.params) }
-
-  if (row.effect === 'gate') return { ...metadata, effect: row.effect, params: normalizeGateParamsEnvelope(row.params) }
-
-  if (row.effect === 'limiter') return { ...metadata, effect: row.effect, params: normalizeLimiterParamsEnvelope(row.params) }
-
-  if (row.effect === 'lofi') return { ...metadata, effect: row.effect, params: normalizeLoFiParamsEnvelope(row.params) }
-
-  if (row.effect === 'chorus') return { ...metadata, effect: row.effect, params: normalizeChorusParamsEnvelope(row.params) }
-
-  if (row.effect === 'flanger') return { ...metadata, effect: row.effect, params: normalizeFlangerParamsEnvelope(row.params) }
-
-  if (row.effect === 'phaser') return { ...metadata, effect: row.effect, params: normalizePhaserParamsEnvelope(row.params) }
-
-  if (row.effect === 'tremolo') return { ...metadata, effect: row.effect, params: normalizeTremoloParamsEnvelope(row.params) }
-
-  if (row.effect === 'autopan') return { ...metadata, effect: row.effect, params: normalizeAutoPanParamsEnvelope(row.params) }
-
-  if (row.effect === 'ensemble') return { ...metadata, effect: row.effect, params: normalizeEnsembleParamsEnvelope(row.params) }
-
-  if (row.effect === 'spectral') return { ...metadata, effect: row.effect, params: normalizeSpectralParamsEnvelope(row.params) }
+  if (isDspEffectRow(row)) return { ...metadata, ...normalizeAudioEffectRow(row.effect, row.params) }
 
   if (row.effect === 'arp') return { targetId: row.targetId, effect: row.effect, params: normalizeArpeggiatorParams(row.params) }
 
@@ -342,63 +230,14 @@ const applyTrackFxPatch = (trackFx: TrackFxMap, trackId: string, patch: TrackFxP
   trackFx[trackId] = { ...(trackFx[trackId] ?? { instances: [] }), ...patch }
 }
 
-const createOwnedExportEffectRow = (
-  targetId: string,
-  id: string,
-  kind: 'utility' | 'autofilter' | 'gate' | 'limiter' | 'lofi' | 'chorus' | 'flanger' | 'phaser' | 'tremolo' | 'autopan' | 'ensemble' | 'spectral',
-  params: OwnedExportEffectParams,
-  index?: number,
-): ExportEffectInstanceRow => {
-  if (kind === 'utility') return { targetId, id, kind, index, params: normalizeUtilityParamsEnvelope(params) }
-
-  if (kind === 'autofilter') return { targetId, id, kind, index, params: normalizeAutoFilterParamsEnvelope(params) }
-
-  if (kind === 'gate') return { targetId, id, kind, index, params: normalizeGateParamsEnvelope(params) }
-
-  if (kind === 'limiter') return { targetId, id, kind, index, params: normalizeLimiterParamsEnvelope(params) }
-
-  if (kind === 'lofi') return { targetId, id, kind, index, params: normalizeLoFiParamsEnvelope(params) }
-
-  if (kind === 'chorus') return { targetId, id, kind, index, params: normalizeChorusParamsEnvelope(params) }
-
-  if (kind === 'flanger') return { targetId, id, kind, index, params: normalizeFlangerParamsEnvelope(params) }
-
-  if (kind === 'phaser') return { targetId, id, kind, index, params: normalizePhaserParamsEnvelope(params) }
-
-  if (kind === 'tremolo') return { targetId, id, kind, index, params: normalizeTremoloParamsEnvelope(params) }
-
-  if (kind === 'autopan') return { targetId, id, kind, index, params: normalizeAutoPanParamsEnvelope(params) }
-
-  if (kind === 'spectral') return { targetId, id, kind, index, params: normalizeSpectralParamsEnvelope(params) }
-
-  return { targetId, id, kind, index, params: normalizeEnsembleParamsEnvelope(params) }
-}
-
 const normalizeExportEffectInstances = (rows: ExportEffectInstanceRow[]): AudioEffectRuntimeInstance[] => {
   const seen = new Set<string>()
   const instances: AudioEffectRuntimeInstance[] = []
 
-  for (const row of rows.sort(compareAudioEffectOrderEntries)) {
-    if (seen.has(row.id)) continue
-    seen.add(row.id)
-
-    if (row.kind === 'utility') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'autofilter') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'eq') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'gate') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'compressor') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'saturator') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'limiter') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'lofi') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'delay') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'reverb') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'chorus') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'flanger') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'phaser') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'tremolo') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'autopan') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else if (row.kind === 'spectral') instances.push({ id: row.id, kind: row.kind, params: row.params })
-    else instances.push({ id: row.id, kind: row.kind, params: row.params })
+  for (const { targetId: _targetId, index: _index, ...instance } of rows.sort(compareAudioEffectOrderEntries)) {
+    if (seen.has(instance.id)) continue
+    seen.add(instance.id)
+    instances.push(instance)
   }
 
   return instances
@@ -440,12 +279,7 @@ const replaceExportEffectInstancesForTarget = (
   for (const row of rows) {
     if (!isDspAudioEffectKind(row.effect) || !row.instanceId) continue
 
-    if (row.effect === 'eq') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
-    else if (row.effect === 'compressor') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
-    else if (row.effect === 'saturator') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
-    else if (row.effect === 'delay') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
-    else if (row.effect === 'reverb') instances.push({ targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
-    else instances.push(createOwnedExportEffectRow(targetId, row.instanceId, row.effect, row.params, row.index))
+    instances.push({ targetId, id: row.instanceId, index: row.index, ...normalizeAudioEffect(row.effect, row.params) })
   }
 
   const normalized = normalizeExportEffectInstances(instances)
@@ -469,22 +303,8 @@ export const applyLocalEffectRowsToFx = (fx: ExportFx, rows: readonly LocalEffec
     if (kind) {
       if (!row.instanceId) throw new Error(`Audio effect "${kind}" is missing an instance ID.`)
       const id = row.instanceId
-      const params = isJsonObject(row.params) ? row.params : {}
 
-      if (kind === 'eq') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.eq.normalizeParams(params) })
-
-      if (kind === 'compressor') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.compressor.normalizeParams(params) })
-
-      if (kind === 'saturator') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.saturator.normalizeParams(params) })
-
-      if (kind === 'delay') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams(params) })
-
-      if (kind === 'reverb') instanceRows.push({ targetId: row.targetId, id, kind, index: row.index, params: AUDIO_EFFECT_CONTRACTS.reverb.normalizeParams(params) })
-
-      if (kind === 'utility' || kind === 'autofilter' || kind === 'gate' || kind === 'limiter' || kind === 'lofi' ||
-        kind === 'chorus' || kind === 'flanger' || kind === 'phaser' || kind === 'tremolo' || kind === 'autopan' || kind === 'ensemble' || kind === 'spectral') {
-        instanceRows.push(createOwnedExportEffectRow(row.targetId, id, kind, row.params, row.index))
-      }
+      if (isDspAudioEffectKind(kind)) instanceRows.push({ targetId: row.targetId, id, index: row.index, ...normalizeAudioEffect(kind, row.params) })
     }
 
     if (row.effect === 'arp') {
@@ -517,20 +337,7 @@ export const applyRoomEffectRowsToFx = (fx: ExportFx, rows: readonly RoomEffectR
         if (!row.instanceId) throw new Error(`Audio effect "${row.type}" is missing an instance ID.`)
         const id = row.instanceId
 
-        if (row.type === 'eq') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeEqParams(row.params) })
-
-        if (row.type === 'compressor') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeCompressorParams(row.params) })
-
-        if (row.type === 'saturator') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeSaturatorParams(row.params) })
-
-        if (row.type === 'delay') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeDelayParams(row.params) })
-
-        if (row.type === 'reverb') instanceRows.push({ targetId, id, kind: row.type, index: row.index, params: normalizeReverbParams(row.params) })
-
-        if (row.type === 'utility' || row.type === 'autofilter' || row.type === 'gate' || row.type === 'limiter' || row.type === 'lofi' ||
-          row.type === 'chorus' || row.type === 'flanger' || row.type === 'phaser' || row.type === 'tremolo' || row.type === 'autopan' || row.type === 'ensemble' || row.type === 'spectral') {
-          instanceRows.push(createOwnedExportEffectRow(targetId, id, row.type, row.params, row.index))
-        }
+        instanceRows.push({ targetId, id, index: row.index, ...normalizeAudioEffect(row.type, row.params) })
       }
     }
 
@@ -559,12 +366,7 @@ const applyProjectedEffectRowsToFx = (fx: ExportFx, rows: readonly ExportEffectR
 
   for (const row of rows) {
     if (isDspAudioEffectKind(row.effect) && row.instanceId) {
-      if (row.effect === 'eq') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeEqParams(row.params) })
-      else if (row.effect === 'compressor') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeCompressorParams(row.params) })
-      else if (row.effect === 'saturator') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeSaturatorParams(row.params) })
-      else if (row.effect === 'delay') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeDelayParams(row.params) })
-      else if (row.effect === 'reverb') instances.push({ targetId: row.targetId, id: row.instanceId, kind: row.effect, index: row.index, params: normalizeReverbParams(row.params) })
-      else instances.push(createOwnedExportEffectRow(row.targetId, row.instanceId, row.effect, row.params, row.index))
+      instances.push({ targetId: row.targetId, id: row.instanceId, index: row.index, ...normalizeAudioEffect(row.effect, row.params) })
     }
 
     if (row.effect === 'arp') applyTrackFxPatch(trackFx, row.targetId, { arp: normalizeArpeggiatorParams(row.params) })

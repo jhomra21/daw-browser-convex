@@ -1,4 +1,4 @@
-import { AUDIO_EFFECT_ORDER, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, type AudioEffectInstance, type AudioEffectKind } from '@daw-browser/shared'
+import { AUDIO_EFFECT_KINDS, normalizeAudioEffectInstanceOrder, normalizeAudioEffectOrder, type AudioEffectInstance, type AudioEffectKind } from '@daw-browser/shared'
 
 type AudioEffectOrderEntry = {
   targetId: string
@@ -8,7 +8,7 @@ type AudioEffectOrderEntry = {
 }
 
 const getAudioEffectOrderSortIndex = (entry: Pick<AudioEffectOrderEntry, 'kind' | 'index'>) => (
-  entry.index ?? (entry.kind === 'spectral' ? AUDIO_EFFECT_ORDER.length : AUDIO_EFFECT_ORDER.indexOf(entry.kind))
+  entry.index ?? (entry.kind === 'spectral' ? AUDIO_EFFECT_KINDS.length : AUDIO_EFFECT_KINDS.indexOf(entry.kind))
 )
 
 export const compareAudioEffectOrderEntries = (

@@ -7,7 +7,7 @@ Ruled by the owner on 2026-11-22, on the evidence of FAST-CERT bless runs 2 and 
 Seeds 51, 127, 319, 350, 543 and 767 of the hook fuzz pass before and after. Each gains or loses one `latency|cancelled|ending-transport-domain` rejection, a cancelled settlement that the B6 gate never counts.
 
 - 127, 319, 543, 767: commit 9cf4e211 retries a paused Play whose schedule coordinator an edit adoption replaced during its compile. Solid 1 reported "Native audio playback is unavailable." and settled the Play in the ending domain; the Play now starts.
-- 51, 350: Solid 2's microtask batching reorders a compile or a loop settlement against a transport command. Not traced step by step.
+- 51, 350: traced step by step against convex-1-51. Under Solid 1, `setIsPlaying(false)` in `handlePause` ran the effect that calls `nativePlayback.dropAdoptionIntents()` synchronously, so its state patch queued before the pause transition. Solid 2 runs that effect at the flush, after `handlePause` has queued the pause (first swap: step 1213 for seed 51, step 610 for seed 350). A Play queued behind a locate then reaches its compile in a different order: for seed 51 the locate moves the coordinator mid-compile and the 9cf4e211 retry recompiles; for seed 350 the start returns unavailable and the hook plays again from the locate. From there the seeded walk draws a `latency` action that the Solid 1 run never draws (step 1415 and step 1738), and a transport command refuses it in the ending domain. Both runs end in the same state (not playing, actual equal to desired) and pass every invariant. No Play is lost; a start can land a few microtasks later or replay from the locate.
 
 Recorded with `--allow-rejection hook:<seed>:latency|cancelled|ending-transport-domain` for each seed.
 

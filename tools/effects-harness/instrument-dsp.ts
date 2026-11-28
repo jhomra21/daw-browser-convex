@@ -89,9 +89,12 @@ export const sineEnvelope = (signal: ArrayLike<number>, period: number) => {
  */
 export const decayTimeSec = (envelope: Float64Array, rate: number, period: number, onFrame: number, sustain: number) => {
   const target = sustain + 0.01 * (1 - sustain)
+  let peak = onFrame + period / 2
 
-  // The one-period window holds only the note from half a period in.
-  for (let n = onFrame + period / 2; n < envelope.length; n += 1) if (envelope[n] <= target) return (n - onFrame) / rate
+  // The decay starts at the peak: the attack passes through the sustain level on its way up.
+  for (let n = peak; n < envelope.length; n += 1) if (envelope[n] > envelope[peak]) peak = n
+
+  for (let n = peak; n < envelope.length; n += 1) if (envelope[n] <= target) return (n - onFrame) / rate
 
   return Infinity
 }

@@ -114,7 +114,12 @@ const steal: Scenario = {
     const stealFrame = searchFrom + peakFrame(victim.subarray(searchFrom, searchFrom + 1500))
     const stolen = await render([...held, { frame: stealFrame, pitch: 72, velocity: 1 }])
     await h.wav('steal', stolen)
-    h.atMost('17th note into 16 voices: largest step in 10 ms / largest step in the 50 ms before', stepRatio(stolen[0], stealFrame, window, 5 * window), 1.5, '', 'S3, on the victim\'s crest')
+
+    // Voices sum linearly, so the new note rendered alone is taken out: what is left is the held voices and the victim's exit, where the click is.
+    // The new note's own steps (a louder 523 Hz sine than the 16 low notes before it) would otherwise count as a click.
+    const newNote = (await render([{ frame: stealFrame, pitch: 72, velocity: 1 }]))[0]
+    const withoutNewNote = stolen[0].map((value, index) => value - newNote[index])
+    h.atMost('17th note into 16 voices, new note subtracted: largest step in 10 ms / largest step in the 50 ms before', stepRatio(withoutNewNote, stealFrame, window, 5 * window), 1.5, '', 'S3, on the victim\'s crest')
   },
 }
 

@@ -27,6 +27,13 @@ const fnv1a = (text: string) => {
   return (hash >>> 0).toString(16)
 }
 
+/** The observer shape the native playback controller takes: who owns the session, plus the adoption and mark hooks. */
+export const nativeControllerObserver = (acceptance: PlaybackAcceptanceObserver | undefined) => acceptance && {
+  adoption: acceptance.adoption,
+  mark: acceptance.mark,
+  externalSessionOwner: !acceptance.ownsNativeSession,
+}
+
 // The bridge offers `acceptance` only when the app runs with DAW_AE08_EXTERNAL_NATIVE_SESSION or DAW_AE08_EVIDENCE_DIR, and
 // `acceptance.mark` only with the latter. Without an observer a call site pays one optional chain and no key runs.
 export const desktopAcceptanceObserver = (bridge: Pick<DesktopBridge, "acceptance"> | undefined): PlaybackAcceptanceObserver | undefined => {

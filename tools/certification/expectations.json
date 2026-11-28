@@ -18,7 +18,7 @@
   "entries": {
    "src/lib/desktop/native-playback-controller.ts": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
    "src/lib/desktop/native-processor-state-owner.ts": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
-   "src/hooks/useTimelinePlayback.ts": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f",
+   "src/hooks/useTimelinePlayback.ts": "48739f65e4b2b1a5e8269ae0bb939d013c6831427a00457f0e1626e22255dda0",
    "src/lib/desktop/native-playback-controller.test.ts": "3b44147e3afed2b449cf7a8182e6f07af45b6e7f4b339e3e6d2e8b729335cac2",
    "src/hooks/useTimelinePlayback.test.ts": "cca39fbe9e6e5e105ee2ae6f8aa2d02548a77ecc05de6fa09465c21941d6dd13",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
@@ -39,7 +39,7 @@
    "src/components/timeline/parameter-gesture-owner.ts": "6b6ee1ed625da949a06f55df690d7a50ca3f2cb6b81b47facf230e0d0abce049",
    "src/components/timeline/create-persisted-effect-state.ts": "3331f5f47be4e672820d8a08e6d9dd71147d382b00eab3c8186b74410d945b49",
    "src/components/timeline/create-effects-panel-state.ts": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38",
-   "src/components/timeline/create-effects-panel-controller.ts": "6fd114550a811a4ce2dd65ab00a4bbde9afcb5f7957b4744c9a8ea56855e99ab",
+   "src/components/timeline/create-effects-panel-controller.ts": "8506a3a20c2171015bb4a1837fadbffacae7f3b6acb6441c1d92188f217116c9",
    "src/lib/portable-browser-playback-controller.ts": "91d459cba7fe449b685d8512f6730f46a0ca8f9c689f030f5c48afd792db1ff4",
    "src/components/effects/Sampler.tsx": "2572d8391dab1389f6ea2224270c0299700ae2f7350055068dc0204cba30476f",
    "src/components/effects/Granular.tsx": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e",
@@ -156,7 +156,7 @@
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "f529c9683eb5db1eb34d3590b63bfbcf80d7dec778ac041284aaa84b44592d1f",
+   "src/hooks/useTimelinePlayback.ts": "48739f65e4b2b1a5e8269ae0bb939d013c6831427a00457f0e1626e22255dda0",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
    "src/lib/desktop/native-playback-controller.ts": "c6d904cc672cd4a906dcf19a9d4d295df83fdedee9c87c4f0d1cbda1c2ded874",
    "src/lib/local-effects.ts": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40",
@@ -4194,7 +4194,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "72a51788907d391f1946c0137f5181f7a684e1c2a1f0301640816fb4aa42b511",
+   "treeSha256": "6fef882088684c7524deb3a04fd332dc09baeaa67a7925d87e093112a60eae21",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

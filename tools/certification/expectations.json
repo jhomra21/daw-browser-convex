@@ -18,13 +18,13 @@
   "entries": {
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
-   "src/hooks/useTimelinePlayback.ts": "90526d667e16b5b5181f51c87248a4da40ab0c8a787f7d1d55773d04559f3875",
+   "src/hooks/useTimelinePlayback.ts": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4",
    "src/lib/desktop/native-playback-controller.test.ts": "cbc36ddbd755cd08813fd498901b04af1f7abca611335da47ad8a1969115605d",
    "src/hooks/useTimelinePlayback.test.ts": "9fec646e24dbdfcf956870057577822311adb186614377faebcab59c1ac723b0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "41608c63c65fcb1da3c10794560faa64f742311204ae17de2b06a62c8abc2ef6",
+   "src/components/Timeline.tsx": "eeac88ae3da3f1f04a357a1593e38c5d491f63c14f6e48e6e8ae71dfb861af47",
    "src/components/Timeline.test.ts": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "cd09163df02d227ba9ef6bc43f6ac15abcb47d05735be876f2663683e0fad97d",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
@@ -35,19 +35,19 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
    "tools/acceptance/device-control-cost.browser.test.ts": "6ee6446d6cd8bedd5715e791f14b46ebb56a54c11222fab751325cfeed214938",
-   "src/lib/instrument-buffer-sync.test.ts": "f198b72e77121b0d7dba549ffcee1afcdd0846a4e28bb66f21cc8485733cd376",
+   "src/lib/instrument-buffer-sync.test.ts": "781a7a9d3ae27aa8eb4d5ce74d2a61b0aa4d055a2160b0ac9519b8a03015731d",
    "src/components/timeline/parameter-gesture-owner.ts": "c1508853dec2cbcdd350b27ea5e50861e15acbe2a814f916c13bf140b46c5b48",
    "src/components/timeline/create-persisted-effect-state.ts": "200343a8ef20a412aabdef8c0e8c057cb9e96b0b42db9487e337448de800628d",
    "src/components/timeline/create-effects-panel-state.ts": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38",
    "src/components/timeline/create-effects-panel-controller.ts": "91c61ab86293341896c946a8f2f32b83e1d360ebdd49f68583b7a21d24d93fb0",
-   "src/lib/portable-browser-playback-controller.ts": "4914eae96cfc9d6a0a081ebaf372e875dcffe77e49bbc8e4c74f389e7750b3d8",
+   "src/lib/portable-browser-playback-controller.ts": "6e12a3ff533ff650f3b7350028f3776fa5dc6e33fc2106785509db65feec4d7c",
    "src/components/effects/Sampler.tsx": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8",
    "src/components/effects/Granular.tsx": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e",
    "src/lib/when-number.ts": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5",
-   "tools/acceptance/device-control-cost.browser-runtime.tsx": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7",
+   "tools/acceptance/device-control-cost.browser-runtime.tsx": "ac88f5c5ea40f99d1a1411bd0815abd66091bb3b6afb3826c8d6c3005a7d44d7",
    "tools/acceptance/device-control-cost.ts": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345",
    "src/hooks/useEffectsPanelAudioSync.test.ts": "1e028cb38009c1e30abececd2522efe39a5a62ae715fe53ee620d379de79fef9",
-   "src/lib/portable-browser-playback-controller.test.ts": "a99741ec87c7e560ab7023dad3df788636027d661a121a0a3f39d2588b6b44d2",
+   "src/lib/portable-browser-playback-controller.test.ts": "003e6a4219e0f3af6dd608201c8ca6a32a166934a8e37c822f4411e585311ab0",
    "src/components/timeline/create-persisted-effect-state.test.ts": "4015e82cc121cb819afb990b2078c06ca996e0732fcb9184592f324682c5eead",
    "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "0da64041beda5de695b159d1652f3359119aff52097923a45ebc744adc8e3708",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
@@ -156,7 +156,7 @@
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "90526d667e16b5b5181f51c87248a4da40ab0c8a787f7d1d55773d04559f3875",
+   "src/hooks/useTimelinePlayback.ts": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/local-effects.ts": "04c38749303e54799a90735c0e2f7568d02b5f2924f42feae81fe59fbf43982c",
@@ -2072,7 +2072,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 159,
+     "pass": 166,
      "skip": 0,
      "fail": 0
     },
@@ -2908,7 +2908,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 439,
+     "pass": 446,
      "skip": 3,
      "fail": 0
     },
@@ -4228,7 +4228,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "7ce1bb37729a56e773cde4720d2a13d48956ecb7c0e612fdf193808404abefa1",
+   "treeSha256": "5679a007a788b782f64ee567cc8fe692e894c5107c054b90b89519460f103338",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -35110,7 +35110,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -35288,13 +35288,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 157,
+      "pass": 163,
       "skip": 0,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6f ensurePrepared moves a live paused session to a newer playhead instead of answering at the old one",
-      "W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule"
+      "W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule",
+      "a locate between live note on and off leaves no hung note and sends nothing in the old epoch"
      ],
      "fuzz": null,
      "rejection": null,
@@ -41371,7 +41372,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -41501,7 +41502,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 144,
+      "pass": 151,
       "skip": 0,
       "fail": 15
      },
@@ -41631,7 +41632,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -41764,7 +41765,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 141,
+      "pass": 148,
       "skip": 0,
       "fail": 18
      },
@@ -41897,7 +41898,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -42026,7 +42027,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 157,
+      "pass": 164,
       "skip": 0,
       "fail": 2
      },
@@ -42268,7 +42269,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -42398,7 +42399,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 152,
+      "pass": 159,
       "skip": 0,
       "fail": 7
      },
@@ -46534,7 +46535,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -46717,7 +46718,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 154,
+      "pass": 161,
       "skip": 0,
       "fail": 5
      },
@@ -46896,7 +46897,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -47021,7 +47022,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 157,
+      "pass": 164,
       "skip": 0,
       "fail": 2
      },
@@ -47134,7 +47135,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -47328,7 +47329,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 115,
+      "pass": 122,
       "skip": 0,
       "fail": 44
      },
@@ -47584,7 +47585,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -47708,7 +47709,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 158,
+      "pass": 165,
       "skip": 0,
       "fail": 1
      },
@@ -49636,7 +49637,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -49761,7 +49762,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 153,
+      "pass": 160,
       "skip": 0,
       "fail": 6
      },
@@ -49878,7 +49879,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 159,
+      "pass": 166,
       "skip": 0,
       "fail": 0
      },
@@ -50003,7 +50004,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 142,
+      "pass": 149,
       "skip": 0,
       "fail": 17
      },

@@ -1,0 +1,395 @@
+{
+ "name": "instruments-browser-live-notes",
+ "sequence": 143,
+ "createdAt": "2026-11-28T12:07:26.445Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "41608c63c65fcb1da3c10794560faa64f742311204ae17de2b06a62c8abc2ef6",
+   "to": "eeac88ae3da3f1f04a357a1593e38c5d491f63c14f6e48e6e8ae71dfb861af47"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "90526d667e16b5b5181f51c87248a4da40ab0c8a787f7d1d55773d04559f3875",
+   "to": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "f198b72e77121b0d7dba549ffcee1afcdd0846a4e28bb66f21cc8485733cd376",
+   "to": "781a7a9d3ae27aa8eb4d5ce74d2a61b0aa4d055a2160b0ac9519b8a03015731d"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.test.ts",
+   "from": "a99741ec87c7e560ab7023dad3df788636027d661a121a0a3f39d2588b6b44d2",
+   "to": "003e6a4219e0f3af6dd608201c8ca6a32a166934a8e37c822f4411e585311ab0"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "4914eae96cfc9d6a0a081ebaf372e875dcffe77e49bbc8e4c74f389e7750b3d8",
+   "to": "6e12a3ff533ff650f3b7350028f3776fa5dc6e33fc2106785509db65feec4d7c"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser-runtime.tsx",
+   "from": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7",
+   "to": "ac88f5c5ea40f99d1a1411bd0815abd66091bb3b6afb3826c8d6c3005a7d44d7"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "7ce1bb37729a56e773cde4720d2a13d48956ecb7c0e612fdf193808404abefa1",
+   "new": "5679a007a788b782f64ee567cc8fe692e894c5107c054b90b89519460f103338"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 439,
+   "new": 446
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-portable",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 115,
+   "new": 122
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:474:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:474:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 164
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 158,
+   "new": 165
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 152,
+   "new": 159
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 142,
+   "new": 149
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 164
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 154,
+   "new": 161
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 153,
+   "new": 160
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 163
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 2,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f ensurePrepared moves a live paused session to a newer playhead instead of answering at the old one",
+    "W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule"
+   ],
+   "new": [
+    "B6f ensurePrepared moves a live paused session to a newer playhead instead of answering at the old one",
+    "W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule",
+    "a locate between live note on and off leaves no hung note and sends nothing in the old epoch"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 141,
+   "new": 148
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 159,
+   "new": 166
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 144,
+   "new": 151
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "86b062ef305951a9c380e2b660e465fa14e5e05f",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "b959da11b1f191f64cf072f4b261114a85641d6c995076d56381fdd028e6de32",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "b959da11b1f191f64cf072f4b261114a85641d6c995076d56381fdd028e6de32",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/iln-bless/live",
+   "resultSha256": "e292cb9422192fd67ee4d9fd47edf73c0a6857def0066543b863f08b229d80f5",
+   "seconds": 1432.989985083,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

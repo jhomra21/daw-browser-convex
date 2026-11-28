@@ -1768,13 +1768,15 @@ const runA8 = async () => {
     await state.flushPending();
     await settle();
     const actual = boundaryCounts.get("instrument");
+    // The browser engine only records the declared instrument (the portable session plays it), so it has no content
+    // to compare and applies the equal close rather than skipping it.
     rows.push({
       name: `A8-persisted-synth-${ticks}`, ticks,
-      expected: { calls: ticks + 1, applications: ticks, skips: 1, joins: 0 },
+      expected: { calls: ticks + 1, applications: ticks + 1, skips: 0, joins: 0 },
       actual: actual ? { ...actual } : null,
-      status: actual?.calls === ticks + 1 && actual.applications === ticks && actual.skips === 1 && actual.joins === 0 ? "green" : "expected-red",
-      failure: "equal final content is suppressed by the panel lane before the synth runtime can return skipped",
-      flip: "3B-1 offers the logical close to the synth runtime",
+      status: actual?.calls === ticks + 1 && actual.applications === ticks + 1 && actual.skips === 0 && actual.joins === 0 ? "green" : "expected-red",
+      failure: "equal final content is suppressed by the panel lane before the instrument declaration",
+      flip: "3B-1 offers the logical close to the instrument declaration",
     });
     dispose();
     engine.clearTrackInstrument(trackId);

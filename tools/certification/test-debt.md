@@ -28,7 +28,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 | `rc2:428:0:mutant` | rc2 428 | `src/hooks/useTimelinePlayback.ts`: `[cancellation, playAttempt?.promise, rebuildPromise]` → `[cancellation]` | its test command (21 pass) still passes; row disposition "DISPOSITION CHANGED" |
 | `rc2:429:0:mutant` | rc2 429 | `src/hooks/useTimelinePlayback.ts`: ` if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)` → ` if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return ` | its test command (21 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:429:2:mutant` | rc2 429 | `src/hooks/useTimelinePlayback.ts`: ` if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)` → ` if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return ` | its test command (30 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
-| `rc2:429:1:mutant` | rc2 429 | `src/hooks/useTimelinePlayback.ts`: ` if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec)` → ` if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === "started") return ` | its test command (262 pass) still passes; its one killer, "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled", tested the legacy Play deleted in 6ef40d59 (rebases/instruments-web-audio-retirement-audit.json) |
 | `rc2:429:3:mutant` | rc2 429 | `src/hooks/useTimelinePlayback.ts`: ` if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)` → ` if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === "started") return ` | its test command (16 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
 | `rc2:433:0:mutant` | rc2 433 | `src/hooks/useTimelinePlayback.ts`: ` if (!mounted \|\| requestedIntentToken !== transportIntentToken) { setIsPlayPending(false` → ` if (!mounted \|\| requestedIntentToken !== transportIntentToken) return ` | its test command (21 pass) still passes; row disposition "survives (diagnostic)" |
 | `rc2:437:1:mutant` | rc2 437 | `src/hooks/useTimelinePlayback.ts`: ` const hadPendingPlay = playAttempt !== undefined \|\| rebuildInProgress invalidatePlayAtt` → ` const hadPendingPlay = playAttempt !== undefined invalidatePlayAttempt() if (!isPlaying()` | its test command (2 pass) still passes; the row is killed by another arm; this arm's witness does not reach the mutated code |
@@ -119,7 +118,6 @@ The MISMATCH rows 382 and 434 keep their killing arms and have no survivor to re
 - `rc2:429:0:control`
 - `rc2:429:2:control`
 - `rc2:429:3:control`
-- `rc2:429:1:control`
 - `rc2:433:0:control`
 - `rc2:437:1:control`
 - `ledger:439:control:hookwit`

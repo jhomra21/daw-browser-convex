@@ -1,6 +1,6 @@
 {
  "name": "instruments-web-audio-retirement-audit",
- "sequence": 143,
+ "sequence": 144,
  "createdAt": "2026-11-28T11:42:29.371Z",
  "revert": [],
  "watched": [],
@@ -1748,7 +1748,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1759,7 +1759,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1793,7 +1793,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1805,7 +1805,7 @@
     "pass"
    ],
    "old": 268,
-   "new": 249
+   "new": 250
   },
   {
    "path": [
@@ -1817,7 +1817,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1829,7 +1829,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -1841,7 +1841,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1853,7 +1853,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -1865,7 +1865,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1877,7 +1877,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -1889,7 +1889,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1901,7 +1901,7 @@
     "pass"
    ],
    "old": 276,
-   "new": 257
+   "new": 258
   },
   {
    "path": [
@@ -1913,7 +1913,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1925,7 +1925,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -1937,7 +1937,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1949,7 +1949,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -1961,7 +1961,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1973,7 +1973,7 @@
     "pass"
    ],
    "old": 276,
-   "new": 257
+   "new": 258
   },
   {
    "path": [
@@ -1985,7 +1985,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -1997,7 +1997,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2009,7 +2009,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2021,7 +2021,7 @@
     "pass"
    ],
    "old": 273,
-   "new": 254
+   "new": 255
   },
   {
    "path": [
@@ -2033,7 +2033,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2045,7 +2045,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2057,7 +2057,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2069,7 +2069,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2081,7 +2081,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2093,7 +2093,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -2105,7 +2105,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2117,7 +2117,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -2129,18 +2129,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:429:1:mutant",
-    "expect",
-    "exit"
-   ],
-   "old": 1,
-   "new": 0
+   "new": 263
   },
   {
    "path": [
@@ -2153,19 +2142,9 @@
    "old": [
     "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
    ],
-   "new": []
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=rc2:429:1:mutant",
-    "expect",
-    "counts",
-    "fail"
-   ],
-   "old": 1,
-   "new": 0
+   "new": [
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+   ]
   },
   {
    "path": [
@@ -2189,7 +2168,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2201,7 +2180,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2213,7 +2192,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2225,7 +2204,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2237,7 +2216,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2249,7 +2228,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2261,7 +2240,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2273,7 +2252,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2285,7 +2264,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2297,7 +2276,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2309,7 +2288,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2321,7 +2300,7 @@
     "pass"
    ],
    "old": 274,
-   "new": 255
+   "new": 256
   },
   {
    "path": [
@@ -2333,7 +2312,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2345,7 +2324,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2357,7 +2336,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2369,7 +2348,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2381,7 +2360,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2393,7 +2372,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2405,7 +2384,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2417,7 +2396,7 @@
     "pass"
    ],
    "old": 266,
-   "new": 247
+   "new": 248
   },
   {
    "path": [
@@ -2429,7 +2408,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2441,7 +2420,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2453,7 +2432,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2465,7 +2444,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2477,7 +2456,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2489,7 +2468,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2501,7 +2480,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2513,7 +2492,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2525,7 +2504,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2537,7 +2516,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2549,7 +2528,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2561,7 +2540,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2573,7 +2552,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2585,7 +2564,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2597,7 +2576,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2609,7 +2588,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2621,7 +2600,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2633,7 +2612,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2645,7 +2624,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2657,7 +2636,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2669,7 +2648,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2681,7 +2660,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2693,7 +2672,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2705,7 +2684,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -2717,7 +2696,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2729,7 +2708,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -2741,7 +2720,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2753,7 +2732,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2765,7 +2744,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2777,7 +2756,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2789,7 +2768,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2801,7 +2780,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -2813,7 +2792,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2825,7 +2804,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2837,7 +2816,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2849,7 +2828,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -2861,7 +2840,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2873,7 +2852,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2885,7 +2864,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2897,7 +2876,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2909,7 +2888,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2921,7 +2900,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2933,7 +2912,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2945,7 +2924,7 @@
     "pass"
    ],
    "old": 277,
-   "new": 258
+   "new": 259
   },
   {
    "path": [
@@ -2957,7 +2936,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2969,7 +2948,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -2981,7 +2960,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -2993,7 +2972,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3005,7 +2984,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3017,7 +2996,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3029,7 +3008,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3041,7 +3020,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3053,7 +3032,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3065,7 +3044,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3077,7 +3056,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3089,7 +3068,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3101,7 +3080,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3113,7 +3092,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -3125,7 +3104,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3137,7 +3116,7 @@
     "pass"
    ],
    "old": 261,
-   "new": 242
+   "new": 243
   },
   {
    "path": [
@@ -3149,7 +3128,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -3161,7 +3140,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3173,7 +3152,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3185,7 +3164,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3197,7 +3176,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3209,7 +3188,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3221,7 +3200,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -3233,7 +3212,7 @@
     "pass"
    ],
    "old": 263,
-   "new": 244
+   "new": 245
   },
   {
    "path": [
@@ -3245,18 +3224,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=diag:419:419-plus-429",
-    "expect",
-    "exit"
-   ],
-   "old": 1,
-   "new": 0
+   "new": 260
   },
   {
    "path": [
@@ -3269,19 +3237,9 @@
    "old": [
     "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
    ],
-   "new": []
-  },
-  {
-   "path": [
-    "mutations",
-    "arms",
-    "id=diag:419:419-plus-429",
-    "expect",
-    "counts",
-    "fail"
-   ],
-   "old": 1,
-   "new": 0
+   "new": [
+    "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+   ]
   },
   {
    "path": [
@@ -3305,7 +3263,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3317,7 +3275,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3329,7 +3287,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3341,7 +3299,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3353,7 +3311,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3365,7 +3323,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3377,7 +3335,7 @@
     "pass"
    ],
    "old": 281,
-   "new": 262
+   "new": 263
   },
   {
    "path": [
@@ -3389,7 +3347,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -3401,7 +3359,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3413,7 +3371,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -3425,7 +3383,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3437,7 +3395,7 @@
     "pass"
    ],
    "old": 279,
-   "new": 260
+   "new": 261
   },
   {
    "path": [
@@ -3449,7 +3407,7 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   },
   {
    "path": [
@@ -3461,7 +3419,7 @@
     "pass"
    ],
    "old": 278,
-   "new": 259
+   "new": 260
   },
   {
    "path": [
@@ -3473,13 +3431,13 @@
     "pass"
    ],
    "old": 280,
-   "new": 261
+   "new": 262
   }
  ],
  "seedRecordChanges": [],
  "evidence": {
   "mode": "anchor",
-  "reason": "Web Audio retirement (instruments-web-audio-retirement 6ef40d59, 409d5638, ec989bf0, 1fa317b8, 4ca8adbb; hand record, no --bless; a direct audit like instruments-single-source-removal, stacked on instruments-browser-live-notes-audit). The browser plays only through the portable session: the legacy Web Audio live playback, the clip scheduler, the synth, sampler, Drum Rack and granular voices, their reference cores and the granular worklet are deleted. Whole-file deletions are not admissible through --allow-removal, so the engine gates leave their `files` maps as whole-object changes (diffJson records a removed key as old -> null, which setAt cannot apply). Counts measured with bun --conditions=browser test at 4ca8adbb against d5b16920 (whole packages/audio-engine/src: 920 -> 814 tests, 90 -> 82 files, nine test files deleted, audio-scheduling.test.ts 14 -> 11, the only other difference the new sampled-instrument-buffer-cache.test.ts with 5 pass, which the engine judge does not pin; the portable-wasm-host and lofi-worklet timing tests are flaky under load and differ in fail count only between runs). Direct audit of every removed test: (1) granular-core.test.ts (3): 'granular core > windows are finite, bounded, and have useful energy'; 'granular core > seed and density produce deterministic bounded schedules'; 'granular core > PRNG decisions cover deterministic reverse and stereo choices'. Why: granular-core.ts (window and schedule generation) is deleted in 409d5638; granular is rendered by the WASM core and checked by live-notes.browser.test.ts. (2) sampler-core.test.ts (11): 'sampler core > selects velocity ranges and advances round robin deterministically'; 'sampler core > bounds loop crossfade and envelope times'; 'sampler core > normalizes versioned persisted state and invalid loop bounds'; 'sampler core > evicts decoded buffers deterministically by least recent use'; 'sampler core > builds deterministic bounded equal-power crossfade segments'; 'sampler core > advances the first crossfade in playback time at every playback rate'; 'sampler core > keeps forward-loop sources alive through the note envelope'; 'sampler core > does not evict pinned decoded buffers'; 'sampler core > reports pinned over-budget state and evicts after the final unpin'; 'sampler core > reports evicted values so runtime holders can release decoded buffers'; 'sampler core > retains a replaced pinned value until its pin is released'. Why: sampler-core.ts is deleted in 409d5638. Five of its tests moved with the sampled buffer cache to packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts under the same leaf names ('evicts decoded buffers deterministically by least recent use', 'does not evict pinned decoded buffers', 'reports pinned over-budget state and evicts after the final unpin', 'reports evicted values so holders can release decoded buffers', 'retains a replaced pinned value until its pin is released'; 5 pass, a new unpinned file); the other six exercised the Web Audio sampler reference core (velocity ranges, loop crossfade, persisted state, crossfade segments, forward loops), and the sampler now sounds only through the WASM core (live-notes.browser.test.ts, sampled-instrument-region.test.ts 4, unchanged). (3) synth-voice-allocation.test.ts (3): 'synth voice allocation > does not let future scheduled voices consume current polyphony'; 'synth voice allocation > prefers released voices, then uses oldest deterministic tie-breaking'; 'synth voice allocation > prunes only voices ended before the chronological scheduling point'. Why: synth-voice-allocation.ts (Web Audio voice stealing order) is deleted in 409d5638; voice allocation lives in the WASM core, covered by the instrument voice blocks and live-notes.browser.test.ts. (4) drum-rack-runtime.test.ts (15): 'Instrument runtime > reports granular as dropped when no AudioContext can install it'; 'Instrument runtime > closes stale granular runtimes after creation and supersedes pending installs'; 'Instrument runtime > keeps Synth and Drum Rack scheduling exclusive per track'; 'Drum Rack runtime > reports applied configuration and equal skip'; 'Drum Rack runtime > schedules live MIDI notes through note-to-pad routing'; 'Drum Rack runtime > previews keyboard notes through mapped pads'; 'Drum Rack runtime > localizes regional buffers before live pad scheduling'; 'Drum Rack runtime > live scheduling helper applies pad trim, transpose, gain, pan, and mute'; 'Drum Rack runtime > chokes prior hits in the matching group with the browser six-millisecond fade'; 'Drum Rack runtime > steals the oldest hit at the canonical sampled-instrument cap'; 'Drum Rack runtime > emits one inactive event when a forced stop is followed by onended'; 'Drum Rack runtime > retains a scheduled stop hit until its source ends and stops only once'; 'Drum Rack runtime > removes a hit immediately when a scheduled stop throws'; 'Drum Rack runtime > disposes active hits immediately without waiting for onended'; 'Sampler runtime > reports regional active use for each concurrent voice'. Why: drum-rack-runtime.ts and the Web Audio instrument runtime paths are deleted in 409d5638; Drum Rack pads sound only through the WASM core (live-notes.browser.test.ts checks pads 36 and 37 as one-shots that end inside the audition); the 'Instrument runtime' tests asserted granular install and Synth/Drum Rack scheduling exclusivity of the deleted runtime. (5) synth-voice.test.ts (8): 'synth envelope planning > creates deterministic bounded white-noise buffers per voice identity and seed key'; 'synth envelope planning > plans ADSR and releases from interrupted attack and decay levels'; 'synth envelope planning > interpolates attack from a retargeted start level'; 'synth envelope planning > cancels attack scheduling at note-off and releases from the attack level'; 'synth envelope planning > cancels decay scheduling at note-off and releases from the decay level'; 'synth envelope planning > clamps cutoff at each supported sample rate'; 'synth envelope planning > calculates MIDI pitch and oscillator transposition'; 'synth envelope planning > evaluates ADSR and filter envelope automation at note-on only'. Why: synth-voice.ts (envelope planning, noise buffers, pitch) is deleted in 409d5638, the same synth runtime. (6) synth-runtime.test.ts (47): 'synth runtime characterization > preserves the requested one-shot preview duration'; 'synth runtime characterization > initializes a new track output with the default synth gain'; 'synth runtime characterization > keeps timeline notes separate from a held live note when retrigger is disabled'; 'synth runtime characterization > removes ended oscillators and their gain node from active state'; 'synth runtime characterization > schedules legacy MIDI through configured synth waves without repairing the source clip'; 'synth runtime characterization > skips invalid persisted MIDI notes without modifying their source clip'; 'synth runtime characterization > keeps per-voice pan neutral while applying pan on the persistent track output'; 'synth runtime characterization > routes amp LFO through a unit-gain modulation stage after the ADSR envelope'; 'synth runtime characterization > keeps zero-level oscillator and LFO graph nodes available for active updates'; 'synth runtime characterization > gates oscillators independently without recreating held voices'; 'synth runtime characterization > gates and smoothly enables held noise without recreating its source'; 'synth runtime characterization > resolves noise level automation while disabled noise remains gated'; 'synth runtime characterization > cancels a future voice before its start without scheduling an audible steal fade'; 'synth runtime characterization > disconnects every voice node after its oscillators end'; 'synth runtime characterization > stopping one clip preserves notes from other clips'; 'synth runtime characterization > retargets active amp and filter envelopes from their scheduled curve'; 'synth runtime characterization > reschedules LFO depth automation when enabling an LFO during playback'; 'synth runtime characterization > updates a held zero-level oscillator without changing its discrete pitch settings'; 'synth runtime characterization > uses updated discrete oscillator settings for the next scheduled voice'; 'synth runtime characterization > updates active voice filter and LFO parameters'; 'synth runtime characterization > updates held-note filter enablement, mode, and next key tracking together'; 'synth runtime characterization > gates disabled LFO automation and cancels modulation through synth updates'; 'synth runtime characterization > ignores disabled note-rate automation envelopes'; 'synth runtime characterization > applies persisted MIDI gain to synth voice amplitude'; 'synth runtime characterization > keeps amp LFO depth normalized across velocity, clip gain, and held-note updates'; 'synth runtime characterization > resolves synth output gain on the persistent track output'; 'synth runtime characterization > preserves the synth instance identity across parameter-only updates'; 'synth runtime characterization > resolves held-voice a-rate automation with per-voice transforms'; 'synth runtime characterization > reschedules held-voice automation bindings when an envelope changes or is removed'; 'synth runtime characterization > does not cancel a voice automation binding for an unrelated parameter update'; 'synth runtime characterization > delegates live a-rate scheduling while retaining voice-local offline scheduling'; 'synth runtime characterization > removes every required victim from allocation before replacing voices after a polyphony reduction'; 'synth runtime characterization > orders unsorted live MIDI notes by start time before polyphony allocation'; 'synth runtime characterization > allocates out-of-order cross-clip voices chronologically at polyphony one'; 'synth runtime characterization > reallocates future scheduled voices after a polyphony decrease and keeps them stoppable'; 'synth runtime characterization > keeps dense completed allocations bounded while stopClip and stopAll cancel their scheduled handles'; 'synth runtime characterization > releases preview notes with the configured amp release from attack and sustain'; 'synth runtime characterization > does not release a recreated synth voice through a stale live generation'; 'synth runtime characterization > does not clear a recreated live voice when a disposed voice ends late'; 'synth runtime characterization > releases a held preview filter envelope at note-off instead of its original long duration'; 'synth runtime characterization > releases a retargeted envelope from its retargeted curve'; 'synth runtime characterization > preserves exact amp and negative filter levels across repeated retargets'; 'synth runtime characterization > retargets during natural release without reviving the envelope'; 'synth runtime characterization > stops an early release from its latest scheduled level'; 'synth runtime delivery > skips equal params'; 'synth runtime delivery > applies changed params'; 'synth runtime delivery > drops params it cannot install without an audio context'. Why: synth-runtime.ts, the Web Audio synth runtime (voices, envelopes, LFO, polyphony, held-note updates), is deleted in 409d5638; the browser plays instruments only through the portable session and the WASM core, covered by src/hooks/live-notes.browser.test.ts (synth plays and releases, 40 checks), portable-wasm-host.test.ts (82, unchanged) and the shared instrument voice blocks blessed at c9739e1b. (7) clip-scheduler.test.ts (13): 'clip scheduler stretch render horizon > pre-renders all scheduled stretched clips with the default unbounded horizon'; 'clip scheduler stretch render horizon > pre-renders stretched clips inside the live horizon'; 'clip scheduler stretch render horizon > does not pre-render stretched clips beyond the live horizon'; 'clip scheduler stretch render horizon > uses loop end as the live horizon when it is sooner'; 'clip scheduler stretch render horizon > pre-renders stretched clips already overlapping the playhead'; 'clip scheduler append ranges > includes only entries intersecting the appended window'; 'clip scheduler stretch fallback policy > defers future stretch segments while the render is not ready'; 'clip scheduler stretch fallback policy > allows repitch fallback for imminent stretch segments'; 'clip scheduler stretch fallback policy > allows repitch fallback for stretch segments already overlapping the playhead'; 'clip scheduler deferred stretch windows > returns deferred metadata when a future stretch render is not ready'; 'clip scheduler deferred stretch windows > returns replace metadata when repitch fallback is imminent'; 'clip scheduler deferred stretch windows > clip filter limits append retries to matching clips'; 'clip scheduler deferred stretch windows > reschedule returns deferred metadata for future stretch renders'. Why: clip-scheduler.ts, the Web Audio clip scheduler with its stretch render horizon, fallback policy and deferred stretch windows, is deleted in 6ef40d59 with deferred-stretch.ts; the portable session compiles and renders clips in the WASM core, and prepared stretch rendering and readiness stay pinned in prepared-stretch-store.test.ts (22), audio-stretching-async.test.ts (3) and audio-stretch-rendering.test.ts (3), unchanged. (8) granular-runtime.test.ts (5): 'granular runtime transfer contract > 3B1 r3 processorerror rejects an install before reporting its fault'; 'granular runtime transfer contract > configures stereo node params and schedules deterministic MIDI gates'; 'granular runtime transfer contract > acks transfers, deduplicates identity, freezes, releases, faults, and closes idempotently'; 'granular runtime transfer contract > force-stops only the matching live gate while preserving other live and clip intervals'; 'granular runtime transfer contract > rejects oversize, install errors, stale acknowledgements, and pending work on close'. Why: granular-runtime.ts (worklet transfer and gate contract) is deleted in 409d5638 with the granular worklet. (9) granular-worklet.test.ts (3): 'granular worklet source > uses a bounded preallocated pool and sample-accurate parameters'; 'granular worklet source > downmixes a centered mono grain without overwriting one side'; 'granular worklet source > does not allocate, log, or schedule timers in process'. Why: public/audio-worklets/daw-granular-processor-v1.js and its manifest entry are deleted in 409d5638; the source assertions checked that script. (10) audio-scheduling.test.ts (3): 'clip scheduler stretch horizon > includes stretch clips inside the live render horizon'; 'clip scheduler stretch horizon > excludes stretch clips beyond the live render horizon'; 'clip scheduler stretch horizon > uses requested end limit before stretch render horizon'. Why: the three 'clip scheduler stretch horizon' tests called clipSchedulerTestInternals.shouldScheduleStretchSource from clip-scheduler.ts (deleted in 6ef40d59); the file keeps its other 11 tests, which cover audio-scheduling.ts that stays. (11) src/lib/instrument-buffer-sync.test.ts (12): '3B1 r3 granular processorerror settles the tracked readiness drain truthfully'; 'pins active sampler regions and releases them after the final voice ends'; 'releases a retired sampler generation through the ending voice token'; 'releases a retired Drum Rack generation through the ending hit token'; 'refuses sampler replacement while an obsolete region is pinned'; 'refreshes the runtime sampler map when releasing pinned regions evicts them'; 'records a sampler note-miss load failure without an unhandled rejection'; 'does not overwrite newer sampler state when a note-miss load is aborted'; 'rejects a pinned aggregate region until release makes capacity available'; 'pins active Drum Rack regions in the shared aggregate budget'; 'H6 granular failed replacement then original row recovers local=true'; 'H6 granular failed replacement then original row recovers local=false'. Why: the sampler runtime listeners and pins they drove (note-miss reloads, region use) are deleted in ec989bf0 ('the Web Audio voices that reported note misses and region use are gone ... export loading keeps its own pins'), and createGranularRuntime and the Drum Rack runtime constants are deleted or moved in 409d5638; the cache pin and eviction rules the pin tests relied on are now tested in sampled-instrument-buffer-cache.test.ts. The remaining 209 tests still cover buffer sync and export loading. (12) src/hooks/useTimelinePlayback.test.ts (21): 'useTimelinePlayback deferred stretch retries > loop wrap cancels automation before updating transport seek'; 'useTimelinePlayback deferred stretch retries > RAF does not retry deferred stretch windows before they become imminent'; 'useTimelinePlayback deferred stretch retries > stretch readiness retries non-imminent deferred stretch windows'; 'useTimelinePlayback deferred stretch retries > RAF retries deferred stretch windows once they become imminent'; 'useTimelinePlayback deferred stretch retries > live reschedule tracks deferred stretch windows for readiness retry'; 'useTimelinePlayback deferred stretch retries > restarts active playback from the current transport position'; 'useTimelinePlayback deferred stretch retries > live reschedule clears stale deferred stretch windows when a clip no longer needs stretching'; 'useTimelinePlayback deferred stretch retries > RAF keeps fallback stretch windows queued for render readiness replacement'; 'useTimelinePlayback deferred stretch retries > deferred queue upgrades matching windows to replace existing fallback sources'; 'keeps legacy recovery inert until explicit play'; 'plays through legacy Web Audio while lifecycle is recovering'; 'plays through legacy Web Audio and retries native recovery while lifecycle is failed'; 'serializes three rapid play calls into one legacy startup'; 'cancels delayed legacy resume before it schedules playback'; 'waits for a cancelled play attempt before starting a fresh play'; 'keeps fallback startup alive across a failed native retry'; 'preserves active legacy playback across a failed native retry'; 'retries failed recovery only after explicit play and stays paused until ready'; 'does not prepare native audio when disabled and keeps browser playback available'; 'uses the committed native backend without scheduling Web Audio'; 'a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled'. Why: the legacy Web Audio start, tick, pause and deferred stretch retry paths are deleted in 6ef40d59; the 21 removed tests asserted those paths (deferred stretch retries, legacy startup and recovery, 'Pause that cancels a pending legacy Play'). Two were rewritten for the surviving behavior and counted as added: 'keeps recovery inert until explicit play' and 'uses the committed native backend without starting Web Audio' (net -19). A project the portable session cannot play now shows the blocking notice, tested by src/hooks/portable-unavailable.browser.test.ts (new, 6 checks). Pins moved: f-engine and last-engine files (nine files removed, audio-scheduling.test.ts pass 14 -> 11); f-playback and rc1-g-playback counts.pass 281 -> 262 (skip 1 unchanged); f-buffer and last-buffer counts.pass 221 -> 209; 135 mutation arms that run src/hooks/useTimelinePlayback.test.ts (each runs the whole file) lower expect.counts.pass by 19, which is the recorded count plus the measured change at 4ca8adbb against d5b16920 with the arm's mutation applied in memory and the preload dropped (-19 each, net of the two added tests; the two killer arms -18, below). Gates and arms that run other files at 4ca8adbb keep their counts (f-c0f, f-c0g, f-hookwit, f-b6d8, f-b6e, f-b6f, f-b6f2, f-b6family, f-cost-browser, rc1-i11-cost-browser, 24 probe and child-preload arms whose -t patterns match no removed test); f-portable and rc1-i4-consumers rise by 7 and are not pinned here. KILLER REMOVED: 'a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled' is the only killer of rc2:429:1:mutant (mutation: ensureLiveGraph drops `nativePreviewRequested &&`, useTimelinePlayback.ts) and of the case diag:419:419-plus-429. It tested the legacy Play that is deleted; ensureLiveGraph keeps the guard, so the mutant is now a survivor: run on 4ca8adbb it exits 0 with 262 pass, 0 fail. Both arms are recorded as exit 1 -> 0, fail 1 -> 0, fails -> [], pass 280 -> 262, which makes the mutant an expected survivor that retiredArms retires (with its control rc2:429:1:control); test-debt.md lists them. The other 20 removed useTimelinePlayback tests, the 12 buffer-sync tests and the 145 engine, buffer and playback tests are named in no arm's expect.fails and no gate's judge.fails (rg of each leaf name over expectations.json finds only the 429 pair). Not run: x-matrix and x-probe160 (preloads in /tmp/dv01-b6 absent; their B6F5PROBE and B6FPROBE patterns match no removed test). The rc2:169 and diag:169 arms use a child preload and are unchanged by pattern. Watched hashes of the changed sources move with the next bless --full, not with this record.",
+  "reason": "Web Audio retirement (instruments-web-audio-retirement 6ef40d59, 409d5638, ec989bf0, 1fa317b8, 4ca8adbb; hand record, no --bless; a direct audit like instruments-single-source-removal, stacked on instruments-browser-live-notes-audit). The browser plays only through the portable session: the legacy Web Audio live playback, the clip scheduler, the synth, sampler, Drum Rack and granular voices, their reference cores and the granular worklet are deleted. Whole-file deletions are not admissible through --allow-removal, so the engine gates leave their `files` maps as whole-object changes (diffJson records a removed key as old -> null, which setAt cannot apply). Counts measured with bun --conditions=browser test at 4ca8adbb against d5b16920 (whole packages/audio-engine/src: 920 -> 814 tests, 90 -> 82 files, nine test files deleted, audio-scheduling.test.ts 14 -> 11, the only other difference the new sampled-instrument-buffer-cache.test.ts with 5 pass, which the engine judge does not pin; the portable-wasm-host and lofi-worklet timing tests are flaky under load and differ in fail count only between runs). Direct audit of every removed test: (1) granular-core.test.ts (3): 'granular core > windows are finite, bounded, and have useful energy'; 'granular core > seed and density produce deterministic bounded schedules'; 'granular core > PRNG decisions cover deterministic reverse and stereo choices'. Why: granular-core.ts (window and schedule generation) is deleted in 409d5638; granular is rendered by the WASM core and checked by live-notes.browser.test.ts. (2) sampler-core.test.ts (11): 'sampler core > selects velocity ranges and advances round robin deterministically'; 'sampler core > bounds loop crossfade and envelope times'; 'sampler core > normalizes versioned persisted state and invalid loop bounds'; 'sampler core > evicts decoded buffers deterministically by least recent use'; 'sampler core > builds deterministic bounded equal-power crossfade segments'; 'sampler core > advances the first crossfade in playback time at every playback rate'; 'sampler core > keeps forward-loop sources alive through the note envelope'; 'sampler core > does not evict pinned decoded buffers'; 'sampler core > reports pinned over-budget state and evicts after the final unpin'; 'sampler core > reports evicted values so runtime holders can release decoded buffers'; 'sampler core > retains a replaced pinned value until its pin is released'. Why: sampler-core.ts is deleted in 409d5638. Five of its tests moved with the sampled buffer cache to packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts under the same leaf names ('evicts decoded buffers deterministically by least recent use', 'does not evict pinned decoded buffers', 'reports pinned over-budget state and evicts after the final unpin', 'reports evicted values so holders can release decoded buffers', 'retains a replaced pinned value until its pin is released'; 5 pass, a new unpinned file); the other six exercised the Web Audio sampler reference core (velocity ranges, loop crossfade, persisted state, crossfade segments, forward loops), and the sampler now sounds only through the WASM core (live-notes.browser.test.ts, sampled-instrument-region.test.ts 4, unchanged). (3) synth-voice-allocation.test.ts (3): 'synth voice allocation > does not let future scheduled voices consume current polyphony'; 'synth voice allocation > prefers released voices, then uses oldest deterministic tie-breaking'; 'synth voice allocation > prunes only voices ended before the chronological scheduling point'. Why: synth-voice-allocation.ts (Web Audio voice stealing order) is deleted in 409d5638; voice allocation lives in the WASM core, covered by the instrument voice blocks and live-notes.browser.test.ts. (4) drum-rack-runtime.test.ts (15): 'Instrument runtime > reports granular as dropped when no AudioContext can install it'; 'Instrument runtime > closes stale granular runtimes after creation and supersedes pending installs'; 'Instrument runtime > keeps Synth and Drum Rack scheduling exclusive per track'; 'Drum Rack runtime > reports applied configuration and equal skip'; 'Drum Rack runtime > schedules live MIDI notes through note-to-pad routing'; 'Drum Rack runtime > previews keyboard notes through mapped pads'; 'Drum Rack runtime > localizes regional buffers before live pad scheduling'; 'Drum Rack runtime > live scheduling helper applies pad trim, transpose, gain, pan, and mute'; 'Drum Rack runtime > chokes prior hits in the matching group with the browser six-millisecond fade'; 'Drum Rack runtime > steals the oldest hit at the canonical sampled-instrument cap'; 'Drum Rack runtime > emits one inactive event when a forced stop is followed by onended'; 'Drum Rack runtime > retains a scheduled stop hit until its source ends and stops only once'; 'Drum Rack runtime > removes a hit immediately when a scheduled stop throws'; 'Drum Rack runtime > disposes active hits immediately without waiting for onended'; 'Sampler runtime > reports regional active use for each concurrent voice'. Why: drum-rack-runtime.ts and the Web Audio instrument runtime paths are deleted in 409d5638; Drum Rack pads sound only through the WASM core (live-notes.browser.test.ts checks pads 36 and 37 as one-shots that end inside the audition); the 'Instrument runtime' tests asserted granular install and Synth/Drum Rack scheduling exclusivity of the deleted runtime. (5) synth-voice.test.ts (8): 'synth envelope planning > creates deterministic bounded white-noise buffers per voice identity and seed key'; 'synth envelope planning > plans ADSR and releases from interrupted attack and decay levels'; 'synth envelope planning > interpolates attack from a retargeted start level'; 'synth envelope planning > cancels attack scheduling at note-off and releases from the attack level'; 'synth envelope planning > cancels decay scheduling at note-off and releases from the decay level'; 'synth envelope planning > clamps cutoff at each supported sample rate'; 'synth envelope planning > calculates MIDI pitch and oscillator transposition'; 'synth envelope planning > evaluates ADSR and filter envelope automation at note-on only'. Why: synth-voice.ts (envelope planning, noise buffers, pitch) is deleted in 409d5638, the same synth runtime. (6) synth-runtime.test.ts (47): 'synth runtime characterization > preserves the requested one-shot preview duration'; 'synth runtime characterization > initializes a new track output with the default synth gain'; 'synth runtime characterization > keeps timeline notes separate from a held live note when retrigger is disabled'; 'synth runtime characterization > removes ended oscillators and their gain node from active state'; 'synth runtime characterization > schedules legacy MIDI through configured synth waves without repairing the source clip'; 'synth runtime characterization > skips invalid persisted MIDI notes without modifying their source clip'; 'synth runtime characterization > keeps per-voice pan neutral while applying pan on the persistent track output'; 'synth runtime characterization > routes amp LFO through a unit-gain modulation stage after the ADSR envelope'; 'synth runtime characterization > keeps zero-level oscillator and LFO graph nodes available for active updates'; 'synth runtime characterization > gates oscillators independently without recreating held voices'; 'synth runtime characterization > gates and smoothly enables held noise without recreating its source'; 'synth runtime characterization > resolves noise level automation while disabled noise remains gated'; 'synth runtime characterization > cancels a future voice before its start without scheduling an audible steal fade'; 'synth runtime characterization > disconnects every voice node after its oscillators end'; 'synth runtime characterization > stopping one clip preserves notes from other clips'; 'synth runtime characterization > retargets active amp and filter envelopes from their scheduled curve'; 'synth runtime characterization > reschedules LFO depth automation when enabling an LFO during playback'; 'synth runtime characterization > updates a held zero-level oscillator without changing its discrete pitch settings'; 'synth runtime characterization > uses updated discrete oscillator settings for the next scheduled voice'; 'synth runtime characterization > updates active voice filter and LFO parameters'; 'synth runtime characterization > updates held-note filter enablement, mode, and next key tracking together'; 'synth runtime characterization > gates disabled LFO automation and cancels modulation through synth updates'; 'synth runtime characterization > ignores disabled note-rate automation envelopes'; 'synth runtime characterization > applies persisted MIDI gain to synth voice amplitude'; 'synth runtime characterization > keeps amp LFO depth normalized across velocity, clip gain, and held-note updates'; 'synth runtime characterization > resolves synth output gain on the persistent track output'; 'synth runtime characterization > preserves the synth instance identity across parameter-only updates'; 'synth runtime characterization > resolves held-voice a-rate automation with per-voice transforms'; 'synth runtime characterization > reschedules held-voice automation bindings when an envelope changes or is removed'; 'synth runtime characterization > does not cancel a voice automation binding for an unrelated parameter update'; 'synth runtime characterization > delegates live a-rate scheduling while retaining voice-local offline scheduling'; 'synth runtime characterization > removes every required victim from allocation before replacing voices after a polyphony reduction'; 'synth runtime characterization > orders unsorted live MIDI notes by start time before polyphony allocation'; 'synth runtime characterization > allocates out-of-order cross-clip voices chronologically at polyphony one'; 'synth runtime characterization > reallocates future scheduled voices after a polyphony decrease and keeps them stoppable'; 'synth runtime characterization > keeps dense completed allocations bounded while stopClip and stopAll cancel their scheduled handles'; 'synth runtime characterization > releases preview notes with the configured amp release from attack and sustain'; 'synth runtime characterization > does not release a recreated synth voice through a stale live generation'; 'synth runtime characterization > does not clear a recreated live voice when a disposed voice ends late'; 'synth runtime characterization > releases a held preview filter envelope at note-off instead of its original long duration'; 'synth runtime characterization > releases a retargeted envelope from its retargeted curve'; 'synth runtime characterization > preserves exact amp and negative filter levels across repeated retargets'; 'synth runtime characterization > retargets during natural release without reviving the envelope'; 'synth runtime characterization > stops an early release from its latest scheduled level'; 'synth runtime delivery > skips equal params'; 'synth runtime delivery > applies changed params'; 'synth runtime delivery > drops params it cannot install without an audio context'. Why: synth-runtime.ts, the Web Audio synth runtime (voices, envelopes, LFO, polyphony, held-note updates), is deleted in 409d5638; the browser plays instruments only through the portable session and the WASM core, covered by src/hooks/live-notes.browser.test.ts (synth plays and releases, 40 checks), portable-wasm-host.test.ts (82, unchanged) and the shared instrument voice blocks blessed at c9739e1b. (7) clip-scheduler.test.ts (13): 'clip scheduler stretch render horizon > pre-renders all scheduled stretched clips with the default unbounded horizon'; 'clip scheduler stretch render horizon > pre-renders stretched clips inside the live horizon'; 'clip scheduler stretch render horizon > does not pre-render stretched clips beyond the live horizon'; 'clip scheduler stretch render horizon > uses loop end as the live horizon when it is sooner'; 'clip scheduler stretch render horizon > pre-renders stretched clips already overlapping the playhead'; 'clip scheduler append ranges > includes only entries intersecting the appended window'; 'clip scheduler stretch fallback policy > defers future stretch segments while the render is not ready'; 'clip scheduler stretch fallback policy > allows repitch fallback for imminent stretch segments'; 'clip scheduler stretch fallback policy > allows repitch fallback for stretch segments already overlapping the playhead'; 'clip scheduler deferred stretch windows > returns deferred metadata when a future stretch render is not ready'; 'clip scheduler deferred stretch windows > returns replace metadata when repitch fallback is imminent'; 'clip scheduler deferred stretch windows > clip filter limits append retries to matching clips'; 'clip scheduler deferred stretch windows > reschedule returns deferred metadata for future stretch renders'. Why: clip-scheduler.ts, the Web Audio clip scheduler with its stretch render horizon, fallback policy and deferred stretch windows, is deleted in 6ef40d59 with deferred-stretch.ts; the portable session compiles and renders clips in the WASM core, and prepared stretch rendering and readiness stay pinned in prepared-stretch-store.test.ts (22), audio-stretching-async.test.ts (3) and audio-stretch-rendering.test.ts (3), unchanged. (8) granular-runtime.test.ts (5): 'granular runtime transfer contract > 3B1 r3 processorerror rejects an install before reporting its fault'; 'granular runtime transfer contract > configures stereo node params and schedules deterministic MIDI gates'; 'granular runtime transfer contract > acks transfers, deduplicates identity, freezes, releases, faults, and closes idempotently'; 'granular runtime transfer contract > force-stops only the matching live gate while preserving other live and clip intervals'; 'granular runtime transfer contract > rejects oversize, install errors, stale acknowledgements, and pending work on close'. Why: granular-runtime.ts (worklet transfer and gate contract) is deleted in 409d5638 with the granular worklet. (9) granular-worklet.test.ts (3): 'granular worklet source > uses a bounded preallocated pool and sample-accurate parameters'; 'granular worklet source > downmixes a centered mono grain without overwriting one side'; 'granular worklet source > does not allocate, log, or schedule timers in process'. Why: public/audio-worklets/daw-granular-processor-v1.js and its manifest entry are deleted in 409d5638; the source assertions checked that script. (10) audio-scheduling.test.ts (3): 'clip scheduler stretch horizon > includes stretch clips inside the live render horizon'; 'clip scheduler stretch horizon > excludes stretch clips beyond the live render horizon'; 'clip scheduler stretch horizon > uses requested end limit before stretch render horizon'. Why: the three 'clip scheduler stretch horizon' tests called clipSchedulerTestInternals.shouldScheduleStretchSource from clip-scheduler.ts (deleted in 6ef40d59); the file keeps its other 11 tests, which cover audio-scheduling.ts that stays. (11) src/lib/instrument-buffer-sync.test.ts (12): '3B1 r3 granular processorerror settles the tracked readiness drain truthfully'; 'pins active sampler regions and releases them after the final voice ends'; 'releases a retired sampler generation through the ending voice token'; 'releases a retired Drum Rack generation through the ending hit token'; 'refuses sampler replacement while an obsolete region is pinned'; 'refreshes the runtime sampler map when releasing pinned regions evicts them'; 'records a sampler note-miss load failure without an unhandled rejection'; 'does not overwrite newer sampler state when a note-miss load is aborted'; 'rejects a pinned aggregate region until release makes capacity available'; 'pins active Drum Rack regions in the shared aggregate budget'; 'H6 granular failed replacement then original row recovers local=true'; 'H6 granular failed replacement then original row recovers local=false'. Why: the sampler runtime listeners and pins they drove (note-miss reloads, region use) are deleted in ec989bf0 ('the Web Audio voices that reported note misses and region use are gone ... export loading keeps its own pins'), and createGranularRuntime and the Drum Rack runtime constants are deleted or moved in 409d5638; the cache pin and eviction rules the pin tests relied on are now tested in sampled-instrument-buffer-cache.test.ts. The remaining 209 tests still cover buffer sync and export loading. (12) src/hooks/useTimelinePlayback.test.ts (21): 'useTimelinePlayback deferred stretch retries > loop wrap cancels automation before updating transport seek'; 'useTimelinePlayback deferred stretch retries > RAF does not retry deferred stretch windows before they become imminent'; 'useTimelinePlayback deferred stretch retries > stretch readiness retries non-imminent deferred stretch windows'; 'useTimelinePlayback deferred stretch retries > RAF retries deferred stretch windows once they become imminent'; 'useTimelinePlayback deferred stretch retries > live reschedule tracks deferred stretch windows for readiness retry'; 'useTimelinePlayback deferred stretch retries > restarts active playback from the current transport position'; 'useTimelinePlayback deferred stretch retries > live reschedule clears stale deferred stretch windows when a clip no longer needs stretching'; 'useTimelinePlayback deferred stretch retries > RAF keeps fallback stretch windows queued for render readiness replacement'; 'useTimelinePlayback deferred stretch retries > deferred queue upgrades matching windows to replace existing fallback sources'; 'keeps legacy recovery inert until explicit play'; 'plays through legacy Web Audio while lifecycle is recovering'; 'plays through legacy Web Audio and retries native recovery while lifecycle is failed'; 'serializes three rapid play calls into one legacy startup'; 'cancels delayed legacy resume before it schedules playback'; 'waits for a cancelled play attempt before starting a fresh play'; 'keeps fallback startup alive across a failed native retry'; 'preserves active legacy playback across a failed native retry'; 'retries failed recovery only after explicit play and stays paused until ready'; 'does not prepare native audio when disabled and keeps browser playback available'; 'uses the committed native backend without scheduling Web Audio'; 'a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled'. Why: the legacy Web Audio start, tick, pause and deferred stretch retry paths are deleted in 6ef40d59; the 21 removed tests asserted those paths (deferred stretch retries, legacy startup and recovery, 'Pause that cancels a pending legacy Play'). Two were rewritten for the surviving behavior and counted as added: 'keeps recovery inert until explicit play' and 'uses the committed native backend without starting Web Audio' (net -19). A project the portable session cannot play now shows the blocking notice, tested by src/hooks/portable-unavailable.browser.test.ts (new, 6 checks). Pins moved: f-engine and last-engine files (nine files removed, audio-scheduling.test.ts pass 14 -> 11); f-playback and rc1-g-playback counts.pass 281 -> 263 (skip 1 unchanged); f-buffer and last-buffer counts.pass 221 -> 209; 135 mutation arms that run src/hooks/useTimelinePlayback.test.ts (each runs the whole file) lower expect.counts.pass by 18, which is the recorded count plus the measured change at 4ca8adbb against d5b16920 with the arm's mutation applied in memory and the preload dropped (-19 each, net of the two added tests; the new killer test 'B6f a Pause that cancels a pending Play with native playback disabled requests no native preview' adds one passing test to every arm that does not mutate ensureLiveGraph, so -18; the two killer arms fail it and drop to pass 262 from 280, also -18). Gates and arms that run other files at 4ca8adbb keep their counts (f-c0f, f-c0g, f-hookwit, f-b6d8, f-b6e, f-b6f, f-b6f2, f-b6family, f-cost-browser, rc1-i11-cost-browser, 24 probe and child-preload arms whose -t patterns match no removed test); f-portable and rc1-i4-consumers rise by 7 and are not pinned here. KILLER KEPT: 'a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled' was the only killer of rc2:429:1:mutant (mutation: ensureLiveGraph drops `nativePreviewRequested &&`, useTimelinePlayback.ts) and of the case diag:419:419-plus-429. It tested the legacy Play that is deleted; ensureLiveGraph keeps the guard, so the new test 'B6f a Pause that cancels a pending Play with native playback disabled requests no native preview' (B6f harness, portable session with a native host present and native playback disabled) kills both arms through the portable path: both keep exit 1 and fail 1, fails -> that test, pass 280 -> 262, and their controls are not retired. The other 20 removed useTimelinePlayback tests, the 12 buffer-sync tests and the 145 engine, buffer and playback tests are named in no arm's expect.fails and no gate's judge.fails (rg of each leaf name over expectations.json finds only the 429 pair). Not run: x-matrix and x-probe160 (preloads in /tmp/dv01-b6 absent; their B6F5PROBE and B6FPROBE patterns match no removed test). The rc2:169 and diag:169 arms use a child preload and are unchanged by pattern. Watched hashes of the changed sources move with the next bless --full, not with this record.",
   "expectationsSha256": "b959da11b1f191f64cf072f4b261114a85641d6c995076d56381fdd028e6de32"
  }
 }

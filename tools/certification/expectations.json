@@ -1615,7 +1615,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 262,
+     "pass": 263,
      "skip": 1,
      "fail": 0
     },
@@ -2758,7 +2758,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 262,
+     "pass": 263,
      "skip": 1,
      "fail": 0
     },
@@ -22312,7 +22312,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -22373,7 +22373,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 249,
+      "pass": 250,
       "skip": 1,
       "fail": 13
      },
@@ -22817,7 +22817,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -22878,7 +22878,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -23066,7 +23066,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -23133,7 +23133,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -23311,7 +23311,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -23372,7 +23372,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -23918,7 +23918,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -23979,7 +23979,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -24667,7 +24667,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -24728,7 +24728,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -24909,7 +24909,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -24970,7 +24970,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -25153,7 +25153,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25214,7 +25214,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 257,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -25547,7 +25547,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25620,7 +25620,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -25818,7 +25818,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25891,7 +25891,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 254,
+      "pass": 255,
       "skip": 1,
       "fail": 8
      },
@@ -26077,7 +26077,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -26138,7 +26138,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -27418,7 +27418,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -27479,7 +27479,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -27783,7 +27783,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -27844,7 +27844,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -28038,7 +28038,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -28099,7 +28099,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -28278,7 +28278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -28336,14 +28336,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 1,
      "counts": {
       "pass": 262,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -28876,7 +28878,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -28937,7 +28939,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -29116,7 +29118,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29177,7 +29179,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -29480,7 +29482,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29541,7 +29543,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -29843,7 +29845,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29904,7 +29906,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -30325,7 +30327,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -30386,7 +30388,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -30551,7 +30553,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -30738,7 +30740,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 255,
+      "pass": 256,
       "skip": 1,
       "fail": 7
      },
@@ -30909,7 +30911,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -31093,7 +31095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -32583,7 +32585,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -32768,7 +32770,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -32935,7 +32937,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33120,7 +33122,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -33287,7 +33289,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33477,7 +33479,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 247,
+      "pass": 248,
       "skip": 1,
       "fail": 15
      },
@@ -33658,7 +33660,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33844,7 +33846,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -34012,7 +34014,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34197,7 +34199,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -34365,7 +34367,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34550,7 +34552,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -34720,7 +34722,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34905,7 +34907,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -35071,7 +35073,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -35259,7 +35261,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -35429,7 +35431,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -35616,7 +35618,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -35784,7 +35786,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -35969,7 +35971,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36136,7 +36138,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -36321,7 +36323,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36488,7 +36490,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -36673,7 +36675,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36840,7 +36842,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37025,7 +37027,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -37192,7 +37194,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37377,7 +37379,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -37599,7 +37601,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37845,7 +37847,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -38069,7 +38071,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -38317,7 +38319,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -38540,7 +38542,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -38786,7 +38788,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -39063,7 +39065,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -39371,7 +39373,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -39651,7 +39653,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -39962,7 +39964,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -40256,7 +40258,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -40563,7 +40565,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -40840,7 +40842,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -41147,7 +41149,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -47785,7 +47787,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -47971,7 +47973,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -48650,7 +48652,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -48836,7 +48838,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -49244,7 +49246,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -49430,7 +49432,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -50640,7 +50642,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -50763,7 +50765,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 258,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -50876,7 +50878,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -50998,7 +51000,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51108,7 +51110,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51228,7 +51230,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51338,7 +51340,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51516,7 +51518,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51688,7 +51690,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51866,7 +51868,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52038,7 +52040,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52216,7 +52218,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52388,7 +52390,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52566,7 +52568,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52738,7 +52740,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52860,7 +52862,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -63482,7 +63484,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -63549,7 +63551,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 242,
+      "pass": 243,
       "skip": 1,
       "fail": 20
      },
@@ -63631,7 +63633,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -63711,7 +63713,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -63778,7 +63780,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -63848,7 +63850,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -63915,7 +63917,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -63985,7 +63987,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64054,7 +64056,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -64134,7 +64136,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 244,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -64220,7 +64222,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -64288,14 +64290,16 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 0,
+     "exit": 1,
      "applied": 2,
      "counts": {
       "pass": 262,
       "skip": 1,
-      "fail": 0
+      "fail": 1
      },
-     "fails": [],
+     "fails": [
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
+     ],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -64427,7 +64431,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64496,7 +64500,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64565,7 +64569,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -64635,7 +64639,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64704,7 +64708,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -64768,7 +64772,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64823,7 +64827,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 262,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -64884,7 +64888,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65416,7 +65420,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -65485,7 +65489,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65550,7 +65554,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -65620,7 +65624,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 260,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -65684,7 +65688,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -65753,7 +65757,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 259,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65818,7 +65822,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 261,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },

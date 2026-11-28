@@ -1,12 +1,6 @@
 import type { ApiContext, App } from '../app-types'
+import { readBearerToken } from '../http'
 import { drainDueR2DeleteQueue } from '../r2-delete-queue'
-
-const readBearerToken = (authorization: string | undefined): string | null => {
-  if (!authorization) return null
-  const [scheme, token, extra] = authorization.split(' ')
-
-  return scheme === 'Bearer' && token && !extra ? token : null
-}
 
 const hasSameCredential = (actual: string, expected: string) => {
   if (actual.length !== expected.length) return false

@@ -118,16 +118,29 @@ export async function ensureOwnedProjectRow(
   return { status: "created" as const, project: created };
 }
 
-export async function advanceProjectRevision(
+/**
+ * The one place a mutation that edits a project advances its revision: exactly once, and only
+ * when `changed(result)` says the write changed the project.
+ */
+export async function editProjectIf<Result>(
   ctx: MutationCtx,
   projectId: string,
-) {
-  const project = await requireProjectRow(ctx, projectId);
-  const updatedAt = Date.now();
-  await ctx.db.patch(project._id, {
-    revision: project.revision + 1,
-    updatedAt,
-  });
+  write: () => Promise<Result>,
+  changed: (result: Result) => boolean,
+): Promise<Result> {
+  return await withProjectEdit(ctx, projectId, async (edit) => {
+    const result = await write();
 
-  return { revision: project.revision + 1, updatedAt };
+    if (changed(result)) edit.stamp();
+
+    return result;
+  });
+}
+
+export async function editProject<Result extends { changed: boolean }>(
+  ctx: MutationCtx,
+  projectId: string,
+  write: () => Promise<Result>,
+): Promise<Result> {
+  return await editProjectIf(ctx, projectId, write, (result) => result.changed);
 }

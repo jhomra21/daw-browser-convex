@@ -2189,12 +2189,11 @@ test("a recording lease refuses reroute and regroup of the leased track, and an 
 
   await expect(user.mutation(api.tracks.setRouting, { trackId: leased, outputTargetId: group })).rejects.toThrow("Track locked by another user");
   await expect(user.mutation(api.tracks.serverSetRouting, { trackId: String(leased), outputTargetId: String(group) })).rejects.toThrow("Track locked by another user");
-  await expect(user.mutation(api.tracks.setGroup, { trackId: leased, groupId: group })).rejects.toThrow("Track locked by another user");
   await expect(user.mutation(api.tracks.serverSetGroup, { trackId: String(leased), groupId: String(group) })).rejects.toThrow("Track locked by another user");
   expect((await leasedRow())?.groupId).toBeUndefined();
 
   await user.mutation(api.tracks.setRouting, { trackId: free, outputTargetId: group });
-  await user.mutation(api.tracks.setGroup, { trackId: free, groupId: group });
+  await user.mutation(api.tracks.serverSetGroup, { trackId: String(free), groupId: String(group) });
   const freeRow = await t.run(async (ctx) => await ctx.db.get(free));
   expect(freeRow?.groupId).toBe(group);
 });

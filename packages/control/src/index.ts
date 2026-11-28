@@ -65,6 +65,7 @@ export {
   idempotencyKeySchemaV1,
   controlCommitRequestSchemaV1,
   controlErrorSchemaV1,
+  readControlErrorV1,
   controlPreviewRequestSchemaV1,
   controlApprovalRequestSchemaV1,
   resolvedRefSchemaV1,

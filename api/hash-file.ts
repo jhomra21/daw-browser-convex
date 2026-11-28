@@ -1,4 +1,5 @@
 import { sha256 } from '@noble/hashes/sha2.js'
+import { hexOfBytes } from './http'
 
 export const hashFile = async (file: File) => {
   const hash = sha256.create()
@@ -15,5 +16,5 @@ export const hashFile = async (file: File) => {
     reader.releaseLock()
   }
 
-  return Array.from(hash.digest(), (byte) => byte.toString(16).padStart(2, '0')).join('')
+  return hexOfBytes(hash.digest())
 }

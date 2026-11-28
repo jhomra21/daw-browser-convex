@@ -1,9 +1,7 @@
 import { WebStandardStreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/webStandardStreamableHttp.js"
-import { z } from "zod"
 import {
   controlCapabilitiesV1,
   controlCapabilitiesV2,
-  controlLimitsV1,
 } from "@daw-browser/control"
 import { isJsonObject, type JsonValue } from "@daw-browser/shared"
 import {
@@ -13,6 +11,7 @@ import {
 import { api as convexApi } from "../../convex/_generated/api"
 import type { ApiContext, App } from "../app-types"
 import { createControlConvexClient } from "../convex-auth"
+import { readBoundedJson } from "../http"
 import {
   resolveControlBearer,
   type ControlBearer,
@@ -66,23 +65,13 @@ const parseMcpBody = async (request: Request): Promise<ParsedMcpBody> => {
     return { response: new Response("Content-Type must be application/json.", { status: 415, headers: noStore }) }
   }
 
-  const contentLength = request.headers.get("content-length")
+  const body = await readBoundedJson(request)
 
-  if (contentLength && (!/^\d+$/.test(contentLength) || Number(contentLength) > controlLimitsV1.maxSerializedBodyBytes)) {
-    return { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
-  }
+  if ("value" in body) return body
 
-  const bytes = new Uint8Array(await request.clone().arrayBuffer())
-
-  if (bytes.byteLength > controlLimitsV1.maxSerializedBodyBytes) {
-    return { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
-  }
-
-  try {
-    return { value: z.json().parse(JSON.parse(new TextDecoder().decode(bytes))) }
-  } catch {
-    return { response: new Response("Malformed MCP JSON body.", { status: 400, headers: noStore }) }
-  }
+  return body.failure === "too-large"
+    ? { response: new Response("MCP body exceeds the serialized body limit.", { status: 413, headers: noStore }) }
+    : { response: new Response("Malformed MCP JSON body.", { status: 400, headers: noStore }) }
 }
 
 const requiresWriteScope = (value: JsonValue) => {

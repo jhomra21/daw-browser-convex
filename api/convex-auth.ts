@@ -1,4 +1,5 @@
 import { importJWK, SignJWT } from 'jose'
+import { convexIdentityClaims, WORKER_USER_ID } from '@daw-browser/shared'
 import type { ApiContext, App } from './app-types'
 import type { Session } from './auth'
 
@@ -33,7 +34,7 @@ type ConvexAuthTokenOptions = {
 }
 
 const maintenanceWorkerUser: ConvexAuthUser = {
-  id: 'daw-worker',
+  id: WORKER_USER_ID,
   email: 'worker@daw-browser-convex.local',
   name: 'DAW Worker',
 }
@@ -97,9 +98,9 @@ export const issueConvexAuthToken = async (
     email: user.email,
     name: user.name,
     picture: user.image,
-    dawWorker: options?.worker ? true : undefined,
-    dawControlActorIssuer: actor?.issuer,
-    dawControlActorTokenIdentifier: actor?.tokenIdentifier,
+    [convexIdentityClaims.worker]: options?.worker ? true : undefined,
+    [convexIdentityClaims.actorIssuer]: actor?.issuer,
+    [convexIdentityClaims.actorTokenIdentifier]: actor?.tokenIdentifier,
   })
     .setProtectedHeader({ alg: algorithm, kid: keyId, typ: 'JWT' })
     .setIssuer(readIssuer(context))

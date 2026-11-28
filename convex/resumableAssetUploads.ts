@@ -1,13 +1,12 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
 import {
-  canonicalJson, controlErrorSchemaV1, controlLimitsV1, resumableUploadLimitsV1,
+  canonicalJson, controlLimitsV1, resumableUploadLimitsV1,
 } from "@daw-browser/control";
-import { advanceProjectRevision, requireProjectRow } from "./projectRows";
-import {
-  requireAuthenticatedIdentity, requireAuthenticatedUserId, requireProjectRole,
-  requireWorkerIdentity,
-} from "./projectAccess";
+import { fail } from "./errors";
+import { requireProjectRow, withProjectEdit } from "./projectRows";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedIdentity, requireAuthenticatedUserId, requireWorkerIdentity } from "./identity";
 import { enqueueMultipartAbortRows, enqueueR2DeleteRows, hasR2DeleteRow } from "./r2Deletes";
 import { findSampleRow, insertSampleRow } from "./sampleRows";
 import {
@@ -24,13 +23,6 @@ const mimeTypes = new Set([
   "audio/mpeg", "audio/wav", "audio/x-wav", "audio/flac",
   "audio/ogg", "audio/mp4", "audio/aac", "audio/webm",
 ]);
-
-const fail = (
-  code: "invalid-request" | "validation" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "internal",
-  message: string,
-): never => {
-  throw new ConvexError(controlErrorSchemaV1.parse({ version: "v1", code, message }));
-};
 
 const validName = (value: string) => {
   const name = value.trim();
@@ -389,48 +381,52 @@ export const finalizeUpload = mutation({
       fail("limit-exceeded", "Project asset limit reached.");
     }
 
-    const rowId = await insertSampleRow(ctx, {
-      projectId: input.projectId, assetKey: receipt.assetKey, sourceKind: "upload",
-      ownerUserId: receipt.actorUserId,
-      name: receipt.name, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, contentSha256: receipt.contentSha256,
-      r2Key: uploadedObjectStorageKey, duration: receipt.durationSec, sampleRate: receipt.sampleRate,
-      channelCount: receipt.channelCount, folderId: receipt.folderId,
-    });
+    const asset = await withProjectEdit(ctx, input.projectId, async (edit) => {
+      const rowId = await insertSampleRow(ctx, {
+        projectId: input.projectId, assetKey: receipt.assetKey, sourceKind: "upload",
+        ownerUserId: receipt.actorUserId,
+        name: receipt.name, mimeType: receipt.mimeType, sizeBytes: receipt.sizeBytes, contentSha256: receipt.contentSha256,
+        r2Key: uploadedObjectStorageKey, duration: receipt.durationSec, sampleRate: receipt.sampleRate,
+        channelCount: receipt.channelCount, folderId: receipt.folderId,
+      });
 
-    const asset = await ctx.db.get(rowId);
+      const inserted = await ctx.db.get(rowId);
 
-    if (asset === null) throw new Error("Asset finalization failed.");
-    const completedAt = Date.now();
-    await ctx.db.patch(receipt._id, { status: "completed", updatedAt: completedAt, completedAt });
+      if (inserted === null) throw new Error("Asset finalization failed.");
+      const completedAt = Date.now();
+      await ctx.db.patch(receipt._id, { status: "completed", updatedAt: completedAt, completedAt });
 
-    if (isResumable) {
-      const resumable = await ctx.db.query("assetUploadSessions")
-        .withIndex("by_session", (query) => query.eq("sessionId", input.sessionId!)).unique();
+      if (isResumable) {
+        const resumable = await ctx.db.query("assetUploadSessions")
+          .withIndex("by_session", (query) => query.eq("sessionId", input.sessionId!)).unique();
 
-      if (!resumable) throw new Error("Resumable upload session not found.");
+        if (!resumable) throw new Error("Resumable upload session not found.");
 
-      if (resumable.status !== "finalizing"
-        || resumable.completionToken !== input.completionToken) {
-        fail("validation", "Resumable completion was superseded.");
+        if (resumable.status !== "finalizing"
+          || resumable.completionToken !== input.completionToken) {
+          fail("validation", "Resumable completion was superseded.");
+        }
+
+        await ctx.db.patch(resumable._id, {
+          status: "completed", acceptedBytes: resumable.sizeBytes, leaseToken: undefined,
+          leaseExpiresAt: undefined, updatedAt: completedAt,
+        });
       }
 
-      await ctx.db.patch(resumable._id, {
-      status: "completed", acceptedBytes: resumable.sizeBytes, leaseToken: undefined,
-        leaseExpiresAt: undefined, updatedAt: completedAt,
-      });
-    }
+      const completedMultipartUploadId = receipt.multipartUploadId;
 
-    const completedMultipartUploadId = receipt.multipartUploadId;
+      if (completedMultipartUploadId) {
+        const parts = await ctx.db.query("assetUploadParts").withIndex("by_upload", (query) => query
+          .eq("projectId", receipt.projectId).eq("assetKey", receipt.assetKey)
+          .eq("multipartUploadId", completedMultipartUploadId)).collect();
 
-    if (completedMultipartUploadId) {
-      const parts = await ctx.db.query("assetUploadParts").withIndex("by_upload", (query) => query
-        .eq("projectId", receipt.projectId).eq("assetKey", receipt.assetKey)
-        .eq("multipartUploadId", completedMultipartUploadId)).collect();
+        await Promise.all(parts.map((part) => ctx.db.delete(part._id)));
+      }
 
-      await Promise.all(parts.map((part) => ctx.db.delete(part._id)));
-    }
+      edit.stamp();
 
-    await advanceProjectRevision(ctx, input.projectId);
+      return inserted;
+    });
 
     return { asset: controlAssetView(asset), idempotencyReplay: false };
   },
@@ -1008,9 +1004,7 @@ export const abortResumableUpload = mutation({
 export const reconcileStalePending = mutation({
   args: { before: v.number(), limit: v.number() },
   handler: async (ctx, input) => {
-    const identity = await ctx.auth.getUserIdentity();
-
-    if (identity?.dawWorker !== true) throw new Error("Asset reconciliation requires worker access.");
+    await requireWorkerIdentity(ctx, "Asset reconciliation requires worker access.");
     const limit = Math.max(1, Math.min(input.limit, 100));
 
     const receipts = await ctx.db.query("assetUploadReceipts")
@@ -1059,9 +1053,7 @@ export const reconcileStalePending = mutation({
 export const expireResumableSessions = mutation({
   args: { now: v.number(), limit: v.number() },
   handler: async (ctx, input) => {
-    const identity = await ctx.auth.getUserIdentity();
-
-    if (identity?.dawWorker !== true) throw new Error("Asset reconciliation requires worker access.");
+    await requireWorkerIdentity(ctx, "Asset reconciliation requires worker access.");
 
     const expired = (await ctx.db.query("assetUploadSessions")
       .withIndex("by_status_expiresAt", (query) => query.eq("status", "uploading").lte("expiresAt", input.now))

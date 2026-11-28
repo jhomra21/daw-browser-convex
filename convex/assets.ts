@@ -1,23 +1,13 @@
-import { ConvexError, v } from "convex/values";
+import { v } from "convex/values";
 import { mutation, query, type MutationCtx } from "./_generated/server";
-import {
-  controlErrorSchemaV1,
-} from "@daw-browser/control";
-import { advanceProjectRevision, requireProjectRow } from "./projectRows";
-import {
-  requireAuthenticatedUserId, requireProjectAccess, requireProjectRole,
-} from "./projectAccess";
+import { fail } from "./errors";
+import { editProject, editProjectIf, requireProjectRow } from "./projectRows";
+import { requireProjectAccess, requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { enqueueR2DeleteRows } from "./r2Deletes";
 import { findSampleRow, moveSampleFolderRow } from "./sampleRows";
 
 const maxNameLength = 120;
-
-const fail = (
-  code: "invalid-request" | "validation" | "idempotency-conflict" | "forbidden" | "authorization" | "not-found" | "limit-exceeded" | "internal",
-  message: string,
-): never => {
-  throw new ConvexError(controlErrorSchemaV1.parse({ version: "v1", code, message }));
-};
 
 const validName = (value: string) => {
   const name = value.trim();
@@ -124,17 +114,18 @@ export const deleteAsset = mutation({
       .filter((query) => query.eq(query.field("sourceAssetKey"), input.assetKey)).first();
 
     if (reference) fail("validation", "Referenced assets cannot be deleted.");
-    await ctx.db.delete(asset._id);
+    await editProjectIf(ctx, input.projectId, async () => {
+      await ctx.db.delete(asset._id);
 
-    const receipts = await ctx.db.query("assetUploadReceipts").withIndex("by_asset", (query) => query
-      .eq("projectId", input.projectId).eq("assetKey", input.assetKey)).collect();
+      const receipts = await ctx.db.query("assetUploadReceipts").withIndex("by_asset", (query) => query
+        .eq("projectId", input.projectId).eq("assetKey", input.assetKey)).collect();
 
-    await Promise.all(receipts.map((receipt) => ctx.db.delete(receipt._id)));
-    const project = await requireProjectRow(ctx, input.projectId);
-    await enqueueR2DeleteRows(ctx, {
-      projectId: input.projectId, storageNamespace: project.storageNamespace, keys: [asset.r2Key], kind: "sample",
-    });
-    await advanceProjectRevision(ctx, input.projectId);
+      await Promise.all(receipts.map((receipt) => ctx.db.delete(receipt._id)));
+      const project = await requireProjectRow(ctx, input.projectId);
+      await enqueueR2DeleteRows(ctx, {
+        projectId: input.projectId, storageNamespace: project.storageNamespace, keys: [asset.r2Key], kind: "sample",
+      });
+    }, () => true);
 
     return { deleted: true };
   },
@@ -151,11 +142,14 @@ export const createFolder = mutation({
     }
 
     const now = Date.now();
-    const id = await ctx.db.insert("assetFolders", { projectId: input.projectId, name: validName(input.name), createdAt: now, updatedAt: now });
-    const folder = await ctx.db.get(id);
+
+    const folder = await editProjectIf(ctx, input.projectId, async () => {
+      const id = await ctx.db.insert("assetFolders", { projectId: input.projectId, name: validName(input.name), createdAt: now, updatedAt: now });
+
+      return await ctx.db.get(id);
+    }, () => true);
 
     if (folder === null) throw new Error("Folder creation failed.");
-    await advanceProjectRevision(ctx, input.projectId);
 
     return { folder: controlFolderView(folder), applied: true };
   },
@@ -173,8 +167,7 @@ export const renameFolder = mutation({
 
     if (folder.name === name) return { folder: controlFolderView(folder), applied: false };
     const updatedAt = Date.now();
-    await ctx.db.patch(folder._id, { name, updatedAt });
-    await advanceProjectRevision(ctx, input.projectId);
+    await editProjectIf(ctx, input.projectId, () => ctx.db.patch(folder._id, { name, updatedAt }), () => true);
 
     return { folder: { ...controlFolderView(folder), name, updatedAt }, applied: true };
   },
@@ -203,8 +196,7 @@ export const deleteFolder = mutation({
       .eq("projectId", input.projectId).eq("folderId", input.folderId).eq("status", "failed")).first();
 
     if (failedReceipt) fail("validation", "Folders with retryable uploads cannot be deleted.");
-    await ctx.db.delete(folder._id);
-    await advanceProjectRevision(ctx, input.projectId);
+    await editProjectIf(ctx, input.projectId, () => ctx.db.delete(folder._id), () => true);
 
     return { deleted: true };
   },
@@ -217,13 +209,12 @@ export const moveAssetToFolder = mutation({
     await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
 
     if (input.folderId && !await readFolder(ctx, input.projectId, input.folderId)) fail("not-found", "Asset folder not found.");
-    const result = await moveSampleFolderRow(ctx, input);
+    const result = await editProject(ctx, input.projectId, () => moveSampleFolderRow(ctx, input));
 
     if (result.asset === null) throw new Error("Asset not found.");
     const asset = result.asset;
 
     if (!result.changed) return { asset: assetView(asset), applied: false };
-    await advanceProjectRevision(ctx, input.projectId);
 
     return { asset: assetView({ ...asset, folderId: input.folderId, updatedAt: Date.now() }), applied: true };
   },

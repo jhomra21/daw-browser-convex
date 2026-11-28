@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server"
 import { v } from "convex/values"
-import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess"
+import { requireProjectRole } from "./projectAccess"
+import { requireAuthenticatedUserId } from "./identity"
 import { isValidR2DeleteKey } from "@daw-browser/shared"
 import { enqueueR2DeleteRows } from "./r2Deletes"
 import { requireProjectRow } from "./projectRows"

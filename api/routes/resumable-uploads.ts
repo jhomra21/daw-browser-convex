@@ -1,12 +1,13 @@
 import { z } from 'zod'
 import {
-  controlErrorSchemaV1,
+  readControlErrorV1,
   resumableUploadLimitsV1,
   resumableUploadMaximumBytes,
 } from '@daw-browser/control'
 import { api as convexApi } from '../../convex/_generated/api'
 import type { ApiContext, App } from '../app-types'
 import { createMaintenanceWorkerConvexClient, type ApiConvexClient } from '../convex-auth'
+import { controlErrorStatus } from '../http'
 import { requireProjectRoleContextForApi } from '../project-access'
 import {
   AudioUploadValidationError,
@@ -39,51 +40,15 @@ const errorMessage = 'Resumable upload failed.'
 
 type UploadErrorStatus = 400 | 401 | 403 | 404 | 409 | 422 | 500
 
-type UploadError = Error | z.infer<typeof errorEnvelopeSchema>
-
-const errorEnvelopeSchema = z.object({
-  data: z.json().optional(),
-  errorData: z.json().optional(),
-}).passthrough()
-
-const uploadErrorResponse = (
-  error: UploadError,
+const uploadErrorResponse = <Failure>(
+  error: Failure,
   fallbackStatus: UploadErrorStatus = 500,
 ) => {
-  const envelope = errorEnvelopeSchema.safeParse(error)
+  const typed = readControlErrorV1(error)
 
-  const candidates = [
-    error,
-    envelope.success ? envelope.data.data : undefined,
-    envelope.success ? envelope.data.errorData : undefined,
-  ]
+  if (!typed) return { status: fallbackStatus, body: { error: errorMessage } }
 
-  for (const candidate of candidates) {
-    const parsed = controlErrorSchemaV1.safeParse(candidate)
-
-    if (!parsed.success) continue
-
-    const status: UploadErrorStatus = parsed.data.code === 'authorization' ? 401
-      : parsed.data.code === 'forbidden' ? 403
-        : parsed.data.code === 'not-found' ? 404
-          : parsed.data.code === 'idempotency-conflict' ? 409
-            : parsed.data.code === 'invalid-request' ? 400
-              : parsed.data.code === 'validation' || parsed.data.code === 'limit-exceeded' ? 422
-                : fallbackStatus
-
-    return { status, body: { error: parsed.data.message } }
-  }
-
-  return { status: fallbackStatus, body: { error: errorMessage } }
-}
-
-// oxlint-disable-next-line anti-slop/no-unknown-parameters
-const parseUploadError = (error: unknown): UploadError => {
-  const envelope = errorEnvelopeSchema.safeParse(error)
-
-  if (envelope.success) return envelope.data
-
-  return error instanceof Error ? error : new Error(errorMessage)
+  return { status: typed.code === 'internal' ? fallbackStatus : controlErrorStatus(typed.code), body: { error: typed.message } }
 }
 
 type ResumableRouteDependencies = {
@@ -205,7 +170,7 @@ export const registerResumableUploadRoutes = (
       }, 201)
     } catch (error) {
       await multipart?.abort().catch(() => undefined)
-      const failure = uploadErrorResponse(parseUploadError(error))
+      const failure = uploadErrorResponse(error)
 
       return c.json(failure.body, failure.status)
     }
@@ -233,7 +198,7 @@ export const registerResumableUploadRoutes = (
           : undefined,
       })
     } catch (error) {
-      const failure = uploadErrorResponse(parseUploadError(error), 404)
+      const failure = uploadErrorResponse(error, 404)
 
       return c.json(failure.body, failure.status)
     }
@@ -294,12 +259,12 @@ export const registerResumableUploadRoutes = (
         await access.convex.mutation(convexApi.resumableAssetUploads.releaseUploadPart, {
           projectId, assetKey, sessionId, partNumber, leaseToken: claim.leaseToken,
         }).catch(() => undefined)
-        const failure = uploadErrorResponse(parseUploadError(error))
+        const failure = uploadErrorResponse(error)
 
         return c.json(failure.body, failure.status)
       }
     } catch (error) {
-      const failure = uploadErrorResponse(parseUploadError(error))
+      const failure = uploadErrorResponse(error)
 
       return c.json(failure.body, failure.status)
     }
@@ -490,7 +455,7 @@ export const registerResumableUploadRoutes = (
         return c.json({ error: error.message }, 422)
       }
 
-      const failure = uploadErrorResponse(parseUploadError(error))
+      const failure = uploadErrorResponse(error)
 
       return c.json(failure.body, failure.status)
     }
@@ -514,7 +479,7 @@ export const registerResumableUploadRoutes = (
 
       return c.json({ aborted: true }, 200)
     } catch (error) {
-      const failure = uploadErrorResponse(parseUploadError(error))
+      const failure = uploadErrorResponse(error)
 
       return c.json(failure.body, failure.status)
     }

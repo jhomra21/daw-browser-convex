@@ -1,6 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
-import { requireAuthenticatedUserId, requireProjectRole } from "./projectAccess";
+import { requireProjectRole } from "./projectAccess";
+import { requireAuthenticatedUserId } from "./identity";
 import { removeProjectMemberAccessAndTransferEntities } from "./projectMembership";
 
 const SHARE_INVITE_TTL_MS = 7 * 24 * 60 * 60 * 1000;

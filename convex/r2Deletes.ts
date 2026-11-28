@@ -1,5 +1,6 @@
 import { mutation, type MutationCtx, query } from "./_generated/server";
 import { v } from "convex/values";
+import { requireWorkerIdentity } from "./identity";
 import { isValidR2DeleteKey, type R2DeleteKind } from "@daw-browser/shared";
 
 const retryDelayMs = (attempts: number) => Math.min(60 * 60 * 1000, 2 ** Math.min(attempts, 8) * 1000);
@@ -15,17 +16,8 @@ const pruneDeletedRows = async (ctx: Pick<MutationCtx, "db">, now: number) => {
   for (const row of rows) await ctx.db.delete(row._id);
 };
 
-type WorkerAuthCtx = {
-  auth: {
-    getUserIdentity: () => Promise<{ tokenIdentifier: string; dawWorker?: unknown } | null>;
-  };
-};
-
-const requireWorkerQueueAccess = async (ctx: WorkerAuthCtx) => {
-  const identity = await ctx.auth.getUserIdentity();
-
-  if (identity?.dawWorker === true) return;
-  throw new Error("R2 queue maintenance requires worker access.");
+const requireWorkerQueueAccess = async (ctx: Parameters<typeof requireWorkerIdentity>[0]) => {
+  await requireWorkerIdentity(ctx, "R2 queue maintenance requires worker access.");
 };
 
 export const enqueueR2DeleteRows = async (

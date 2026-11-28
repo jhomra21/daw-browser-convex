@@ -72,7 +72,7 @@ type EffectsPanelProps = {
   deliverProcessor?: (edit: LiveProcessorEditIdentity, gesture?: ProcessorDelivery["gesture"]) => DeliveryRegistration;
   applyPortableProcessor?: (edit: LiveProcessorEditIdentity) => Promise<EngineDisposition | undefined>;
   joinPublication?: (join: PublicationJoin) => DeliveryRegistration;
-  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
+  onPreviewNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   onEffectInstanceParamsReplayChange?: Parameters<typeof createEffectsPanelController>[0]["onEffectInstanceParamsReplayChange"];
   onLocalSaveFailed?: (projectId: string, message: string) => void;
   onEffectError?: (title: string, message: string) => void;
@@ -133,7 +133,7 @@ type EffectsPanelInstrumentSectionProps = {
   audioEngine: AudioEngine;
   targetId: string;
   projectId?: string;
-  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
+  onPreviewNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   synthAutomationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>;
   synthAutomationParameterIds?: ReadonlyMap<string, string>;
   synthAutomationDisplayParams?: SynthParams;
@@ -243,7 +243,6 @@ const EffectsPanelInstrumentSection: Component<EffectsPanelInstrumentSectionProp
               params={params()}
               targetId={props.targetId}
               projectId={props.projectId}
-              audioEngine={props.audioEngine}
               onPreviewNote={props.onPreviewNote}
               canWrite={props.instrument.canWrite}
               onAssignSampleToPad={props.instrument.state.drumRack.assignSampleToPad}

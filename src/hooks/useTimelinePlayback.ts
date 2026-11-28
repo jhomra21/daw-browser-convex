@@ -6,7 +6,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
 import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/desktop/native-playback-controller'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
-import type { LivePlaybackCompileContext } from '~/lib/live-playback-snapshot'
+import type { LivePlaybackCompileContext, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createAudioLifecycle } from './playback-audio-lifecycle'
 import { createDeferredStretch } from './deferred-stretch'
 import { createScheduleReconciliation } from './playback-session-reconciliation'
@@ -121,6 +121,12 @@ export function useTimelinePlayback(
     const isActive = enabled && length > LOOP_EPS
 
     return { enabled, start, end, length, isActive }
+  }
+
+  const pausedLiveTransport = (): LivePlaybackTransport => {
+    const { isActive, start, end } = getLoopParams()
+
+    return { state: "paused", playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end }
   }
 
   const cancelRaf = () => {
@@ -2298,6 +2304,25 @@ export function useTimelinePlayback(
       ),
       stop: nativePlayback.releaseLiveMidiNote,
       subscribeReset: nativePlayback.subscribeNativeLiveMidiReset,
+    },
+    portableLiveMidi: {
+      // The paused session is prepared at the playhead when an instrument panel opens or MIDI input starts; a note
+      // that still finds none carries the same transport and waits for the preparation.
+      prepare: () => {
+        if (requiresNativeAudio || !portableBrowserOptions) return
+        portableBrowserPlayback.prepareLiveNotes(pausedLiveTransport())
+      },
+      start: (note: { trackId: string; pitch: number; velocity: number }) => {
+        if (requiresNativeAudio || !portableBrowserOptions) return undefined
+
+        return portableBrowserPlayback.startLiveNote({
+          trackId: note.trackId,
+          pitch: note.pitch,
+          velocity: note.velocity,
+          transport: pausedLiveTransport(),
+        })
+      },
+      stop: portableBrowserPlayback.releaseLiveNote,
     },
     subscribeTrackLevels,
     subscribeMasterLevels,

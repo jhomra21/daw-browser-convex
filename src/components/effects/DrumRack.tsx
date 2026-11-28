@@ -16,7 +16,6 @@ import {
   type DrumRackParams,
   type DrumRackSampleAssignment,
 } from "@daw-browser/shared";
-import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import EffectShell from "~/components/effects/EffectShell";
 import { DeviceToggleButton } from "~/components/ui/device-control";
@@ -35,8 +34,7 @@ type DrumRackProps = {
   params: DrumRackParams;
   targetId: string;
   projectId?: string;
-  audioEngine: AudioEngine;
-  onPreviewNote?: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
+  onPreviewNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void;
   canWrite: boolean;
   onAssignSampleToPad: (padId: string, sample: DrumRackSampleAssignment) => void;
   onReset: () => void;
@@ -268,11 +266,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
 
     if (!readCachedPadBuffer(pad)) return;
 
-    if (props.onPreviewNote) {
-      props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
-    } else {
-      props.audioEngine.instruments.previewDrumRackPad(props.targetId, pad.id, 1);
-    }
+    props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
   };
 
   const assignSample = (pad: DrumRackPadParams, sample: SampleDragData) => {

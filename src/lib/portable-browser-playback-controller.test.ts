@@ -4773,3 +4773,156 @@ test('W-C9-track-R a track added and deleted during a take is adopted and the ta
       .toEqual({ added: 'adopted', deleted: 'adopted', faults: [], recording: true, sessions: 1 })
   } finally { f.controller.dispose() }
 })
+
+// Live notes: the portable session plays notes sent as instrument events, whether or not the transport runs.
+const liveNoteFixture = (options: { holdPrepare?: Promise<void> } = {}) => {
+  const sent: Array<{ epoch: number; events: readonly { nodeId: string; noteId: number; sequence: number; frameOffset: number; type: string; note: number; value: number }[] }> = []
+  const transportEpochs: number[] = []
+  const calls: string[] = []
+
+  const controller = createPortableBrowserPlaybackController({
+    compileSnapshot: async () => compilation(),
+    getAudioContext: () => context,
+    select: async () => selected,
+    backend: { createPlaybackSession: async () => {
+      const session = createSession(calls, async () => {})
+
+      return {
+        ...session,
+        prepareGraph: async () => { await options.holdPrepare },
+        setTransport: async (epoch: number, running: boolean, frame: number) => {
+          transportEpochs.push(epoch)
+          await session.setTransport(epoch, running, frame)
+        },
+        queueInstrumentEvents: async (epoch: number, events: typeof sent[number]['events']) => { sent.push({ epoch, events }) },
+      }
+    } },
+  })
+
+  const transport: LivePlaybackTransport = { ...compilation().snapshot.transport, state: 'paused' }
+  const flat = () => sent.flatMap(({ epoch, events }) => events.map(event => ({ epoch, node: event.nodeId, type: event.type, note: event.note, value: event.value, frameOffset: event.frameOffset, sequence: event.sequence, noteId: event.noteId })))
+
+  const epoch = () => transportEpochs.at(-1) ?? 0
+
+  return { controller, transport, sent, epoch, calls, flat }
+}
+
+test('live note on and off reach the paused prepared session in order, in its epoch, for its node', async () => {
+  const f = liveNoteFixture()
+
+  try {
+    expect(await f.controller.ensurePrepared(f.transport)).toBe('started')
+    const handle = f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.5 })
+    f.controller.releaseLiveNote(handle ?? expect.unreachable('a prepared session plays the note'))
+    await Bun.sleep(0)
+    const events = f.flat()
+    expect(events.map(event => [event.epoch, event.node, event.type, event.note, event.value, event.frameOffset]))
+      .toEqual([[f.epoch(), 'synth', 'note-on', 60, 0.5, 0], [f.epoch(), 'synth', 'note-off', 60, 0, 0]])
+    expect(events[0]?.noteId).toBe(events[1]?.noteId)
+    expect(events[0] && events[1] && events[0].sequence < events[1].sequence && events[0].sequence >= 1_000_000).toBe(true)
+  } finally { f.controller.dispose() }
+})
+
+test('a live note is refused for an unplayable note and for a cold controller without a transport', async () => {
+  const f = liveNoteFixture()
+
+  try {
+    expect(f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.5 })).toBeUndefined()
+    expect(await f.controller.ensurePrepared(f.transport)).toBe('started')
+    expect([
+      f.controller.startLiveNote({ trackId: 'synth', pitch: 128, velocity: 0.5 }),
+      f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: Number.NaN }),
+      f.controller.startLiveNote({ trackId: 'missing', pitch: 60, velocity: 0.5 }),
+    ]).toEqual([undefined, undefined, undefined])
+  } finally { f.controller.dispose() }
+})
+
+test('a live note started while the session is preparing is delivered once it is prepared', async () => {
+  const hold = Promise.withResolvers<void>()
+  const f = liveNoteFixture({ holdPrepare: hold.promise })
+
+  try {
+    const handle = f.controller.startLiveNote({ trackId: 'synth', pitch: 36, velocity: 1, transport: f.transport })
+    expect(handle).toBeDefined()
+    f.controller.releaseLiveNote(handle ?? expect.unreachable('a cold start with a transport plays the note'))
+    await Bun.sleep(0)
+    expect(f.flat()).toEqual([])
+    hold.resolve()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(f.flat().map(event => [event.type, event.note])).toEqual([['note-on', 36], ['note-off', 36]])
+  } finally { f.controller.dispose() }
+})
+
+test('a locate between live note on and off leaves no hung note and sends nothing in the old epoch', async () => {
+  const f = liveNoteFixture()
+
+  try {
+    expect(await f.controller.ensurePrepared(f.transport)).toBe('started')
+    const first = f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.8 })
+    await Bun.sleep(0)
+    const before = f.epoch()
+    expect(await f.controller.ensurePrepared({ ...f.transport, playheadSec: 0.25 })).toBe('started')
+    const after = f.epoch()
+    expect(after).not.toBe(before)
+    f.controller.releaseLiveNote(first ?? expect.unreachable('a prepared session plays the note'))
+    await Bun.sleep(0)
+    // The core released the voice with the epoch change; a note-off in either epoch would be stale or fault the host.
+    expect(f.flat().map(event => [event.epoch, event.type])).toEqual([[before, 'note-on']])
+    const second = f.controller.startLiveNote({ trackId: 'synth', pitch: 62, velocity: 0.8 })
+    f.controller.releaseLiveNote(second ?? expect.unreachable('a prepared session plays the note'))
+    await Bun.sleep(0)
+    expect(f.flat().slice(1).map(event => [event.epoch, event.type])).toEqual([[after, 'note-on'], [after, 'note-off']])
+  } finally { f.controller.dispose() }
+})
+
+test('a locate in flight holds a live note until its epoch is the session epoch', async () => {
+  const f = liveNoteFixture()
+
+  try {
+    expect(await f.controller.ensurePrepared(f.transport)).toBe('started')
+    const locate = f.controller.ensurePrepared({ ...f.transport, playheadSec: 0.25 })
+    f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.8 })
+    await locate
+    await Bun.sleep(0)
+    expect(f.flat().map(event => [event.epoch, event.type])).toEqual([[f.epoch(), 'note-on']])
+  } finally { f.controller.dispose() }
+})
+
+test('teardown drops held and waiting live notes without sending to the next session', async () => {
+  const hold = Promise.withResolvers<void>()
+  const f = liveNoteFixture()
+
+  try {
+    expect(await f.controller.ensurePrepared(f.transport)).toBe('started')
+    const held = f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.8 })
+    await Bun.sleep(0)
+    expect(f.flat().map(event => event.type)).toEqual(['note-on'])
+    expect(await f.controller.rebuildPrepared(f.transport)).toBe('started')
+    f.controller.releaseLiveNote(held ?? expect.unreachable('a prepared session plays the note'))
+    await Bun.sleep(0)
+    expect(f.flat().map(event => event.type)).toEqual(['note-on'])
+    hold.resolve()
+  } finally { f.controller.dispose() }
+
+  const g = liveNoteFixture({ holdPrepare: hold.promise })
+  const waiting = g.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 0.8, transport: g.transport })
+  g.controller.dispose()
+  g.controller.releaseLiveNote(waiting ?? expect.unreachable('a cold start with a transport plays the note'))
+  await Bun.sleep(0)
+  expect(g.flat()).toEqual([])
+})
+
+test('a forced release drops a live note whose note-on has not been sent yet', async () => {
+  const hold = Promise.withResolvers<void>()
+  const f = liveNoteFixture({ holdPrepare: hold.promise })
+
+  try {
+    const handle = f.controller.startLiveNote({ trackId: 'synth', pitch: 60, velocity: 1, transport: f.transport })
+    f.controller.releaseLiveNote(handle ?? expect.unreachable('a cold start with a transport plays the note'), true)
+    hold.resolve()
+    await Bun.sleep(0)
+    await Bun.sleep(0)
+    expect(f.flat()).toEqual([])
+  } finally { f.controller.dispose() }
+})

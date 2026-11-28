@@ -173,7 +173,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     isGroupTrack ? defaultGroupColor() : defaultTrackColor();
   const customDefaultColor = () => parseHexColor(configuredDefaultColor(), "");
   const explicitTrackColor = () => parseHexColor(track.color, "");
-  const rowBackgroundColor = () =>
+  const trackColor = () =>
     explicitTrackColor() || customDefaultColor() || undefined;
   const isSelected = () =>
     sidebar().selectedTrackId === track.id ||
@@ -373,17 +373,9 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
     <div
       class={cn(
         "track-row-divider relative",
-        isSelected() && rowBackgroundColor() && "track-row-selected-wash",
-        isGroupTrack && rowBackgroundColor()
-          ? "text-black"
-          : isSelected()
-            ? "bg-timeline-surface-muted"
-            : "bg-timeline-surface",
+        isSelected() ? "bg-timeline-surface-muted" : "bg-timeline-surface",
       )}
-      style={{
-        height: `${rowHeightPx()}px`,
-        background: rowBackgroundColor() ? rowBackgroundColor() : undefined,
-      }}
+      style={{ height: `${rowHeightPx()}px` }}
       onClick={() => {
         if (suppressTrackClickId() === track.id) {
           setSuppressTrackClickId(undefined);
@@ -463,7 +455,19 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
             "minmax(76px, 1fr) minmax(96px, 1.2fr) 101px",
         }}
       >
-        <div class="flex min-w-0 items-start gap-1 overflow-hidden">
+        {/* Like Ableton's track headers, only the name cell carries the track color; the controls stay on the neutral row.
+            Negative margins take the cell to the row's top and left edges and down to its divider. */}
+        <div
+          class={cn(
+            "-ml-1 flex min-w-0 items-start gap-1 self-stretch overflow-hidden pl-1 pr-1",
+            track.collapsed ? "-mb-[3px] -mt-1 pt-1" : "-mb-[7px] -mt-2 pt-2",
+          )}
+          style={{
+            background: trackColor()
+              ? `color-mix(in srgb, ${trackColor()} ${isSelected() ? 55 : 35}%, transparent)`
+              : undefined,
+          }}
+        >
           <button
             class={cn(
               "flex w-4 shrink-0 items-center justify-center text-xs text-muted-foreground hover:text-foreground",
@@ -859,7 +863,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
           <div
             class={cn(
               "track-meter-strip relative shrink-0",
-              track.collapsed ? "h-6" : "h-full",
+              track.collapsed ? "h-6" : "self-stretch",
             )}
           >
             <div class="absolute inset-0 flex items-end justify-center gap-1">
@@ -867,12 +871,12 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 const meter = meters[track.id];
                 const left = displayMeterLevel(meter?.left);
                 const right = displayMeterLevel(meter?.right);
-                const leftColor = left >= 0.98 ? "bg-red-500" : "bg-green-500";
+                const leftColor = left >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
                 const rightColor =
-                  right >= 0.98 ? "bg-red-500" : "bg-green-500";
+                  right >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe";
                 return (
                   <>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",
@@ -881,7 +885,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                         style={{ height: `${left * 100}%` }}
                       />
                     </div>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",

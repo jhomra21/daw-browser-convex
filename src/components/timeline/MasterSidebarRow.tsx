@@ -310,20 +310,20 @@ const MasterSidebarRow: Component<MasterSidebarRowProps> = (props) => {
                 const right = Math.max(0, Math.min(1, props.levels.right));
                 return (
                   <>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",
-                          left >= 0.98 ? "bg-red-500" : "bg-green-500",
+                          left >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe",
                         )}
                         style={{ height: `${left * 100}%` }}
                       />
                     </div>
-                    <div class="relative h-full w-1 overflow-hidden bg-border/60">
+                    <div class="relative h-full w-1 overflow-hidden bg-black/75">
                       <div
                         class={cn(
                           "absolute bottom-0 w-full transition-all duration-75",
-                          right >= 0.98 ? "bg-red-500" : "bg-green-500",
+                          right >= 0.98 ? "bg-meter-clipping" : "bg-meter-safe",
                         )}
                         style={{ height: `${right * 100}%` }}
                       />

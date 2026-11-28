@@ -1,0 +1,1883 @@
+{
+ "name": "instruments-single-source-removal",
+ "sequence": 139,
+ "createdAt": "2026-11-28T05:29:35.812Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/export-mixdown.test.ts",
+    "pass"
+   ],
+   "old": 21,
+   "new": 19
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files"
+   ],
+   "old": {
+    "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-core.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampler-core.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/dsp-characterization.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loudness-analyzer.test.ts": {
+     "pass": 9,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/bpm-detection.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-assets.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-clip-projector.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/metering-runtime.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/reliability-characterization.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-encoding.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-session-compiler.test.ts": {
+     "pass": 18,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/true-peak-scanner.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-runtime.test.ts": {
+     "pass": 47,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-clock.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-host.test.ts": {
+     "pass": 82,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-native-projection.test.ts": {
+     "pass": 25,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/clip-scheduler.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/automation.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.hash.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-host-wire.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-audio-support.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching-async.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-runtime.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-runtime.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/spectral-core.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/master-fx-runtime.test.ts": {
+     "pass": 60,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+     "pass": 70,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-loader.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/browser-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-mixdown.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-worker.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+     "pass": 23,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching.test.ts": {
+     "pass": 48,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-assets.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-scheduling.test.ts": {
+     "pass": 14,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-fidelity.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/calibration.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/encode-wav.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recorder-core.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+     "pass": 17,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/timing.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/chain.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/dsp.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-automation.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    }
+   },
+   "new": {
+    "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-core.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampler-core.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/dsp-characterization.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loudness-analyzer.test.ts": {
+     "pass": 9,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/bpm-detection.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-assets.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-clip-projector.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/metering-runtime.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/reliability-characterization.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-encoding.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-session-compiler.test.ts": {
+     "pass": 18,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/true-peak-scanner.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-runtime.test.ts": {
+     "pass": 47,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-clock.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-host.test.ts": {
+     "pass": 82,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-native-projection.test.ts": {
+     "pass": 25,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/clip-scheduler.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/automation.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.hash.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-host-wire.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-audio-support.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching-async.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-runtime.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-runtime.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/spectral-core.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/master-fx-runtime.test.ts": {
+     "pass": 60,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+     "pass": 70,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-loader.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/browser-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-mixdown.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-worker.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+     "pass": 23,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching.test.ts": {
+     "pass": 48,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-assets.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-scheduling.test.ts": {
+     "pass": 14,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-fidelity.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/calibration.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/encode-wav.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recorder-core.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+     "pass": 17,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/timing.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/chain.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/dsp.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-automation.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    }
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/export-mixdown.test.ts",
+    "pass"
+   ],
+   "old": 21,
+   "new": 19
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files"
+   ],
+   "old": {
+    "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-core.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampler-core.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/dsp-characterization.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loudness-analyzer.test.ts": {
+     "pass": 9,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/bpm-detection.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-assets.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-clip-projector.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/metering-runtime.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/reliability-characterization.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-encoding.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-session-compiler.test.ts": {
+     "pass": 18,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/true-peak-scanner.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-runtime.test.ts": {
+     "pass": 47,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-clock.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-host.test.ts": {
+     "pass": 82,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-native-projection.test.ts": {
+     "pass": 25,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/clip-scheduler.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/automation.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.hash.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-host-wire.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-audio-support.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching-async.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-runtime.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-runtime.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/spectral-core.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/master-fx-runtime.test.ts": {
+     "pass": 60,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+     "pass": 70,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-loader.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/browser-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-mixdown.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-worker.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+     "pass": 23,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching.test.ts": {
+     "pass": 48,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-assets.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-scheduling.test.ts": {
+     "pass": 14,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-fidelity.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/calibration.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/encode-wav.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recorder-core.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+     "pass": 17,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-offline-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/timing.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/chain.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/dsp.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-automation.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    }
+   },
+   "new": {
+    "packages/audio-engine/src/streaming-export-fidelity.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-store.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-core.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampler-core.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/dsp-characterization.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loudness-analyzer.test.ts": {
+     "pass": 9,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-calibration.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/loop-frame-schedule.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/bpm-detection.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice-allocation.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-snapshot.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/drum-rack-runtime.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-assets.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-clip-projector.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/metering-runtime.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-protocol.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/reliability-characterization.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-voice.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-encoding.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-session-compiler.test.ts": {
+     "pass": 18,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/prepared-stretch-artifact.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-cache.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/true-peak-scanner.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-loudness-analyzer.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretch-rendering.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/synth-runtime.test.ts": {
+     "pass": 47,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-clock.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-wasm-host.test.ts": {
+     "pass": 82,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-native-projection.test.ts": {
+     "pass": 25,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/clip-scheduler.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/automation.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.hash.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-engine-live-midi.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sampled-instrument-region.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/midi-expression-scheduling.test.ts": {
+     "pass": 7,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-host-wire.test.ts": {
+     "pass": 22,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-audio-support.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching-async.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/media-pages.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-runtime.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-runtime.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/native-pcm-chunking.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/spectral-core.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/master-fx-runtime.test.ts": {
+     "pass": 60,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/live-mixer-runtime.test.ts": {
+     "pass": 70,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/streaming-true-peak-limiter.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-loader.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/sample-rate-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/browser-characterization.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-param-ramp.browser.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-mixdown.test.ts": {
+     "pass": 19,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-worker.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-stretch-preparation.test.ts": {
+     "pass": 23,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/granular-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-stretching.test.ts": {
+     "pass": 48,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/worklet-assets.test.ts": {
+     "pass": 13,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/audio-scheduling.test.ts": {
+     "pass": 14,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/export-fidelity.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/calibration.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/encode-wav.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recorder-core.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-runtime.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/sab-ring-buffer.test.ts": {
+     "pass": 5,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/recording/recording-protocol.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": {
+     "pass": 10,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/channel-layout.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/graph-contract.test.ts": {
+     "pass": 17,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-timing.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/resolve-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/mixer/cue-routing.test.ts": {
+     "pass": 1,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/timing.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/chain.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-gate-worklet.test.ts": {
+     "pass": 15,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/dsp.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-chain-state.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/modulation-worklet.test.ts": {
+     "pass": 6,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/live-worklet-budget.test.ts": {
+     "pass": 11,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/static-worklet-chain.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/autofilter-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/owned-processor-audio-descriptors.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/compressor-worklet.test.ts": {
+     "pass": 12,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/backends/processor-registry-contract.test.ts": {
+     "pass": 3,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+     "pass": 2,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/portable-export-automation.test.ts": {
+     "pass": 8,
+     "skip": 0,
+     "fail": 0
+    },
+    "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+     "pass": 4,
+     "skip": 0,
+     "fail": 0
+    }
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Offline export removal (instruments-single-source e2e91b11; owner decision in acceptance-reports/instruments-research-2026-11-27/PLAN.md \"Owner decisions on single-source.md\"; hand record, no --bless). The OfflineAudioContext export path has no production caller: rg for renderMixdown, renderStemMixdown, createStemRenderSession, createOfflineMixerNodes, offline-instrument-renderers and apply-offline-routing over every .ts, .tsx and .json file outside tools/certification finds no match at this commit; production export runs the portable export worker and the native export plan. A whole-file deletion is not admissible through --allow-removal, so the engine gates leave their `files` maps as whole-object changes (diffJson records a removed key as old -> null, which setAt cannot apply) after the one-field export-mixdown change. Direct audit of every removed test. (1) export-mixdown.test.ts 'runtime-only cue routing > is explicitly rejected by offline export': asserted that renderMixdown rejects cueTrackIds with 'Cue routing is live-only and cannot be exported.'; renderMixdown is deleted and nothing else calls it, so the rejection path does not exist. Cue routing itself stays covered by mixer/cue-routing.test.ts (1 pass, unchanged). (2) export-mixdown.test.ts 'offline instrument scheduling > does not fabricate a synth for instrument tracks without a persisted device': drove renderMixdown through a fake OfflineAudioContext and counted oscillators; offline-instrument-renderers.ts and the renderMixdown instrument scheduling are deleted, so no offline path can fabricate a synth. Verified: bun test of export-mixdown.test.ts on this branch runs 19 pass, 0 fail (pinned 21). (3) mixer/apply-offline-routing.test.ts (4 tests: 'wraps registration and construction rejection with processor context', 'rejects runtime faults instead of silently succeeding', 'turns malformed processor messages into protocol faults', 'cleans up an earlier processor when a later sequential construction rejects'): the compressor failure contract of createOfflineMixerNodes in apply-offline-routing.ts, both deleted; the file imported ./offline-compressor-lifecycle, which this branch still contains but no .ts or .tsx file imports (rg finds no importer), so those four tests exercised only the deleted offline graph builder. Live routing keeps mixer/apply-live-routing.test.ts (4 pass, unchanged). (4) portable-export-legacy-comparison.browser.test.ts (1 test, 'the portable export worker matches the legacy OfflineAudioContext render'): compared the portable worker against a legacy OfflineAudioContext render (automation worst diff < 0.5 dB, sidechain < 3.5 dB outside key edges); with the legacy renderer deleted there is nothing to compare against, and the portable path keeps portable-export-worker.test.ts (6), portable-export-automation.test.ts (8) and export-fidelity.test.ts (8), unchanged. No killer is removed: none of the seven tests is named in an arm's expect.fails or a gate's judge.fails. Counts: f-engine and last-engine files: export-mixdown.test.ts pass 21 -> 19, apply-offline-routing.test.ts (pass 4) and portable-export-legacy-comparison.browser.test.ts (pass 1) removed. The engine judge pins per-file counts only; no aggregate count in any gate includes them. removals/instruments-single-source.json and .md are deleted: this record supersedes them.",
+  "expectationsSha256": "0f07cc7f9f2589ce084235131d5d6ee668d0b01c4bc3bc9f7d5e36cc24f27322"
+ }
+}

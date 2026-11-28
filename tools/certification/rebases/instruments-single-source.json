@@ -1,0 +1,38 @@
+{
+ "name": "instruments-single-source",
+ "sequence": 140,
+ "createdAt": "2026-11-28T05:55:01.327Z",
+ "revert": [],
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "6ce21df09a8efd3242d6207bff59385a7e290a50",
+   "gitStatusSha256": "924d6c5fe5e9030997a8e36f0f19b8305897b31bc2844060e9d0b2b1ceee8cce",
+   "expectationsSha256": "bb977135fd5ca8997926113ee0b0776f998ff61173c738a26973d4af04c08d6c",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "bb977135fd5ca8997926113ee0b0776f998ff61173c738a26973d4af04c08d6c",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/iss-bless/live",
+   "resultSha256": "a44e2d72ce322cf77b4ba41cbe98ebfc718de731928b57167ad12a5e4ec164db",
+   "seconds": 1371.3568445409999,
+   "observations": 3082
+  },
+  "unreachedByOverlay": []
+ }
+}

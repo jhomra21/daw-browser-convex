@@ -1,14 +1,6 @@
-import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
-import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMidiEvents } from './audio-scheduling'
-import { createAudioStretchCache } from './audio-stretch-cache'
-import { getAutomationParameterDescriptor, midiMappingTargetKey, valueAtAutomationTime, cloneMidiClip, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseInstrumentAutomationKey, parseGranularAutomationKey, parseSynthAutomationKey, assertDefined } from '@daw-browser/shared'
-import type { createGranularRuntime } from './granular-runtime'
-import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
+import type { AutomationEnvelope, AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
-import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import type { ResolvedMixerGraph } from './mixer/types'
-import { scheduleAutomationEnvelope, type AutomationAudioBinding } from './automation'
-import { compileTrackMidiExpressionSchedule, findTrackAutomationEnvelope, indexTrackAutomationEnvelopes } from './midi-expression-scheduling'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import { getExportRangeBounds, type ExportRange } from './export-range'
 import { convertStereoToMonoSample } from './mixer/channel-layout'
@@ -26,8 +18,6 @@ import { preparePortablePagedStretchAssets } from './portable-stretch-paging'
 import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from './media-pages'
 import type { PreparedStretchArtifactRepository } from './prepared-stretch-store'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
-import { type OfflineDrumRackHit, readTrackInstrument, createOfflineSynthTrack, renderOfflineDrumRackEvents, renderOfflineSamplerEvents, createOfflineGranularTrack } from './offline-instrument-renderers'
-import { type StemDefinition, type StemRecombinationMetadata, type SourceIsolatedRenderOptions, createSourceAutomationScope, createStemRenderPlan, isAutomationEnvelopeInSourceScope } from './export-stem-plan'
 
 export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
@@ -61,16 +51,15 @@ export type ExportRequest = {
 }
 
 
-export type RenderedStem = {
-  id: string
-  name: string
-  buffer: AudioBuffer
-  metadata: StemRecombinationMetadata
-}
-
-export type StemRenderSession = {
-  renderStem: (stem: StemDefinition) => Promise<RenderedStem>
-}
+type PortableMixdownSelection =
+  | {
+    selected: true
+    artifact: AudioCoreWasmArtifact
+    snapshot: Extract<PortableExportSnapshot, { supported: true }>
+    readPage: (input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal }) => Promise<readonly Float32Array[]>
+    cleanup: () => Promise<void>
+  }
+  | { selected: false }
 
 type PreparedExportRange = {
   startSec: number
@@ -84,26 +73,11 @@ type PreparedExportRender = {
   range: PreparedExportRange
   sampleRate: number
   numberOfChannels: number
-  trackById: Map<string, Track<AudioBuffer>>
   mixerGraph: ResolvedMixerGraph
-  exportTrackFx?: ExportFx['trackFx']
   automationEnvelopes: AutomationEnvelope[]
   sidechainRoutes: ExternalSidechainRoute[]
-  signal?: AbortSignal
   resourceObserver?: ResourceObserver
-  resolveAudioSource?: ExportRequest['resolveAudioSource']
 }
-
-
-type PortableMixdownSelection =
-  | {
-    selected: true
-    artifact: AudioCoreWasmArtifact
-    snapshot: Extract<PortableExportSnapshot, { supported: true }>
-    readPage: (input: { assetId: string; startFrame: number; frameCount: number; signal?: AbortSignal }) => Promise<readonly Float32Array[]>
-    cleanup: () => Promise<void>
-  }
-  | { selected: false }
 
 export function resolveExportLimiterCeilingDbtp(
   graph: ResolvedMixerGraph,
@@ -208,6 +182,27 @@ const portableSnapshotRange = (range: PreparedExportRange): ExportRange => ({
   startSec: range.startSec,
   endSec: range.sourceEndSec,
 })
+
+function prepareExportRender(req: ExportRequest): PreparedExportRender {
+  throwIfAborted(req.signal)
+  const { startSec, endSec } = getExportRangeBounds(req.tracks, req.range)
+
+  return {
+    bpm: req.bpm,
+    range: {
+      startSec,
+      endSec,
+      sourceEndSec: Math.min(endSec, req.sourceEndSec ?? endSec),
+      durationSec: endSec - startSec,
+    },
+    sampleRate: req.sampleRate ?? 44100,
+    numberOfChannels: req.numberOfChannels ?? 2,
+    mixerGraph: req.mixerGraph ?? resolveExportMixerGraph({ tracks: req.tracks, fx: req.fx }),
+    automationEnvelopes: req.automationEnvelopes ?? [],
+    sidechainRoutes: req.sidechainRoutes ?? [],
+    resourceObserver: req.resourceObserver,
+  }
+}
 
 const supportsPortableExport = (
   environment: typeof globalThis,
@@ -489,55 +484,6 @@ export const createPortableOutputBuffer = (
     : stereo
 }
 
-const renderPortableMixdown = async (
-  req: ExportRequest,
-  prepared: PreparedExportRender,
-  selection: Extract<PortableMixdownSelection, { selected: true }>,
-): Promise<AudioBuffer> => {
-  const frameCount = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
-  const chunks = new Map<number, { frameCount: number; planes: readonly Float32Array[] }>()
-  let hasDuplicateChunk = false
-  const worker = new PortableExportWorker(undefined, undefined, selection.artifact)
-  const releaseWorker = observeResource(prepared.resourceObserver, 'workers', worker)
-  const cancel = () => worker.cancel()
-  req.signal?.addEventListener('abort', cancel, { once: true })
-
-  try {
-    await worker.render({
-      snapshot: selection.snapshot,
-      sampleRateHz: prepared.sampleRate,
-      frameCount,
-      generation: 1,
-      signal: req.signal,
-      onProgress: req.onRenderProgress,
-      onChunk: (index, _startFrame, pcm) => {
-        if (chunks.has(index)) {
-          hasDuplicateChunk = true
-
-          return
-        }
-
-        chunks.set(index, { frameCount: pcm.frameCount, planes: pcm.planes })
-      },
-      readPage: selection.readPage,
-    })
-    throwIfAborted(req.signal)
-
-    if (hasDuplicateChunk) throw new Error('Portable export Worker returned duplicate PCM output.')
-
-    return createPortableOutputBuffer(chunks, frameCount, prepared.sampleRate, prepared.numberOfChannels)
-  } finally {
-    req.signal?.removeEventListener('abort', cancel)
-
-    try {
-      await selection.cleanup()
-    } finally {
-      worker.dispose()
-      releaseWorker()
-    }
-  }
-}
-
 /**
  * Renders the range plus the graph's output latency. The first `latencyFrames` frames are the
  * graph's delay: dropping them puts the range start at frame 0. `onChunk` receives the total
@@ -629,460 +575,4 @@ export const renderPortableMixdownChunks = async (
   } finally {
     req.signal?.removeEventListener('abort', cancel)
   }
-}
-
-
-function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
-  const trackById = new Map<string, Track<AudioBuffer>>()
-
-  for (const track of tracks) trackById.set(track.id, track)
-
-  return trackById
-}
-
-const snapshotTracks = (tracks: Track<AudioBuffer>[]): Track<AudioBuffer>[] => tracks.map((track) => ({
-  ...track,
-  sends: track.sends?.map((send) => ({ ...send })),
-  clips: track.clips.map((clip) => ({
-    ...clip,
-    audioWarp: clip.audioWarp ? { ...clip.audioWarp } : undefined,
-    midi: clip.midi ? cloneMidiClip(clip.midi) : undefined,
-  })),
-}))
-
-const snapshotAutomation = (envelopes: readonly AutomationEnvelope[]): AutomationEnvelope[] =>
-  envelopes.map((envelope) => ({
-    ...envelope,
-    target: { ...envelope.target },
-    points: envelope.points.map((point) => ({ ...point })),
-  }))
-
-const snapshotInstrument = (instrument: TrackInstrumentParams): TrackInstrumentParams => {
-  if (instrument.kind === 'drum-rack') {
-    return { ...instrument, params: { ...instrument.params, pads: instrument.params.pads.map((pad) => ({ ...pad })) } }
-  }
-
-  if (instrument.kind === 'sampler') {
-    return {
-      ...instrument,
-      params: {
-        ...instrument.params,
-        zones: instrument.params.zones.map((zone) => ({ ...zone, sample: { ...zone.sample } })),
-      },
-    }
-  }
-
-  if (instrument.kind === 'granular') {
-    return {
-      ...instrument,
-      params: {
-        ...instrument.params,
-        zone: instrument.params.zone
-          ? { ...instrument.params.zone, sample: { ...instrument.params.zone.sample } }
-          : undefined,
-      },
-    }
-  }
-
-  return { ...instrument, params: { ...instrument.params } }
-}
-
-const snapshotTrackFx = (trackFx: ExportFx['trackFx']): ExportFx['trackFx'] => {
-  if (!trackFx) return undefined
-
-  return Object.fromEntries(Object.entries(trackFx).map(([trackId, entry]) => [
-    trackId,
-    {
-      ...entry,
-      instances: [...entry.instances],
-      instrument: entry.instrument ? snapshotInstrument(entry.instrument) : undefined,
-    },
-  ]))
-}
-
-function prepareExportRender(req: ExportRequest): PreparedExportRender {
-  const { bpm, range, sampleRate = 44100, numberOfChannels = 2, fx, signal } = req
-  const tracks = snapshotTracks(req.tracks)
-  throwIfAborted(signal)
-
-  if (req.cueTrackIds && req.cueTrackIds.length > 0) {
-    throw new Error('Cue routing is live-only and cannot be exported.')
-  }
-
-  const { startSec, endSec } = getExportRangeBounds(tracks, range)
-  const sourceEndSec = Math.min(endSec, req.sourceEndSec ?? endSec)
-  const durationSec = endSec - startSec
-
-  return {
-    bpm,
-    range: { startSec, endSec, sourceEndSec, durationSec },
-    sampleRate,
-    numberOfChannels,
-    trackById: createTrackById(tracks),
-    mixerGraph: req.mixerGraph ?? resolveExportMixerGraph({ tracks, fx }),
-    exportTrackFx: snapshotTrackFx(fx?.trackFx),
-    automationEnvelopes: snapshotAutomation(req.automationEnvelopes ?? []),
-    sidechainRoutes: (req.sidechainRoutes ?? []).map((route) => ({ ...route })),
-    signal,
-    resourceObserver: req.resourceObserver,
-    resolveAudioSource: req.resolveAudioSource,
-  }
-}
-
-async function renderSourceIsolatedMixdownFromPrepared(
-  prepared: PreparedExportRender,
-  options: SourceIsolatedRenderOptions = {},
-): Promise<AudioBuffer> {
-  const { sourceTrackIds, includeMasterFx = true } = options
-  throwIfAborted(prepared.signal)
-  const length = Math.ceil(prepared.range.durationSec * prepared.sampleRate)
-  const renderChannelCount = prepared.numberOfChannels === 1 ? 2 : prepared.numberOfChannels
-  const ctx = new OfflineAudioContext(renderChannelCount, length, prepared.sampleRate)
-  const releaseContext = observeResource(prepared.resourceObserver, 'audio-contexts', ctx)
-
-  const stretchCache = createAudioStretchCache({
-    createBuffer: (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
-    resolveSource: prepared.resolveAudioSource,
-    materializationPolicy: {
-      maximumBytes: 256 * 1024 * 1024,
-      maximumChannels: 32,
-    },
-  })
-
-  const graph = options.graph ?? (includeMasterFx ? prepared.mixerGraph : {
-    ...prepared.mixerGraph,
-    master: {
-      volume: prepared.mixerGraph.master.volume,
-      instances: [],
-      inputLayout: prepared.mixerGraph.master.inputLayout,
-      outputLayout: prepared.mixerGraph.master.inputLayout,
-    },
-  })
-
-  const automationScope = createSourceAutomationScope(graph, options)
-
-  const mixerNodes = await createOfflineMixerNodes(
-    ctx,
-    graph,
-    prepared.bpm,
-    prepared.sidechainRoutes,
-    options.detectorOnlyTrackIds,
-  ).catch((error) => {
-    releaseContext()
-    throw error
-  })
-
-  const { trackNodes } = mixerNodes
-  const granularRuntimes: Array<Awaited<ReturnType<typeof createGranularRuntime>>> = []
-
-  try {
-    const mappingBindingBaselines = new Map<string, Map<AutomationAudioBinding['param'], number>>()
-
-    for (const envelope of prepared.automationEnvelopes) {
-      if (!envelope.enabled) continue
-
-      if (!isAutomationEnvelopeInSourceScope(automationScope, envelope)) continue
-      const descriptor = getAutomationParameterDescriptor(envelope.parameterId)
-      const fallback = descriptor?.defaultValue ?? 0
-
-      const bindings = envelope.target.kind === 'master'
-        ? mixerNodes.resolveMasterAutomationBindings(envelope.target, envelope.parameterId)
-        : mixerNodes.resolveTrackAutomationBindings(envelope.target, envelope.parameterId)
-
-      scheduleAutomationEnvelope(
-        bindings,
-        envelope,
-        {
-          playheadSec: prepared.range.startSec,
-          startLimitSec: prepared.range.startSec,
-          endLimitSec: prepared.range.sourceEndSec,
-        },
-        (timeSec) => Math.max(0, timeSec - prepared.range.startSec),
-        fallback,
-      )
-    }
-
-    const envelopeIndex = indexTrackAutomationEnvelopes(prepared.automationEnvelopes)
-
-    for (const resolvedTrack of graph.channels) {
-      const track = prepared.trackById.get(resolvedTrack.channel.id)
-
-      if (!track) continue
-
-      for (const event of compileTrackMidiExpressionSchedule({
-        clips: track.clips,
-        trackId: track.id,
-        automationEnvelopes: prepared.automationEnvelopes,
-        bpm: prepared.bpm,
-        rangeStartSec: prepared.range.startSec,
-        rangeEndSec: prepared.range.sourceEndSec,
-      })) {
-        const bindings = mixerNodes.resolveTrackAutomationBindings(
-          { trackId: track.id, effectInstanceId: event.target.effectInstanceId },
-          event.target.parameterId,
-        )
-
-        const descriptor = getAutomationParameterDescriptor(event.target.parameterId)
-        const mappingKey = `${track.id}\u0000${midiMappingTargetKey(event.target)}`
-        const baselines = mappingBindingBaselines.get(mappingKey) ?? new Map<AutomationAudioBinding['param'], number>()
-        const envelope = findTrackAutomationEnvelope(envelopeIndex, track.id, event.target)
-
-        const value = event.phase === 'restore'
-          ? envelope
-            ? valueAtAutomationTime(envelope.points, event.timeSec, descriptor?.defaultValue ?? 0)
-            : event.target.parameterId === 'volume'
-              ? track.volume
-              : descriptor?.defaultValue
-          : event.value
-
-        if (value === undefined) continue
-
-        for (const binding of bindings) {
-          if (!baselines.has(binding.param)) baselines.set(binding.param, binding.param.value ?? binding.valueToAudioValue(value))
-          const baseline = event.phase === 'restore' && !envelope ? baselines.get(binding.param) : undefined
-          binding.param.setValueAtTime(baseline ?? binding.valueToAudioValue(value), Math.max(0, event.timeSec - prepared.range.startSec))
-        }
-
-        if (baselines.size > 0) mappingBindingBaselines.set(mappingKey, baselines)
-      }
-    }
-
-    for (const resolvedTrack of graph.channels) {
-      const track = assertDefined(
-        prepared.trackById.get(resolvedTrack.channel.id),
-        `Missing prepared export track ${resolvedTrack.channel.id}`,
-      )
-
-      if (sourceTrackIds && !sourceTrackIds.has(track.id) && !options.detectorOnlyTrackIds?.has(track.id)) continue
-
-      const trackInput = assertDefined(
-        trackNodes.get(track.id)?.input,
-        `Missing offline track input ${track.id}`,
-      )
-
-      const fxCfg = resolvedTrack.fx
-      const exportFxCfg = prepared.exportTrackFx?.[track.id]
-      const instrument = readTrackInstrument(exportFxCfg)
-
-      const drumRackPadsByNote = instrument?.kind === 'drum-rack'
-        ? new Map(instrument.params.pads.map((pad) => [pad.note, pad]))
-        : undefined
-
-      const activeDrumRackHitsByChokeGroup = new Map<number, OfflineDrumRackHit[]>()
-
-      const granularRuntime = instrument?.kind === 'granular'
-        ? await createOfflineGranularTrack({
-          ctx,
-          destination: trackInput,
-          instrument,
-          installedBuffer: exportFxCfg?.granularBuffer,
-          resourceObserver: prepared.resourceObserver,
-        })
-        : undefined
-
-      if (granularRuntime) granularRuntimes.push(granularRuntime)
-
-      const synthParams = instrument?.kind === 'synth'
-        ? instrument.params
-        : instrument
-          ? undefined
-          : fxCfg?.synth
-
-      const synthTrack = synthParams
-        ? createOfflineSynthTrack({
-            ctx,
-            destination: trackInput,
-            trackId: track.id,
-            rangeStartSec: prepared.range.startSec,
-            synth: synthParams,
-            automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => {
-              const key = parseSynthAutomationKey(envelope.parameterId)
-
-              return key?.trackId === track.id && key.instanceId === (instrument?.kind === 'synth' ? instrument.instanceId : undefined)
-            }),
-          })
-        : undefined
-
-      if (synthTrack) {
-        const events = track.clips.flatMap((clip) => {
-          const midi = clip.midi
-
-          if (!midi || !Array.isArray(midi.notes)) return []
-
-          return getScheduledMidiEvents({
-            clip,
-            bpm: prepared.bpm,
-            notes: midi.notes,
-            rangeStartSec: prepared.range.startSec,
-            rangeEndSec: prepared.range.sourceEndSec,
-            arp: fxCfg?.arp,
-          }).map((event) => ({ ...event, clipGain: midi.gain }))
-        }).toSorted((left, right) => left.startSec - right.startSec)
-
-        synthTrack.scheduleEvents(events)
-      }
-
-      for (const clip of track.clips) {
-        const midi = clip.midi
-
-        if (midi && Array.isArray(midi.notes)) {
-          if (synthTrack) continue
-
-          const events = getScheduledMidiEvents({
-            clip,
-            bpm: prepared.bpm,
-            notes: midi.notes,
-            rangeStartSec: prepared.range.startSec,
-            rangeEndSec: prepared.range.sourceEndSec,
-            arp: fxCfg?.arp,
-          })
-
-          if (instrument?.kind === 'drum-rack' && drumRackPadsByNote) {
-            renderOfflineDrumRackEvents({
-              ctx,
-              destination: trackInput,
-              events,
-              padsByNote: drumRackPadsByNote,
-              rangeStartSec: prepared.range.startSec,
-              buffers: exportFxCfg?.drumRackBuffers,
-              activeHitsByChokeGroup: activeDrumRackHitsByChokeGroup,
-            })
-          } else if (instrument?.kind === 'sampler') {
-            renderOfflineSamplerEvents({
-              ctx,
-              destination: trackInput,
-              events,
-              rangeStartSec: prepared.range.startSec,
-              instrument,
-              buffers: exportFxCfg?.samplerBuffers,
-              automationEnvelopes: prepared.automationEnvelopes.filter((envelope) => (
-                parseInstrumentAutomationKey(envelope.parameterId)?.trackId === track.id
-              )),
-            })
-          } else if (instrument?.kind === 'granular' && granularRuntime) {
-            const automationEnvelopes = prepared.automationEnvelopes.filter((envelope) => (
-              parseGranularAutomationKey(envelope.parameterId)?.trackId === track.id
-            ))
-
-            for (const event of events) {
-              granularRuntime.scheduleNote({
-                when: Math.max(0, event.startSec - prepared.range.startSec),
-                durationSec: event.endSec - event.startSec,
-                timelineStartSec: event.startSec,
-                timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - prepared.range.startSec),
-                automationEnvelopes,
-              })
-            }
-          }
-
-          continue
-        }
-
-        if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) continue
-
-        const map = getAudioClipTimeMap({
-          clip,
-          bufferDurationSec: clip.buffer?.duration ?? clip.sourceDurationSec ?? 0,
-          projectBpm: prepared.bpm,
-          rangeStartSec: prepared.range.startSec,
-          rangeEndSec: prepared.range.sourceEndSec,
-        })
-
-        if (!map) continue
-
-        const src = ctx.createBufferSource()
-
-        const stretched = map.mode === 'stretch'
-          ? await stretchCache.renderNow(clip, prepared.bpm).catch((error) => {
-            throw new Error(`Failed to render Stretch warp for clip "${clip.name}": ${error instanceof Error ? error.message : String(error)}`)
-          })
-          : null
-
-        const sourceBuffer = clip.buffer ?? stretched?.buffer
-
-        if (!sourceBuffer) continue
-
-        const playback = getAudioBufferPlaybackParams({
-          sourceBuffer,
-          map,
-          stretched: stretched ? { ...stretched, bufferDurationSec: stretched.buffer.duration } : null,
-        })
-
-        if (playback.durationSec <= 0) continue
-        src.buffer = playback.buffer
-        src.playbackRate.value = playback.playbackRate
-        connectSourceWithClipGain(ctx, src, trackInput, clip.gain, {
-          fades: normalizeClipFades(clip.fades, clip.duration),
-          clipStartSec: clip.startSec,
-          clipDurationSec: clip.duration,
-          timelineStartSec: map.timelineStartSec,
-          timelineEndSec: map.timelineEndSec,
-          contextStartTime: Math.max(0, map.timelineStartSec - prepared.range.startSec),
-        })
-
-        try {
-          src.start(
-            Math.max(0, map.timelineStartSec - prepared.range.startSec),
-            playback.offsetSec,
-            playback.durationSec,
-          )
-        } catch {}
-      }
-    }
-
-    throwIfAborted(prepared.signal)
-    const rendered = await ctx.startRendering()
-    mixerNodes.assertCompressorProcessorsHealthy()
-    throwIfAborted(prepared.signal)
-
-    const output = prepared.numberOfChannels !== 1 || rendered.numberOfChannels === 1
-      ? rendered
-      : downmixStereoBufferToMono(
-      rendered,
-      (channels, frames, sampleRate) => ctx.createBuffer(channels, frames, sampleRate),
-    )
-
-    await assertExportTruePeakWithinLimiterCeiling(
-      output,
-      resolveExportLimiterCeilingDbtp(graph),
-      prepared.signal,
-    )
-
-    return output
-  } finally {
-    for (const runtime of granularRuntimes) runtime.close()
-    mixerNodes.dispose()
-    releaseContext()
-  }
-}
-
-export async function renderMixdown(req: ExportRequest): Promise<AudioBuffer> {
-  const prepared = prepareExportRender(req)
-  const portable = await selectPortableMixdown(req, prepared)
-
-  return portable.selected
-    ? renderPortableMixdown(req, prepared, portable)
-    : renderSourceIsolatedMixdownFromPrepared(prepared)
-}
-
-export function createStemRenderSession(req: ExportRequest): StemRenderSession {
-  const prepared = prepareExportRender(req)
-
-  return {
-    async renderStem(stem) {
-      const plan = createStemRenderPlan(prepared.mixerGraph, stem, prepared.sidechainRoutes)
-
-      const buffer = await renderSourceIsolatedMixdownFromPrepared(prepared, {
-        sourceTrackIds: plan.sourceTrackIds,
-        detectorOnlyTrackIds: plan.detectorOnlyTrackIds,
-        graph: plan.graph,
-      })
-
-      return { id: stem.id, name: stem.name, buffer, metadata: plan.metadata }
-    },
-  }
-}
-
-export async function renderStemMixdown(req: ExportRequest & { stem: StemDefinition }): Promise<RenderedStem> {
-  return createStemRenderSession(req).renderStem(req.stem)
 }

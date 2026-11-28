@@ -1,11 +1,17 @@
 import type { AudioCoreGraphSnapshot, AudioCoreSampleSourceEventDto, PlanarPcm } from '../../audio-core-contract/src/index'
 import type { PortableExportAsset } from './portable-export-snapshot'
+import {
+  portableWasmMaxAssets,
+  portableWasmMaxGraphEdges,
+  portableWasmMaxGraphNodes,
+  portableWasmMaxPendingEvents,
+} from './portable-wasm-protocol'
 
 export const portableExportWorkerProtocolVersion = 2
-export const portableExportWorkerMaxAssets = 64
-export const portableExportWorkerMaxEvents = 256
-export const portableExportWorkerMaxGraphNodes = 64
-export const portableExportWorkerMaxGraphEdges = 256
+export const portableExportWorkerMaxAssets = portableWasmMaxAssets
+export const portableExportWorkerMaxEvents = portableWasmMaxPendingEvents
+export const portableExportWorkerMaxGraphNodes = portableWasmMaxGraphNodes
+export const portableExportWorkerMaxGraphEdges = portableWasmMaxGraphEdges
 
 export type PortableExportWorkerSnapshot = {
   graph: AudioCoreGraphSnapshot

@@ -1,0 +1,133 @@
+{
+ "name": "untangle-wire-contract",
+ "sequence": 91,
+ "createdAt": "2026-11-20T20:01:33.657Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "dfbb52c0d57f48ee23147308c00854d63aac27c56cecd80084c2fa3af65b0697",
+   "to": "fc4faa70afec01e523cb29f122286a1bf52ed4940cda9c66f660d0623ba65e2f"
+  },
+  {
+   "file": "native/audio-host-macos/src/audio-host.cpp",
+   "from": "99d21402d9c5d9da62b062f84559c231b2ad96c9557406b17617dc04ab586e4c",
+   "to": "04d939e6825407da69c683f660a70658dc56987f2dc7f960e542d60f61dfd9bc"
+  },
+  {
+   "file": "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts",
+   "from": "7617aeacab29ee4d8dcc5dffa38e293c8fac923ff1435271b09ff11c6df48938",
+   "to": "5df7d18c1641a2c54076cba9f810a2f96f81113ca6f87df47e772fe44b779901"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.ts",
+   "from": "2f2b08a68f34d15dadccc614c44557efa47d8a9b0d32d3c831c7b693db03b5d5",
+   "to": "b4793183ac8a093491a35d21d7921a0dd238e4f251ad47b473323eeb5f7060fc"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "67d0d212dbe5c1d92b674bc00484a947c3f8813edb305ab7b89017e962293e4d",
+   "to": "e679117bae956c5eca082c504b0d016bafe7712b1077592947822fd57cd56aa4"
+  },
+  {
+   "file": "src/lib/desktop/native-host-connection-loss.ts",
+   "from": "b1289fc6f224cc95a80b5d97e295833b42e711a1e9c7b33e95bc6593f35b8add",
+   "to": "86f2ec8e05d566ec461b5a7b945e52462f1e4215e86ef752878d41c2735acccd"
+  },
+  {
+   "file": "src/lib/desktop/native-recording-session.ts",
+   "from": "8405e5cb7ba8cc145a46db2f97357576282badc249f76f8b764f0992f71de7a7",
+   "to": "f1128d68417d66e5b0adc4c3c1446abcd0762baaed036798db830340fce67c19"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "53849faa087573fe924faee888d4f13e30037a4e24feae123050ec01be34d340",
+   "to": "059ef5ff7fc5c19c8fb2bcc367983e6d557769793cbdc98f1c21ffc476bcbfd7"
+  },
+  {
+   "file": "src/lib/desktop/native-snapshot-support.ts",
+   "from": "61a01346d9a89b74a5e2c4e2f642034c0e3bf84b42aea6d881b0033b143d2d4a",
+   "to": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "70d3f54d273c9216c54ea01c9539a8f4c647cc2d99ab07258dcf1bb0045f755a",
+   "new": "dd77ff7b0ef85b3631db46164b9c00e3a59c4313181918a8940c98b1a29df2a9"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "99647875fc97321e7dc8eb7aa29f0c63d554b07440c2c68ab776c462de9f39c2",
+   "new": "a9e26f99de9d9d6f6bca3b64b1a1fb2c076b95585c29dd3599a3731a9fb9bf0e"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-protocol-constants.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 2,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/portable-protocol-constants.test.ts"
+   ],
+   "old": null,
+   "new": {
+    "pass": 2,
+    "skip": 0,
+    "fail": 0
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "8b57bb6b9284c2b8a42cf97d98c80ab01434b0d6",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "c8f1a8a5dac4be2d08e643cf5092a4025a8129ed3f01b501a039cf6583194179",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "c8f1a8a5dac4be2d08e643cf5092a4025a8129ed3f01b501a039cf6583194179",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b4-bless/live",
+   "resultSha256": "4fd329ee8125f98d3a516f5d6691ab23b518b9effaa777de3156ec7e621167b5",
+   "seconds": 1399.281606584,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

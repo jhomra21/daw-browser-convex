@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test"
 import {
   nativeAudioHostMaximumAssetFramesForChannels,
+  nativeAudioHostMaximumMappedAssetRanges,
   nativeAudioHostMaximumMappedAssetPageFramesForChannels,
   nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPlanSchema,
@@ -53,6 +54,25 @@ test("uses payload-safe mono and stereo asset frame capacities", () => {
 test("uses the mapped-page header and channel count for page capacity", () => {
   expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(2)).toBe(131_070)
   expect(nativeAudioHostMaximumMappedAssetPageFramesForChannels(64)).toBe(4_095)
+})
+
+const mappedAssetWithRanges = (rangeCount: number) => ({
+  ...plan(),
+  mappedAssets: [{
+    sessionAssetId: 1,
+    sourceAssetKey: "asset",
+    frameCount: rangeCount * 2,
+    sampleRateHz: 48_000,
+    channelCount: 1,
+    ranges: Array.from({ length: rangeCount }, (_, index) => ({ startFrame: index * 2, frameCount: 1 })),
+  }],
+})
+
+// The host merges written pages into at most this many disjoint ranges and refuses the page that would exceed it.
+test("refuses mapped assets with more disjoint ranges than the host ledger holds", () => {
+  expect(nativeAudioHostMaximumMappedAssetRanges).toBe(256)
+  expect(nativeOfflineRenderPlanSchema.safeParse(mappedAssetWithRanges(256)).success).toBe(true)
+  expect(nativeOfflineRenderPlanSchema.safeParse(mappedAssetWithRanges(257)).success).toBe(false)
 })
 
 test("rejects malformed PCM asset dimensions", () => {

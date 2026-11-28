@@ -24,7 +24,7 @@ bool IsClassId(const std::string& classId) {
 }
 
 bool IsValidSetup(const WorkerProcessSetup& setup) {
-  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= 384'000.0
+  return std::isfinite(setup.sampleRate) && setup.sampleRate > 0.0 && setup.sampleRate <= kMaximumWorkerSampleRateHz
     && setup.maximumBlockFrames > 0 && setup.maximumBlockFrames <= kMaximumWorkerFrames
     && setup.inputChannels <= kMaximumWorkerChannels && setup.outputChannels > 0
     && setup.outputChannels <= kMaximumWorkerChannels
@@ -96,7 +96,7 @@ bool IsValidWorkerManifest(const WorkerManifest& manifest) {
     || manifest.transport.maximumEventsPerBlock > kMaximumWorkerEvents || manifest.latencyFrames > kMaximumGraphLatencyFrames
     || (manifest.tailFrames && !IsValidFiniteWorkerTailFrames(*manifest.tailFrames))
     || manifest.stateRevision > 0x7fff'ffffU
-    || manifest.parameters.size() > 16'384) {
+    || manifest.parameters.size() > kMaximumPluginParameters) {
     return false;
   }
   std::unordered_set<std::uint32_t> parameterIds;

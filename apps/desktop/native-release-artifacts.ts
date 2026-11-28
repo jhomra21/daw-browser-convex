@@ -1,3 +1,4 @@
+import { sha256HexPattern } from "@daw-browser/desktop-protocol/wire-patterns"
 import { createHash } from "node:crypto"
 import { createReadStream } from "node:fs"
 import { readFile, stat, writeFile } from "node:fs/promises"
@@ -49,7 +50,7 @@ const isManifest = (
     if (typeof artifact !== "object" || artifact === null
       || !("name" in artifact) || !isArtifactName(artifact.name)
       || !("sha256" in artifact) || typeof artifact.sha256 !== "string"
-      || !/^[a-f0-9]{64}$/.test(artifact.sha256) || names.has(artifact.name)) return false
+      || !sha256HexPattern.test(artifact.sha256) || names.has(artifact.name)) return false
     names.add(artifact.name)
   }
 

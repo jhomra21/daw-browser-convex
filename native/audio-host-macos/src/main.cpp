@@ -24,7 +24,6 @@
 
 namespace {
 
-constexpr std::uint32_t kCapabilities = 0x000003ffU;
 
 bool ShouldLogReceivedControl(const daw::audio_host_macos::ControlType type) {
   using Type = daw::audio_host_macos::ControlType;
@@ -433,7 +432,7 @@ bool ConfigureRecording(daw::audio_host_macos::AudioHost& host, const std::vecto
   const std::uint32_t uid_length = ReadU32(payload.data() + 56);
   if (flags > 1 || ReadU32(payload.data() + 52) != 0
     || uid_length == 0 || uid_length > 4096 || ReadU32(payload.data() + 140) == 0
-    || ReadU32(payload.data() + 140) > 4096 || payload.size() != kHeaderBytes + uid_length + ReadU32(payload.data() + 140)) return false;
+    || ReadU32(payload.data() + 140) > daw::audio_host_macos::kMaximumDeviceIdBytes || payload.size() != kHeaderBytes + uid_length + ReadU32(payload.data() + 140)) return false;
   const auto device_uid = daw::audio_host_macos::CoreAudioDeviceUid(
     std::string_view(reinterpret_cast<const char*>(payload.data() + kHeaderBytes), uid_length));
   if (!device_uid) return false;
@@ -670,7 +669,7 @@ bool AttachVst(daw::audio_host_macos::AudioHost& host, const std::vector<std::ui
   if (payload.size() < offset + 4) return false;
   const auto parameter_id_count = ReadU32(payload.data() + offset);
   offset += 4;
-  if (parameter_id_count > 16'384
+  if (parameter_id_count > daw::plugin_host::kMaximumPluginParameters
     || payload.size() != offset + static_cast<std::size_t>(parameter_id_count) * 4) return false;
   attachment.parameter_ids.reserve(parameter_id_count);
   for (std::uint32_t index = 0; index < parameter_id_count; ++index) {
@@ -882,11 +881,11 @@ int main() {
       if (!payload.empty()) return EXIT_FAILURE;
       std::vector<std::uint8_t> response;
       WriteU32(response, daw::audio_host_macos::kControlProtocolVersion);
-      WriteU32(response, kCapabilities);
+      WriteU32(response, daw::audio_host_macos::kHostCapabilities);
       WriteU32(response, DAW_AUDIO_CORE_ABI_VERSION);
       WriteString(response, DAW_AUDIO_CORE_PROCESSOR_CONTRACT_HASH);
       WriteString(response, DAW_AUDIO_CORE_PORTABLE_GRAPH_CONTRACT_HASH);
-      WriteString(response, "daw-audio-host-macos/v10");
+      WriteString(response, daw::audio_host_macos::kArtifactId);
       WriteU32(response, static_cast<std::uint32_t>(host->diagnostics().state));
       WriteU32(response, static_cast<std::uint32_t>(host->readinessReason()));
       WriteU32(response, daw::audio_host_macos::kMaximumParkedNativeVsts);
@@ -1087,8 +1086,8 @@ int main() {
         if (!active_session || payload.size() < 28) return EXIT_FAILURE;
         const auto command = ReadU32(payload.data());
         if (command < 1 || command > 5
-          || ReadU32(payload.data() + 4) > 8192
-          || ReadU32(payload.data() + 8) > 8192
+          || ReadU32(payload.data() + 4) > daw::plugin_host::kMaximumEditorDimension
+          || ReadU32(payload.data() + 8) > daw::plugin_host::kMaximumEditorDimension
           || ReadU32(payload.data() + 12) > 1
           || (ReadU32(payload.data() + 12) == 1 && command != 1 && command != 3)) return EXIT_FAILURE;
         std::size_t offset = 24;

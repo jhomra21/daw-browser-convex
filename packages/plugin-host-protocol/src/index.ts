@@ -4,10 +4,13 @@ export const pluginHostProtocolCompatibility = { minimum: 1, maximum: 2 }
 export const maxPluginHostControlFrameBytes = 1_048_576
 export const vst3WorkerProtocolVersion = 2
 export const maxVst3WorkerStateBytes = 512 * 1024
-const maxVst3WorkerTransportSlots = 8
+export const maxVst3WorkerTransportSlots = 8
 export const maxVst3WorkerChannels = 64
 export const maxVst3WorkerFrames = 8_192
+export const maxVst3WorkerSampleRateHz = 384_000
 export const maxVst3WorkerEventsPerBlock = 2_048
+export const maxVst3PluginParameters = 16_384
+export const maxVst3EditorDimension = 8_192
 export const nativeVst3WorkerArtifactId = 'daw-vst3-worker'
 export const nativeVst3WorkerArtifactVersion = '3'
 export const nativeVst3WorkerManifestVersion = 1
@@ -80,7 +83,7 @@ export const pluginManifestSchema = z.object({
   audioInputs: z.array(busSchema).max(32),
   audioOutputs: z.array(busSchema).min(1).max(32),
   sidechainInputs: z.array(busSchema).max(16),
-  parameters: z.array(pluginParameterDescriptorSchema).max(16_384)
+  parameters: z.array(pluginParameterDescriptorSchema).max(maxVst3PluginParameters)
     .refine((parameters) => new Set(parameters.map((parameter) => parameter.id)).size === parameters.length, 'Parameter IDs must be unique.'),
   latencyFrames: z.number().int().nonnegative().max(10_000_000),
   tailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
@@ -217,7 +220,7 @@ const workerInstanceSchema = z.object({
 }).strict()
 
 const workerSetupSchema = z.object({
-  sampleRate: finiteNumber.positive().max(384_000),
+  sampleRate: finiteNumber.positive().max(maxVst3WorkerSampleRateHz),
   maximumBlockFrames: z.number().int().positive().max(maxVst3WorkerFrames),
   inputChannels: z.number().int().min(0).max(maxVst3WorkerChannels),
   outputChannels: z.number().int().min(1).max(maxVst3WorkerChannels),
@@ -268,7 +271,7 @@ const nativeVst3WorkerManifestSchema = z.object({
   latencyFrames: z.number().int().nonnegative().max(10_000_000),
   tailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
   stateRevision: z.number().int().nonnegative().max(0x7fffffff),
-  parameters: z.array(pluginParameterDescriptorSchema).max(16_384).optional(),
+  parameters: z.array(pluginParameterDescriptorSchema).max(maxVst3PluginParameters).optional(),
   supportsBypass: z.boolean().optional(),
   supportsEditor: z.boolean().optional(),
   supportsState: z.boolean().optional(),
@@ -426,7 +429,7 @@ const nativeVst3InsertionManifestSchema = z.object({
   outputBuses: z.array(busSchema).min(1).max(32),
   latencyFrames: z.number().int().nonnegative().max(10_000_000),
   tailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
-  parameters: z.array(pluginParameterDescriptorSchema).max(16_384),
+  parameters: z.array(pluginParameterDescriptorSchema).max(maxVst3PluginParameters),
   supportsBypass: z.boolean(),
   supportsEditor: z.boolean(),
   supportsState: z.boolean(),
@@ -479,7 +482,7 @@ const nativeExternalAttachmentFields = {
   declaredTailFrames: z.number().int().nonnegative().max(100_000_000).nullable(),
   bypassed: z.boolean(),
   stateRevision: z.number().int().nonnegative().max(0x7fffffff),
-  parameters: z.array(pluginParameterDescriptorSchema).max(16_384).optional(),
+  parameters: z.array(pluginParameterDescriptorSchema).max(maxVst3PluginParameters).optional(),
   parameterOverrides: z.record(
     z.string().regex(/^\d+$/),
     finiteNumber.refine((value) => value >= 0 && value <= 1),

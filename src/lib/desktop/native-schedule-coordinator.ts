@@ -29,6 +29,12 @@ import { parseExternalAutomationParameterId, valueAtAutomationTime } from "@daw-
 import type { LivePlaybackSnapshot } from "~/lib/live-playback-snapshot"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
+import {
+  nativeAudioHostMaximumInstrumentEvents,
+  nativeAudioHostMaximumProcessorEvents,
+  nativeAudioHostMaximumScheduleChunks,
+  nativeAudioHostMaximumSourceEvents,
+} from "@daw-browser/desktop-protocol/native-audio-host"
 import { SYNTH_LIVE_FIELDS } from "~/lib/processor-edit-semantics"
 import type { PlaybackAcceptanceObserver } from "./acceptance-observer"
 import type { NativeTimelinePageManager } from "./native-timeline-page-manager"
@@ -103,15 +109,12 @@ export type NativeRefillDiagnostics = {
   submittedVstSegments: number
 }
 
-const nativeInstrumentEventBatchSize = 256
-const nativeScheduleChunkCount = 16
+const nativeInstrumentEventBatchSize = nativeAudioHostMaximumInstrumentEvents
+const nativeScheduleChunkCount = nativeAudioHostMaximumScheduleChunks
 const nativeScheduleSubmissionAttempts = 8
 const nativeScheduleRefillRetryLimit = 8
 const nativeScheduleLookaheadSec = 2
 const nativeScheduleRefillThresholdSec = 1
-const nativeInstrumentEventCapacity = 256
-const nativeProcessorEventCapacity = 256
-const nativeSourceCapacity = 256
 const nativeSourceLedgerCapacity = 1024
 
 const assertReply = (reply: NativeSessionReply) => {
@@ -897,7 +900,7 @@ const buildNativeScheduleCoordinator = (input: {
     // event ledger constrains note admission.
     const heldNoteCapacityByNode = new Map(
       graph.nodes.filter((node) => node.kind === "instrument" && vstNodeIds.has(node.id))
-        .map((node) => [node.id, 256]),
+        .map((node) => [node.id, nativeAudioHostMaximumInstrumentEvents]),
     )
 
     const preflightEnd = loop
@@ -913,12 +916,12 @@ const buildNativeScheduleCoordinator = (input: {
         const initial = start === input.startFrame ? synthStateEvents(input.snapshot, start) : []
         const instrumentCount = window.instrumentEvents.length + initial.length
 
-        if (instrumentCount > nativeInstrumentEventCapacity) {
-          throw capacityError(`callback at frame ${start} contains ${instrumentCount} instrument events; the native limit is 256.`)
+        if (instrumentCount > nativeAudioHostMaximumInstrumentEvents) {
+          throw capacityError(`callback at frame ${start} contains ${instrumentCount} instrument events; the native limit is ${nativeAudioHostMaximumInstrumentEvents}.`)
         }
 
-        if (window.sampleSourceEvents.length > nativeSourceCapacity) {
-          throw capacityError(`callback at frame ${start} contains ${window.sampleSourceEvents.length} source events; the native source limit is 256.`)
+        if (window.sampleSourceEvents.length > nativeAudioHostMaximumSourceEvents) {
+          throw capacityError(`callback at frame ${start} contains ${window.sampleSourceEvents.length} source events; the native source limit is ${nativeAudioHostMaximumSourceEvents}.`)
         }
 
         const processorCount = window.vstAutomationSegments.reduce((count, segment) => (
@@ -931,8 +934,8 @@ const buildNativeScheduleCoordinator = (input: {
           return count + (event.frame < end && event.endFrame > start ? 1 : 0)
         }, 0)
 
-        if (processorCount > nativeProcessorEventCapacity) {
-          throw capacityError(`callback at frame ${start} contains ${processorCount} processor events; the native limit is 256.`)
+        if (processorCount > nativeAudioHostMaximumProcessorEvents) {
+          throw capacityError(`callback at frame ${start} contains ${processorCount} processor events; the native limit is ${nativeAudioHostMaximumProcessorEvents}.`)
         }
 
         for (const [eventIndex, event] of window.instrumentEvents.entries()) {

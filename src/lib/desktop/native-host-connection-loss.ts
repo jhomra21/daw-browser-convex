@@ -1,3 +1,5 @@
+import { indicatesNativeHostLoss } from "@daw-browser/desktop-protocol/native-audio-host"
+
 type NativePlaybackDiagnosticFailure = Error | string | null | undefined
 
 export const sanitizeNativeVst3DiagnosticError = (error: NativePlaybackDiagnosticFailure) => {
@@ -8,15 +10,9 @@ export const sanitizeNativeVst3DiagnosticError = (error: NativePlaybackDiagnosti
   return message.replace(/(?:[A-Za-z]:[\\/]|\/)[^\s]*/g, "<path>").slice(0, 256)
 }
 
-export const indicatesNativeHostConnectionLoss = (error: NativePlaybackDiagnosticFailure) => {
-  const message = sanitizeNativeVst3DiagnosticError(error).toLowerCase()
-
-  return message.includes("native playback host connection was lost")
-    || message.includes("native audio host is unavailable")
-    || message.includes("native audio host stopped")
-    || message.includes("host connection was lost")
-    || message.includes("host connection closed")
-}
+export const indicatesNativeHostConnectionLoss = (error: NativePlaybackDiagnosticFailure) => (
+  indicatesNativeHostLoss(sanitizeNativeVst3DiagnosticError(error))
+)
 
 // Whether the native host connection is lost, for which project generation, and whether the one recovery it allows
 // is spent. A loss belongs to the project generation it happened in: a later generation starts clean.

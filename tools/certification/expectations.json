@@ -24,7 +24,7 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "67d0d212dbe5c1d92b674bc00484a947c3f8813edb305ab7b89017e962293e4d",
+   "src/components/Timeline.tsx": "e679117bae956c5eca082c504b0d016bafe7712b1077592947822fd57cd56aa4",
    "src/components/Timeline.test.ts": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "d1e59232db2fb6e8abba87edcf70b44d6833285228775c9a57d66d586306db69",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
@@ -62,8 +62,8 @@
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "12e03002e9d602d0da33fba4489b54cfd8cb9147616e6e3722a9ae5d43812741",
    "public/audio-worklets/daw-portable-audio-core-host-v2.js": "69cc2407f39f06d21457a3230d9890250237f30e30a816d78f92e96bb2e6faaa",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
-   "packages/audio-engine/src/portable-wasm-protocol.ts": "2f2b08a68f34d15dadccc614c44557efa47d8a9b0d32d3c831c7b693db03b5d5",
-   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "7617aeacab29ee4d8dcc5dffa38e293c8fac923ff1435271b09ff11c6df48938",
+   "packages/audio-engine/src/portable-wasm-protocol.ts": "b4793183ac8a093491a35d21d7921a0dd238e4f251ad47b473323eeb5f7060fc",
+   "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "5df7d18c1641a2c54076cba9f810a2f96f81113ca6f87df47e772fe44b779901",
    "packages/audio-engine/src/native-host-wire.ts": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
    "packages/audio-engine/src/native-host-wire.test.ts": "9b6ce8571eb84fa04530229541ef4c74829378a64fdee8e772a484d22a0e466c",
    "packages/audio-engine/src/portable-wasm-host.test.ts": "e80d61b1e91b289547f81d16083dba98a27adfb25ce08e928f5fe1efc5cd5a14",
@@ -127,15 +127,15 @@
  "fuzzSources": {
   "controller": {
    "src/lib/desktop/native-playback-controller.ts": "0bc77835e26b7709e12593dad6ea34bc1734e1cbd5a4f5d930dc3d3337b61fc8",
-   "src/lib/desktop/native-schedule-coordinator.ts": "53849faa087573fe924faee888d4f13e30037a4e24feae123050ec01be34d340",
+   "src/lib/desktop/native-schedule-coordinator.ts": "059ef5ff7fc5c19c8fb2bcc367983e6d557769793cbdc98f1c21ffc476bcbfd7",
    "src/lib/desktop/native-processor-state-owner.ts": "51240d9c2b7d9b2f96bb034ec1e1258406fe9981c86775b3d371a5d079934b28",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
    "src/lib/live-processor-control.ts": "3fdfa747f55ddd77895e6f26956d754d102507f24dad85055aaef93be4fa2c61",
    "src/components/timeline/create-processor-edit-registry.ts": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b",
    "src/lib/live-playback-snapshot.ts": "0884622a3c6eacb11ec1ac4042042d944fb6914e794e4b26843475b3515d4e56",
    "packages/audio-engine/src/native-host-wire.ts": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
-   "apps/desktop/audio-host.ts": "dfbb52c0d57f48ee23147308c00854d63aac27c56cecd80084c2fa3af65b0697",
-   "native/audio-host-macos/src/audio-host.cpp": "99d21402d9c5d9da62b062f84559c231b2ad96c9557406b17617dc04ab586e4c",
+   "apps/desktop/audio-host.ts": "fc4faa70afec01e523cb29f122286a1bf52ed4940cda9c66f660d0623ba65e2f",
+   "native/audio-host-macos/src/audio-host.cpp": "04d939e6825407da69c683f660a70658dc56987f2dc7f960e542d60f61dfd9bc",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "849ccfc235ee28b37c9cf5b4604d4910f402e6df03f4c292c27eb7ddfe776bdf",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "c7e891e3b5ff53005f499a06fda991e35f0b07726d66f0934d54f0b0e0df062b",
@@ -146,12 +146,12 @@
    "src/lib/desktop/native-publication-transaction.ts": "f5fb94a4b20df818500ba99bd61dca72254ecdc44fd5786ba4ec031e635637f6",
    "src/lib/desktop/native-schedule-publication.ts": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb",
    "src/lib/desktop/native-observation.ts": "00dd7b0593e8d743d7bbbb23994ba359c192cbef173a4996d74ecdf4a2274a46",
-   "src/lib/desktop/native-recording-session.ts": "8405e5cb7ba8cc145a46db2f97357576282badc249f76f8b764f0992f71de7a7",
+   "src/lib/desktop/native-recording-session.ts": "f1128d68417d66e5b0adc4c3c1446abcd0762baaed036798db830340fce67c19",
    "src/lib/desktop/native-live-midi.ts": "9f152404893b4f9280cc73474ff9bd8035740d8f23dd1012089a18a091984948",
    "src/lib/desktop/native-state-patches.ts": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b",
    "src/lib/desktop/native-graph-targets.ts": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a",
-   "src/lib/desktop/native-snapshot-support.ts": "61a01346d9a89b74a5e2c4e2f642034c0e3bf84b42aea6d881b0033b143d2d4a",
-   "src/lib/desktop/native-host-connection-loss.ts": "b1289fc6f224cc95a80b5d97e295833b42e711a1e9c7b33e95bc6593f35b8add",
+   "src/lib/desktop/native-snapshot-support.ts": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347",
+   "src/lib/desktop/native-host-connection-loss.ts": "86f2ec8e05d566ec461b5a7b945e52462f1e4215e86ef752878d41c2735acccd",
    "src/lib/desktop/native-retirement.ts": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae",
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   },
@@ -190,12 +190,12 @@
    "src/lib/desktop/native-publication-transaction.ts": "f5fb94a4b20df818500ba99bd61dca72254ecdc44fd5786ba4ec031e635637f6",
    "src/lib/desktop/native-schedule-publication.ts": "ecf3007be44126f403c30d6598ccf55d9b53c558d7c72736256fddc3bdf407eb",
    "src/lib/desktop/native-observation.ts": "00dd7b0593e8d743d7bbbb23994ba359c192cbef173a4996d74ecdf4a2274a46",
-   "src/lib/desktop/native-recording-session.ts": "8405e5cb7ba8cc145a46db2f97357576282badc249f76f8b764f0992f71de7a7",
+   "src/lib/desktop/native-recording-session.ts": "f1128d68417d66e5b0adc4c3c1446abcd0762baaed036798db830340fce67c19",
    "src/lib/desktop/native-live-midi.ts": "9f152404893b4f9280cc73474ff9bd8035740d8f23dd1012089a18a091984948",
    "src/lib/desktop/native-state-patches.ts": "cd51b6aaefb57ef225cd2b7745d54c5da068fc37a57df1b4036f7db1255b602b",
    "src/lib/desktop/native-graph-targets.ts": "e4dc6d99333bfa415904c68d848e9a52d58d8bdc95272b469e4489489aa3aa3a",
-   "src/lib/desktop/native-snapshot-support.ts": "61a01346d9a89b74a5e2c4e2f642034c0e3bf84b42aea6d881b0033b143d2d4a",
-   "src/lib/desktop/native-host-connection-loss.ts": "b1289fc6f224cc95a80b5d97e295833b42e711a1e9c7b33e95bc6593f35b8add",
+   "src/lib/desktop/native-snapshot-support.ts": "6db54d56904edf15d36a3f52a2a70674f64cd25739213ccfacba2892c0a96347",
+   "src/lib/desktop/native-host-connection-loss.ts": "86f2ec8e05d566ec461b5a7b945e52462f1e4215e86ef752878d41c2735acccd",
    "src/lib/desktop/native-retirement.ts": "3927ba62cd6691447c98999dca5955213b97f4395118d60f1505dbfeb2a527ae",
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   }
@@ -2699,6 +2699,11 @@
       "pass": 3,
       "skip": 0,
       "fail": 0
+     },
+     "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+      "pass": 2,
+      "skip": 0,
+      "fail": 0
      }
     }
    }
@@ -3593,6 +3598,11 @@
       "pass": 3,
       "skip": 0,
       "fail": 0
+     },
+     "packages/audio-engine/src/portable-protocol-constants.test.ts": {
+      "pass": 2,
+      "skip": 0,
+      "fail": 0
      }
     }
    }
@@ -4178,13 +4188,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "70d3f54d273c9216c54ea01c9539a8f4c647cc2d99ab07258dcf1bb0045f755a",
+   "treeSha256": "dd77ff7b0ef85b3631db46164b9c00e3a59c4313181918a8940c98b1a29df2a9",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "99647875fc97321e7dc8eb7aa29f0c63d554b07440c2c68ab776c462de9f39c2",
+   "treeSha256": "a9e26f99de9d9d6f6bca3b64b1a1fb2c076b95585c29dd3599a3731a9fb9bf0e",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

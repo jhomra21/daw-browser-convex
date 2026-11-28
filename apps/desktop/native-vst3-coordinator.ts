@@ -1,3 +1,4 @@
+import { sha256HexPattern } from "@daw-browser/desktop-protocol/wire-patterns"
 import { createHash } from "node:crypto"
 import {
   decodeNativeExternalAttachmentPlan,
@@ -51,11 +52,10 @@ const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachm
   || left.instanceId.localeCompare(right.instanceId)
 ))
 
-const sha256Pattern = /^[a-f0-9]{64}$/
 
 const decodeCapturedVst3State = (value: CapturedVst3State): CapturedVst3State | undefined => {
   if (value.bytes.byteLength > maxVst3WorkerStateBytes
-    || !sha256Pattern.test(value.sha256)
+    || !sha256HexPattern.test(value.sha256)
     || createHash("sha256").update(value.bytes).digest("hex") !== value.sha256) return undefined
 
   return value

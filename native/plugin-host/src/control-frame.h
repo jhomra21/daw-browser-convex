@@ -1,5 +1,7 @@
 #pragma once
 
+#include "plugin-host-contract-generated.h"
+
 #include <cstddef>
 #include <cstdint>
 #include <optional>
@@ -7,8 +9,6 @@
 #include <string_view>
 
 namespace daw::plugin_host {
-
-constexpr std::size_t kMaximumControlFrameBytes = 1'048'576;
 
 enum class ControlMessage {
   kScan,

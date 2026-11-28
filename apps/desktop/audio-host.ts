@@ -1,3 +1,4 @@
+import { sha256HexPattern, unsigned32Max, unsigned64Max } from "@daw-browser/desktop-protocol/wire-patterns"
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process"
 import { access } from "node:fs/promises"
 import { randomBytes } from "node:crypto"
@@ -25,8 +26,13 @@ import {
 import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { defaultDecodedAudioPageFrames } from "@daw-browser/audio-engine/media-pages"
 import {
+  maxVst3EditorDimension,
+  maxVst3PluginParameters,
+  maxVst3WorkerChannels,
   maxVst3WorkerEventsPerBlock,
   maxVst3WorkerFrames,
+  maxVst3WorkerStateBytes,
+  maxVst3WorkerTransportSlots,
 } from "@daw-browser/plugin-host-protocol"
 import {
   portableGraphContractHash,
@@ -34,7 +40,16 @@ import {
 } from "@daw-browser/audio-core-contract/generated"
 import {
   nativeAudioHostAssetInstallHeaderBytes as assetInstallHeaderBytes,
+  nativeAudioHostCodeName,
   nativeAudioHostControlTypes,
+  nativeAudioHostLifecycleStates,
+  nativeAudioHostNotificationKinds,
+  nativeAudioHostPatchOutcomes,
+  nativeAudioHostPatchRefusals,
+  nativeAudioHostReadinessReasons,
+  nativeAudioHostRequiredCapabilities,
+  nativeAudioHostSpoolStates,
+  nativeAudioHostVstEditorCommands,
   nativeAudioHostFrameHeaderBytes as headerBytes,
   nativeAudioHostMagic as magic,
   nativeAudioHostMaximumAssetChannels as maximumAssetChannels,
@@ -60,7 +75,6 @@ import type {
   NativeHostMeterBatch,
   NativeHostSpectrumFrame,
   NativeScheduleProgress,
-  NativeProcessorPatchRefusal,
   NativeProcessorPatchStatus,
   NativeOutputDevice,
   NativeHostPcmAsset,
@@ -150,7 +164,6 @@ const {
   instrumentStates: instrumentStatesType,
 } = nativeAudioHostControlTypes
 
-const requiredHostCapabilities = 0x000003ff
 const maximumOfflineStderrBytes = 16 * 1024
 const maximumOfflineQueuedFrames = 4
 const nativeOfflineStageTimeoutMs = 10_000
@@ -162,31 +175,7 @@ export const isNativeOfflineTelemetryFrame = (frameType: number) => (
   || frameType === scheduleProgressType
 )
 
-const deviceState = (value: number): AudioHostHello["deviceState"] | undefined => {
-  if (value === 0) return "idle"
-
-  if (value === 1) return "configured"
-
-  if (value === 2) return "running"
-
-  if (value === 3) return "faulted"
-
-  return undefined
-}
-
-const readinessReason = (value: number): AudioHostHello["readinessReason"] | undefined => {
-  if (value === 0) return "ready"
-
-  if (value === 1) return "device-not-configured"
-
-  if (value === 2) return "graph-not-prepared"
-
-  if (value === 3) return "transport-not-prepared"
-
-  return undefined
-}
-
-const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= 0xffff_ffff
+const unsigned32 = (value: number) => Number.isSafeInteger(value) && value >= 0 && value <= unsigned32Max
 
 const writeUnsigned32 = (value: number) => {
   const bytes = Buffer.alloc(4)
@@ -241,7 +230,7 @@ const serializeTransport = (input: NativeHostTransport) => {
       && (input.cycleStartSec === undefined || input.cycleEndSec === undefined
         || input.cycleEndSec <= input.cycleStartSec))
     || (input.transitionId !== undefined && (
-      input.transitionId <= 0n || input.transitionId > 0xffff_ffff_ffff_ffffn
+      input.transitionId <= 0n || input.transitionId > unsigned64Max
     ))) return undefined
   const output = Buffer.alloc(64)
   output.writeUInt32BE(input.epoch)
@@ -271,9 +260,9 @@ export type NativeMainRecordingStatus = NativeHostRecordingStatus & { fileDevice
 const recordingConfigurationHeaderBytes = 152
 
 const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration, spool: NativeRecordingSpoolConfiguration) => {
-  if (!spool || !/^[a-f0-9]{64}$/.test(spool.token) || !path.isAbsolute(spool.rootPath)
+  if (!spool || !sha256HexPattern.test(spool.token) || !path.isAbsolute(spool.rootPath)
     || spool.rootPath.includes("\0") || spool.rootDevice < 0n || spool.rootInode <= 0n
-    || spool.rootDevice > 0xffff_ffff_ffff_ffffn || spool.rootInode > 0xffff_ffff_ffff_ffffn) return undefined
+    || spool.rootDevice > unsigned64Max || spool.rootInode > unsigned64Max) return undefined
   const root = Buffer.from(spool.rootPath, "utf8")
 
   if (root.byteLength > 4096) return undefined
@@ -281,7 +270,7 @@ const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration
 
   if (
     !unsigned32(input.generation) || input.generation === 0
-    || input.sessionId <= 0n || input.sessionId > 0xffff_ffff_ffff_ffffn
+    || input.sessionId <= 0n || input.sessionId > unsigned64Max
     || (input.channelCount !== 1 && input.channelCount !== 2)
     || input.inputChannels.length !== input.channelCount
     || input.inputChannels.some((channel) => !unsigned32(channel))
@@ -293,7 +282,7 @@ const serializeRecordingConfiguration = (input: NativeHostRecordingConfiguration
     ))
     || !coreAudioDeviceId(input.deviceUid)
     || deviceUid.byteLength === 0 || deviceUid.byteLength > 4096
-    || input.targetNodeId <= 0n || input.targetNodeId > 0xffff_ffff_ffff_ffffn
+    || input.targetNodeId <= 0n || input.targetNodeId > unsigned64Max
   ) return undefined
   const output = Buffer.alloc(recordingConfigurationHeaderBytes + deviceUid.byteLength + root.byteLength)
   output.writeUInt32BE(input.generation, 0)
@@ -381,7 +370,7 @@ export type ResolvedVst3Attachment = {
   workerEnabled?: boolean
 }
 
-const fingerprintBytes = (value: string) => /^[a-f0-9]{64}$/.test(value) ? Buffer.from(value, "hex") : undefined
+const fingerprintBytes = (value: string) => sha256HexPattern.test(value) ? Buffer.from(value, "hex") : undefined
 
 const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   const strings = [input.instanceId, input.classId, input.vendorId]
@@ -406,16 +395,16 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
       && input.declaredTailFrames !== null
       && (!unsigned32(input.declaredTailFrames) || input.declaredTailFrames > 100_000_000))
     || !unsigned32(input.transportLatencyFrames)
-    || !unsigned32(input.workerTransport.slotCount) || input.workerTransport.slotCount === 0 || input.workerTransport.slotCount > 8
+    || !unsigned32(input.workerTransport.slotCount) || input.workerTransport.slotCount === 0 || input.workerTransport.slotCount > maxVst3WorkerTransportSlots
     || !unsigned32(input.workerTransport.maximumFrames) || input.workerTransport.maximumFrames === 0 || input.workerTransport.maximumFrames > maxVst3WorkerFrames
-    || !unsigned32(input.workerTransport.inputChannels) || input.workerTransport.inputChannels > 64
+    || !unsigned32(input.workerTransport.inputChannels) || input.workerTransport.inputChannels > maxVst3WorkerChannels
     || (input.role === "instrument" && input.workerTransport.inputChannels !== 0)
     || (input.role === "effect" && input.workerTransport.inputChannels === 0)
-    || !unsigned32(input.workerTransport.outputChannels) || input.workerTransport.outputChannels === 0 || input.workerTransport.outputChannels > 64
+    || !unsigned32(input.workerTransport.outputChannels) || input.workerTransport.outputChannels === 0 || input.workerTransport.outputChannels > maxVst3WorkerChannels
     || !unsigned32(input.workerTransport.maximumEventsPerBlock)
     || input.workerTransport.maximumEventsPerBlock === 0
     || input.workerTransport.maximumEventsPerBlock > maxVst3WorkerEventsPerBlock
-    || (input.parameterIds?.length ?? 0) > 16_384
+    || (input.parameterIds?.length ?? 0) > maxVst3PluginParameters
   ) return undefined
   const bundleFingerprint = fingerprintBytes(input.bundleFingerprint)
   const binaryFingerprint = fingerprintBytes(input.binaryFingerprint)
@@ -429,9 +418,9 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   const stateHash = input.initialState?.sha256 ?? ""
 
   if (
-    stateBytes.byteLength > 512 * 1024
-    || (stateBytes.byteLength === 0 && stateHash !== "" && !/^[a-f0-9]{64}$/.test(stateHash))
-    || (stateBytes.byteLength > 0 && !/^[a-f0-9]{64}$/.test(stateHash))
+    stateBytes.byteLength > maxVst3WorkerStateBytes
+    || (stateBytes.byteLength === 0 && stateHash !== "" && !sha256HexPattern.test(stateHash))
+    || (stateBytes.byteLength > 0 && !sha256HexPattern.test(stateHash))
     || (input.initialParameterValues?.length ?? 0) > 2_048
   ) return undefined
   const parameterBytes = Buffer.alloc((input.initialParameterValues?.length ?? 0) * 12)
@@ -457,7 +446,7 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
   return Buffer.concat([
     ...encodedStrings.flatMap((value) => [writeUnsigned32(value.byteLength), value]),
     writeUnsigned32(input.stageIndex),
-    writeUnsigned32(input.sourceIndex ?? 0xffff_ffff),
+    writeUnsigned32(input.sourceIndex ?? unsigned32Max),
     writeUnsigned64(input.graphNodeId),
     Buffer.from([1]),
     bundleFingerprint,
@@ -471,7 +460,7 @@ const serializeVstAttachment = (input: ResolvedVst3Attachment) => {
       input.renderEnabled === false ? 0 : 1,
     ]),
     writeUnsigned32(input.declaredLatencyFrames),
-    writeUnsigned32(input.declaredTailFrames ?? 0xffff_ffff),
+    writeUnsigned32(input.declaredTailFrames ?? unsigned32Max),
     writeUnsigned32(input.transportLatencyFrames),
     writeUnsigned32(input.workerTransport.slotCount),
     writeUnsigned32(input.workerTransport.maximumFrames),
@@ -509,7 +498,7 @@ const serializeVstEditor = (input: {
   anchor?: NativeVstEditorAnchor
 }) => {
   const instanceIdBytes = Buffer.from(input.instanceId, "utf8")
-  const command = { open: 1, close: 2, focus: 3, resize: 4, status: 5 }[input.command]
+  const command = nativeAudioHostVstEditorCommands[input.command]
   const width = input.width ?? 0
   const height = input.height ?? 0
   const anchor = input.anchor
@@ -519,8 +508,8 @@ const serializeVstEditor = (input: {
     !command
     || instanceIdBytes.byteLength === 0
     || instanceIdBytes.byteLength > maximumVstStringBytes
-    || !unsigned32(width) || width > 8192
-    || !unsigned32(height) || height > 8192
+    || !unsigned32(width) || width > maxVst3EditorDimension
+    || !unsigned32(height) || height > maxVst3EditorDimension
     || (anchor !== undefined && input.command !== "open" && input.command !== "focus")
     || (anchor !== undefined && (
       !Number.isSafeInteger(anchor.x) || anchor.x < -0x8000_0000 || anchor.x > 0x7fff_ffff
@@ -1247,8 +1236,8 @@ const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
   const artifactId = readString()
 
   if (!processorContractHash || !graphContractHash || !artifactId || offset + 16 !== bytes.byteLength) return undefined
-  const parsedDeviceState = deviceState(bytes.readUInt32BE(offset))
-  const parsedReadinessReason = readinessReason(bytes.readUInt32BE(offset + 4))
+  const parsedDeviceState = nativeAudioHostCodeName(nativeAudioHostLifecycleStates, bytes.readUInt32BE(offset))
+  const parsedReadinessReason = nativeAudioHostCodeName(nativeAudioHostReadinessReasons, bytes.readUInt32BE(offset + 4))
 
   if (!parsedDeviceState || !parsedReadinessReason) return undefined
   const maximumParkedInstances = bytes.readUInt32BE(offset + 8)
@@ -1270,7 +1259,7 @@ const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
 }
 
 const isCompatibleAudioHostHello = (hello: AudioHostHello) => (
-  (hello.capabilities & requiredHostCapabilities) === requiredHostCapabilities
+  (hello.capabilities & nativeAudioHostRequiredCapabilities) === nativeAudioHostRequiredCapabilities
   && hello.abiVersion === audioCoreWasmAbiVersion
   && hello.processorContractHash === processorContractHash
   && hello.graphContractHash === portableGraphContractHash
@@ -1281,15 +1270,11 @@ export const packagedAudioHostPath = (resourcesPath: string, isPackaged: boolean
   isPackaged ? path.join(resourcesPath, "daw-audio-host-macos") : explicitPath
 )
 
-const patchRefusals: readonly (NativeProcessorPatchRefusal | undefined)[] = [
-  undefined, "unavailable", "preparing", "claim-pending", "invalid",
-  "stale-revision", "stage-failed", "not-claimed", "apply-failed",
-]
-
 /** Anything but the three valid outcome/refusal/token/core combinations is a protocol error. */
 export const decodeNativeProcessorPatchStatus = (payload: Buffer): NativeProcessorPatchStatus | undefined => {
   if (payload.byteLength !== nativeAudioHostProcessorPatchStatusBytes) return undefined
   const outcome = payload.readUInt32BE(0)
+  const refusalName = nativeAudioHostCodeName(nativeAudioHostPatchRefusals, payload.readUInt32BE(4))
   const refusalCode = payload.readUInt32BE(4)
   const coreResult = payload.readUInt32BE(8)
   const token = payload.readBigUInt64BE(12)
@@ -1297,7 +1282,7 @@ export const decodeNativeProcessorPatchStatus = (payload: Buffer): NativeProcess
   if (outcome === 1) return refusalCode === 0 && coreResult === 0 && token === 0n ? { outcome: "applied" } : undefined
 
   if (outcome === 3) return refusalCode === 0 && coreResult === 0 && token !== 0n ? { outcome: "claimed", token } : undefined
-  const refusal = outcome === 2 ? patchRefusals[refusalCode] : undefined
+  const refusal = outcome === nativeAudioHostPatchOutcomes.refused && refusalName !== "none" ? refusalName : undefined
 
   if (!refusal) return undefined
 
@@ -1587,16 +1572,7 @@ export const createNativeAudioHostSupervisor = (
     if (payload.byteLength < 24) return undefined
     const kindValue = payload.readUInt32BE(0)
 
-    const kind = kindValue === 1 ? "latency"
-      : kindValue === 2 ? "buses"
-      : kindValue === 3 ? "restart"
-      : kindValue === 4 ? "fault"
-      : kindValue === 5 ? "miss"
-      : kindValue === 6 ? "editor-interaction"
-      : kindValue === 7 ? "parameter-edit"
-      : kindValue === 8 ? "tail"
-      : kindValue === 9 ? "editor-state"
-      : undefined
+    const kind = nativeAudioHostCodeName(nativeAudioHostNotificationKinds, kindValue)
 
     if (kind === "parameter-edit") {
       if (payload.byteLength < 32) return undefined
@@ -1605,7 +1581,7 @@ export const createNativeAudioHostSupervisor = (
       const instanceBytes = payload.readUInt32BE(28)
       const instanceId = payload.subarray(32).toString("utf8")
 
-      if (parameterId > 0xffff_ffff
+      if (parameterId > unsigned32Max
         || !Number.isFinite(normalizedValue)
         || normalizedValue < 0
         || normalizedValue > 1
@@ -1812,17 +1788,17 @@ export const createNativeAudioHostSupervisor = (
 
         if (recordingConfiguration && status.generation === recordingConfiguration.generation
           && status.sessionId === recordingConfiguration.sessionId) {
-          if (status.spool?.state === 1 && status.configured) recordingReady?.resolve(status)
-          else if (status.spool && status.spool.state >= 3) recordingReady?.reject(new Error("Native recording preparation failed."))
+          if (status.spool?.state === nativeAudioHostSpoolStates.ready && status.configured) recordingReady?.resolve(status)
+          else if (status.spool && status.spool.state >= nativeAudioHostSpoolStates.failed) recordingReady?.reject(new Error("Native recording preparation failed."))
 
-          if (recordingFinish && status.spool && status.spool.state >= 2) {
+          if (recordingFinish && status.spool && status.spool.state >= nativeAudioHostSpoolStates.complete) {
             recordingFinish.pending = false
 
-            if (status.spool.state === 2) recordingFinish.resolve()
+            if (status.spool.state === nativeAudioHostSpoolStates.complete) recordingFinish.resolve()
             else recordingFinish.reject(new Error("Native recording persistence failed; source retained for recovery."))
           }
 
-          if (status.spool && status.spool.state >= 2) recordingAdmitted = false
+          if (status.spool && status.spool.state >= nativeAudioHostSpoolStates.complete) recordingAdmitted = false
         }
 
         for (const listener of recordingStatusListeners) listener(status)
@@ -1955,9 +1931,9 @@ export const createNativeAudioHostSupervisor = (
         if (
           instanceId !== reply.instanceId
           || hashBytes !== 64
-          || stateBytes > 512 * 1024
+          || stateBytes > maxVst3WorkerStateBytes
           || payload.byteLength !== start + stateBytes + hashBytes
-          || !/^[a-f0-9]{64}$/.test(sha256)
+          || !sha256HexPattern.test(sha256)
         ) {
           rejectState("The native audio host returned an invalid VST state response.")
           continue
@@ -2586,7 +2562,7 @@ export const createNativeAudioHostSupervisor = (
         || !Number.isSafeInteger(input.frameCount) || input.frameCount <= 0
         || !unsigned32(input.sampleRateHz) || input.sampleRateHz === 0
         || !unsigned32(input.channelCount) || input.channelCount === 0 || input.channelCount > maximumAssetChannels
-        || hash < 0n || hash > 0xffff_ffff_ffff_ffffn
+        || hash < 0n || hash > unsigned64Max
       ) throw new Error("The native mapped audio asset is invalid.")
       const payload = Buffer.alloc(28)
       payload.writeUInt32BE(input.sessionAssetId, 0)
@@ -2665,7 +2641,7 @@ export const createNativeAudioHostSupervisor = (
       return requestGraphRevision(graphPrepareType, request, transactionToken)
     },
     allocateRuntimeRevision() {
-      if (!child || !hello || runtimeRevision >= 0xffff_ffff)
+      if (!child || !hello || runtimeRevision >= unsigned32Max)
         throw new NativeAudioHostNotSentError("The native runtime revision allocator is unavailable or exhausted.")
 
       return ++runtimeRevision

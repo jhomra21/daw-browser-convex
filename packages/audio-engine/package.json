@@ -55,6 +55,8 @@
     "./mixer/resolve-graph-processor": "./src/mixer/resolve-graph-processor.ts"
   },
   "scripts": {
+    "generate": "bun scripts/generate-portable-protocol-constants.ts",
+    "check:generated": "bun scripts/generate-portable-protocol-constants.ts --check",
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {

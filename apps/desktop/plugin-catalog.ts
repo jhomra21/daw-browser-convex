@@ -1,3 +1,4 @@
+import { sha256HexPattern } from "@daw-browser/desktop-protocol/wire-patterns"
 import { createHash, randomUUID } from 'node:crypto'
 import { createReadStream } from 'node:fs'
 import type { Dirent } from 'node:fs'
@@ -347,7 +348,7 @@ const isValidEntry = (value: DesktopJsonValue): value is DesktopJsonValue & Vst3
     && (record.scanHealth === "filesystem-only" || record.scanHealth === "scanned" || record.scanHealth === "scan-failed")
     && (!("scannerVersion" in record) || record.scannerVersion === undefined || typeof record.scannerVersion === "string")
     && (!("sdkVersion" in record) || record.sdkVersion === undefined || typeof record.sdkVersion === "string")
-    && (!("binaryFingerprint" in record) || record.binaryFingerprint === undefined || (typeof record.binaryFingerprint === "string" && /^[a-f0-9]{64}$/.test(record.binaryFingerprint)))
+    && (!("binaryFingerprint" in record) || record.binaryFingerprint === undefined || (typeof record.binaryFingerprint === "string" && sha256HexPattern.test(record.binaryFingerprint)))
     && (!("launchEligibility" in record) || record.launchEligibility === undefined || isValidLaunchEligibility(record.launchEligibility, record))
     && (!("hasTrustedScan" in record)
       || record.hasTrustedScan === undefined
@@ -373,11 +374,11 @@ const isValidLaunchEligibility = (
     && isInsideDirectory(record.canonicalExecutablePath, entry.bundlePath)
     && "binaryFingerprint" in record
     && typeof record.binaryFingerprint === "string"
-    && /^[a-f0-9]{64}$/.test(record.binaryFingerprint)
+    && sha256HexPattern.test(record.binaryFingerprint)
     && record.binaryFingerprint === entry.binaryFingerprint
     && "bundleFingerprint" in record
     && typeof record.bundleFingerprint === "string"
-    && /^[a-f0-9]{64}$/.test(record.bundleFingerprint)
+    && sha256HexPattern.test(record.bundleFingerprint)
     && "architecture" in record
     && record.architecture === "arm64"
     && "codeSignVerifiedAtMs" in record
@@ -595,8 +596,8 @@ export const createPluginCatalogStore = (options: {
     && eligibility.canonicalBundlePath === entry.bundlePath
     && path.isAbsolute(eligibility.canonicalExecutablePath)
     && isInsideDirectory(eligibility.canonicalExecutablePath, entry.bundlePath)
-    && /^[a-f0-9]{64}$/.test(eligibility.bundleFingerprint)
-    && /^[a-f0-9]{64}$/.test(eligibility.binaryFingerprint)
+    && sha256HexPattern.test(eligibility.bundleFingerprint)
+    && sha256HexPattern.test(eligibility.binaryFingerprint)
     && eligibility.binaryFingerprint === entry.binaryFingerprint
     && eligibility.architecture === "arm64"
     && eligibility.quarantinePresent === false

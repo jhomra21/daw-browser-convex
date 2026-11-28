@@ -1,3 +1,4 @@
+import { requestIdPattern, requestIdSchema, sha256HexSchema } from "@daw-browser/desktop-protocol/wire-patterns"
 import { contextBridge, ipcRenderer } from "electron"
 import { nativeInstrumentBudgetPolicy } from "@daw-browser/desktop-protocol/native-instrument-budget-policy"
 import {
@@ -105,9 +106,8 @@ import {
   vstParameterEditChannel,
 } from "@daw-browser/desktop-protocol/ipc-channels"
 import {
-  nativeAudioHostMappedAssetPageHeaderBytes,
+  nativeAudioHostMaximumMappedAssetPageBytes,
   nativeAudioHostMaximumMappedAssetRanges,
-  nativeAudioHostMaximumPayloadBytes,
   nativeOfflineRenderPlanSchema,
   type NativeRecordingSpoolImportVersion,
 } from "@daw-browser/desktop-protocol/native-audio-host"
@@ -171,7 +171,6 @@ const traceDiagnostics = (id: string, stage: string) => {
   if (stage === "preload-reply-sent" || stage === "preload-reply-invalid") diagnosticsTraceStarts.delete(id)
 }
 
-const maximumNativeMappedPageBytes = nativeAudioHostMaximumPayloadBytes - nativeAudioHostMappedAssetPageHeaderBytes
 const queueLimit = 32
 let closeHandler: (() => Promise<{ flushed: boolean }>) | undefined
 let activeGeneration = 0
@@ -198,7 +197,7 @@ const vstEditorCapturedStateSchema = z.object({
   instanceId: z.string(),
   state: z.object({
     bytes: z.instanceof(Uint8Array),
-    sha256: z.string().regex(/^[a-f0-9]{64}$/),
+    sha256: sha256HexSchema,
   }).strict(),
 }).strict()
 
@@ -270,7 +269,7 @@ const invokeNativeInputDevice = (preferredDeviceId?: string): Promise<NativeInpu
   ipcRenderer.invoke(resolveInputDeviceChannel, preferredDeviceId)
 
 const invokeNativeDeviceList = (): Promise<NativeDeviceListReply> => ipcRenderer.invoke(listDevicesChannel)
-const validExportRequestId = (requestId: string) => /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(requestId)
+const validExportRequestId = (requestId: string) => requestIdPattern.test(requestId)
 const invalidExportRequest = () => Promise.reject(new Error("Invalid export output request."))
 
 const reply = (generation: number, response: PreloadHostResponse) => {
@@ -605,7 +604,7 @@ const desktopBridge = {
           const pageNotify = ipcRendererListener((_event, value) => {
             const request = z.object({
               jobId: z.string(),
-              requestId: z.string().regex(/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/),
+              requestId: requestIdSchema,
               asset: z.object({
                 sessionAssetId: z.number().int().positive().safe(),
                 sourceAssetKey: z.string().min(1),
@@ -633,7 +632,7 @@ const desktopBridge = {
               || !Number.isSafeInteger(
                 request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT,
               )
-              || request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT > maximumNativeMappedPageBytes
+              || request.data.frameCount * request.data.asset.channelCount * Float32Array.BYTES_PER_ELEMENT > nativeAudioHostMaximumMappedAssetPageBytes
             ) return
             void pageListener(
               request.data.requestId,

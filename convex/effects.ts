@@ -15,6 +15,7 @@ import {
   normalizeArpeggiatorParams,
   normalizeAudioEffectParamsForUpdate,
   audioEffectParamsVersionStamp,
+  effectRowParamsVersionStamp,
   AUDIO_EFFECT_KINDS,
   audioEffectKindsWithOperation,
   audioEffectOrderItemId,
@@ -371,7 +372,7 @@ export const upsertTrackEffectRow = async (
     }
 
     edit.stamp()
-    await ctx.db.patch(row._id, { params, ...audioEffectParamsVersionStamp(input.type), targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
+    await ctx.db.patch(row._id, { params, ...effectRowParamsVersionStamp(input.type, params), targetType: 'track', type: input.type, instanceId: input.instanceId, revision })
 
     return effectRowWriteResult('updated', row._id, revision)
   }
@@ -387,7 +388,7 @@ export const upsertTrackEffectRow = async (
     type: input.type,
     instanceId: input.instanceId,
     params,
-    ...audioEffectParamsVersionStamp(input.type),
+    ...effectRowParamsVersionStamp(input.type, params),
     createdAt: Date.now(),
     revision,
   })

@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import { convexTest } from "convex-test";
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, AUDIO_EFFECT_PARAMS_VERSION, isJsonObject, type AudioEffectParamsVersioning } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, AUDIO_EFFECT_PARAMS_VERSION, INSTRUMENT_CONTRACTS, INSTRUMENT_KINDS, INSTRUMENT_PARAMS_VERSION, createDefaultArpeggiatorParams, isJsonObject, normalizeSynthParams, type AudioEffectParamsVersioning, type JsonValue } from "@daw-browser/shared";
 
 import { api } from "./_generated/api";
 import { currentEffectRow, currentEffectRows } from "./effectRowParams";
-import { upsertMasterEffectRow, upsertTrackEffectRow } from "./effects";
+import { setArpeggiatorRow, setTrackInstrumentRow, upsertMasterEffectRow, upsertTrackEffectRow } from "./effects";
 import { withProjectEdit } from "./projectRows";
 import schema from "./schema";
 
@@ -13,6 +13,7 @@ const modules = {
   "./automation.ts": () => import("./automation"),
   "./effects.ts": () => import("./effects"),
   "./projects.ts": () => import("./projects"),
+  "./tracks.ts": () => import("./tracks"),
 };
 
 const owner = "effect-params-owner";
@@ -44,7 +45,7 @@ const seed = async () => {
   return { t, trackId };
 };
 
-type StoredParams = Record<string, boolean | number | string>;
+type StoredParams = Record<string, JsonValue>;
 
 const eqRow = (trackId: Awaited<ReturnType<typeof seed>>["trackId"], params: StoredParams, paramsVersion?: number) => ({
   projectId,
@@ -86,16 +87,16 @@ test("returns a newer stored version unchanged and lists it through the query", 
   expect(listed[0]).not.toHaveProperty("paramsVersion");
 });
 
-test("leaves non-catalog rows such as instruments untouched", async () => {
+test("leaves rows outside the catalog and the instruments untouched", async () => {
   const { t, trackId } = await seed();
 
   const row = await t.run(async (ctx) => {
-    const id = await ctx.db.insert("effects", { ...eqRow(trackId, { kind: "synth" }), type: "instrument" });
+    const id = await ctx.db.insert("effects", { ...eqRow(trackId, { kind: "unknown" }), type: "external" });
 
     return await ctx.db.get(id);
   });
 
-  expect(row && currentEffectRow(row, exampleVersioning).params).toEqual({ kind: "synth" });
+  expect(row && currentEffectRow(row, exampleVersioning).params).toEqual({ kind: "unknown" });
 });
 
 test("stamps every catalog kind on write and reads the same params back", async () => {
@@ -123,4 +124,78 @@ test("stamps every catalog kind on write and reads the same params back", async 
   }
 
   expect(listed.every((row) => !("paramsVersion" in row))).toBe(true);
+});
+
+const legacySynth = { wave1: "square", wave2: "sine", gain: 0.5, attackMs: 40, releaseMs: 300 };
+
+test("migrates stored instrument, legacy synth and arpeggiator rows at read and keeps unversioned current rows as they are", async () => {
+  const { t, trackId } = await seed();
+
+  const rows = await t.run(async (ctx) => {
+    const sampler = { kind: "sampler", instanceId: "i-sampler", params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() };
+    await ctx.db.insert("effects", { ...eqRow(trackId, legacySynth), type: "synth", instanceId: "i-synth" });
+    await ctx.db.insert("effects", { ...eqRow(trackId, { kind: "synth", instanceId: "i-legacy", params: legacySynth }), type: "instrument", instanceId: "i-legacy", index: 1 });
+    await ctx.db.insert("effects", { ...eqRow(trackId, sampler), type: "instrument", instanceId: "i-sampler", index: 2 });
+    await ctx.db.insert("effects", { ...eqRow(trackId, createDefaultArpeggiatorParams()), type: "arpeggiator", instanceId: undefined, index: 3 });
+
+    return await ctx.db.query("effects").collect();
+  });
+
+  const [bareSynth, wrappedSynth, samplerRow, arp] = currentEffectRows(rows);
+
+  expect(bareSynth?.params).toEqual(normalizeSynthParams(legacySynth));
+  expect(wrappedSynth?.params).toEqual({ kind: "synth", instanceId: "i-legacy", params: normalizeSynthParams(legacySynth) });
+  expect(samplerRow?.params).toEqual({ kind: "sampler", instanceId: "i-sampler", params: INSTRUMENT_CONTRACTS.sampler.createDefaultParams() });
+  expect(arp?.params).toEqual(createDefaultArpeggiatorParams());
+  expect(currentEffectRows(rows).every((row) => !("paramsVersion" in row))).toBe(true);
+});
+
+test("lists a legacy synth row through the query as the current shape", async () => {
+  const { t, trackId } = await seed();
+  await t.run(async (ctx) => { await ctx.db.insert("effects", { ...eqRow(trackId, legacySynth), type: "synth", instanceId: "i-synth" }); });
+
+  const listed = await t.withIdentity({ subject: owner }).query(api.effects.listByTrack, { projectId, trackId });
+
+  expect(listed.map((row) => row.params)).toEqual([normalizeSynthParams(legacySynth)]);
+});
+
+test("stamps every instrument kind and the arpeggiator on write and reads the same params back", async () => {
+  const { t, trackId } = await seed();
+
+  for (const kind of INSTRUMENT_KINDS) {
+    const instrument = { kind, instanceId: `i-${kind}`, params: INSTRUMENT_CONTRACTS[kind].createDefaultParams() };
+
+    const written = await t.run(async (ctx) => {
+      await withProjectEdit(ctx, projectId, (edit) => setTrackInstrumentRow(ctx, edit, { projectId, trackId, instrument }));
+
+      return await ctx.db.query("effects").collect();
+    });
+
+    expect(written).toHaveLength(1);
+    expect(written[0]?.type).toBe("instrument");
+    expect(written[0]?.paramsVersion).toBe(INSTRUMENT_PARAMS_VERSION[kind]);
+    expect(currentEffectRows(written)[0]?.params).toEqual(instrument);
+  }
+
+  const raw = await t.run(async (ctx) => {
+    await withProjectEdit(ctx, projectId, (edit) => setArpeggiatorRow(ctx, edit, { projectId, trackId, params: createDefaultArpeggiatorParams() }));
+
+    return await ctx.db.query("effects").collect();
+  });
+
+  const listed = await t.withIdentity({ subject: owner }).query(api.effects.listByTrack, { projectId, trackId });
+
+  expect(raw.find((row) => row.type === "arpeggiator")?.paramsVersion).toBe(INSTRUMENT_PARAMS_VERSION.arpeggiator);
+  expect(listed.find((row) => row.type === "arpeggiator")?.params).toEqual(createDefaultArpeggiatorParams());
+  expect(listed.every((row) => !("paramsVersion" in row))).toBe(true);
+});
+
+test("creating an instrument track stamps its synth", async () => {
+  const t = convexTest(schema, modules);
+  const asOwner = t.withIdentity({ subject: owner });
+  await asOwner.mutation(api.projects.createOwnedRoom, { projectId });
+  await asOwner.mutation(api.tracks.serverCreate, { projectId, kind: "instrument" });
+  const rows = await t.run(async (ctx) => await ctx.db.query("effects").collect());
+
+  expect(rows.map((row) => row.paramsVersion)).toEqual([INSTRUMENT_PARAMS_VERSION.synth]);
 });

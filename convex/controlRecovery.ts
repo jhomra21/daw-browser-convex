@@ -22,9 +22,9 @@ import {
 } from "@daw-browser/control-core";
 import type { NormalizedTrackControlStateV1, TimelineRangeDeletePatchV1 } from "@daw-browser/control-core";
 import {
-  audioEffectParamsVersionStamp,
   automationTargetKey,
   automationValuesVersionStamp,
+  effectRowParamsVersionStamp,
   granularAutomationKey,
   instrumentAutomationKey,
   normalizeLegacyMidiClip,
@@ -852,6 +852,8 @@ const restoreEffectBundle = async (
       item.effect.processor.params,
     );
 
+    const type = instrument ? "instrument" : item.effect.processor.kind;
+    const params = instrument ?? item.effect.processor.params;
     edit.stamp();
 
     const id = await ctx.db.insert("effects", {
@@ -859,10 +861,10 @@ const restoreEffectBundle = async (
       targetType: item.effect.target.kind,
       trackId: target.track === undefined ? undefined : target.track._id,
       index: item.effect.index,
-      type: instrument ? "instrument" : item.effect.processor.kind,
+      type,
       instanceId: item.effect.instanceId,
-      params: instrument ?? item.effect.processor.params,
-      ...audioEffectParamsVersionStamp(item.effect.processor.kind),
+      params,
+      ...effectRowParamsVersionStamp(type, params),
       createdAt: item.effect.createdAt,
       revision,
     });
@@ -1113,13 +1115,15 @@ const restoreTrackBundle = async (
         : effect.instanceId !== undefined && row.instanceId === effect.instanceId
     ))) throw new ControlDomainError("validation", "Recovery processor collides with current state.", input.actionIndex);
     const instrument = normalizePersistedInstrumentParams(effect.processor.kind, effect.instanceId ?? null, effect.processor.params);
+    const type = instrument ? "instrument" : effect.processor.kind;
+    const params = instrument ?? effect.processor.params;
     edit.stamp();
 
     const id = await ctx.db.insert("effects", {
       projectId: effect.projectId, targetType: effect.target.kind, trackId,
-      index: effect.index, type: instrument ? "instrument" : effect.processor.kind,
+      index: effect.index, type,
       instanceId: effect.instanceId,
-      params: instrument ?? effect.processor.params, ...audioEffectParamsVersionStamp(effect.processor.kind), createdAt: effect.createdAt,
+      params, ...effectRowParamsVersionStamp(type, params), createdAt: effect.createdAt,
       revision: effectRevision,
     });
 

@@ -389,6 +389,7 @@ export default defineSchema({
     type: v.string(),
     instanceId: v.optional(v.string()),
     params: v.any(),
+    // Version of the params shape for this row's effect, instrument or arpeggiator kind; absent = 1.
     paramsVersion: v.optional(v.number()),
     createdAt: v.number(),
     // Project revision of the transaction that last wrote this row. Rows written before stamping have none.
@@ -419,7 +420,7 @@ export default defineSchema({
     parameterId: v.string(),
     enabled: v.boolean(),
     points: v.array(automationPointValidator),
-    // Version of the effect kind whose parameter units the point values are in; absent = 1. Unset for mixer and instrument lanes.
+    // Version of the effect or instrument kind whose parameter units the point values are in; absent = 1. Unset for mixer lanes.
     valuesVersion: v.optional(v.number()),
     updatedAt: v.number(),
   })

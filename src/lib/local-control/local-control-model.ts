@@ -351,7 +351,7 @@ export const materializeLocalControlSnapshot = (
       updatedAt: timestamp,
     }
 
-    entities.push(createLocalProjectEntityRow(EFFECT_ROW_KIND, id, { ...row, ...localEffectParamsVersionStamp(kind) }, timestamp))
+    entities.push(createLocalProjectEntityRow(EFFECT_ROW_KIND, id, { ...row, ...localEffectParamsVersionStamp(kind, row.params) }, timestamp))
   }
 
   for (const item of snapshot.automation) {

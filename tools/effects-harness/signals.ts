@@ -2,6 +2,10 @@
 export const sine = (frames: number, frequencyHz: number, rate: number, amplitude = 1, phaseRadians = 0) =>
   Float32Array.from({ length: frames }, (_, n) => amplitude * Math.sin(2 * Math.PI * frequencyHz * n / rate + phaseRadians))
 
+/** A sum of sines, one per [frequencyHz, amplitude] partial. */
+export const tones = (frames: number, rate: number, partials: readonly (readonly [number, number])[]) =>
+  Float32Array.from({ length: frames }, (_, n) => partials.reduce((sum, [frequencyHz, amplitude]) => sum + amplitude * Math.sin(2 * Math.PI * frequencyHz * n / rate), 0))
+
 /** A sine whose crest lands on frame `peakFrame`: the worst case for a gain or parameter step. */
 export const sineWithPeakAt = (frames: number, frequencyHz: number, rate: number, amplitude: number, peakFrame: number) =>
   Float32Array.from({ length: frames }, (_, n) => amplitude * Math.cos(2 * Math.PI * frequencyHz * (n - peakFrame) / rate))

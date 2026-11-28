@@ -159,7 +159,7 @@
    "src/hooks/useTimelinePlayback.ts": "90526d667e16b5b5181f51c87248a4da40ab0c8a787f7d1d55773d04559f3875",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
-   "src/lib/local-effects.ts": "ed2309148770fcd7f0b82732470644dab31532a676d4814fd5e7f937435528c8",
+   "src/lib/local-effects.ts": "04c38749303e54799a90735c0e2f7568d02b5f2924f42feae81fe59fbf43982c",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "10047901ef4a4b3e5edbc87221b291814210006441ef0286b8db9e24a609608e",
    "src/lib/live-processor-control.ts": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a",
@@ -4248,7 +4248,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "28b9d9c3153070c3e29570c95158ea94cd1aaf1439d2ebdaae6140433d893241",
+   "treeSha256": "7ce1bb37729a56e773cde4720d2a13d48956ecb7c0e612fdf193808404abefa1",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

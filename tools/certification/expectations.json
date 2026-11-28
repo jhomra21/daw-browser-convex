@@ -42489,7 +42489,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -42727,7 +42727,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -42905,7 +42905,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43128,7 +43128,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -43305,7 +43305,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43499,7 +43499,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -43673,7 +43673,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43895,7 +43895,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -44070,7 +44070,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -44262,7 +44262,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -44438,7 +44438,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -44655,7 +44655,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 224,
+      "pass": 206,
       "skip": 1,
       "fail": 57
      },
@@ -44885,7 +44885,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -45095,7 +45095,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -45272,7 +45272,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -45528,7 +45528,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -45763,7 +45763,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -45964,7 +45964,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -46500,7 +46500,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -46695,7 +46695,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -63551,9 +63551,9 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 243,
+      "pass": 242,
       "skip": 1,
-      "fail": 20
+      "fail": 21
      },
      "fails": [
       "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
@@ -63574,6 +63574,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -63633,9 +63634,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 245,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -63654,6 +63655,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -64056,9 +64058,9 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 245,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -64077,6 +64079,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -64136,9 +64139,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 245,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -64157,6 +64160,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],

@@ -106,17 +106,23 @@ struct EnvelopeFrames {
   float attack;
   float decay;
   float release;
+  float sustain_follow;
 };
 
+// A held note follows a moved Sustain knob with a 2 ms pole: no step, and settled
+// (under 1% of a 0.5 move) within 20 ms, which the 5 ms parameter slew alone is not.
+constexpr float kSustainFollowSeconds = 0.002F;
+
 EnvelopeFrames envelope_frames(float attack_ms, float decay_ms, float release_ms, uint32_t sample_rate_hz) {
-  const auto frames = [sample_rate_hz](float ms) { return std::fmax(1.0F, ms * static_cast<float>(sample_rate_hz) / 1000.0F); };
-  return {frames(std::fmax(1.0F, attack_ms)), frames(decay_ms), frames(release_ms)};
+  const float rate = static_cast<float>(sample_rate_hz);
+  const auto frames = [rate](float ms) { return std::fmax(1.0F, ms * rate / 1000.0F); };
+  return {frames(std::fmax(1.0F, attack_ms)), frames(decay_ms), frames(release_ms), 1.0F / frames(kSustainFollowSeconds * 1000.0F)};
 }
 
 // Attack climbs to 1, decay falls from 1 to the sustain level, and from then on the
-// level is the sustain (already slewed, so a moved knob is heard on a held note).
-// Release falls from the level at note-off (`release_from`) to 0. A note-on on a
-// releasing voice attacks again from where the level is.
+// level follows the sustain, so a moved knob is heard on a held note. Release falls
+// from the level at note-off (`release_from`) to 0. A note-on on a releasing voice
+// attacks again from where the level is.
 float envelope_step(
   float level, uint32_t *stage, float *release_from, bool released, const EnvelopeFrames &frames, float sustain) {
   if (released) {
@@ -137,7 +143,9 @@ float envelope_step(
     level -= (1.0F - sustain) / frames.decay;
     if (level <= sustain) *stage = 2;
   }
-  return *stage == 2 ? sustain : level;
+  if (*stage != 2) return level;
+  const float delta = sustain - level;
+  return std::fabs(delta) < 1e-5F ? sustain : level + delta * frames.sustain_follow;
 }
 
 // Quietest released voice, then the oldest released, then the oldest held.
@@ -259,8 +267,8 @@ void render_instrument_frame(
     pitch_modulated ? 1.0F : std::pow(2.0F, synth.oscillators[0].detune_cents / 1200.0F),
     pitch_modulated ? 1.0F : std::pow(2.0F, synth.oscillators[1].detune_cents / 1200.0F)};
   const auto render_voice = [&](InstrumentVoice &voice) {
-    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, &voice.amp_release_level, voice.released, amp_frames, synth.amp_sustain);
-    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, synth.filter_sustain);
+    voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, &voice.amp_release_level, voice.released, amp_frames, instrument.synth.amp_sustain);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, instrument.synth.filter_sustain);
     if (voice.amp_level <= 0.0F && voice.released) {
       voice = {};
       return;
@@ -367,8 +375,8 @@ void render_sample_instrument_frame(
   const auto render_voice = [&](SampleVoice &voice) {
     const float release_ms = voice.forced_release_ms > 0.0F ? voice.forced_release_ms : state.amp_release_ms;
     voice.amp_level = envelope_step(voice.amp_level, &voice.amp_stage, &voice.amp_release_level, voice.released,
-      envelope_frames(state.amp_attack_ms, state.amp_decay_ms, release_ms, sample_rate_hz), state.amp_sustain);
-    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, state.filter_sustain);
+      envelope_frames(state.amp_attack_ms, state.amp_decay_ms, release_ms, sample_rate_hz), instrument.sampler.amp_sustain);
+    voice.filter_level = envelope_step(voice.filter_level, &voice.filter_stage, &voice.filter_release_level, voice.released, filter_frames, instrument.sampler.filter_sustain);
     const daw_audio_sample_zone &zone = instrument.applied.zones[voice.zone];
     AssetSlot *asset = find_asset(&core, zone.asset);
     if (asset == nullptr || (voice.amp_level <= 0.0F && voice.released)) {

@@ -7,15 +7,12 @@ import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRend
 import { arpeggiatorParamsEqual, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AudioPcmSourceDescriptor, type AutomationEnvelope, type MidiMappingTarget, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
 import { createMasterFxRuntime } from './master-fx-runtime'
-import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackMeterFrameListener, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
-import type { CompressorMeterFrame, CompressorMeterListener } from './effects/compressor-worklet'
-import type { GateMeterFrame, GateMeterListener } from './effects/static-worklet-chain'
+import { createMeteringRuntime, type MasterStereoLevelsListener, type SpectrumFrame, type TrackMeterFrame, type TrackMeterFrameBatch, type TrackStereoLevels, type TrackStereoLevelsBatch, type TrackStereoLevelsListener } from './metering-runtime'
+import type { CompressorMeterFrame } from './effects/compressor-worklet'
+import type { GateMeterFrame } from './effects/static-worklet-chain'
 import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
-import type { DrumRackRegionUse, DrumRackResolvedBuffers } from './drum-rack-runtime'
-import type { SamplerNoteMiss, SamplerRegionUse, SamplerResolvedBuffers } from './sampler-runtime'
-import type { GranularInstalledBuffer } from './granular-runtime'
 
 export { createSamplerBufferCache } from './sampler-core'
 
@@ -26,7 +23,7 @@ import type { Clip, ExternalSidechainRoute, Track } from '@daw-browser/timeline-
 import { applyAutomationEnvelopeAtTime, scheduleAutomationEnvelope, type AutomationAudioBinding } from './automation'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { EngineDisposition } from './engine-disposition'
-import { createRecordingRuntime, type RecordingRuntimeStatus, type StartRecordingCaptureOptions } from './recording/recording-runtime'
+import { createRecordingRuntime, type StartRecordingCaptureOptions } from './recording/recording-runtime'
 import { analyzeCalibrationCapture, createCalibrationStimulus, type RecordingCalibrationAnalysis } from './recording/calibration'
 import { createRuntimeFaultCounter, type RuntimeFaultSnapshot } from './runtime-diagnostics'
 import { createLiveWorkletBudget } from './effects/live-worklet-budget'
@@ -113,16 +110,16 @@ export class AudioEngine {
   private masterVolume = 1
   private sources = createSourceRegistry()
   private workletBudget = createLiveWorkletBudget()
-  private instrumentRuntime = createInstrumentRuntime({
+  readonly instruments = createInstrumentRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
     getBpm: () => this.clock.getBpm(),
     timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
-    ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
+    ensureTrackInput: (trackId) => this.mixer.ensureTrackInput(trackId),
     sources: this.sources,
     getAutomationEnvelopes: () => this.automationEnvelopes,
   })
-  private mixerRuntime = createLiveMixerRuntime({
+  readonly mixer = createLiveMixerRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
     getMasterInput: () => this.masterGain,
@@ -152,7 +149,7 @@ export class AudioEngine {
     getBpm: () => this.clock.getBpm(),
     timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
     updateTrackGains: (tracks) => this.updateTrackGains(tracks),
-    ensureTrackInput: (trackId) => this.mixerRuntime.ensureTrackInput(trackId),
+    ensureTrackInput: (trackId) => this.mixer.ensureTrackInput(trackId),
     stopClipSources: () => this.stopClipSources(),
     stopSourcesForClip: (clipId) => this.stopSourcesForClip(clipId),
     scheduleMidiClip: (track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec),
@@ -161,7 +158,7 @@ export class AudioEngine {
     stretchRenderAheadSec: LIVE_SCHEDULE_HORIZON_SEC,
     sources: this.sources,
   })
-  private masterFx = createMasterFxRuntime({
+  readonly masterFx = createMasterFxRuntime({
     getFaultGeneration: () => this.faultGeneration,
     workletBudget: this.workletBudget,
     onWorkletFault: (generation, kind, code, context) => {
@@ -172,7 +169,7 @@ export class AudioEngine {
   private metronome = createMetronomeRuntime(this.clock)
   private runtimeFaultCounter = createRuntimeFaultCounter()
   private inferredApplicationStallCount = 0
-  private metering = createMeteringRuntime({
+  readonly metering = createMeteringRuntime({
     getFaultGeneration: () => this.faultGeneration,
     onWorkletFault: (generation, trackId) => {
       if (this.runtimeFaultCounter.report(generation, {
@@ -186,9 +183,9 @@ export class AudioEngine {
     createBuffer: (channels, frames, sampleRate) => new AudioBuffer({ numberOfChannels: channels, length: frames, sampleRate }),
     persist: true,
   })
-  private recording = createRecordingRuntime({
+  readonly recording = createRecordingRuntime({
     getContext: () => this.audioCtx,
-    connectMonitor: (trackId, source) => this.mixerRuntime.connectRecordingMonitor(trackId, source),
+    connectMonitor: (trackId, source) => this.mixer.connectRecordingMonitor(trackId, source),
     getFaultGeneration: () => this.faultGeneration,
     onFault: (generation, code) => {
       if (this.runtimeFaultCounter.report(generation, { kind: 'recorder', code, context: 'recording-capture' })) {
@@ -335,14 +332,6 @@ export class AudioEngine {
     return this.metering.subscribeMasterStereoLevels(listener)
   }
 
-  subscribeTrackMeterFrames(listener: TrackMeterFrameListener) {
-    return this.metering.subscribeTrackMeterFrames(listener)
-  }
-
-  resetTrackMeters() {
-    this.metering.resetTrackMeters()
-  }
-
   startRecordingCapture(options: StartRecordingCaptureOptions) {
     if (this.calibrationReserved) throw new Error('Wait for recording calibration to finish.')
     this.recordingStartReserved = true
@@ -350,18 +339,6 @@ export class AudioEngine {
     return this.recording.start(options).finally(() => {
       this.recordingStartReserved = false
     })
-  }
-
-  stopRecordingCapture() {
-    return this.recording.stop()
-  }
-
-  cancelRecordingCapture() {
-    this.recording.cancel()
-  }
-
-  subscribeRecordingStatus(listener: (status: RecordingRuntimeStatus) => void) {
-    return this.recording.subscribe(listener)
   }
 
   async calibrateRecording(input: {
@@ -506,46 +483,12 @@ export class AudioEngine {
     }
   }
 
-  // Returns a normalized 0..1 RMS level for a track's post-gain signal
-  getTrackLevel(trackId: string): number {
-    return this.metering.getTrackLevel(trackId)
-  }
-
   getAudioContext() {
     return this.audioCtx
   }
 
   midiEventTimes(timeStamp: number): AudioClockResult | undefined {
     return this.midiTimestampConverter(timeStamp)
-  }
-
-  triggerSynthNote(input: {
-    trackId: string
-    pitch: number
-    velocity?: number
-    when: number
-    durationSec: number
-    live?: boolean
-  }) {
-    this.ensureAudio()
-
-    return this.instrumentRuntime.triggerSynthNote(input)
-  }
-
-  previewSynthNote(trackId: string, pitch: number, velocity?: number, durationSec?: number) {
-    this.ensureAudio()
-
-    return this.instrumentRuntime.previewSynthNote(trackId, pitch, velocity, durationSec)
-  }
-
-  startSynthPreviewNote(trackId: string, pitch: number, velocity?: number) {
-    this.ensureAudio()
-
-    return this.instrumentRuntime.startSynthPreviewNote(trackId, pitch, velocity)
-  }
-
-  releaseSynthPreviewNote(trackId: string, noteInstanceId: number, when?: number) {
-    this.instrumentRuntime.releaseSynthPreviewNote(trackId, noteInstanceId, when)
   }
 
   startLiveMidiNote(input: {
@@ -555,20 +498,20 @@ export class AudioEngine {
     when: number
   }): LiveMidiNoteHandle | undefined {
     this.ensureAudio()
-    const instrumentKind = this.instrumentRuntime.getTrackInstrumentKind(input.trackId)
+    const instrumentKind = this.instruments.getTrackInstrumentKind(input.trackId)
 
     if (!instrumentKind) return undefined
     const id = this.nextLiveMidiNoteId++
 
     if (instrumentKind === 'synth') {
-      const synthNoteInstanceId = this.instrumentRuntime.triggerSynthNote({
+      const synthNoteInstanceId = this.instruments.triggerSynthNote({
         ...input,
         durationSec: 86_400,
         live: true,
       })
 
       if (synthNoteInstanceId === undefined) return undefined
-      const synthGeneration = this.instrumentRuntime.getSynthLiveVoiceGeneration(input.trackId)
+      const synthGeneration = this.instruments.getSynthLiveVoiceGeneration(input.trackId)
 
       if (synthGeneration === undefined) return undefined
       this.liveMidiNotes.set(id, { trackId: input.trackId, instrumentKind, synthNoteInstanceId, synthGeneration })
@@ -584,11 +527,11 @@ export class AudioEngine {
     }
 
     const stop = instrumentKind === 'sampler'
-      ? this.instrumentRuntime.startLiveSamplerNote(input.trackId, input.pitch, input.velocity, undefined, onEnded)
+      ? this.instruments.startLiveSamplerNote(input.trackId, input.pitch, input.velocity, undefined, onEnded)
       : instrumentKind === 'drum-rack'
-        ? this.instrumentRuntime.startLiveDrumRackNote(input.trackId, input.pitch, input.velocity, onEnded)
+        ? this.instruments.startLiveDrumRackNote(input.trackId, input.pitch, input.velocity, onEnded)
         : instrumentKind === 'granular'
-          ? this.instrumentRuntime.startLiveGranularNote(
+          ? this.instruments.startLiveGranularNote(
               input.trackId,
               input.when,
               LIVE_GRANULAR_NOTE_DURATION_SEC,
@@ -621,7 +564,7 @@ export class AudioEngine {
 
     if (note.synthNoteInstanceId !== undefined) {
       this.removeLiveMidiNote(handle.id)
-      this.instrumentRuntime.releaseSynthPreviewNote(
+      this.instruments.releaseSynthPreviewNote(
         note.trackId,
         note.synthNoteInstanceId,
         when,
@@ -660,7 +603,7 @@ export class AudioEngine {
   }
 
   getTrackInstrumentKind(trackId: string): TrackInstrumentParams['kind'] | undefined {
-    return this.instrumentRuntime.getTrackInstrumentKind(trackId)
+    return this.instruments.getTrackInstrumentKind(trackId)
   }
 
   ensureAudio(opts?: { applyCachedTrackGains?: boolean }) {
@@ -692,69 +635,25 @@ export class AudioEngine {
   }
 
   setTrackSynth(trackId: string, params: SynthParamsInput, instanceId?: string): EngineDisposition {
-    return this.instrumentRuntime.setTrackSynth(trackId, params, instanceId)
+    return this.instruments.setTrackSynth(trackId, params, instanceId)
   }
 
   setTrackInstrument(trackId: string, input: SetTrackInstrumentInput): EngineDisposition {
-    return this.instrumentRuntime.setTrackInstrument(trackId, input)
-  }
-
-  setTrackDrumRack(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'drum-rack' }>['params'], buffers?: DrumRackResolvedBuffers): EngineDisposition {
-    return this.instrumentRuntime.setTrackDrumRack(trackId, params, buffers)
-  }
-
-  setTrackSampler(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'sampler' }>['params'], buffers?: SamplerResolvedBuffers, instanceId?: string) {
-    this.instrumentRuntime.setTrackSampler(trackId, params, buffers, instanceId)
-  }
-
-  setTrackGranular(trackId: string, params: Extract<SetTrackInstrumentInput['instrument'], { kind: 'granular' }>['params'], installedBuffer?: GranularInstalledBuffer, instanceId?: string): Promise<EngineDisposition> {
-    return this.instrumentRuntime.setTrackGranular(trackId, params, installedBuffer, instanceId)
-  }
-
-  setSamplerRuntimeListeners(listeners: {
-    onNoteMiss?: (miss: SamplerNoteMiss) => void
-    onAssetUse?: (use: SamplerRegionUse) => void
-    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
-  }) {
-    this.instrumentRuntime.setSamplerRuntimeListeners(listeners)
-  }
-
-  addSamplerRuntimeListeners(listeners: {
-    onNoteMiss?: (miss: SamplerNoteMiss) => void
-    onAssetUse?: (use: SamplerRegionUse) => void
-    onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
-  }) {
-    return this.instrumentRuntime.addSamplerRuntimeListeners(listeners)
-  }
-
-  previewSamplerNote(trackId: string, pitch: number, velocity = 1) {
-    return this.instrumentRuntime.previewSamplerNote(trackId, pitch, velocity)
-  }
-
-  previewDrumRackPad(trackId: string, padId: string, velocity = 1) {
-    this.instrumentRuntime.previewDrumRackPad(trackId, padId, velocity)
-  }
-
-  previewDrumRackNote(trackId: string, pitch: number, velocity = 1) {
-    return this.instrumentRuntime.previewDrumRackNote(trackId, pitch, velocity)
+    return this.instruments.setTrackInstrument(trackId, input)
   }
 
   setTrackArpeggiator(trackId: string, params: ArpParams): EngineDisposition {
-    if (arpeggiatorParamsEqual(this.instrumentRuntime.getTrackArpeggiator(trackId), params)) return 'skipped'
-    this.instrumentRuntime.setTrackArpeggiator(trackId, params)
+    if (arpeggiatorParamsEqual(this.instruments.getTrackArpeggiator(trackId), params)) return 'skipped'
+    this.instruments.setTrackArpeggiator(trackId, params)
 
     for (const listener of this.arpeggiatorListeners) listener(trackId)
 
     return 'applied'
   }
 
-  getTrackArpeggiator(trackId: string): ArpParams | undefined {
-    return this.instrumentRuntime.getTrackArpeggiator(trackId)
-  }
-
   clearTrackArpeggiator(trackId: string) {
-    if (this.instrumentRuntime.getTrackArpeggiator(trackId) === undefined) return
-    this.instrumentRuntime.clearTrackArpeggiator(trackId)
+    if (this.instruments.getTrackArpeggiator(trackId) === undefined) return
+    this.instruments.clearTrackArpeggiator(trackId)
 
     for (const listener of this.arpeggiatorListeners) listener(trackId)
   }
@@ -769,20 +668,16 @@ export class AudioEngine {
     return this.clock.getBpm()
   }
 
-  clearTrackDrumRack(trackId: string) {
-    this.instrumentRuntime.clearTrackDrumRack(trackId)
-  }
-
   clearTrackInstrument(trackId: string) {
-    this.instrumentRuntime.clearTrackInstrument(trackId)
+    this.instruments.clearTrackInstrument(trackId)
   }
 
   private stopActiveNotesForClip(clipId: string) {
-    this.instrumentRuntime.stopClip(clipId)
+    this.instruments.stopClip(clipId)
   }
 
   private stopAllActiveNotes() {
-    this.instrumentRuntime.stopAll()
+    this.instruments.stopAll()
   }
 
   setBpm(nextBpm: number) {
@@ -791,7 +686,7 @@ export class AudioEngine {
     // A failed track delay write must not leave the master delays on the old tempo; the first failure is the one reported.
     let failure: unknown
 
-    for (const runtime of [this.mixerRuntime, this.masterFx]) {
+    for (const runtime of [this.mixer, this.masterFx]) {
       try {
         runtime.setBpm(nextBpm)
       } catch (error) {
@@ -839,36 +734,12 @@ export class AudioEngine {
     this.metronome.onTransportSeek(this.audioCtx, opts?.resetMetronome !== false)
   }
 
-  subscribeTrackCompressorMeter(trackId: string, effectInstanceId: string, listener: CompressorMeterListener) {
-    return this.mixerRuntime.subscribeTrackCompressorMeter(trackId, effectInstanceId, listener)
-  }
-
-  subscribeTrackGateMeter(trackId: string, effectInstanceId: string, listener: GateMeterListener) {
-    return this.mixerRuntime.subscribeTrackGateMeter(trackId, effectInstanceId, listener)
-  }
-
   setTrackFxInstances(trackId: string, instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
-    return this.mixerRuntime.setTrackFxInstances(trackId, instances)
+    return this.mixer.setTrackFxInstances(trackId, instances)
   }
 
   setExternalSidechainRoutes(routes: ExternalSidechainRoute[]) {
-    this.mixerRuntime.setExternalSidechainRoutes(routes)
-  }
-
-  setCueTrackIds(trackIds: readonly string[]) {
-    this.mixerRuntime.setCueTrackIds(trackIds)
-  }
-
-  setCueDestination(destination: AudioNode | null) {
-    this.mixerRuntime.setCueDestination(destination)
-  }
-
-  subscribeMasterCompressorMeter(effectInstanceId: string, listener: CompressorMeterListener) {
-    return this.masterFx.subscribeCompressorMeter(effectInstanceId, listener)
-  }
-
-  subscribeMasterGateMeter(effectInstanceId: string, listener: GateMeterListener) {
-    return this.masterFx.subscribeGateMeter(effectInstanceId, listener)
+    this.mixer.setExternalSidechainRoutes(routes)
   }
 
   setMasterFxInstances(instances: AudioEffectRuntimeInstance[]): Promise<EngineDisposition> {
@@ -883,14 +754,14 @@ export class AudioEngine {
       instances,
     )
 
-    if (!inPlace) this.mixerRuntime.publishGraphLatency()
+    if (!inPlace) this.mixer.publishGraphLatency()
 
     return disposition
   }
 
   /** Replaces one instance of the retained chain. Resolves 'not-held' when the chain does not hold it: send the whole chain. */
   setTrackFxInstance(trackId: string, instance: AudioEffectRuntimeInstance) {
-    return this.mixerRuntime.replaceTrackFxInstance(trackId, instance)
+    return this.mixer.replaceTrackFxInstance(trackId, instance)
   }
 
   /** Master twin of {@link setTrackFxInstance}. */
@@ -900,10 +771,6 @@ export class AudioEngine {
     if (!retained.some((entry) => entry.id === instance.id)) return 'not-held'
 
     return this.applyMasterFxInstances(retained.map((entry) => entry.id === instance.id ? instance : entry))
-  }
-
-  previewTrackVolume(trackId: string, volume: number, muted: boolean) {
-    this.mixerRuntime.previewTrackVolume(trackId, volume, muted)
   }
 
   setMasterVolume(volume: number) {
@@ -924,12 +791,12 @@ export class AudioEngine {
 
   updateTrackGains(tracks: RuntimeTrack[]) {
     this.tracksSnapshot = tracks
-    this.mixerRuntime.updateTrackGains(tracks)
+    this.mixer.updateTrackGains(tracks)
   }
 
   setAutomationEnvelopes(envelopes: AutomationEnvelope[]) {
     this.automationEnvelopes = envelopes
-    this.mixerRuntime.setAutomatedVolumeTargets(envelopes)
+    this.mixer.setAutomatedVolumeTargets(envelopes)
   }
 
   scheduleAutomationFromPlayhead(playheadSec: number, opts?: {
@@ -981,7 +848,7 @@ export class AudioEngine {
     when = this.audioCtx?.currentTime ?? 0,
     sourceId?: string,
   ) {
-    const bindings = this.mixerRuntime.resolveTrackAutomationBindings(trackId, target.parameterId, target.effectInstanceId)
+    const bindings = this.mixer.resolveTrackAutomationBindings(trackId, target.parameterId, target.effectInstanceId)
     const key = this.midiMappingTargetKey(trackId, target)
     this.transientMidiMappingTargets.set(key, { trackId, target })
     const baselineState = this.transientMidiMappingBaselines.get(key)
@@ -1032,7 +899,7 @@ export class AudioEngine {
       const activeValue = Array.from(baseline.sourceValues.values()).at(-1)
 
       if (baseline.sourceIds.size > 0 && activeValue !== undefined) {
-        const bindings = this.mixerRuntime.resolveTrackAutomationBindings(
+        const bindings = this.mixer.resolveTrackAutomationBindings(
           trackId,
           target.parameterId,
           target.effectInstanceId,
@@ -1102,7 +969,7 @@ export class AudioEngine {
 
         if (targetKeys && !targetKeys.has(targetKey)) continue
 
-        const bindings = this.mixerRuntime.resolveTrackAutomationBindings(
+        const bindings = this.mixer.resolveTrackAutomationBindings(
           track.id,
           event.target.parameterId,
           event.target.effectInstanceId,
@@ -1186,15 +1053,15 @@ export class AudioEngine {
   }
 
   private disposeSynthTrack(id: string) {
-    this.instrumentRuntime.disposeTrack(id)
+    this.instruments.disposeTrack(id)
   }
 
   private resolveAutomationBindings(envelope: AutomationEnvelope) {
     return envelope.target.kind === 'master'
       ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
       : parseSynthAutomationKey(envelope.parameterId)
-        ? this.instrumentRuntime.resolveSynthAutomationBindings(envelope.target.trackId, envelope.parameterId)
-        : this.mixerRuntime.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
+        ? this.instruments.resolveSynthAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        : this.mixer.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
   }
 
   private stopClipSources() {
@@ -1235,7 +1102,7 @@ export class AudioEngine {
   private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): boolean {
     if (!this.audioCtx) return false
 
-    return this.instrumentRuntime.scheduleMidiClip(
+    return this.instruments.scheduleMidiClip(
       track,
       clip,
       startLimitSec ?? playheadSec,
@@ -1330,9 +1197,9 @@ export class AudioEngine {
     this.cancelAutomationSchedules()
     this.stopAllSources()
     this.metronome.close()
-    this.mixerRuntime.clear()
+    this.mixer.clear()
     this.metering.close()
-    this.instrumentRuntime.clear()
+    this.instruments.clear()
     this.stretchCache.dispose()
     this.arpeggiatorListeners.clear()
     this.automationEnvelopes = []
@@ -1356,7 +1223,7 @@ export class AudioEngine {
 
   // --- Live spectrum sampling (Ableton-like) ---
   getTrackSpectrum(trackId: string): SpectrumFrame | null {
-    const output = this.mixerRuntime.getTrackOutput(trackId)
+    const output = this.mixer.getTrackOutput(trackId)
 
     return this.metering.getTrackSpectrum(this.audioCtx, trackId, output)
   }

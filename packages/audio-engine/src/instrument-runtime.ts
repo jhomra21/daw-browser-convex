@@ -231,16 +231,24 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       when: number
       durationSec: number
       live?: boolean
-    }) => activeKinds.get(input.trackId) === 'synth' ? synthRuntime.triggerNote(input) : undefined,
+    }) => {
+      options.ensureAudio()
+
+      return activeKinds.get(input.trackId) === 'synth' ? synthRuntime.triggerNote(input) : undefined
+    },
     getSynthLiveVoiceGeneration: (trackId: string) => (
       activeKinds.get(trackId) === 'synth' ? synthRuntime.getLiveVoiceGeneration(trackId) : undefined
     ),
-    previewSynthNote: (trackId: string, pitch: number, velocity?: number, durationSec?: number) => (
-      activeKinds.get(trackId) === 'synth' ? synthRuntime.previewNote(trackId, pitch, velocity, durationSec) : undefined
-    ),
-    startSynthPreviewNote: (trackId: string, pitch: number, velocity?: number) => (
-      activeKinds.get(trackId) === 'synth' ? synthRuntime.startPreviewNote(trackId, pitch, velocity) : undefined
-    ),
+    previewSynthNote: (trackId: string, pitch: number, velocity?: number, durationSec?: number) => {
+      options.ensureAudio()
+
+      return activeKinds.get(trackId) === 'synth' ? synthRuntime.previewNote(trackId, pitch, velocity, durationSec) : undefined
+    },
+    startSynthPreviewNote: (trackId: string, pitch: number, velocity?: number) => {
+      options.ensureAudio()
+
+      return activeKinds.get(trackId) === 'synth' ? synthRuntime.startPreviewNote(trackId, pitch, velocity) : undefined
+    },
     releaseSynthPreviewNote: (
       trackId: string,
       noteInstanceId: number,

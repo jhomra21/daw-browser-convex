@@ -1,32 +1,8 @@
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { connectSourceWithClipGain, getAudioBufferPlaybackParams, getScheduledMidiEvents } from './audio-scheduling'
 import { createAudioStretchCache } from './audio-stretch-cache'
-import {
-  getAutomationParameterDescriptor,
-  midiMappingTargetKey,
-  valueAtAutomationTime,
-  assert,
-  cloneMidiClip,
-  type AutomationEnvelope,
-  type AudioPcmSourceDescriptor,
-  type DrumRackParams,
-  normalizeSynthParams,
-  type SynthParamsInput,
-  type SynthAutomationParameterId,
-  type TrackInstrumentParams,
-  parseInstrumentAutomationKey,
-  parseGranularAutomationKey,
-  parseSynthAutomationKey,
-  SYNTH_AUTOMATION_DESCRIPTORS,
-  assertDefined,
-  isNonlinearKind,
-} from '@daw-browser/shared'
-import { createSynthOutputChain, scheduleSynthVoice, type SynthVoiceHandle } from './synth-voice'
-import { chooseSynthVoiceVictim, isSynthVoiceSoundingAt, pruneSynthVoiceAllocations } from './synth-voice-allocation'
-import { DRUM_RACK_CHOKE_FADE_SEC, scheduleDrumRackHit, type DrumRackResolvedBuffers } from './drum-rack-runtime'
-import { scheduleSamplerVoice, type SamplerResolvedBuffers } from './sampler-runtime'
-import { resetSamplerRoundRobin, selectSamplerZone } from './sampler-core'
-import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
+import { getAutomationParameterDescriptor, midiMappingTargetKey, valueAtAutomationTime, cloneMidiClip, type AutomationEnvelope, type AudioPcmSourceDescriptor, type TrackInstrumentParams, parseInstrumentAutomationKey, parseGranularAutomationKey, parseSynthAutomationKey, assertDefined } from '@daw-browser/shared'
+import type { createGranularRuntime } from './granular-runtime'
 import { createOfflineMixerNodes } from './mixer/apply-offline-routing'
 import type { ExternalSidechainRoute, Track } from '@daw-browser/timeline-core/types'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
@@ -41,28 +17,17 @@ import { observeResource, type ResourceObserver } from './runtime-diagnostics'
 import { resolveExportMixerGraph } from './export-mixer-graph'
 import type { ExportFx } from './export-types'
 import type { PlanarPcm } from '../../audio-core-contract/src/index'
-import {
-  loadAudioCoreWasmArtifact,
-  type AudioCoreWasmArtifact,
-  type AudioCoreWasmArtifactResult,
-} from '../../audio-core-wasm/src/index'
-import {
-  compilePortableExportSnapshot,
-  type PortableExportSnapshot,
-} from './portable-export-snapshot'
+import { loadAudioCoreWasmArtifact, type AudioCoreWasmArtifact, type AudioCoreWasmArtifactResult } from '../../audio-core-wasm/src/index'
+import { compilePortableExportSnapshot, type PortableExportSnapshot } from './portable-export-snapshot'
 import { PortableExportWorker } from './portable-export-worker'
-import {
-  portableExportWorkerMaxAssets,
-  portableExportWorkerMaxEvents,
-  portableExportWorkerMaxGraphEdges,
-  portableExportWorkerMaxGraphNodes,
-} from './portable-export-worker-protocol'
+import { portableExportWorkerMaxAssets, portableExportWorkerMaxEvents, portableExportWorkerMaxGraphEdges, portableExportWorkerMaxGraphNodes } from './portable-export-worker-protocol'
 import { resolvePortableWasmManifestUrl } from './worklet-manifest'
 import { preparePortablePagedStretchAssets } from './portable-stretch-paging'
 import { createAudioPcmSourceDescriptor, getAudioBufferSessionIdentity } from './media-pages'
 import type { PreparedStretchArtifactRepository } from './prepared-stretch-store'
 import type { AudioStretchRuntimeClip } from './audio-stretch-rendering'
-import { localizeSampledInstrumentSeconds } from './sampled-instrument-region'
+import { type OfflineDrumRackHit, readTrackInstrument, createOfflineSynthTrack, renderOfflineDrumRackEvents, renderOfflineSamplerEvents, createOfflineGranularTrack } from './offline-instrument-renderers'
+import { type StemDefinition, type StemRecombinationMetadata, type SourceIsolatedRenderOptions, createSourceAutomationScope, createStemRenderPlan, isAutomationEnvelopeInSourceScope } from './export-stem-plan'
 
 export { encodeAudioBuffer, encodeAudioChunks, type EncodeAudioBufferOptions, type EncodeAudioBufferTarget } from './export-encoding'
 
@@ -95,24 +60,6 @@ export type ExportRequest = {
   trackIds?: ReadonlySet<string>
 }
 
-export type StemMode =
-  | 'dry-source'
-  | 'post-track-fx'
-  | 'reachable-routing'
-  | 'channel-output'
-  | 'full-master-contribution'
-
-export type StemDefinition = {
-  id: string
-  name: string
-  mode: StemMode
-  targetTrackId: string
-}
-
-export type StemRecombinationMetadata = {
-  recombinesToMaster: boolean
-  conditions: readonly string[]
-}
 
 export type RenderedStem = {
   id: string
@@ -147,17 +94,6 @@ type PreparedExportRender = {
   resolveAudioSource?: ExportRequest['resolveAudioSource']
 }
 
-type SourceIsolatedRenderOptions = {
-  sourceTrackIds?: ReadonlySet<string>
-  detectorOnlyTrackIds?: ReadonlySet<string>
-  includeMasterFx?: boolean
-  graph?: ResolvedMixerGraph
-}
-
-type SourceAutomationScope = {
-  trackIds?: ReadonlySet<string>
-  includeMasterFx: boolean
-}
 
 type PortableMixdownSelection =
   | {
@@ -202,22 +138,6 @@ export async function assertExportTruePeakWithinLimiterCeiling(
   }
 }
 
-export function isAutomationEnvelopeInSourceScope(
-  scope: SourceAutomationScope,
-  envelope: AutomationEnvelope,
-): boolean {
-  if (scope.trackIds && envelope.target.kind === 'track' && !scope.trackIds.has(envelope.target.trackId)) return false
-
-  if (!scope.includeMasterFx && envelope.target.kind === 'master' && envelope.parameterId !== 'volume') return false
-
-  return true
-}
-
-type OfflineDrumRackHit = {
-  source: AudioBufferSourceNode
-  gain: GainNode
-  chokeGroup: number
-}
 
 type AudioSampleBuffer = Pick<AudioBuffer, 'numberOfChannels' | 'getChannelData'>
 
@@ -713,264 +633,6 @@ export const renderPortableMixdownChunks = async (
   }
 }
 
-const readTrackInstrument = (
-  fxCfg: NonNullable<ExportFx['trackFx']>[string] | undefined,
-): TrackInstrumentParams | undefined => fxCfg?.instrument
-
-function createOfflineSynthTrack(input: {
-  ctx: OfflineAudioContext
-  destination: AudioNode
-  trackId: string
-  rangeStartSec: number
-  synth: SynthParamsInput | undefined
-  automationEnvelopes: readonly AutomationEnvelope[]
-}) {
-  const synth = normalizeSynthParams(input.synth ?? {})
-
-  const { output: outputGain, outputPan } = createSynthOutputChain(
-    input.ctx,
-    input.destination,
-    synth.gain,
-    synth.pan,
-    0,
-  )
-
-  const outputBindings = {
-    'output.gain': outputGain.gain,
-    'output.pan': outputPan.pan,
-  }
-
-  for (const envelope of input.automationEnvelopes) {
-    const key = parseSynthAutomationKey(envelope.parameterId)
-
-    if (!key || !envelope.enabled) continue
-
-    const param = key.parameterId === 'output.gain'
-      ? outputBindings['output.gain']
-      : key.parameterId === 'output.pan'
-        ? outputBindings['output.pan']
-        : undefined
-
-    if (!param) continue
-    scheduleAutomationEnvelope(
-      [{ param, valueToAudioValue: (value) => value }],
-      envelope,
-      {
-        playheadSec: input.rangeStartSec,
-        startLimitSec: input.rangeStartSec,
-        endLimitSec: Number.POSITIVE_INFINITY,
-      },
-      (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
-      SYNTH_AUTOMATION_DESCRIPTORS[key.parameterId].defaultValue,
-    )
-  }
-
-  let voices: SynthVoiceHandle[] = []
-  let nextId = 1
-  const envelopes = new Map<SynthAutomationParameterId, AutomationEnvelope>()
-
-  for (const envelope of input.automationEnvelopes) {
-    const key = parseSynthAutomationKey(envelope.parameterId)
-
-    if (key && envelope.enabled) envelopes.set(key.parameterId, envelope)
-  }
-
-  return {
-    scheduleEvents: (
-      events: readonly (ReturnType<typeof getScheduledMidiEvents>[number] & {
-        clipGain: number | undefined
-      })[],
-    ) => {
-      for (const event of events) {
-        const when = Math.max(0, event.startSec - input.rangeStartSec)
-        const noteDur = event.endSec - event.startSec
-
-        if (noteDur <= 0) continue
-        voices = pruneSynthVoiceAllocations(voices, when)
-
-        if (!synth.retrigger && voices.some((voice) => voice.pitch === event.pitch && isSynthVoiceSoundingAt(voice, when))) continue
-        const victim = chooseSynthVoiceVictim(voices, synth.polyphony, when)
-
-        if (victim) {
-          voices = voices.filter((voice) => voice !== victim)
-          victim.stop(when)
-        }
-
-        const id = nextId
-        nextId += 1
-        voices.push(scheduleSynthVoice(input.ctx, {
-          id,
-          noteInstanceId: id,
-          pitch: event.pitch,
-          velocity: event.velocity,
-          clipGain: event.clipGain,
-          when,
-          durationSec: noteDur,
-          seedKey: input.trackId,
-          params: synth,
-          destination: outputPan,
-          timelineStartSec: event.startSec,
-          timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
-          automationEnvelopes: envelopes,
-          onEnded: (ended) => {
-            const index = voices.indexOf(ended)
-
-            if (index >= 0) voices.splice(index, 1)
-          },
-        }))
-      }
-    }
-  }
-}
-
-function renderOfflineDrumRackEvents(input: {
-  ctx: OfflineAudioContext
-  destination: AudioNode
-  events: ReturnType<typeof getScheduledMidiEvents>
-  padsByNote: ReadonlyMap<number, DrumRackParams['pads'][number]>
-  rangeStartSec: number
-  buffers: DrumRackResolvedBuffers | undefined
-  activeHitsByChokeGroup: Map<number, OfflineDrumRackHit[]>
-}) {
-  if (!input.buffers) return
-
-  for (const event of input.events) {
-    const pad = input.padsByNote.get(event.pitch)
-
-    if (!pad) continue
-    const resolved = input.buffers.get(pad.id)
-
-    if (!resolved) continue
-    const sampled = resolved
-    const sampleRate = pad.sample?.source.sampleRate ?? sampled.buffer.sampleRate
-
-    const localPad = {
-      ...pad,
-      startSec: localizeSampledInstrumentSeconds(pad.startSec, sampled.sourceStartFrame, sampleRate),
-      endSec: pad.endSec === undefined
-        ? sampled.buffer.length / sampled.buffer.sampleRate
-        : localizeSampledInstrumentSeconds(pad.endSec, sampled.sourceStartFrame, sampleRate),
-    }
-
-    const when = Math.max(0, event.startSec - input.rangeStartSec)
-
-    if (pad.chokeGroup > 0) {
-      const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup)
-
-      if (activeHits) {
-        for (const hit of activeHits) {
-          try {
-            hit.gain.gain.cancelScheduledValues(when)
-            hit.gain.gain.linearRampToValueAtTime(0, when + DRUM_RACK_CHOKE_FADE_SEC)
-            hit.source.stop(when + DRUM_RACK_CHOKE_FADE_SEC)
-          } catch {}
-        }
-      }
-
-      input.activeHitsByChokeGroup.set(pad.chokeGroup, [])
-    }
-
-    try {
-      const scheduled = scheduleDrumRackHit({
-        ctx: input.ctx,
-        destination: input.destination,
-        buffer: sampled.buffer,
-        pad: localPad,
-        when,
-        velocity: event.velocity ?? 1,
-      })
-
-      if (scheduled && pad.chokeGroup > 0) {
-        const activeHits = input.activeHitsByChokeGroup.get(pad.chokeGroup) ?? []
-        activeHits.push({ source: scheduled.source, gain: scheduled.gain, chokeGroup: pad.chokeGroup })
-        input.activeHitsByChokeGroup.set(pad.chokeGroup, activeHits)
-      }
-    } catch {}
-  }
-}
-
-function renderOfflineSamplerEvents(input: {
-  ctx: OfflineAudioContext
-  destination: AudioNode
-  events: ReturnType<typeof getScheduledMidiEvents>
-  rangeStartSec: number
-  instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>
-  buffers: SamplerResolvedBuffers | undefined
-  automationEnvelopes: readonly AutomationEnvelope[]
-}) {
-  if (!input.buffers) throw new Error('Sampler export requires preloaded sampler buffers.')
-  let roundRobin = resetSamplerRoundRobin()
-
-  for (const event of input.events) {
-    const selected = selectSamplerZone(input.instrument.params.zones, event.pitch, Math.round((event.velocity ?? 1) * 127), roundRobin)
-    roundRobin = selected.roundRobin
-
-    if (!selected.zone) continue
-    const resolved = input.buffers.get(selected.zone.id)
-
-    if (!resolved) throw new Error(`Sampler export is missing buffer for zone "${selected.zone.id}".`)
-    const sampled = resolved
-
-    const zone = {
-      ...selected.zone,
-      startSec: localizeSampledInstrumentSeconds(selected.zone.startSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
-      endSec: selected.zone.endSec === undefined
-        ? sampled.buffer.length / sampled.buffer.sampleRate
-        : localizeSampledInstrumentSeconds(selected.zone.endSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
-      loopStartSec: selected.zone.loopStartSec === undefined
-        ? undefined
-        : localizeSampledInstrumentSeconds(selected.zone.loopStartSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
-      loopEndSec: selected.zone.loopEndSec === undefined
-        ? undefined
-        : localizeSampledInstrumentSeconds(selected.zone.loopEndSec, sampled.sourceStartFrame, selected.zone.sample.source.sampleRate),
-    }
-
-    scheduleSamplerVoice({
-      ctx: input.ctx,
-      destination: input.destination,
-      buffer: sampled.buffer,
-      zone,
-      params: input.instrument.params,
-      note: event.pitch,
-      velocity: Math.round((event.velocity ?? 1) * 127),
-      when: Math.max(0, event.startSec - input.rangeStartSec),
-      durationSec: event.endSec - event.startSec,
-      timelineStartSec: event.startSec,
-      automationEnvelopes: input.automationEnvelopes.filter((envelope) => {
-        const key = parseInstrumentAutomationKey(envelope.parameterId)
-
-        return key?.instanceId === input.instrument.instanceId
-      }),
-      timelineToCtxTime: (timelineSec) => Math.max(0, timelineSec - input.rangeStartSec),
-    })
-  }
-}
-
-async function createOfflineGranularTrack(input: {
-  ctx: OfflineAudioContext
-  destination: AudioNode
-  instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>
-  installedBuffer: GranularInstalledBuffer | undefined
-  resourceObserver?: ResourceObserver
-}) {
-  const runtime = await createGranularRuntime({
-    context: input.ctx,
-    destination: input.destination,
-    params: input.instrument.params,
-    resourceObserver: input.resourceObserver,
-  })
-
-  try {
-    if (input.installedBuffer) await runtime.installSample(input.installedBuffer)
-    runtime.resetSeed(input.instrument.params.seed)
-    runtime.setFrozen(input.instrument.params.freeze)
-
-    return runtime
-  } catch (error) {
-    runtime.close()
-    throw error
-  }
-}
 
 function createTrackById(tracks: Track<AudioBuffer>[]): Map<string, Track<AudioBuffer>> {
   const trackById = new Map<string, Track<AudioBuffer>>()
@@ -1066,209 +728,6 @@ function prepareExportRender(req: ExportRequest): PreparedExportRender {
     signal,
     resourceObserver: req.resourceObserver,
     resolveAudioSource: req.resolveAudioSource,
-  }
-}
-
-function collectOutputPathChannelIds(
-  channelId: string,
-  outputTargetByChannelId: ReadonlyMap<string, string | undefined>,
-): string[] {
-  const path: string[] = []
-  const visited = new Set<string>()
-  let currentId: string | undefined = channelId
-
-  while (currentId && !visited.has(currentId)) {
-    visited.add(currentId)
-    path.push(currentId)
-    currentId = outputTargetByChannelId.get(currentId)
-  }
-
-  return path
-}
-
-export function createSourceAutomationScope(
-  graph: ResolvedMixerGraph,
-  options: SourceIsolatedRenderOptions,
-): SourceAutomationScope {
-  const { sourceTrackIds, includeMasterFx = true } = options
-
-  if (!sourceTrackIds) return { includeMasterFx }
-
-  const channelById = new Map(
-    graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack] as const),
-  )
-
-  const outputTargetByChannelId = new Map(
-    graph.channels.map((resolvedTrack) => [resolvedTrack.channel.id, resolvedTrack.outputTargetId] as const),
-  )
-
-  const scopedTrackIds = new Set<string>()
-
-  const addReachableChannel = (channelId: string, queue: string[]) => {
-    if (!channelById.has(channelId) || scopedTrackIds.has(channelId)) return
-    scopedTrackIds.add(channelId)
-    queue.push(channelId)
-  }
-
-  const queue: string[] = []
-
-  for (const sourceTrackId of sourceTrackIds) {
-    addReachableChannel(sourceTrackId, queue)
-  }
-
-  for (let index = 0; index < queue.length; index += 1) {
-    const channelId = queue[index]
-    const channel = channelById.get(channelId)
-
-    if (!channel) continue
-    const outputPath = collectOutputPathChannelIds(channelId, outputTargetByChannelId)
-
-    for (const pathChannelId of outputPath) addReachableChannel(pathChannelId, queue)
-
-    for (const send of channel.sends) addReachableChannel(send.targetId, queue)
-  }
-
-  return { trackIds: scopedTrackIds, includeMasterFx }
-}
-
-const emptyMasterFx = (graph: ResolvedMixerGraph): ResolvedMixerGraph['master'] => ({
-  volume: 1,
-  instances: [],
-  inputLayout: graph.master.inputLayout,
-  outputLayout: graph.master.inputLayout,
-})
-
-const collectReachableChannelIds = (
-  graph: ResolvedMixerGraph,
-  sourceTrackIds: ReadonlySet<string>,
-): Set<string> => new Set(createSourceAutomationScope(graph, {
-  sourceTrackIds,
-  includeMasterFx: false,
-}).trackIds ?? [])
-
-const collectUpstreamChannelIds = (
-  graph: ResolvedMixerGraph,
-  targetTrackId: string,
-): Set<string> => {
-  const upstream = new Set([targetTrackId])
-  let changed = true
-
-  while (changed) {
-    changed = false
-
-    for (const channel of graph.channels) {
-      if (upstream.has(channel.channel.id)) continue
-
-      if (channel.outputTargetId && upstream.has(channel.outputTargetId)) {
-        upstream.add(channel.channel.id)
-        changed = true
-        continue
-      }
-
-      if (channel.sends.some((send) => upstream.has(send.targetId))) {
-        upstream.add(channel.channel.id)
-        changed = true
-      }
-    }
-  }
-
-  return upstream
-}
-
-export type StemRenderPlan = {
-  sourceTrackIds: Set<string>
-  detectorOnlyTrackIds: Set<string>
-  graph: ResolvedMixerGraph
-  metadata: StemRecombinationMetadata
-}
-
-export function createStemRenderPlan(
-  graph: ResolvedMixerGraph,
-  stem: StemDefinition,
-  sidechainRoutes: readonly ExternalSidechainRoute[] = [],
-): StemRenderPlan {
-  const target = assertDefined(
-    graph.channels.find((channel) => channel.channel.id === stem.targetTrackId),
-    `Missing stem target ${stem.targetTrackId}`,
-  )
-
-  if (stem.mode === 'channel-output') {
-    assert(target.channel.role === 'group' || target.channel.role === 'return', 'Channel-output stems require a group or return target.')
-  } else {
-    assert(target.channel.role === 'track', `${stem.mode} stems require a source track target.`)
-  }
-
-  const sourceTrackIds = stem.mode === 'channel-output'
-    ? collectUpstreamChannelIds(graph, stem.targetTrackId)
-    : new Set([stem.targetTrackId])
-
-  const reachableIds = collectReachableChannelIds(graph, sourceTrackIds)
-  const detectorOnlyTrackIds = new Set<string>()
-
-  for (const route of sidechainRoutes) {
-    if (reachableIds.has(route.targetTrackId) && !sourceTrackIds.has(route.sourceTrackId)) {
-      detectorOnlyTrackIds.add(route.sourceTrackId)
-    }
-  }
-
-  const graphForMode: ResolvedMixerGraph = {
-    channels: graph.channels.map((channel) => {
-      const id = channel.channel.id
-
-      if (detectorOnlyTrackIds.has(id)) {
-        return { ...channel, outputGain: 0, sends: [] }
-      }
-
-      if (stem.mode === 'dry-source') {
-        const audible = !channel.channel.muted && channel.outputGain > 0
-
-        return {
-          ...channel,
-          gain: id === stem.targetTrackId && audible ? 1 : 0,
-          outputGain: id === stem.targetTrackId && audible ? 1 : 0,
-          outputTargetId: undefined,
-          sends: [],
-          fx: undefined,
-        }
-      }
-
-      if (stem.mode === 'post-track-fx') {
-        return {
-          ...channel,
-          outputGain: id === stem.targetTrackId ? channel.outputGain : 0,
-          outputTargetId: id === stem.targetTrackId ? undefined : channel.outputTargetId,
-          sends: [],
-        }
-      }
-
-      if (stem.mode === 'channel-output') {
-        return {
-          ...channel,
-          outputGain: id === stem.targetTrackId ? channel.outputGain : channel.outputGain,
-          outputTargetId: id === stem.targetTrackId ? undefined : channel.outputTargetId,
-          sends: id === stem.targetTrackId ? [] : channel.sends,
-        }
-      }
-
-      return channel
-    }),
-    master: stem.mode === 'full-master-contribution' ? graph.master : emptyMasterFx(graph),
-  }
-
-  const nonlinearMaster = graph.master.instances.some((instance) => isNonlinearKind(instance.kind))
-
-  return {
-    sourceTrackIds,
-    detectorOnlyTrackIds,
-    graph: graphForMode,
-    metadata: {
-      recombinesToMaster: stem.mode !== 'full-master-contribution' || !nonlinearMaster,
-      conditions: stem.mode === 'full-master-contribution'
-        ? nonlinearMaster
-          ? ['Shared nonlinear master processing prevents linear stem recombination.']
-          : ['Master processing must remain linear and stem normalization must be disabled.']
-        : ['Export every required stem over the same range with normalization disabled.'],
-    },
   }
 }
 

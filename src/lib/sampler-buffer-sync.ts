@@ -1,6 +1,6 @@
 import { createSamplerBufferCache, type AudioEngine, type EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
 import {
-  sampledInstrumentRegion,
+  resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
   sampledInstrumentRegionIdentity,
   sampledInstrumentRetainedBytes,
@@ -96,14 +96,10 @@ type SamplerConfig = { params: SamplerParams; instanceId?: string; projectId: st
 type GranularConfig = { params: GranularParams; instanceId?: string; projectId: string }
 
 const regionForZone = (zone: SamplerZone): RegionSpec => {
-  const region = sampledInstrumentRegion(
-    zone.sample.source,
-    zone.startSec,
-    zone.endSec ?? zone.sample.source.durationSec,
-  )
+  const { region, key } = resolveSampledInstrumentRegion(zone.sample, zone.startSec, zone.endSec)
 
   return {
-    key: sampledInstrumentRegionIdentity(zone.sample, region),
+    key,
     zone,
     ...region,
     bytes: sampledInstrumentRegionBytes(region, zone.sample.source.channelCount),
@@ -185,14 +181,14 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       if (value) buffers.set(zone.id, value)
     }
 
-    engine.setTrackSampler(trackId, config.params, buffers, config.instanceId)
+    engine.instruments.setTrackSampler(trackId, config.params, buffers, config.instanceId)
   }
 
   const clearGranularRuntimeBuffer = (trackId: Track['id']) => {
     const engine = granularEnginesByTrack.get(trackId)
     const config = granularConfigs.get(trackId)
 
-    if (engine && config) void engine.setTrackGranular(trackId, config.params, undefined, config.instanceId).catch(() => undefined)
+    if (engine && config) void engine.instruments.setTrackGranular(trackId, config.params, undefined, config.instanceId).catch(() => undefined)
   }
 
   const handleCacheEviction = (
@@ -511,7 +507,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
   const installRuntimeListeners = (engine: AudioEngine) => {
     if (listenerRemovers.has(engine)) return
 
-    const remove = engine.addSamplerRuntimeListeners({
+    const remove = engine.instruments.addSamplerRuntimeListeners({
       onAssetUse: (use) => {
         const configured = enginesByTrack.get(use.trackId)
 
@@ -685,7 +681,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       getCached(trackId, regionForZone(zone).key, 'sampler') ? 'ready' : 'missing',
     ])))
     samplerErrors.set(trackId, new Map())
-    engine.setTrackSampler(trackId, params, new Map(), instanceId)
+    engine.instruments.setTrackSampler(trackId, params, new Map(), instanceId)
     installSamplerBuffers(trackId)
 
     if (params.cachePolicy !== 'preload' && !options.nativeAudio?.()) {
@@ -850,7 +846,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       granularStates.set(trackId, 'missing')
       notify()
 
-      return engine.setTrackGranular(trackId, params, undefined, instanceId)
+      return engine.instruments.setTrackGranular(trackId, params, undefined, instanceId)
     }
 
     const region = regionForZone(zone)
@@ -883,7 +879,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       // granular worklet sample under the portable limit on this explicit path.
       const disposition = options.nativeAudio?.()
         ? 'dropped'
-        : await engine.setTrackGranular(
+        : await engine.instruments.setTrackGranular(
           trackId,
           params,
           value ? withSampledInstrumentIdentity(value, sampledInstrumentRegionIdentity(zone.sample, region)) : undefined,

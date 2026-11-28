@@ -1,4 +1,4 @@
-import type { ExportOutcome, ExportProgress } from '~/lib/export/run-export-job'
+import type { ExportOutcome, ExportProgress } from '~/lib/export/export-job-types'
 
 export type ExportJob = {
   id: string

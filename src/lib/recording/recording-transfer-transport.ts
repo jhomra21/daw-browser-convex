@@ -6,6 +6,7 @@ import {
   type WriterOutboundMessage,
 } from '../../../packages/audio-engine/src/recording/recording-protocol'
 import type { RecordingMessageEndpoint } from '../../../packages/audio-engine/src/recording/recording-runtime'
+import { createBrowserRecordingWriter, deferred, type Deferred } from './recording-worker-session'
 
 type WorkerEndpoint = {
   postMessage: (message: WriterInboundMessage, transfer?: readonly ArrayBuffer[]) => void
@@ -21,24 +22,6 @@ type RecordingTransferTransportOptions = {
   worklet: RecordingMessageEndpoint
   worker?: WorkerEndpoint
   onDiagnostics?: (diagnostics: { queuedFrames: number }) => void
-}
-
-type Deferred<T = void> = {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (error: Error) => void
-}
-
-const deferred = <T = void>(): Deferred<T> => {
-  let resolve = (_value: T) => {}
-  let reject = (_error: Error) => {}
-
-  const promise = new Promise<T>((onResolve, onReject) => {
-    resolve = onResolve
-    reject = onReject
-  })
-
-  return { promise, resolve, reject }
 }
 
 export const createRecordingTransferTransport = (options: RecordingTransferTransportOptions) => {
@@ -282,17 +265,5 @@ export const createRecordingTransferTransport = (options: RecordingTransferTrans
       await finish('abort')
     },
     terminate,
-  }
-}
-
-const createBrowserRecordingWriter = (): WorkerEndpoint => {
-  const worker = new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
-
-  return {
-    postMessage: (message, transfer = []) => worker.postMessage(message, [...transfer]),
-    setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
-    },
-    terminate: () => worker.terminate(),
   }
 }

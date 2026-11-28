@@ -1,6 +1,7 @@
 import { normalizeLocalAutomationEnvelopes } from "~/lib/local-automation"
 import { isLocalEffectRow, type LocalEffectRow } from "~/lib/local-effects"
 import { openLocalProjectDb } from "~/lib/local-project-db"
+import { AUTOMATION_ROW_KIND, EFFECT_ROW_KIND } from "~/lib/local-project-rows"
 import type { JsonValue } from "@daw-browser/shared"
 
 type LocalExportRenderRowsSnapshot = {
@@ -16,8 +17,8 @@ export const captureLocalExportRenderRowsSnapshot = async (
   const index = tx.store.index("by-kind")
 
   const [effectRows, automationRows] = await Promise.all([
-    index.getAll("effect"),
-    index.getAll("automation-envelope"),
+    index.getAll(EFFECT_ROW_KIND),
+    index.getAll(AUTOMATION_ROW_KIND),
   ])
 
   await tx.done

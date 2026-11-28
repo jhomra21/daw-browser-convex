@@ -1,13 +1,13 @@
 import {
   RECORDER_BLOCK_FRAMES,
   RECORDER_MAX_QUEUED_BLOCKS,
-  readWriterOutboundMessage,
   type RecorderBlockMessage,
   type WriterInboundMessage,
   type WriterOutboundMessage,
 } from '@daw-browser/audio-engine/recording-protocol'
 import type { PortableWasmStatusMessage } from '@daw-browser/audio-engine/portable-wasm-protocol'
 import { updateRecordingDiagnostics } from './recording-diagnostics'
+import { createBrowserRecordingWriter, deferred, type Deferred } from './recording-worker-session'
 
 type WorkerEndpoint = {
   postMessage: (message: WriterInboundMessage, transfer?: readonly ArrayBuffer[]) => void
@@ -15,25 +15,7 @@ type WorkerEndpoint = {
   terminate: () => void
 }
 
-type Deferred<T = void> = {
-  promise: Promise<T>
-  resolve: (value: T) => void
-  reject: (error: Error) => void
-}
-
 type BufferMetrics = { returned: number; latencyMs: number; outstanding: number; oldestAgeMs: number; deliveryMs: number; deliveryWorst?: { returnedAtEpochMs: number; receivedAtEpochMs: number } }
-
-const deferred = <T = void>(): Deferred<T> => {
-  let resolve = (_value: T) => {}
-  let reject = (_error: Error) => {}
-
-  const promise = new Promise<T>((onResolve, onReject) => {
-    resolve = onResolve
-    reject = onReject
-  })
-
-  return { promise, resolve, reject }
-}
 
 const portableRecordingWriterTimeoutMs = 2_000
 
@@ -288,16 +270,4 @@ export const createPortableRecordingWriter = (input: {
   }
 
   return { ready: ready.promise, write, finalize, abort, terminate }
-}
-
-const createBrowserRecordingWriter = (): WorkerEndpoint => {
-  const worker = new Worker(new URL('../../workers/recording-writer-worker.ts', import.meta.url), { type: 'module' })
-
-  return {
-    postMessage: (message, transfer = []) => worker.postMessage(message, [...transfer]),
-    setMessageHandler: (handler) => {
-      worker.onmessage = (event: MessageEvent<unknown>) => handler(readWriterOutboundMessage(event.data))
-    },
-    terminate: () => worker.terminate(),
-  }
 }

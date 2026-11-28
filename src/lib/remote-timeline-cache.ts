@@ -16,12 +16,10 @@ import { getDefaultClipColor } from '~/lib/clip-color'
 import { localSidechainRouteRowId } from '~/lib/local-effects'
 import { normalizeClipFades } from '@daw-browser/timeline-core/clip-fades'
 import { z } from 'zod'
+import { CLIP_ROW_KIND, SIDECHAIN_ROW_KIND, TRACK_ROW_KIND } from '~/lib/local-project-rows'
 
 type FullTimelineView = FunctionReturnType<typeof convexApi.timeline.fullView>
 
-const TRACK_KIND = 'track'
-const CLIP_KIND = 'clip'
-const SIDECHAIN_KIND = 'sidechain-route'
 const REMOTE_CACHE_KEY = 'remote-timeline-cache'
 const MIME_TYPE = 'audio/*'
 
@@ -192,16 +190,16 @@ const cacheRemoteTimelineSnapshotUnlocked = async (
 
     const timelineWrites = shouldRewriteTimelineCache
       ? await Promise.all([
-          tx.objectStore('entities').index('by-kind').getAll(TRACK_KIND),
-          tx.objectStore('entities').index('by-kind').getAll(CLIP_KIND),
-          tx.objectStore('entities').index('by-kind').getAll(SIDECHAIN_KIND),
+          tx.objectStore('entities').index('by-kind').getAll(TRACK_ROW_KIND),
+          tx.objectStore('entities').index('by-kind').getAll(CLIP_ROW_KIND),
+          tx.objectStore('entities').index('by-kind').getAll(SIDECHAIN_ROW_KIND),
         ]).then(([cachedTracks, cachedClips, cachedSidechains]) => [
           ...cachedTracks.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
           ...cachedClips.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
           ...cachedSidechains.map((row) => tx.objectStore('entities').delete([row.kind, row.id])),
-          ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_KIND, track.id, track, timestamp))),
-          ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_KIND, clip.id, clip, timestamp))),
-          ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, timestamp))),
+          ...tracks.map((track) => tx.objectStore('entities').put(createLocalProjectEntityRow(TRACK_ROW_KIND, track.id, track, timestamp))),
+          ...clipsWithExistingTracks.map((clip) => tx.objectStore('entities').put(createLocalProjectEntityRow(CLIP_ROW_KIND, clip.id, clip, timestamp))),
+          ...sidechainRoutes.map((route) => tx.objectStore('entities').put(createLocalProjectEntityRow(SIDECHAIN_ROW_KIND, localSidechainRouteRowId(route.targetTrackId, route.effectInstanceId), route, timestamp))),
           ...assets.map((asset) => tx.objectStore('assets').put(asset)),
           ...clipsWithExistingTracks.flatMap((clip) => clip.sourceAssetKey && clip.sampleUrl
         ? [tx.objectStore('syncState').put({

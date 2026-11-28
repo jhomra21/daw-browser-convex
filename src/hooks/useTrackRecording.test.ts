@@ -104,8 +104,8 @@ const createHarness = (
   audioEngine.ensureAudio = () => undefined
   audioEngine.resume = async () => undefined
   audioEngine.getAudioContext = () => context
-  audioEngine.subscribeRecordingStatus = () => () => true
-  audioEngine.cancelRecordingCapture = () => calls.push("legacy-cancel")
+  audioEngine.recording.subscribe = () => () => true
+  audioEngine.recording.cancel = () => calls.push("legacy-cancel")
 
   const emptyStorageDirectory = {
     getDirectoryHandle: async () => emptyStorageDirectory,

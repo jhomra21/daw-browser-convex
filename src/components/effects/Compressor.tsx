@@ -134,11 +134,11 @@ export default function Compressor(props: CompressorProps) {
     if (!audioEngine || !targetId || !props.effectInstanceId) return
 
     const unsubscribe = targetId === 'master'
-      ? audioEngine.subscribeMasterCompressorMeter(props.effectInstanceId, (frame) => {
+      ? audioEngine.masterFx.subscribeCompressorMeter(props.effectInstanceId, (frame) => {
         setMeter(frame)
         setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })
-      : audioEngine.subscribeTrackCompressorMeter(targetId, props.effectInstanceId, (frame) => {
+      : audioEngine.mixer.subscribeTrackCompressorMeter(targetId, props.effectInstanceId, (frame) => {
         setMeter(frame)
         setHistory((frames) => [...frames.slice(1 - HISTORY_SIZE), frame])
       })

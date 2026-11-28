@@ -256,7 +256,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
     if (props.onPreviewNote) {
       props.onPreviewNote(props.targetId, pad.note, 1, 0.35);
     } else {
-      props.audioEngine.previewDrumRackPad(props.targetId, pad.id, 1);
+      props.audioEngine.instruments.previewDrumRackPad(props.targetId, pad.id, 1);
     }
   };
 

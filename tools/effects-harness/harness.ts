@@ -3,6 +3,8 @@
 import type { EffectSpec } from './effects'
 import { clickMetric, maxAbsDiff, maxStep } from './dsp'
 import { legacySupported, renderLegacy, unsupportedReason } from './render-legacy'
+import { renderInstrument } from './render-instrument'
+import type { Instrument, InstrumentRenderOptions } from './render-instrument'
 import { renderWasm } from './render-wasm'
 import { impulse, noise } from './signals'
 import { withPaths } from './state-path'
@@ -52,6 +54,8 @@ export const createHarness = (context: { effect: string; scenario: string; rate:
 
     return { ...rendered, legacy }
   }
+
+  const renderInstrumentAt = (instrument: Instrument, options: InstrumentRenderOptions) => renderInstrument(instrument, rate, options)
 
   const overhead = async () => {
     const cached = overheadByRate.get(rate)
@@ -124,7 +128,7 @@ export const createHarness = (context: { effect: string; scenario: string; rate:
 
   return {
     rate, effect, scenario, checks, parity, wavs,
-    render, cpuNsPerFrame, worstBlockNs, latencyFrames, stepClick, wav,
+    render, renderInstrument: renderInstrumentAt, cpuNsPerFrame, worstBlockNs, latencyFrames, stepClick, wav,
     atMost: (metric: string, value: number, limit: number, unit = '', note?: string) =>
       push(metric, value, unit, `≤ ${limit} ${unit}`.trim(), value <= limit, note),
     atLeast: (metric: string, value: number, limit: number, unit = '', note?: string) =>

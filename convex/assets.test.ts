@@ -627,6 +627,11 @@ test("failed uploads protect their folders until retried", async () => {
   })).resolves.toMatchObject({ status: "pending" });
 });
 
+// A mutation runs at the transaction time, which can be a millisecond after the test's clock, so a worker's `now` is read from the queue.
+const queueDueTime = async (t: Awaited<ReturnType<typeof setup>>) => await t.run(async (ctx) => Math.max(
+  ...(await ctx.db.query("r2DeleteQueue").collect()).map((row) => row.nextAttemptAt),
+));
+
 test("R2 deletion rows claim atomically, complete, and reactivate from tombstones", async () => {
   const t = await setup();
 
@@ -644,16 +649,17 @@ test("R2 deletion rows claim atomically, complete, and reactivate from tombstone
     });
   });
   const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
-  const due = await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now: Date.now(), limit: 10 });
+  const now = await queueDueTime(t);
+  const due = await t.withIdentity(worker).query(api.r2Deletes.listDue, { projectId, now, limit: 10 });
   expect(due).toHaveLength(1);
 
   const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
-    projectId, ids: due.map((row) => row._id), now: Date.now(),
+    projectId, ids: due.map((row) => row._id), now,
   });
 
   expect(claimed).toHaveLength(1);
   expect((await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
-    projectId, ids: due.map((row) => row._id), now: Date.now(),
+    projectId, ids: due.map((row) => row._id), now,
   }))).toEqual([]);
   await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {
     projectId,
@@ -683,7 +689,7 @@ test("expired R2 claims are re-leased and reject stale completion", async () => 
     projectId, storageNamespace: project.storageNamespace, keys: [r2Key], kind: "sample",
   }));
   const worker = { subject: "worker", tokenIdentifier: "worker-token", dawWorker: true };
-  const now = Date.now();
+  const now = await queueDueTime(t);
 
   const first = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
     projectId,

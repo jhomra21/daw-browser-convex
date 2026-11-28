@@ -1,5 +1,6 @@
-import { describe, expect, spyOn, test } from 'bun:test'
+import { describe, expect, test } from 'bun:test'
 import { AUDIO_EFFECT_KINDS, automationTargetKey, normalizeAudioEffectChange, normalizeMasterAudioEffectChange, type AudioEffectKind, type JsonValue, granularAutomationKey, instrumentAutomationKey, synthAutomationKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { installFetch } from '~/test-support/install-fetch'
 import { persistHistoryEffectParams, rebaseTrackAutomationEnvelope } from './history-persistence'
 
 describe('history automation rebasing', () => {
@@ -59,19 +60,16 @@ const cloudOperationByKind = {
 const publishedBy = async (publish: () => Promise<void>) => {
   const bodies: JsonValue[] = []
 
-  const fetchSpy = spyOn(globalThis, 'fetch').mockImplementation(Object.assign(
-    async (_url: Parameters<typeof fetch>[0], init?: RequestInit) => {
-      bodies.push(JSON.parse(String(init?.body)))
+  const restoreFetch = installFetch(async (_url, init) => {
+    bodies.push(JSON.parse(String(init?.body)))
 
-      return new Response(JSON.stringify({ status: 'applied', effectId: 'effect-1' }))
-    },
-    { preconnect: globalThis.fetch.preconnect },
-  ))
+    return new Response(JSON.stringify({ status: 'applied', effectId: 'effect-1' }))
+  })
 
   try {
     await publish()
   } finally {
-    fetchSpy.mockRestore()
+    restoreFetch()
   }
 
   return bodies

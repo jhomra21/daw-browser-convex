@@ -1,0 +1,54 @@
+{
+ "name": "convex-1-51",
+ "sequence": 115,
+ "createdAt": "2026-11-22T17:24:05.032Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "9186193d81314f4347bd4ef6edb62815bc4b196310291c44fd10249081015c28",
+   "to": "f014517b6a8ed9ac33486935daeb16ad4f688ff2399616f86956505e6abfbbc3"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "b58efb821058860d5cb636efd912df8c81d7dd4cd7ad8b4d4339a8f8ea71732f",
+   "new": "360db82e5e16c12e7aa9819bdc6f42231fcee54846787d497ceff62189980796"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "942e8d4da5c79b72e03ee75b5c053f4e452fc022",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "4eda4b440cbe578292518284a9e6e8c4883e3c185c146e63303fb12294378672",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "4eda4b440cbe578292518284a9e6e8c4883e3c185c146e63303fb12294378672",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/cvx-bless/live",
+   "resultSha256": "c9356a1236674b8073cdd7f333330267d404b1ae590e93880eb5bc1c0435bcb8",
+   "seconds": 1254.7093353750001,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

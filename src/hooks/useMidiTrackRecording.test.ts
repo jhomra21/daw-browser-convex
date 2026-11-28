@@ -188,7 +188,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
-  Object.defineProperty(globalThis, 'fetch', { configurable: true, value: originalFetch })
+  Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: originalFetch })
 
   restoreWindow?.()
   runMidiRecordingHeartbeat = undefined
@@ -200,6 +200,7 @@ const setFetch = (
 ) => {
   Object.defineProperty(globalThis, 'fetch', {
     configurable: true,
+    writable: true,
     value: async (_url: string | URL | Request, init?: RequestInit) => {
       const body = z.json().parse(JSON.parse(z.string().parse(init?.body)))
 

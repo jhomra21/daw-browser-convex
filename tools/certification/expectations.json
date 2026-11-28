@@ -20,7 +20,7 @@
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/hooks/useTimelinePlayback.ts": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
    "src/lib/desktop/native-playback-controller.test.ts": "3f0bdeb3be2b1d066df98f753b370261d645261519e09b8297040a7f11cfefc7",
-   "src/hooks/useTimelinePlayback.test.ts": "9186193d81314f4347bd4ef6edb62815bc4b196310291c44fd10249081015c28",
+   "src/hooks/useTimelinePlayback.test.ts": "f014517b6a8ed9ac33486935daeb16ad4f688ff2399616f86956505e6abfbbc3",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
@@ -4194,7 +4194,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "b58efb821058860d5cb636efd912df8c81d7dd4cd7ad8b4d4339a8f8ea71732f",
+   "treeSha256": "360db82e5e16c12e7aa9819bdc6f42231fcee54846787d497ceff62189980796",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

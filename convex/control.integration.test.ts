@@ -64,7 +64,8 @@ const completeR2Deletes = async (t: Awaited<ReturnType<typeof setup>>) => {
   const claimed = await t.withIdentity(worker).mutation(api.r2Deletes.claimRows, {
     projectId,
     ids: rows.map((row) => row._id),
-    now: Date.now(),
+    // Rows are stamped at transaction time, which can be a millisecond after the test's clock.
+    now: Math.max(...rows.map((row) => row.nextAttemptAt)),
   });
 
   await t.withIdentity(worker).mutation(api.r2Deletes.markDeleted, {

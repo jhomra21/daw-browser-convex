@@ -283,13 +283,6 @@ describe('Instrument runtime', () => {
     })
 
     expect(runtime.scheduleMidiClip(createTrack(), createMidiClip(36), 0, 0, 1)).toBe(true)
-    expect(runtime.triggerSynthNote({
-      trackId: 'track-1',
-      pitch: 60,
-      when: 0,
-      durationSec: 1,
-    })).toBeUndefined()
-
     runtime.setTrackInstrument('track-1', {
       instrument: { kind: 'synth', params: createDefaultSynthParams() },
     })

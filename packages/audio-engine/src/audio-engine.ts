@@ -62,31 +62,6 @@ export type AudioRuntimeSnapshot = {
   inferredApplicationStallCount: number
 }
 
-export type LiveMidiNoteHandle = {
-  readonly id: number
-}
-
-type LiveMidiNote = {
-  trackId: string
-  instrumentKind: TrackInstrumentParams['kind']
-  synthNoteInstanceId?: number
-  synthGeneration?: number
-  stop?: (when: number, force?: boolean) => boolean | void
-  cleanupTimer?: ReturnType<typeof setTimeout>
-}
-
-type LiveNoteCleanupScheduler = {
-  schedule: (callback: () => void, delayMs: number) => ReturnType<typeof setTimeout>
-  clear: (timer: ReturnType<typeof setTimeout>) => void
-}
-
-const defaultLiveNoteCleanupScheduler: LiveNoteCleanupScheduler = {
-  schedule: (callback, delayMs) => setTimeout(callback, delayMs),
-  clear: (timer) => clearTimeout(timer),
-}
-
-const LIVE_GRANULAR_NOTE_DURATION_SEC = 0.5
-
 type SinkSelectableAudioContext = AudioContext & {
   setSinkId: (sinkId: string) => Promise<void>
 }
@@ -195,10 +170,7 @@ export class AudioEngine {
   })
   private calibrationReserved = false
   private recordingStartReserved = false
-  private nextLiveMidiNoteId = 1
-  private liveMidiNotes = new Map<number, LiveMidiNote>()
   private arpeggiatorListeners = new Set<(trackId: string) => void>()
-  private liveNoteCleanupScheduler: LiveNoteCleanupScheduler
   private transientMidiMappingBaselines = new Map<string, {
     values: Map<AutomationAudioBinding['param'], number>
     restoreTime?: number
@@ -219,9 +191,8 @@ export class AudioEngine {
     contextTimeToTimeline: (contextTime) => this.clock.ctxTimeToTimeline(contextTime),
   })
 
-  constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }, liveNoteCleanupScheduler = defaultLiveNoteCleanupScheduler) {
+  constructor(options: AudioRuntimeOptions = { latencyHint: 'interactive' }) {
     this.runtimeOptions = options
-    this.liveNoteCleanupScheduler = liveNoteCleanupScheduler
   }
 
   setAudioSourceResolver(resolver: (clip: AudioStretchRuntimeClip, signal?: AbortSignal) => Promise<AudioPcmSourceDescriptor>) {
@@ -489,117 +460,6 @@ export class AudioEngine {
 
   midiEventTimes(timeStamp: number): AudioClockResult | undefined {
     return this.midiTimestampConverter(timeStamp)
-  }
-
-  startLiveMidiNote(input: {
-    trackId: string
-    pitch: number
-    velocity: number
-    when: number
-  }): LiveMidiNoteHandle | undefined {
-    this.ensureAudio()
-    const instrumentKind = this.instruments.getTrackInstrumentKind(input.trackId)
-
-    if (!instrumentKind) return undefined
-    const id = this.nextLiveMidiNoteId++
-
-    if (instrumentKind === 'synth') {
-      const synthNoteInstanceId = this.instruments.triggerSynthNote({
-        ...input,
-        durationSec: 86_400,
-        live: true,
-      })
-
-      if (synthNoteInstanceId === undefined) return undefined
-      const synthGeneration = this.instruments.getSynthLiveVoiceGeneration(input.trackId)
-
-      if (synthGeneration === undefined) return undefined
-      this.liveMidiNotes.set(id, { trackId: input.trackId, instrumentKind, synthNoteInstanceId, synthGeneration })
-
-      return { id }
-    }
-
-    let endedBeforeRegistration = false
-
-    const onEnded = () => {
-      if (this.liveMidiNotes.has(id)) this.removeLiveMidiNote(id)
-      else endedBeforeRegistration = true
-    }
-
-    const stop = instrumentKind === 'sampler'
-      ? this.instruments.startLiveSamplerNote(input.trackId, input.pitch, input.velocity, undefined, onEnded)
-      : instrumentKind === 'drum-rack'
-        ? this.instruments.startLiveDrumRackNote(input.trackId, input.pitch, input.velocity, onEnded)
-        : instrumentKind === 'granular'
-          ? this.instruments.startLiveGranularNote(
-              input.trackId,
-              input.when,
-              LIVE_GRANULAR_NOTE_DURATION_SEC,
-              `live-granular:${id}`,
-            )
-        : undefined
-
-    if (!stop) return undefined
-    const note: LiveMidiNote = { trackId: input.trackId, instrumentKind, stop }
-    this.liveMidiNotes.set(id, note)
-
-    if (instrumentKind === 'granular') {
-      // AudioWorklet gates expose no ended event, so one bounded cleanup timer releases
-      // ownership after the scheduled note end. It is cleared by force-stop and close.
-      note.cleanupTimer = this.liveNoteCleanupScheduler.schedule(
-        () => this.expireLiveMidiNote(id),
-        Math.max(0, input.when - (this.audioCtx?.currentTime ?? input.when) + LIVE_GRANULAR_NOTE_DURATION_SEC) * 1_000,
-      )
-    }
-
-    if (endedBeforeRegistration) this.removeLiveMidiNote(id)
-
-    return { id }
-  }
-
-  releaseLiveMidiNote(handle: LiveMidiNoteHandle, when: number, force = false, gate = false) {
-    const note = this.liveMidiNotes.get(handle.id)
-
-    if (!note) return
-
-    if (note.synthNoteInstanceId !== undefined) {
-      this.removeLiveMidiNote(handle.id)
-      this.instruments.releaseSynthPreviewNote(
-        note.trackId,
-        note.synthNoteInstanceId,
-        when,
-        force,
-        note.synthGeneration,
-      )
-    } else if (force || (gate && note.instrumentKind === 'granular')) {
-      this.removeLiveMidiNote(handle.id)
-      note.stop?.(when, force)
-    } else if (note.instrumentKind === 'sampler' && note.stop?.(when) === true) {
-      this.removeLiveMidiNote(handle.id)
-    }
-  }
-
-  private removeLiveMidiNote(id: number) {
-    const note = this.liveMidiNotes.get(id)
-
-    if (!note) return
-    this.liveMidiNotes.delete(id)
-
-    if (note.cleanupTimer) this.liveNoteCleanupScheduler.clear(note.cleanupTimer)
-  }
-
-  private expireLiveMidiNote(id: number) {
-    const note = this.liveMidiNotes.get(id)
-
-    if (!note) return
-    this.removeLiveMidiNote(id)
-    note.stop?.(this.audioCtx?.currentTime ?? 0)
-  }
-
-  panicLiveMidi() {
-    const now = this.audioCtx?.currentTime ?? 0
-
-    for (const id of Array.from(this.liveMidiNotes.keys())) this.releaseLiveMidiNote({ id }, now, true)
   }
 
   getTrackInstrumentKind(trackId: string): TrackInstrumentParams['kind'] | undefined {
@@ -1065,7 +925,6 @@ export class AudioEngine {
   }
 
   private stopClipSources() {
-    this.panicLiveMidi()
     this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = this.sources.snapshot()

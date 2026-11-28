@@ -11,7 +11,7 @@ import type { ExportRenderStateSnapshot } from "~/lib/desired-playback-state";
 import { createEffectsPanelController, hydrateInstrumentBuffers, type EffectsPanelController, type EffectsPanelExportSnapshot } from "~/components/timeline/create-effects-panel-controller";
 import { deleteLocalEffect, getLocalEffect, setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects";
 import { ParameterGestureHolder } from "~/components/timeline/parameter-gesture-owner";
-import type { Track } from "@daw-browser/timeline-core/types";
+import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { compileLivePlaybackSnapshot } from "~/lib/live-playback-snapshot";
 import type { LocalAssetBytesResult } from "~/lib/local-assets";
 import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
@@ -649,6 +649,12 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     } finally { lease?.release(); }
   };
 
+  // One note scheduled through the runtime, the way a clip plays it.
+  const scheduleNote = (pitch: number) => runtime.scheduleMidiClip(track, {
+    id: "audition", name: "audition", color: "#fff", startSec: 0, duration: 1,
+    midi: { wave: "sine", notes: [{ pitch, beat: 0, length: 1, velocity: 1 }] },
+  } satisfies Clip<AudioBuffer>, 0, 0, 1);
+
   const assertContent = (instrument: TrackInstrumentParams) => {
     expect(device.readInstrumentForTarget(track.id)).toEqual(instrument);
     expect(engine.getTrackInstrumentKind(track.id)).toBe(instrument.kind);
@@ -661,8 +667,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     else {
       const before = sources.length;
 
-      if (instrument.kind === "sampler") expect(runtime.previewSamplerNote(track.id, 60, 1)).toBe(true);
-      else runtime.previewDrumRackNote(track.id, 36, 1);
+      expect(scheduleNote(instrument.kind === "sampler" ? 60 : 36)).toBe(true);
       expect(sources.length).toBeGreaterThan(before);
       expect(sources.at(-1)?.buffer).toBe(buffer);
 
@@ -729,10 +734,10 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
     releaseDecode: () => decoded.resolve(),
     runtimeKind: () => engine.getTrackInstrumentKind(track.id),
     canStartGranularNote: () => {
-      const stop = runtime.startLiveGranularNote(track.id, 0, 0.1, "h6-note");
-      stop?.();
+      const started = scheduleNote(60);
+      runtime.stopClip("audition");
 
-      return stop !== undefined;
+      return started;
     },
     runtimeArp: () => runtime.getTrackArpeggiator(track.id),
     remainingBytes: budget.totalBytes,

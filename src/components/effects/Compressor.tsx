@@ -172,7 +172,7 @@ export default function Compressor(props: CompressorProps) {
 
   return (
     <EffectShell title="Compressor" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset}  class={cn('w-[700px] min-w-[700px]', props.class)}>
-      <div class={cn('grid min-h-0 flex-1 grid-cols-[84px_1fr_96px_112px] gap-2 px-3 py-2', !props.params.enabled && 'opacity-70')}>
+      <div class={cn('grid min-h-0 flex-1 grid-cols-[84px_1fr_124px_112px] gap-2 px-3 py-2', !props.params.enabled && 'opacity-70')}>
         <div class="flex min-h-0 flex-col items-stretch gap-2">
           <AutomatedKnob label="Ratio" valueLabel={formatRatio(props.params.ratio)} value={props.params.ratio} resetValue={DEFAULT_PARAMS.ratio} min={COMPRESSOR_RATIO_MIN} max={COMPRESSOR_RATIO_MAX} step={0.1} disabled={!props.params.enabled} parameterId="compressor.ratio" automation={props} onValueChange={(ratio) => props.onChange({ ratio })} />
           <AutomatedKnob label="Attack" valueLabel={formatMs(props.params.attackMs)} value={props.params.attackMs} resetValue={DEFAULT_PARAMS.attackMs} min={COMPRESSOR_ATTACK_MS_MIN} max={COMPRESSOR_ATTACK_MS_MAX} step={0.1} disabled={!props.params.enabled} parameterId="compressor.attackMs" automation={props} onValueChange={(attackMs) => props.onChange({ attackMs })} />
@@ -207,7 +207,7 @@ export default function Compressor(props: CompressorProps) {
           </div>
         </div>
         <div class="flex min-h-0 flex-col gap-2">
-          <AutomatedKnob label="Makeup" valueLabel={formatDb(props.params.makeupDb)} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || autoMakeupActive()} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
+          <AutomatedKnob label="Makeup" valueLabel={formatDb(makeupDb())} value={props.params.makeupDb} resetValue={DEFAULT_PARAMS.makeupDb} min={COMPRESSOR_GAIN_DB_MIN} max={COMPRESSOR_GAIN_DB_MAX} step={0.1} bipolar disabled={!props.params.enabled || autoMakeupActive()} parameterId="compressor.makeupDb" automation={props} onValueChange={(makeupDb) => props.onChange({ makeupDb })} />
           <DeviceToggleButton class="h-6 py-0" label="Auto Makeup" active={autoMakeupActive()} disabled={!props.params.enabled || externalKey() || props.params.dynamicsMode === 'expand'} onClick={() => props.onChange({ autoMakeup: !props.params.autoMakeup })} />
           <div class="grid grid-cols-2 gap-1">
             <For each={DETECTOR_MODES}>{(mode) => <DeviceToggleButton label={mode.toUpperCase()} active={props.params.detectorMode === mode} disabled={!props.params.enabled} onClick={() => props.onChange({ detectorMode: mode })} />}</For>

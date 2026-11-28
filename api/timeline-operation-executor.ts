@@ -281,6 +281,7 @@ export const executeTimelineOperation = async (
         effect: processorEffectByOperation[operation.kind],
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
+        paramsVersion: operation.payload.paramsVersion,
       })
     case 'effects.setModulationParams':
       return await context.convex.mutation(convexApi.effects.serverSetModulationParams, {
@@ -370,6 +371,7 @@ export const executeTimelineOperation = async (
         effect: processorEffectByOperation[operation.kind],
         instanceId: operation.payload.instanceId,
         params: operation.payload.params,
+        paramsVersion: operation.payload.paramsVersion,
       })
     case 'effects.setMasterModulationParams':
       return await context.convex.mutation(convexApi.effects.serverSetMasterModulationParams, {

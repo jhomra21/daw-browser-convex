@@ -3,6 +3,7 @@ import { audioEffectKindFromLocalEffect } from "~/lib/audio-effect-kind";
 import {
   assert,
   assertDefined,
+  AUDIO_EFFECT_PARAMS_VERSION,
   automationTargetKey,
   createAutomationTarget,
   buildClipCreatePayload,
@@ -357,7 +358,7 @@ const sharedRestoreEffects = (effects: TrackEffectSnapshot | undefined): SharedR
   const restored: SharedRestoreEffects = []
 
   for (const effect of audioEffects) {
-    restored.push({ type: effect.effect, instanceId: effect.instanceId, index: effect.index, params: effect.params })
+    restored.push({ type: effect.effect, instanceId: effect.instanceId, index: effect.index, params: effect.params, paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[effect.effect] })
   }
 
   if (effects.instrument) restored.push({ type: 'instrument', params: effects.instrument })
@@ -515,7 +516,7 @@ export const persistHistoryTrackEffects = async (
   const audioEffects = effects.audioEffects ?? [];
 
   const restoredAudioEffects = audioEffects.flatMap((effect) => (
-    effect.instanceId ? [{ id: effect.instanceId, kind: effect.effect, params: effect.params }] : []
+    effect.instanceId ? [{ id: effect.instanceId, kind: effect.effect, params: effect.params, paramsVersion: AUDIO_EFFECT_PARAMS_VERSION[effect.effect] }] : []
   ));
 
   if (restoredAudioEffects.length !== audioEffects.length) {
@@ -664,7 +665,7 @@ export const persistHistoryEffectParams = async (
 
   if (kind) {
     const params = normalizeAudioEffectRow(kind, pickDirectionalValue(direction, entry.data.from, entry.data.to));
-    await publishHistoryOperation(deps, buildEffectParamsOperation(params, instanceId, entry.data.effect === kind ? targetId : undefined));
+    await publishHistoryOperation(deps, buildEffectParamsOperation(params, instanceId, entry.data.effect === kind ? targetId : undefined, AUDIO_EFFECT_PARAMS_VERSION[kind]));
 
     return;
   }

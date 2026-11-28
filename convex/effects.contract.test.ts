@@ -32,6 +32,6 @@ describe('audio effect persistence instance contract', () => {
 
     expect(audioEffects.kind).toBe('array')
     expect(audioEffects.element.kind).toBe('object')
-    expect(Object.keys(audioEffects.element.fields)).toEqual(['id', 'kind', 'params'])
+    expect(Object.keys(audioEffects.element.fields)).toEqual(['id', 'kind', 'params', 'paramsVersion'])
   })
 })

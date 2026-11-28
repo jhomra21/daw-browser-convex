@@ -1,12 +1,14 @@
 import { mkdir, rm } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from '@solidjs/vite-plugin'
+import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
 
 // Bundles a browser-runtime fixture, opens it in an isolated Chromium session and returns the scenario results the
-// fixture publishes as window.__browserFixtureResults (or fails with the error it published).
-export const runBrowserFixture = async (runtime: URL, options: { screenshot?: string } = {}) => {
+// fixture publishes as window.__browserFixtureResults (or fails with the error it published). A fixture that checks layout
+// passes `styled` and imports ~/index.css, so its classes resolve to the app's real Tailwind rules.
+export const runBrowserFixture = async (runtime: URL, options: { screenshot?: string; styled?: boolean } = {}) => {
   const directory = `/tmp/daw-fixture-${crypto.randomUUID()}`
   const session = `daw-fixture-${crypto.randomUUID()}`
 
@@ -32,6 +34,7 @@ export const runBrowserFixture = async (runtime: URL, options: { screenshot?: st
             : undefined,
         },
         solidPlugin(),
+        ...(options.styled ? [tailwindcss()] : []),
       ],
       define: { 'process.env.NODE_ENV': '"production"', 'import.meta.env.VITE_CONVEX_URL': '"https://fixture.convex.cloud"' },
       resolve: { alias: { '~': `${repositoryRoot}src` } },
@@ -44,9 +47,11 @@ export const runBrowserFixture = async (runtime: URL, options: { screenshot?: st
     const bundle = output.output.find((chunk) => chunk.type === 'chunk')?.code
 
     if (!bundle) throw new Error('The fixture bundle is empty.')
+    const styles = output.output.flatMap((asset) => asset.type === 'asset' && asset.fileName.endsWith('.css') ? [String(asset.source)] : [])
+
     await Bun.write(
       `${directory}/index.html`,
-      `<!doctype html><body><script>window.addEventListener('error',event=>{window.__browserFixtureError=event.message});window.addEventListener('unhandledrejection',event=>{window.__browserFixtureError=String(event.reason)})</script><script>${bundle}</script>`,
+      `<!doctype html><style>${styles.join('\n')}</style><body><script>window.addEventListener('error',event=>{window.__browserFixtureError=event.message});window.addEventListener('unhandledrejection',event=>{window.__browserFixtureError=String(event.reason)})</script><script>${bundle}</script>`,
     )
     await browser('open', `file://${directory}/index.html`)
     await browser('wait', '--fn', '!!window.__browserFixtureResults || !!window.__browserFixtureError')

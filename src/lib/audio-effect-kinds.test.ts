@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, type AudioEffectKind } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, AUDIO_EFFECT_KINDS, AUDIO_EFFECT_PARAMS_VERSION, type AudioEffectKind } from "@daw-browser/shared";
 import { audioEffectForms } from "./audio-effect-kinds";
 
 // The operation that persists each kind, written out per kind so a registry change cannot move it silently.
@@ -52,6 +52,8 @@ describe("audioEffectForms", () => {
     const contract = AUDIO_EFFECT_CONTRACTS[kind];
     const forms = audioEffectForms(kind, undefined, {});
     const params = contract.normalizeParams({});
+    // The server migrates a write from the version it names, so every persisted write names the one it was made at.
+    const paramsVersion = AUDIO_EFFECT_PARAMS_VERSION[kind];
 
     expect<unknown>(forms.track).toEqual({ effect: kind, from: params, to: params });
     expect<unknown>(forms.master).toEqual({ effect: `master-${kind}`, from: params, to: params });
@@ -59,14 +61,14 @@ describe("audioEffectForms", () => {
     expect<unknown>(forms.persist("track-1", "instance-1")).toEqual({
       kind: trackOperationByKind[kind],
       payload: carriesKindInPayload(kind)
-        ? { trackId: "track-1", effect: kind, params, instanceId: "instance-1" }
-        : { trackId: "track-1", params, instanceId: "instance-1" },
+        ? { trackId: "track-1", effect: kind, params, instanceId: "instance-1", paramsVersion }
+        : { trackId: "track-1", params, instanceId: "instance-1", paramsVersion },
     });
     expect<unknown>(forms.persist("master", "instance-2")).toEqual({
       kind: masterOperationByKind[kind],
       payload: carriesKindInPayload(kind)
-        ? { effect: kind, params, instanceId: "instance-2" }
-        : { params, instanceId: "instance-2" },
+        ? { effect: kind, params, instanceId: "instance-2", paramsVersion }
+        : { params, instanceId: "instance-2", paramsVersion },
     });
   });
 });

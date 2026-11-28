@@ -57,8 +57,8 @@
    "native/audio-core/tests/audio_core_test.cpp": "36b04b44658f799c503140c2e1da248e57b7db35d5935f8a489d5e1f56b084eb",
    "native/audio-host-macos/tests/audio_host_test.cpp": "7ced47a18c9c8d37f61d06f3a76f562e4a2a6f63bf9701f9e5354c8dc66dc562",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
-   "public/audio-core/daw-audio-core.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
-   "public/audio-core/daw-audio-core.manifest.json": "2774775ba9f6b62102f60da3cc8c96b93ccd8038fc6086b5a55469e3566e6367",
+   "public/audio-core/daw-audio-core.wasm": "c279c028083e9df60abf5f8598c67a2bf2d2382702db1106285c7438906f491e",
+   "public/audio-core/daw-audio-core.manifest.json": "3069f2ec3d4034d946978c4ed7633d3d570a6a266182a4a0e9f62b1df2f21b87",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "53ecf1158f097547efc0d389ab1fe22e2bd3fedd191c8423175aa88174d67712",
    "public/audio-worklets/daw-portable-audio-core-host-v2.js": "aca3c5d2dd1d783568d492702a6cb9e90b85e5e561e44b6d438ed9e25037bffa",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
@@ -3715,6 +3715,30 @@
    }
   },
   {
+   "name": "x-effects-harness",
+   "group": "x",
+   "isolated": false,
+   "trigger": "always",
+   "command": {
+    "argv": [
+     "bun",
+     "--conditions=browser",
+     "run",
+     "effects:harness",
+     "--out",
+     "{{DIR}}/out"
+    ],
+    "alarmSeconds": 600,
+    "env": {},
+    "evidence": false,
+    "rc7Seconds": 120
+   },
+   "judge": {
+    "kind": "exit",
+    "exit": 0
+   }
+  },
+  {
    "name": "x-wasm-source-hash",
    "group": "x",
    "isolated": false,
@@ -3732,11 +3756,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "2488e93af31e071bdf699e6ea4e95bd772193b0764d34824c1e706389e33fc7f",
+    "value": "022ea82fe0b7ebf3140e788656fc29fe972b050246ad9963d7abcf63799c00b9",
     "files": {
-     "public/audio-core/daw-audio-core.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
-     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "88d26b7b57fe9919829fa6baed4e1029d47084ecf049d8d00153ea99ff9b2c43",
-     "public/audio-core/daw-audio-core.manifest.json": "2774775ba9f6b62102f60da3cc8c96b93ccd8038fc6086b5a55469e3566e6367"
+     "public/audio-core/daw-audio-core.wasm": "c279c028083e9df60abf5f8598c67a2bf2d2382702db1106285c7438906f491e",
+     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "c279c028083e9df60abf5f8598c67a2bf2d2382702db1106285c7438906f491e",
+     "public/audio-core/daw-audio-core.manifest.json": "3069f2ec3d4034d946978c4ed7633d3d570a6a266182a4a0e9f62b1df2f21b87"
     }
    }
   },

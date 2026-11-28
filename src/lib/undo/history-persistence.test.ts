@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { AUDIO_EFFECT_KINDS, automationTargetKey, normalizeAudioEffectChange, normalizeMasterAudioEffectChange, type AudioEffectKind, type JsonValue, granularAutomationKey, instrumentAutomationKey, synthAutomationKey, type AutomationEnvelope } from '@daw-browser/shared'
+import { AUDIO_EFFECT_KINDS, AUDIO_EFFECT_PARAMS_VERSION, automationTargetKey, normalizeAudioEffectChange, normalizeMasterAudioEffectChange, type AudioEffectKind, type JsonValue, granularAutomationKey, instrumentAutomationKey, synthAutomationKey, type AutomationEnvelope } from '@daw-browser/shared'
 import { installFetch } from '~/test-support/install-fetch'
 import { persistHistoryEffectParams, rebaseTrackAutomationEnvelope } from './history-persistence'
 
@@ -84,6 +84,7 @@ describe('cloud effect params history', () => {
       const track = normalizeAudioEffectChange(kind, {}, {})
       const master = normalizeMasterAudioEffectChange(kind, {}, {})
       const carriesKind = operation === 'Modulation'
+      const paramsVersion = AUDIO_EFFECT_PARAMS_VERSION[kind]
 
       const [trackBody] = await publishedBy(() => persistHistoryEffectParams(
         deps, { type: 'effect-params', projectId: 'cloud-project', data: { ...track, instanceId: 'instance-1' } }, 'track-1', 'undo',
@@ -94,12 +95,12 @@ describe('cloud effect params history', () => {
       ))
 
       const trackPayload = carriesKind
-        ? { trackId: 'track-1', effect: kind, params: track.from, instanceId: 'instance-1' }
-        : { trackId: 'track-1', params: track.from, instanceId: 'instance-1' }
+        ? { trackId: 'track-1', effect: kind, params: track.from, instanceId: 'instance-1', paramsVersion }
+        : { trackId: 'track-1', params: track.from, instanceId: 'instance-1', paramsVersion }
 
       const masterPayload = carriesKind
-        ? { effect: kind, params: master.to, instanceId: 'instance-2' }
-        : { params: master.to, instanceId: 'instance-2' }
+        ? { effect: kind, params: master.to, instanceId: 'instance-2', paramsVersion }
+        : { params: master.to, instanceId: 'instance-2', paramsVersion }
 
       expect<unknown>(trackBody).toEqual({ kind: `effects.set${operation}Params`, payload: trackPayload })
       expect<unknown>(masterBody).toEqual({ kind: `effects.setMaster${operation}Params`, payload: masterPayload })

@@ -1,7 +1,7 @@
 // Acceptance tests from dynamics.md section 3: T1 (parity), L1 (smooth attack), L2 (true peak, EBU Tech 3341), L5 (lookahead
 // latency), C1 (low-frequency THD+N), C2 (non-finite, shared), C3 (smoothing), C5 (zero latency), G1 (chatter), G2 (non-finite),
 // G3 (timing), G4 (flip, key, key filter) and G5 (lookahead latency).
-import { countNonFinite, lowpass, maxAbsDiff, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
+import { countNonFinite, lowpass, maxAbsDiff, maxGainStepDb, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
 import { measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { ebuTruePeakCases } from '../ebu3341'
 import { declaredLatencyFrames, fx } from '../effects'
@@ -9,6 +9,7 @@ import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
 import { clickTrain, coherentFrequency, concat, constant, dbToLinear, linearToDb, noise, ramp, scale, silence, sine, sineWithPeakAt, square } from '../signals'
+import { dynamicsControls } from './dynamics-controls'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const normalizePeak = (signal: Float32Array, db: number) => scale(signal, dbToLinear(db) / peakAbs(signal))
@@ -27,20 +28,7 @@ const limiterClick: Scenario = {
       input[clickAt] = 1.9
       const { output } = await h.render(spec, { input: [input] })
       const latency = await h.latencyFrames(spec)
-      let previous: { gain: number; frame: number } | null = null
-      let jump = 0
-
-      for (let n = clickAt - 300; n < clickAt + latency + 2400; n += 1) {
-        const reference = input[n - latency]
-
-        if (Math.abs(reference) < 0.02) continue
-        const gain = linearToDb(Math.abs(output[0][n]) / Math.abs(reference))
-
-        // Samples near the tone's zero crossings carry no gain reading; the change across them is spread over the frames skipped.
-        if (previous) jump = Math.max(jump, Math.abs(gain - previous.gain) / (n - previous.frame))
-
-        previous = { gain, frame: n }
-      }
+      const jump = maxGainStepDb(input, output[0], latency, clickAt - 300, clickAt + latency + 2400)
 
       h.atMost(`max gain change per sample around a 1.9 click, lookahead ${lookaheadMs} ms`, jump, 0.3, 'dB', 'report: 6.58 dB instant step')
       h.atMost(`output sample peak, lookahead ${lookaheadMs} ms`, peakDb(output[0]), -1, 'dBFS')
@@ -690,6 +678,7 @@ export const dynamics: Family = {
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 3, kneeDb: 6, dynamicsMode: 'expand', autoMakeup: true, makeupDb: 2, envelopeCurve: 'linear', sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-expand' },
     { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
     ...familyOf('gate', gateSpec),
+    ...dynamicsControls,
   ],
   notEncoded: [
     'L2: the limiter\'s own detector reading on EBU 3341 cases 15 to 23 is internal; the harness instead validates its own true-peak meter against those cases and limits the signals above 0 dBTP.',

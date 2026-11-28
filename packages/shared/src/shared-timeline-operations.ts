@@ -105,6 +105,8 @@ export type SharedUngroupRestoreEffect = {
   instanceId?: string
   index?: number
   params: JsonValue
+  // The params version the client captured the effect at; absent is version 1.
+  paramsVersion?: number
 }
 
 export type SharedUngroupRestoreAutomation = {
@@ -115,7 +117,7 @@ export type SharedUngroupRestoreAutomation = {
   updatedAt: number
 }
 
-type SharedModulationEffectPayload = NormalizedAudioEffectRow<ModulationOperationKind> & { instanceId: string }
+type SharedModulationEffectPayload = NormalizedAudioEffectRow<ModulationOperationKind> & { instanceId: string; paramsVersion?: number }
 
 export type SharedTimelineOperation =
   | { kind: 'tracks.create'; payload: { name?: string; index?: number; kind?: string; channelRole?: string; collapsed?: boolean; color?: string; operationId?: string } }
@@ -170,43 +172,43 @@ export type SharedTimelineOperation =
   | { kind: 'tracks.setVolume'; payload: { trackId: string; volume: number } }
   | { kind: 'tracks.setMix'; payload: { trackId: string; muted?: boolean; soloed?: boolean } }
   | { kind: 'mixer.setMasterVolume'; payload: { volume: number } }
-  | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams; instanceId: string } }
-  | { kind: 'effects.setUtilityParams'; payload: { trackId: string; params: UtilityParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setGateParams'; payload: { trackId: string; params: GateParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setLimiterParams'; payload: { trackId: string; params: LimiterParamsEnvelope; instanceId: string } }
+  | { kind: 'effects.setEqParams'; payload: { trackId: string; params: EqParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setUtilityParams'; payload: { trackId: string; params: UtilityParamsEnvelope; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setGateParams'; payload: { trackId: string; params: GateParamsEnvelope; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setLimiterParams'; payload: { trackId: string; params: LimiterParamsEnvelope; instanceId: string; paramsVersion?: number } }
   | { kind: 'effects.setModulationParams'; payload: SharedModulationEffectPayload & { trackId: string } }
-  | { kind: 'effects.setCompressorParams'; payload: { trackId: string; params: CompressorParams; instanceId: string } }
-  | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams; instanceId: string } }
-  | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams; instanceId: string } }
-  | { kind: 'effects.setSpectralParams'; payload: { trackId: string; params: SpectralParamsEnvelope; instanceId: string } }
+  | { kind: 'effects.setCompressorParams'; payload: { trackId: string; params: CompressorParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setSaturatorParams'; payload: { trackId: string; params: SaturatorParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setDelayParams'; payload: { trackId: string; params: DelayParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setSpectralParams'; payload: { trackId: string; params: SpectralParamsEnvelope; instanceId: string; paramsVersion?: number } }
   | { kind: 'effects.reorderAudioChain'; payload: { trackId: string; order: AudioEffectOrderItem[] } }
   | {
       kind: 'effects.restoreChain'
       payload: {
         trackId: string
-        audioEffects: Array<{ id: string; kind: AudioEffectKind; params: JsonValue }>
+        audioEffects: Array<{ id: string; kind: AudioEffectKind; params: JsonValue; paramsVersion?: number }>
         instrument?: TrackInstrumentParams
         arpeggiator?: ArpeggiatorParams
         operationId: string
       }
     }
   | { kind: 'effects.removeAudioEffect'; payload: { targetType: 'track'; trackId: string; effect: AudioEffectKind; instanceId: string } | { targetType: 'master'; effect: AudioEffectKind; instanceId: string } }
-  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string } }
+  | { kind: 'effects.setReverbParams'; payload: { trackId: string; params: SharedReverbParams; instanceId: string; paramsVersion?: number } }
   | { kind: 'effects.setSynthParams'; payload: { trackId: string; params: SynthParams; instanceId: string } }
   | { kind: 'instruments.setTrackInstrument'; payload: { trackId: string; instrument: TrackInstrumentParams } }
   | { kind: 'instruments.removeTrackInstrument'; payload: { trackId: string; operationId: string } }
   | { kind: 'effects.setArpeggiatorParams'; payload: { trackId: string; params: ArpeggiatorParams } }
   | { kind: 'effects.removeArpeggiator'; payload: { trackId: string; operationId: string } }
-  | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string } }
-  | { kind: 'effects.setMasterUtilityParams'; payload: { params: UtilityParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setMasterGateParams'; payload: { params: GateParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setMasterLimiterParams'; payload: { params: LimiterParamsEnvelope; instanceId: string } }
+  | { kind: 'effects.setMasterEqParams'; payload: { params: EqParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterUtilityParams'; payload: { params: UtilityParamsEnvelope; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterGateParams'; payload: { params: GateParamsEnvelope; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterLimiterParams'; payload: { params: LimiterParamsEnvelope; instanceId: string; paramsVersion?: number } }
   | { kind: 'effects.setMasterModulationParams'; payload: SharedModulationEffectPayload }
-  | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams; instanceId: string } }
-  | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams; instanceId: string } }
-  | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams; instanceId: string } }
-  | { kind: 'effects.setMasterSpectralParams'; payload: { params: SpectralParamsEnvelope; instanceId: string } }
-  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams; instanceId: string } }
+  | { kind: 'effects.setMasterCompressorParams'; payload: { params: CompressorParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterSaturatorParams'; payload: { params: SaturatorParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterDelayParams'; payload: { params: DelayParams; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterSpectralParams'; payload: { params: SpectralParamsEnvelope; instanceId: string; paramsVersion?: number } }
+  | { kind: 'effects.setMasterReverbParams'; payload: { params: SharedReverbParams; instanceId: string; paramsVersion?: number } }
   | { kind: 'effects.reorderMasterAudioChain'; payload: { order: AudioEffectOrderItem[] } }
   | { kind: 'automation.setEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; parameterId: string; enabled: boolean; points: AutomationPoint[]; updatedAt: number } }
   | { kind: 'automation.deleteEnvelope'; payload: { targetKind: 'track' | 'master'; trackId?: string; effectInstanceId?: string; parameterId: string } }
@@ -322,13 +324,21 @@ const readModulationEnvelope = (effect: JsonValue, value: JsonValue): Normalized
   return isAudioEffectKind(effect) && isModulationOperationKind(effect) ? normalizeAudioEffectRow(effect, value) : null
 }
 
+// Undefined when the client sent no version (the server then reads version 1); null when it sent one that is not a version.
+const readParamsVersion = (value: JsonValue | undefined): number | undefined | null => {
+  if (value === undefined) return undefined
+
+  return isJsonNumber(value) && Number.isInteger(value) && value >= 1 ? value : null
+}
+
 const effectPayload = <Params>(
   params: Params,
-  payload: { instanceId?: JsonValue },
-): { params: Params; instanceId: string } | null => {
+  payload: { instanceId?: JsonValue; paramsVersion?: JsonValue },
+): { params: Params; instanceId: string; paramsVersion?: number } | null => {
   const instanceId = readRequiredInstanceId(payload.instanceId)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  return instanceId ? { params, instanceId } : null
+  return instanceId && paramsVersion !== null ? { params, instanceId, paramsVersion } : null
 }
 
 const readMoves = (value: JsonValue): MoveClipInput[] => Array.isArray(value)
@@ -510,6 +520,7 @@ const readCompressorParams = (value: JsonValue): CompressorParams | null => {
     dryWet: value.dryWet,
     kneeDb: value.kneeDb,
     lookaheadMs: value.lookaheadMs,
+    autoMakeup: isJsonBoolean(value.autoMakeup) ? value.autoMakeup : undefined,
     detectorMode: value.detectorMode,
     dynamicsMode: value.dynamicsMode,
     envelopeCurve: value.envelopeCurve,
@@ -941,6 +952,9 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
     if (effect.index !== undefined && (!isJsonNumber(effect.index) || !Number.isInteger(effect.index) || effect.index < 0)) return null
     const instanceId = isJsonString(effect.instanceId) ? effect.instanceId : undefined
     const index = isJsonNumber(effect.index) ? effect.index : undefined
+    const paramsVersion = readParamsVersion(effect.paramsVersion)
+
+    if (paramsVersion === null) return null
 
     if (!isAudioEffectKind(effect.type) && (instanceId !== undefined || index !== undefined)) return null
 
@@ -985,6 +999,7 @@ export const normalizeSharedUngroupRestoreEffects = (value: JsonValue): SharedUn
       instanceId,
       index,
       params,
+      paramsVersion,
     })
   }
 
@@ -1196,10 +1211,11 @@ const parseTrackProcessor = (
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  if (!isJsonString(payload.trackId) || !params || !instanceId) return null
+  if (!isJsonString(payload.trackId) || !params || !instanceId || paramsVersion === null) return null
 
-  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId, payload.trackId)
+  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId, payload.trackId, paramsVersion)
 }
 
 const parseModulationEffect = (
@@ -1208,12 +1224,13 @@ const parseModulationEffect = (
 ): SharedTimelineOperation | null => {
   const instanceId = readRequiredInstanceId(payload.instanceId)
   const envelope = readModulationEnvelope(payload.effect, payload.params)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  if (!instanceId || !envelope) return null
+  if (!instanceId || !envelope || paramsVersion === null) return null
 
-  if (target === 'master') return buildEffectParamsOperation(envelope, instanceId)
+  if (target === 'master') return buildEffectParamsOperation(envelope, instanceId, undefined, paramsVersion)
 
-  return isJsonString(payload.trackId) ? buildEffectParamsOperation(envelope, instanceId, payload.trackId) : null
+  return isJsonString(payload.trackId) ? buildEffectParamsOperation(envelope, instanceId, payload.trackId, paramsVersion) : null
 }
 
 const parseTrackReverb = (payload: JsonObject): SharedTimelineOperation | null => {
@@ -1254,9 +1271,10 @@ const parseSpectralParams = (value: JsonValue): SpectralParamsEnvelope | null =>
 const parseTrackSpectral = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = parseSpectralParams(payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  return isJsonString(payload.trackId) && params && instanceId
-    ? { kind: 'effects.setSpectralParams', payload: { trackId: payload.trackId, params, instanceId } }
+  return isJsonString(payload.trackId) && params && instanceId && paramsVersion !== null
+    ? { kind: 'effects.setSpectralParams', payload: { trackId: payload.trackId, params, instanceId, paramsVersion } }
     : null
 }
 
@@ -1270,14 +1288,14 @@ const parseRestoreEffectChain = (payload: JsonObject): SharedTimelineOperation |
   if (!isJsonString(payload.trackId) || !isJsonString(payload.operationId) || payload.operationId.length === 0 || !Array.isArray(payload.audioEffects)) return null
 
   const restored = normalizeSharedUngroupRestoreEffects(payload.audioEffects.map((effect) => (
-    isJsonObject(effect) ? { type: effect.kind, instanceId: effect.id, params: effect.params } : effect
+    isJsonObject(effect) ? { type: effect.kind, instanceId: effect.id, params: effect.params, paramsVersion: effect.paramsVersion } : effect
   )))
 
   if (!restored || restored.length !== payload.audioEffects.length) return null
 
   const audioEffects = restored.flatMap((effect) => (
     isAudioEffectKind(effect.type) && effect.instanceId
-      ? [{ id: effect.instanceId, kind: effect.type, params: effect.params }]
+      ? [{ id: effect.instanceId, kind: effect.type, params: effect.params, paramsVersion: effect.paramsVersion }]
       : []
   ))
 
@@ -1379,10 +1397,11 @@ const parseMasterProcessor = (
 ): SharedTimelineOperation | null => {
   const params = readProcessorEnvelope(kind, payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  if (!params || !instanceId) return null
+  if (!params || !instanceId || paramsVersion === null) return null
 
-  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId)
+  return buildEffectParamsOperation(normalizeAudioEffectRow(kind, params), instanceId, undefined, paramsVersion)
 }
 
 const parseMasterReverb = (payload: JsonObject): SharedTimelineOperation | null => {
@@ -1416,9 +1435,10 @@ const parseMasterDelay = (payload: JsonObject): SharedTimelineOperation | null =
 const parseMasterSpectral = (payload: JsonObject): SharedTimelineOperation | null => {
   const params = parseSpectralParams(payload.params)
   const instanceId = readRequiredInstanceId(payload.instanceId)
+  const paramsVersion = readParamsVersion(payload.paramsVersion)
 
-  return params && instanceId
-    ? { kind: 'effects.setMasterSpectralParams', payload: { params, instanceId } }
+  return params && instanceId && paramsVersion !== null
+    ? { kind: 'effects.setMasterSpectralParams', payload: { params, instanceId, paramsVersion } }
     : null
 }
 

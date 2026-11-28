@@ -5,7 +5,7 @@ import type { EffectSpec } from '../effects'
 import type { Scenario } from '../harness'
 import { clickTrain, concat, constant, noise, sine, silence } from '../signals'
 
-const parityLimit = 1e-5
+export const parityLimit = 1e-5
 
 /** Fixed fixtures, 2 s: tone, noise, step, isolated clicks and a near-Nyquist tone. */
 export const parityFixtures = (rate: number): [string, Float32Array][] => {
@@ -81,7 +81,7 @@ export const robustnessScenarios = (effect: string, spec: EffectSpec, expectedLa
       const denormalInput = sine(frames, 997, h.rate, 3e-39)
       const quiet = await timeOf(silence(frames))
       const slow = await timeOf(denormalInput)
-      h.atMost('CPU of subnormal input relative to silence', slow / quiet, 2, 'x')
+      h.info('CPU of subnormal input relative to silence', slow / quiet, 'x', 'wall-clock ratio, machine dependent')
     },
   },
   {

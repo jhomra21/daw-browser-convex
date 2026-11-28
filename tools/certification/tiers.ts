@@ -50,7 +50,7 @@ export const selectTier = (exp: Expectations, changed: string[]) => {
 const staticGates = new Set(["g-typecheck", "g-lint", "g-tools-typecheck", "g-analyzer-selftest", "g-c0fg-oxlint", "g-c0-oxlint", "x-b6f5-scoped-lint", "rc1-i9-scoped-lint"])
 
 export const gateTier = (name: string): Tier =>
-  staticGates.has(name) ? "T0" : /^(x-test-native|x-host-ctest|x-rtguard|x-wasm-|x-portable-wasm|x-validate-wasm|x-backends)/.test(name) ? "T2n" : "T2"
+  staticGates.has(name) ? "T0" : /^(x-test-native|x-host-ctest|x-rtguard|x-wasm-|x-portable-wasm|x-validate-wasm|x-effects-harness|x-backends)/.test(name) ? "T2n" : "T2"
 
 // Campaigns whose command repeats a traced pair's: same fixture, seeds 1-100, steps and bounds. They differ only in `--gate <step>`
 // and `--trace`. A gate step's green set contains every earlier step's (gateSteps order; `gated` and gateViolations keep a class

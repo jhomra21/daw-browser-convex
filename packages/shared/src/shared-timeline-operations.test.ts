@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { parseDurableSharedTimelineOperation, parseSharedTimelineOperation, readSharedTimelineOperationTargets, type SharedTimelineOperation } from './shared-timeline-operations'
-import { createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
+import { createDefaultCompressorParams, createDefaultLimiterParams, createDefaultLoFiParams } from './effects-params'
 import { createDefaultSpectralParams } from './spectral-params'
 import type { JsonValue } from './json-value'
 
@@ -683,5 +683,48 @@ describe('shared timeline operations', () => {
         automation: [],
       },
     })).toBeNull()
+  })
+
+  describe('params version', () => {
+    const compressor = { ...createDefaultCompressorParams(), autoMakeup: true }
+    const limiter = { version: 1, state: createDefaultLimiterParams() }
+
+    test('carries the version a client wrote with and keeps Auto Makeup', () => {
+      expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', instanceId: 'comp-1', params: compressor, paramsVersion: 2 } })).toEqual({
+        kind: 'effects.setCompressorParams',
+        payload: { trackId: 'track-1', instanceId: 'comp-1', params: compressor, paramsVersion: 2 },
+      })
+      expect(parseSharedTimelineOperation({ kind: 'effects.setMasterLimiterParams', payload: { instanceId: 'lim-1', params: limiter, paramsVersion: 1 } })).toMatchObject({
+        kind: 'effects.setMasterLimiterParams',
+        payload: { instanceId: 'lim-1', paramsVersion: 1 },
+      })
+      expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', instanceId: 'comp-1', params: compressor } })).toMatchObject({
+        payload: { paramsVersion: undefined },
+      })
+    })
+
+    test('carries the version of each restored effect', () => {
+      const restored = parseSharedTimelineOperation({
+        kind: 'effects.restoreChain',
+        payload: { trackId: 'track-1', operationId: 'restore-1', audioEffects: [{ id: 'comp-1', kind: 'compressor', params: compressor, paramsVersion: 1 }] },
+      })
+
+      expect(restored).toMatchObject({ payload: { audioEffects: [{ id: 'comp-1', paramsVersion: 1 }] } })
+
+      const ungroup = parseSharedTimelineOperation({
+        kind: 'tracks.restoreUngroup',
+        payload: { group: { index: 0, volume: 1, sends: [] }, children: [], effects: [{ type: 'compressor', instanceId: 'comp-1', index: 0, params: compressor, paramsVersion: 1 }], automation: [] },
+      })
+
+      expect(ungroup).toMatchObject({ payload: { effects: [{ instanceId: 'comp-1', paramsVersion: 1 }] } })
+    })
+
+    test('rejects a version that is not a whole number from 1', () => {
+      for (const paramsVersion of [0, -1, 1.5, '2', null]) {
+        expect(parseSharedTimelineOperation({ kind: 'effects.setCompressorParams', payload: { trackId: 'track-1', instanceId: 'comp-1', params: compressor, paramsVersion } })).toBeNull()
+        expect(parseSharedTimelineOperation({ kind: 'effects.setMasterLimiterParams', payload: { instanceId: 'lim-1', params: limiter, paramsVersion } })).toBeNull()
+        expect(parseSharedTimelineOperation({ kind: 'effects.restoreChain', payload: { trackId: 'track-1', operationId: 'restore-1', audioEffects: [{ id: 'comp-1', kind: 'compressor', params: compressor, paramsVersion }] } })).toBeNull()
+      }
+    })
   })
 })

@@ -1,10 +1,11 @@
 #!/usr/bin/env bun
 // Effects measurement harness: renders fixed signals through the real audio-core wasm (and the legacy worklets for parity)
-// and writes JSON metrics, a markdown summary and short WAVs. Usage: bun tools/effects-harness/run.ts [--family <name>] [--out <dir>]
+// and writes JSON metrics, a markdown summary and short WAVs. Usage: bun tools/effects-harness/run.ts [--family <name>] [--out <dir>] [--gate]
+// --gate runs the gated families (or --family) and exits 1 when any judged row fails; informational rows never fail it.
 import path from 'node:path'
 import { jsonReplacer, markdownSummary, runScenarios } from './report'
 import type { RunMeta } from './report'
-import { families } from './scenarios'
+import { families, gatedFamilies } from './scenarios'
 import { wasmPath } from './render-wasm'
 
 const defaultOutRoot = path.resolve(import.meta.dir, '../../acceptance-reports/effects-harness')
@@ -30,7 +31,8 @@ if (wanted !== undefined && !names.includes(wanted)) {
   process.exit(1)
 }
 
-const selected = known.filter(([name]) => wanted === undefined || name === wanted)
+const gate = process.argv.includes('--gate')
+const selected = known.filter(([name]) => wanted === undefined ? !gate || gatedFamilies.some((gated) => gated === name) : name === wanted)
 const stamp = new Date().toISOString().replace(/[-:]/g, '').replace(/\..*/, '').replace('T', '-')
 const outDir = path.resolve(option('out') ?? `${defaultOutRoot}/${stamp}`)
 const wavDir = `${outDir}/wav`
@@ -67,3 +69,8 @@ const failed = checks.filter((check) => check.pass === false).length
 console.log(`${checks.length} checks, ${checks.filter((check) => check.pass === true).length} PASS, ${failed} FAIL`)
 
 console.log(outDir)
+
+if (gate && failed > 0) {
+  for (const run of runs) for (const check of run.checks) if (check.pass === false) console.error(`FAIL ${check.effect} / ${check.scenario} @${check.rate}: ${check.metric} = ${check.value} (${check.threshold})`)
+  process.exit(1)
+}

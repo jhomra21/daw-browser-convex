@@ -3,13 +3,13 @@
   "effectParamsVersions": {
     "eq": 2,
     "compressor": 2,
-    "saturator": 1,
+    "saturator": 2,
     "delay": 2,
     "reverb": 2,
     "autofilter": 2,
     "gate": 2,
     "limiter": 2,
-    "lofi": 1,
+    "lofi": 2,
     "chorus": 2,
     "flanger": 2,
     "phaser": 2,
@@ -17,7 +17,7 @@
     "autopan": 2,
     "ensemble": 2,
     "spectral": 1,
-    "utility": 1,
+    "utility": 2,
     "spectrum": 1
   },
   "undo": [

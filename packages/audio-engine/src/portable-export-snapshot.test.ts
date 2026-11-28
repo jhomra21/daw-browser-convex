@@ -798,7 +798,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     processor.latencyFrames,
     processor.tailFrames,
   ])).toEqual([
-    ['saturator', 0, 0],
+    ['saturator', 3, 0], // Hi-Quality is on for a new Saturator
     ['eq', 3, 0], // Hi-Quality is on for a new EQ
     ['chorus', 0, 768],
     ['flanger', 0, 1_080],

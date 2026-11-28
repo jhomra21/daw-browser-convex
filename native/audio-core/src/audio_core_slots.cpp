@@ -60,11 +60,17 @@ bool compatible_processor_history(
       return current.utility.dc_block == next.utility.dc_block
         && current.utility.input_mode == next.utility.input_mode
         && current.utility.matrix == next.utility.matrix
-        && current.utility.swap == next.utility.swap;
+        && current.utility.channel_mode == next.utility.channel_mode
+        && current.utility.width_mode == next.utility.width_mode
+        && current.utility.phase_left == next.utility.phase_left
+        && current.utility.phase_right == next.utility.phase_right
+        && current.utility.bass_mono == next.utility.bass_mono
+        && current.utility.bass_mono_audition == next.utility.bass_mono_audition;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
       return current.saturator.curve == next.saturator.curve
+        && current.saturator.hi_quality == next.saturator.hi_quality
         && current.saturator.color == next.saturator.color
-        && same_float(current.saturator.color_frequency_hz, next.saturator.color_frequency_hz);
+        && current.saturator.post_clip == next.saturator.post_clip;
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
       if (current.eq.mode != next.eq.mode || current.eq.high_quality != next.eq.high_quality) return false;
       for (uint32_t band = 0; band < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++band) {

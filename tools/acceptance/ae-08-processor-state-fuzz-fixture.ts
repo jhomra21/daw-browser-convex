@@ -124,7 +124,7 @@ export default function createControllerFixture(
 
   const utilityPayload = (gain: number): NativeBuiltInParameterPayload => ({ effect: "utility", instanceId: "utility:1", targetId: "track",
     from: { version: 1, state: createDefaultUtilityParams() },
-    to: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: gain, swap: utilitySwap } } })
+    to: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: gain, channelMode: utilitySwap ? 'swap' : 'both' } } })
 
   let synthParams = createDefaultSynthParams()
   let replacementValues: Readonly<Record<string, number>> | undefined
@@ -133,7 +133,7 @@ export default function createControllerFixture(
   const stateSequence = (content: Content) => history && processorEdits ? processorEdits.sequence() : content.sequence
 
   const effects = (content: Content): AudioEffectRuntimeInstance[] => [
-    ...(content.utilityPresent === false ? [] : [{ id: "utility:1", kind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: content.gain, swap: utilitySwap } } } satisfies AudioEffectRuntimeInstance]),
+    ...(content.utilityPresent === false ? [] : [{ id: "utility:1", kind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: content.gain, channelMode: utilitySwap ? 'swap' : 'both' } } } satisfies AudioEffectRuntimeInstance]),
     { id: "spectral:1", kind: "spectral", params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: content.fft } } },
   ]
 

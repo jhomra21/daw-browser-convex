@@ -8,6 +8,11 @@ export const delayWorklet = {
   modulePath: 'audio-worklets/daw-delay-processor-v1.js',
 }
 
+export const saturatorWorklet = {
+  processorName: 'daw-saturator-processor',
+  modulePath: 'audio-worklets/daw-saturator-processor-v1.js',
+}
+
 export const reverbWorklet = {
   processorName: 'daw-reverb-processor',
   modulePath: 'audio-worklets/daw-reverb-processor-v1.js',

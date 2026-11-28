@@ -194,17 +194,23 @@ const mapUtility = (payload: EffectChange<'utility' | 'master-utility'>) => {
   return mapFields(
     [
       { parameterId: 'utility.gainDb', from: from.gainDb, to: to.gainDb },
-      { parameterId: 'utility.pan', from: from.pan, to: to.pan },
       { parameterId: 'utility.balance', from: from.balance, to: to.balance },
       { parameterId: 'utility.width', from: from.width, to: to.width },
+      { parameterId: 'utility.midSide', from: from.midSide, to: to.midSide },
+      { parameterId: 'utility.bassMonoHz', from: from.bassMonoHz, to: to.bassMonoHz },
     ],
     [
       { from: from.enabled, to: to.enabled },
-      { from: from.polarity, to: to.polarity },
+      { from: from.phaseLeft, to: to.phaseLeft },
+      { from: from.phaseRight, to: to.phaseRight },
       { from: from.inputMode, to: to.inputMode },
       { from: from.matrix, to: to.matrix },
-      { from: from.swap, to: to.swap },
+      { from: from.channelMode, to: to.channelMode },
       { from: from.dcBlock, to: to.dcBlock },
+      { from: from.mute, to: to.mute },
+      { from: from.widthMode, to: to.widthMode },
+      { from: from.bassMono, to: to.bassMono },
+      { from: from.bassMonoAudition, to: to.bassMonoAudition },
     ],
   )
 }
@@ -251,7 +257,7 @@ const mapLoFi = (payload: EffectChange<'lofi' | 'master-lofi'>) => {
   return mapFields(
     [
       { parameterId: 'lofi.bitDepth', from: from.bitDepth, to: to.bitDepth },
-      { parameterId: 'lofi.sampleRateRatio', from: from.sampleRateRatio, to: to.sampleRateRatio },
+      { parameterId: 'lofi.sampleRateHz', from: from.sampleRateHz, to: to.sampleRateHz },
       { parameterId: 'lofi.jitter', from: from.jitter, to: to.jitter },
       { parameterId: 'lofi.noiseDb', from: from.noiseDb, to: to.noiseDb },
       { parameterId: 'lofi.mix', from: from.mix, to: to.mix },
@@ -350,14 +356,21 @@ const mapSaturator = (payload: EffectChange<'saturator' | 'master-saturator'>) =
     [
       { parameterId: 'saturator.driveDb', from: from.driveDb, to: to.driveDb },
       { parameterId: 'saturator.colorFrequencyHz', from: from.colorFrequencyHz, to: to.colorFrequencyHz },
-      { parameterId: 'saturator.colorAmount', from: from.colorAmount, to: to.colorAmount },
+      { parameterId: 'saturator.colorWidth', from: from.colorWidth, to: to.colorWidth },
+      { parameterId: 'saturator.colorLowDb', from: from.colorLowDb, to: to.colorLowDb },
+      { parameterId: 'saturator.colorHighDb', from: from.colorHighDb, to: to.colorHighDb },
+      { parameterId: 'saturator.bassThresholdDb', from: from.bassThresholdDb, to: to.bassThresholdDb },
+      { parameterId: 'saturator.warpDepth', from: from.warpDepth, to: to.warpDepth },
+      { parameterId: 'saturator.warpPeriod', from: from.warpPeriod, to: to.warpPeriod },
       { parameterId: 'saturator.outputDb', from: from.outputDb, to: to.outputDb },
       { parameterId: 'saturator.dryWet', from: from.dryWet, to: to.dryWet },
     ],
     [
       { from: from.enabled, to: to.enabled },
+      { from: from.hiQuality, to: to.hiQuality },
       { from: from.curve, to: to.curve },
       { from: from.color, to: to.color },
+      { from: from.postClip, to: to.postClip },
     ],
   )
 }

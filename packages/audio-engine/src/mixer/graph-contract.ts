@@ -230,9 +230,10 @@ const toPortableProcessor = (
       state: encodeUtilityProcessorState(instance.params.state),
       parameterTargets: [
         { id: 'utility.gainDb', target: 1 },
-        { id: 'utility.pan', target: 2 },
         { id: 'utility.balance', target: 3 },
         { id: 'utility.width', target: 4 },
+        { id: 'utility.bassMonoHz', target: 210 },
+        { id: 'utility.midSide', target: 211 },
       ],
       bypassed: !instance.params.state.enabled,
     }
@@ -270,9 +271,14 @@ const toPortableProcessor = (
       parameterTargets: [
         { id: 'saturator.driveDb', target: 69 },
         { id: 'saturator.colorFrequencyHz', target: 70 },
-        { id: 'saturator.colorAmount', target: 71 },
         { id: 'saturator.outputDb', target: 72 },
         { id: 'saturator.dryWet', target: 73 },
+        { id: 'saturator.colorHighDb', target: 203 },
+        { id: 'saturator.colorLowDb', target: 204 },
+        { id: 'saturator.colorWidth', target: 205 },
+        { id: 'saturator.bassThresholdDb', target: 206 },
+        { id: 'saturator.warpDepth', target: 207 },
+        { id: 'saturator.warpPeriod', target: 208 },
       ],
       bypassed: !instance.params.enabled,
     }
@@ -470,7 +476,7 @@ const toPortableProcessor = (
     return {
       ...common, kind: 'lofi', kindId: processorIds.lofi, state: encodeLoFiProcessorState(params),
       parameterTargets: [
-        { id: 'lofi.sampleRateRatio', target: 41 },
+        { id: 'lofi.sampleRateHz', target: 209 },
         { id: 'lofi.jitter', target: 42 },
         { id: 'lofi.noiseDb', target: 43 },
         { id: 'lofi.mix', target: 44 },

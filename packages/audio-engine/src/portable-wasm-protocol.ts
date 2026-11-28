@@ -200,14 +200,20 @@ const isUtilityState = <Value>(value: Value): value is Value & UtilityProcessorS
 
   return isProtocolBoolean(value.enabled)
     && isProtocolNumber(value.gainDb)
-    && (value.polarity === 'normal' || value.polarity === 'invert')
+    && isProtocolBoolean(value.phaseLeft)
+    && isProtocolBoolean(value.phaseRight)
     && (value.inputMode === 'stereo' || value.inputMode === 'mono-sum')
-    && isProtocolNumber(value.pan)
     && isProtocolNumber(value.balance)
     && isProtocolNumber(value.width)
     && (value.matrix === 'stereo' || value.matrix === 'mid-side-encode' || value.matrix === 'mid-side-decode')
-    && isProtocolBoolean(value.swap)
+    && (value.channelMode === 'both' || value.channelMode === 'left' || value.channelMode === 'right' || value.channelMode === 'swap')
     && isProtocolBoolean(value.dcBlock)
+    && isProtocolBoolean(value.mute)
+    && (value.widthMode === 'stereo' || value.widthMode === 'mid-side')
+    && isProtocolNumber(value.midSide)
+    && isProtocolBoolean(value.bassMono)
+    && isProtocolNumber(value.bassMonoHz)
+    && isProtocolBoolean(value.bassMonoAudition)
 }
 
 const isInstrumentEvent = <Value>(value: Value): value is Value & PortableWasmInstrumentEvent =>

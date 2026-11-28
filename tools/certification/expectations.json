@@ -19,8 +19,8 @@
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/hooks/useTimelinePlayback.ts": "f2c739f71501f706ac87571c12e0e6c4b8062693d90532d4ab883d42985d14ab",
-   "src/lib/desktop/native-playback-controller.test.ts": "20e9758f1edb24a9b1b434bb0fd77a1cb924d6b391d3545a97e406c28a722136",
-   "src/hooks/useTimelinePlayback.test.ts": "fec2942d3ef2cf9bc4f0a686ec4426bcb0fa864db2e9b87f94026c9c1de8658f",
+   "src/lib/desktop/native-playback-controller.test.ts": "5c46e7eeeedddd7e6f306dfae4b54bd281b4fbbd15c55f84d987bdab847520c5",
+   "src/hooks/useTimelinePlayback.test.ts": "9fec646e24dbdfcf956870057577822311adb186614377faebcab59c1ac723b0",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
@@ -31,8 +31,8 @@
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "de31ddad9c966f2032ae3d4f68ddac197ba717a99e38cb1192d5550570158bd7",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "07da8fac0157b1287ebe8a2886968e671f4de723722d00d88d93b7593ccfbc6b",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "61223c091f7dd8093d711116d29989b2ca75cead4ec3489cbfa751b6e92520b4",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
    "tools/acceptance/device-control-cost.browser.test.ts": "6ee6446d6cd8bedd5715e791f14b46ebb56a54c11222fab751325cfeed214938",
    "src/lib/instrument-buffer-sync.test.ts": "f198b72e77121b0d7dba549ffcee1afcdd0846a4e28bb66f21cc8485733cd376",
@@ -46,28 +46,28 @@
    "src/lib/when-number.ts": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5",
    "tools/acceptance/device-control-cost.browser-runtime.tsx": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7",
    "tools/acceptance/device-control-cost.ts": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345",
-   "src/hooks/useEffectsPanelAudioSync.test.ts": "6349ab04e7e8944f4ee0ca90167a5031c6c1cab0ca7d99efc2fc5cb1979a1e3b",
-   "src/lib/portable-browser-playback-controller.test.ts": "bb6cb7654362efaad79c926e21697be701bf28232d73ca57762142093f0573dc",
+   "src/hooks/useEffectsPanelAudioSync.test.ts": "379f07b71e8436b56500cfd71c23da6f89461a8fcf32a681ffaf78fd68b5b9f0",
+   "src/lib/portable-browser-playback-controller.test.ts": "a99741ec87c7e560ab7023dad3df788636027d661a121a0a3f39d2588b6b44d2",
    "src/components/timeline/create-persisted-effect-state.test.ts": "4015e82cc121cb819afb990b2078c06ca996e0732fcb9184592f324682c5eead",
    "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "0da64041beda5de695b159d1652f3359119aff52097923a45ebc744adc8e3708",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
    "src/hooks/pointer-gesture-ownership.browser.test.ts": "a1a04710c05e3dc2324824ff087eeaab4de12260c213b58eeeb676269e3c0d04",
    "native/audio-core/src/audio_core.cpp": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e",
-   "native/audio-core/include/daw/audio_core.h": "2fd3ecb06434800f494dd2b7b87fb002f4e97045f2f962de2c60cfa0d0d8aa4e",
-   "native/audio-core/tests/audio_core_test.cpp": "aaf29648cf8666fb5c79f67877c3518e90bfff711f29bb9993dfa8c09e25bc9a",
-   "native/audio-host-macos/tests/audio_host_test.cpp": "c317a9b10977d55e0973663a26801c956393868774ac8f71b03348cd07ce34db",
+   "native/audio-core/include/daw/audio_core.h": "149c02791c7da7faf2fc82dca6601ac2dc392509af61db17aaf2aa1f323c1d35",
+   "native/audio-core/tests/audio_core_test.cpp": "2188ca7d7fb15dcc938ab0c2d42d06d0d4ea1b0fa7dd847a5f2a55cb1d040ef3",
+   "native/audio-host-macos/tests/audio_host_test.cpp": "4076912e46e13c1bd3624edf17022510a37e7a2baa1c987ca275b6e7c5b65887",
    "native/audio-host-macos/tests/realtime_callback_guard.test.ts": "de262d58142afc5e94bd95cd1ab06de3478465434cc92455b74a024ea69ea075",
-   "public/audio-core/daw-audio-core.wasm": "a602d2b5a0e4247ee7458867b8c5985e0f9d6c2dfec45e43535ab431d5fbed47",
-   "public/audio-core/daw-audio-core.manifest.json": "ba1b50ad632b6fc94a0cbb977d0845af466e6263da7272be7b98395e901affb6",
+   "public/audio-core/daw-audio-core.wasm": "2ed93b9a8a8055147e7c51965b9228d15522ae1994066eefecd47df7c9c1b5f8",
+   "public/audio-core/daw-audio-core.manifest.json": "449a46d84807deb264e2f930286b461fbd8fd5068fb793651532c90c0242b2e7",
    "public/audio-worklets/daw-portable-graph-envelope-v3.js": "53ecf1158f097547efc0d389ab1fe22e2bd3fedd191c8423175aa88174d67712",
    "public/audio-worklets/daw-portable-audio-core-host-v2.js": "aca3c5d2dd1d783568d492702a6cb9e90b85e5e561e44b6d438ed9e25037bffa",
    "public/audio-worklets/daw-portable-audio-core-processor-v2.js": "d9fcd6ba60a590b54670e02d4124fc9a823759efbdbb463f2c9027ea505f6635",
-   "packages/audio-engine/src/portable-wasm-protocol.ts": "9b59fb1edf13bed9628568dc3a1cbc8ce6e9177283b73d94cf18464f288bcd6b",
+   "packages/audio-engine/src/portable-wasm-protocol.ts": "4fda23a37a8a5a13dd6e19a1b487d44a2c5a161bb6b085b7d59fbdd6c35d8c41",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.ts": "b74e90e9294e1e7c1a101e78faed82c92a9c985ae56bdcf75e25f5bde89259ce",
    "packages/audio-engine/src/native-host-wire.ts": "7f4d56b92169ecf5896c8b7b63bd967c7684767fb8f9c7a859c203ac767912a8",
    "packages/audio-engine/src/native-host-wire.test.ts": "19d2b6b19f4e292148b7a01aae71a7ae4cdf50b807a828a0f81919e130ae2a39",
-   "packages/audio-engine/src/portable-wasm-host.test.ts": "01f93c2965a1d4f922f4403ee657fd50f2e72747dd2374f9bc79b653b18a430b",
-   "packages/audio-engine/src/portable-wasm-protocol.test.ts": "90af46bf2abbf573ac8c20fd21485b5831cd0942ab81422442e9daae1fc7b7b2",
+   "packages/audio-engine/src/portable-wasm-host.test.ts": "8a9f08603836aaedf9e2a695fd215c50d9a5225992531fddbf156d3804233383",
+   "packages/audio-engine/src/portable-wasm-protocol.test.ts": "a5b448a3b118938fefece17b74c2583bcc4fe8c223029ad1f325e0a8b99710ba",
    "packages/audio-engine/src/portable-wasm-worklet.test.ts": "e9bdac5adebf54a2d4e501cd301b510425db02af7f2f44be3d3ecc909ededff9",
    "packages/audio-engine/src/backends/wasm-audio-worklet-backend.session.test.ts": "bb8763b8f9b0e86aabdc782acb2a9ca1625d249c706550135baac50f97d8410f",
    "tools/acceptance/analyze-ae-08-continuity.ts": "33a61fc7dba85ab143b79e3f97b0d7403768afd7a760efc515e913d73d28c734",
@@ -129,7 +129,7 @@
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/desktop/native-schedule-coordinator.ts": "702e457db755553d65eccb93693f2482c00dab6c874f08adca05bf6021d472cf",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "e9a7f359d2218f6c4e5b10a7f86f396835cbfee1494fcf6300a1269a5ae7e7c0",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "c1850092c66cf11df98bf2d66acb067ed2a9d3ab15b60eb0c4f2d64e48f0b73a",
    "src/lib/live-processor-control.ts": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a",
    "src/components/timeline/create-processor-edit-registry.ts": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc",
    "src/lib/live-playback-snapshot.ts": "392a4d0fb1f00a50397d276728c81ff40aa6de78cf046e70447e0e1e537301b9",
@@ -139,7 +139,7 @@
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "de31ddad9c966f2032ae3d4f68ddac197ba717a99e38cb1192d5550570158bd7",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "61223c091f7dd8093d711116d29989b2ca75cead4ec3489cbfa751b6e92520b4",
    "tools/acceptance/ae-08-processor-state-fuzz-trace.ts": "827068b2362de25287bf6c4bf2f03b0eabf50d35e771ac202abe7876c4b043d4",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
    "tools/acceptance/ae-08-processor-state-fuzz-edit.ts": "fc64facaeb3694c3ff38ddc810799d0611dff956daefb20bd8f0af74e96ec51a",
@@ -161,15 +161,15 @@
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/local-effects.ts": "ed2309148770fcd7f0b82732470644dab31532a676d4814fd5e7f937435528c8",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
-   "src/lib/desktop/native-built-in-parameter-mapper.ts": "e9a7f359d2218f6c4e5b10a7f86f396835cbfee1494fcf6300a1269a5ae7e7c0",
+   "src/lib/desktop/native-built-in-parameter-mapper.ts": "c1850092c66cf11df98bf2d66acb067ed2a9d3ab15b60eb0c4f2d64e48f0b73a",
    "src/lib/live-processor-control.ts": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a",
    "src/components/timeline/create-processor-edit-registry.ts": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
-   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "de31ddad9c966f2032ae3d4f68ddac197ba717a99e38cb1192d5550570158bd7",
+   "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "61223c091f7dd8093d711116d29989b2ca75cead4ec3489cbfa751b6e92520b4",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "07da8fac0157b1287ebe8a2886968e671f4de723722d00d88d93b7593ccfbc6b",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-virtual-time.ts": "ae69c66aa9da0e5d3c32a6d7173caffc59344d776b64a7ee1f6ae49e6cd39bf5",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
@@ -1228,7 +1228,7 @@
    "judge": {
     "kind": "ctest",
     "exit": 0,
-    "total": 89
+    "total": 111
    }
   },
   {
@@ -2691,7 +2691,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
-      "pass": 2,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },
@@ -2712,6 +2712,11 @@
      },
      "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts": {
       "pass": 1,
+      "skip": 0,
+      "fail": 0
+     },
+     "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+      "pass": 4,
       "skip": 0,
       "fail": 0
      }
@@ -3600,7 +3605,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/effects/lofi-worklet.test.ts": {
-      "pass": 2,
+      "pass": 3,
       "skip": 0,
       "fail": 0
      },
@@ -3621,6 +3626,11 @@
      },
      "packages/audio-engine/src/portable-export-legacy-comparison.browser.test.ts": {
       "pass": 1,
+      "skip": 0,
+      "fail": 0
+     },
+     "packages/audio-engine/src/effects/utility-worklet.test.ts": {
+      "pass": 4,
       "skip": 0,
       "fail": 0
      }
@@ -3680,9 +3690,9 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "b95d8a334e4556a9f0dfcf5e6584a9713c749aa7c7c407e376cb235d69b5e8ec",
+     "results.json": "f06c579e38e501493c41de5fc06b8150a23721d2511c1a53fade15cf819553ea",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
-     "README.md": "9622b8ee4c4f7abbafd5a45f3cc07adb272529827047e03bbb5ca503fbf978e0"
+     "README.md": "460b62b7316f43885787129dbfb1a23f74146670f49d9ea63c9a92765f90533b"
     }
    }
   },
@@ -3708,9 +3718,9 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "b95d8a334e4556a9f0dfcf5e6584a9713c749aa7c7c407e376cb235d69b5e8ec",
+     "results.json": "f06c579e38e501493c41de5fc06b8150a23721d2511c1a53fade15cf819553ea",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
-     "README.md": "9622b8ee4c4f7abbafd5a45f3cc07adb272529827047e03bbb5ca503fbf978e0"
+     "README.md": "460b62b7316f43885787129dbfb1a23f74146670f49d9ea63c9a92765f90533b"
     }
    }
   },
@@ -3756,11 +3766,11 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "edfde23fed5bce42c6a21e8f626d6723de0c0279862ef4faa8137ba514274663",
+    "value": "47bf31df08e17379e1b666cfcf44454b886cedf16eb3e931eee79ea24ea72d8e",
     "files": {
-     "public/audio-core/daw-audio-core.wasm": "a602d2b5a0e4247ee7458867b8c5985e0f9d6c2dfec45e43535ab431d5fbed47",
-     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "a602d2b5a0e4247ee7458867b8c5985e0f9d6c2dfec45e43535ab431d5fbed47",
-     "public/audio-core/daw-audio-core.manifest.json": "ba1b50ad632b6fc94a0cbb977d0845af466e6263da7272be7b98395e901affb6"
+     "public/audio-core/daw-audio-core.wasm": "2ed93b9a8a8055147e7c51965b9228d15522ae1994066eefecd47df7c9c1b5f8",
+     "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm": "2ed93b9a8a8055147e7c51965b9228d15522ae1994066eefecd47df7c9c1b5f8",
+     "public/audio-core/daw-audio-core.manifest.json": "449a46d84807deb264e2f930286b461fbd8fd5068fb793651532c90c0242b2e7"
     }
    }
   },
@@ -3783,7 +3793,7 @@
    "judge": {
     "kind": "stdout",
     "exit": 0,
-    "value": "4565026a2c5463188c4d31cf09c34ef82816168813066612441208c509783968",
+    "value": "387ec6e32d107a8d25f2c27472915ce31458a12218c218a81f0656fedba45ba1",
     "files": {}
    }
   }
@@ -4232,13 +4242,13 @@
  ],
  "traces": {
   "controller": {
-   "treeSha256": "921737f351b2e02b1acc021dd3f3689c6967d8dba9520fdf5118c51560bd9466",
+   "treeSha256": "d70f265f13f35eb9aef1d78546fa9ed79c3eac25da9000744874637b2f3e8a98",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "9678a0bf6d1cceeccd4ebd65c45347257068aee3c4ebfe851c92f4ff5e537b2b",
+   "treeSha256": "8ad2ee77fda8f3e76b54bd3b13f6116eef504698cf94ec7e8433b89a1c53425d",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"

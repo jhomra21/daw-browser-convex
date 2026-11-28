@@ -7,6 +7,7 @@ import {
   encodeReverbProcessorState, encodeSaturatorProcessorState, encodeSpectralProcessorState, encodeTremoloProcessorState,
   encodeUtilityProcessorState,
 } from '../../packages/audio-core-contract/src'
+import { saturatorLatencyFrames } from '../../packages/shared/src/effects-params'
 import { gateCompressorLatencyFrames, limiterLatencyFrames, throughZeroLatencyFrames } from '../../packages/audio-engine/src/effects/timing'
 import type {
   AmplitudeModulationProcessorState, AutoFilterProcessorState, CompressorProcessorState, DelayModulationProcessorState,
@@ -70,6 +71,7 @@ export const declaredLatencyFrames = (spec: EffectSpec, rate: number): number =>
   switch (spec.kind) {
     case 'autofilter': return spec.state.hiQuality ? 63 : 0
     case 'eq': return spec.state.highQuality ? 3 : 0
+    case 'saturator': return saturatorLatencyFrames(spec.state.hiQuality, spec.state.postClip)
     case 'spectral': return spec.state.fftSize
     case 'gate':
     case 'compressor': return gateCompressorLatencyFrames(spec.state.lookaheadMs, rate)
@@ -98,8 +100,9 @@ const amplitudeKeys = ['rateHz', 'depth', 'shape', 'phase']
 
 /** Parameter targets by state path; the same path patches the legacy worklet's state. */
 export const parameterTargets: Record<EffectKind, Record<string, number>> = {
-  utility: range(1, ['gainDb', 'pan', 'balance', 'width']),
-  saturator: range(69, ['driveDb', 'colorFrequencyHz', 'colorAmount', 'outputDb', 'dryWet']),
+  utility: { gainDb: 1, balance: 3, width: 4, ...range(210, ['bassMonoHz', 'midSide']) },
+  // 71 was the Color amount; the shelves took 203 and up.
+  saturator: { driveDb: 69, colorFrequencyHz: 70, outputDb: 72, dryWet: 73, ...range(203, ['colorHighDb', 'colorLowDb', 'colorWidth', 'bassThresholdDb', 'warpDepth', 'warpPeriod']) },
   eq: eqTargets,
   chorus: { ...range(74, modulationKeys), ...range(177, ['safeBassHz', 'width', 'outputDb']) },
   flanger: { ...range(80, modulationKeys), ...range(180, ['safeBassHz', 'width', 'outputDb']) },
@@ -126,7 +129,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
     ...range(30, ['frequencyHz', 'resonance', 'driveDb', 'mix', 'envelope.amountOctaves', 'envelope.attackMs', 'envelope.releaseMs', 'lfo.rateHz', 'lfo.depthOctaves', 'lfo.phaseOffset', 'lfo.stereoPhase']),
     outputDb: 143,
   },
-  lofi: { sampleRateRatio: 41, jitter: 42, noiseDb: 43, mix: 44, bitDepth: 131 },
+  lofi: { sampleRateHz: 209, jitter: 42, noiseDb: 43, mix: 44, bitDepth: 131 },
 }
 
 const idleBand: EqProcessorBandState = { enabled: false, type: 'peaking', frequency: 1000, gainDb: 0, q: 1 }
@@ -157,11 +160,14 @@ export const autofilterLfo: AutoFilterProcessorState['lfo'] = {
 export const fx = {
   utility: (state: Partial<UtilityProcessorState> = {}): EffectSpec => ({
     kind: 'utility',
-    state: { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true, ...state },
+    state: { enabled: true, gainDb: 0, phaseLeft: false, phaseRight: false, inputMode: 'stereo', balance: 0, width: 1, matrix: 'stereo', channelMode: 'both', mute: false, widthMode: 'stereo', midSide: 0, bassMono: false, bassMonoHz: 120, bassMonoAudition: false, dcBlock: false, ...state },
   }),
   saturator: (state: Partial<SaturatorProcessorState> = {}): EffectSpec => ({
     kind: 'saturator',
-    state: { enabled: true, driveDb: 6, curve: 'soft', color: false, colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1, ...state },
+    state: {
+      enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false, colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0,
+      bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1, ...state,
+    },
   }),
   chorus: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({ kind: 'chorus', state: modulation(state) }),
   flanger: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({
@@ -235,6 +241,9 @@ export const fx = {
   }),
   lofi: (state: Partial<LoFiProcessorState> = {}): EffectSpec => ({
     kind: 'lofi',
-    state: { enabled: true, bitDepth: 12, sampleRateRatio: 1, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1, ...state },
+    state: {
+      enabled: true, bitDepth: 12, sampleRateHz: 96000, jitter: 0, noiseDb: -80, quantization: 'round', dither: 'off', mix: 1, seed: 1,
+      preFilter: false, postFilter: false, dcCorrection: false, subSampleClock: false, ...state,
+    },
   }),
 }

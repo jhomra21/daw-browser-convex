@@ -34,6 +34,9 @@
 #include "phaser_kernel.h"
 #include "reverb_kernel.h"
 #include "delay_kernel.h"
+#include "lofi_kernel.h"
+#include "utility_kernel.h"
+#include "saturator_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
 #include "limiter_kernel.h"
@@ -375,18 +378,16 @@ struct BiquadHistory {
 };
 
 struct UtilityHistory {
-  float dc_x1_left = 0.0F;
-  float dc_x1_right = 0.0F;
-  float dc_y1_left = 0.0F;
-  float dc_y1_right = 0.0F;
+  daw::audio_core::UtilityKernel kernel;
+  daw::audio_core::UtilityValues values;
+  daw::audio_core::UtilityConfig config;
   float bypass = 0.0F;
 };
 
 struct SaturatorHistory {
-  BiquadHistory color_left{};
-  BiquadHistory color_right{};
-  float previous_left = 0.0F;
-  float previous_right = 0.0F;
+  daw::audio_core::SaturatorKernel kernel;
+  daw::audio_core::SaturatorValues values;
+  daw::audio_core::SaturatorConfig config;
   float bypass = 0.0F;
 };
 
@@ -683,15 +684,10 @@ struct AutoFilterHistory {
   float bypass = 0.0F;
 };
 
-struct LoFiChannelHistory {
-  float phase = 1.0F;
-  float held = 0.0F;
-  float interval = 1.0F;
-  uint32_t random_state = 0;
-};
-
 struct LoFiHistory {
-  std::array<LoFiChannelHistory, 2> channels{};
+  daw::audio_core::LoFiKernel kernel;
+  daw::audio_core::LoFiValues values;
+  daw::audio_core::LoFiConfig config;
   float bypass = 0.0F;
 };
 

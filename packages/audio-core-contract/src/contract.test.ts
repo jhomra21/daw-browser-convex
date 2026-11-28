@@ -76,14 +76,20 @@ test('utility processor contract accepts only the versioned canonical shape', ()
     state: {
       enabled: true,
       gainDb: 0,
-      polarity: 'normal',
+      phaseLeft: false,
+      phaseRight: false,
       inputMode: 'stereo',
-      pan: 0,
       balance: 0,
       width: 1,
       matrix: 'stereo',
-      swap: false,
+      channelMode: 'both',
       dcBlock: false,
+      mute: false,
+      widthMode: 'stereo',
+      midSide: 0,
+      bassMono: false,
+      bassMonoHz: 120,
+      bassMonoAudition: false,
     },
   }
 
@@ -282,17 +288,18 @@ test('synth instrument codec emits the fixed native default profile', () => {
 
 test('utility parameter metadata matches the supported worklet AudioParams', () => {
   expect(utilityParameterMetadata).toEqual([
-    { id: 'gainDb', defaultValue: 0, minValue: -60, maxValue: 24 },
-    { id: 'pan', defaultValue: 0, minValue: -1, maxValue: 1 },
+    { id: 'gainDb', defaultValue: 0, minValue: -70, maxValue: 35 },
     { id: 'balance', defaultValue: 0, minValue: -1, maxValue: 1 },
     { id: 'width', defaultValue: 1, minValue: 0, maxValue: 2 },
+    { id: 'midSide', defaultValue: 0, minValue: -1, maxValue: 1 },
+    { id: 'bassMonoHz', defaultValue: 120, minValue: 50, maxValue: 500 },
   ])
 })
 
 test('processor registry preserves stable portable processor ids', () => {
   expect(processorRegistry).toEqual([
-    expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 1, stateBytes: 40, tombstone: false }),
-    expect.objectContaining({ name: 'saturator', id: 2, schemaVersion: 1, stateBytes: 32, tombstone: false }),
+    expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 2, stateBytes: 64, tombstone: false }),
+    expect.objectContaining({ name: 'saturator', id: 2, schemaVersion: 2, stateBytes: 60, tombstone: false }),
     expect.objectContaining({ name: 'eq', id: 3, schemaVersion: 2, stateBytes: 408, tombstone: false }),
     expect.objectContaining({ name: 'chorus', id: 4, schemaVersion: 2, stateBytes: 52 }),
     expect.objectContaining({ name: 'flanger', id: 5, schemaVersion: 2, stateBytes: 52 }),
@@ -307,7 +314,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'reverb', id: 14, schemaVersion: 2, stateBytes: 124 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
     expect.objectContaining({ name: 'autofilter', id: 16, schemaVersion: 1, stateBytes: 92, tombstone: false }),
-    expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 36, schemaVersion: 1, tombstone: false }),
+    expect.objectContaining({ name: 'lofi', id: 17, stateBytes: 52, schemaVersion: 3, tombstone: false }),
   ])
 })
 
@@ -418,12 +425,18 @@ test('delay and reverb codecs preserve portable state without claiming browser c
 
 test('LoFi codec preserves deterministic state and portable controls', () => {
   const lofi = encodeLoFiProcessorState({
-    enabled: true, bitDepth: 12, sampleRateRatio: 0.5, jitter: 0.25, noiseDb: -80,
+    enabled: true, bitDepth: 12, sampleRateHz: 24000, jitter: 0.25, noiseDb: -80,
     quantization: 'truncate', dither: 'triangular', mix: 0.75, seed: 123,
+    preFilter: true, postFilter: false, dcCorrection: true, subSampleClock: true,
   })
 
-  expect(lofi.byteLength).toBe(36)
+  expect(lofi.byteLength).toBe(52)
   const view = new DataView(lofi.buffer)
+  expect(view.getFloat32(8, true)).toBe(24000)
+  expect(view.getUint32(36, true)).toBe(1)
+  expect(view.getUint32(40, true)).toBe(0)
+  expect(view.getUint32(44, true)).toBe(1)
+  expect(view.getUint32(48, true)).toBe(1)
   expect(view.getUint32(4, true)).toBe(12)
   expect(view.getUint32(20, true)).toBe(2)
   expect(view.getUint32(24, true)).toBe(2)
@@ -447,8 +460,8 @@ test('spectral codec preserves bounded STFT state and generic automation metadat
 
 test('processor state envelopes are little-endian, bounded, and kind-neutral', () => {
   const state = encodeSaturatorProcessorState({
-    enabled: true, driveDb: 6, curve: 'soft', color: false,
-    colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
+    enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
+    colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
   })
 
   const wire = encodeAudioCoreProcessorStateEnvelope({
@@ -482,8 +495,8 @@ test('processor state envelopes allow the explicit generic automation capacity',
     kindId: 2,
     schemaVersion: 1,
     state: encodeSaturatorProcessorState({
-      enabled: true, driveDb: 6, curve: 'soft', color: false,
-      colorFrequencyHz: 1200, colorAmount: 0, outputDb: 0, dryWet: 1,
+      enabled: true, hiQuality: true, driveDb: 6, curve: 'soft', color: false,
+      colorFrequencyHz: 1200, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 0, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: 0, dryWet: 1,
     }),
     instanceId: 9,
     bypassed: false,
@@ -505,12 +518,12 @@ test('processor state envelopes allow the explicit generic automation capacity',
 
 test('Saturator and eight-band EQ codecs preserve their portable state profiles', () => {
   const saturator = encodeSaturatorProcessorState({
-    enabled: true, driveDb: 18, curve: 'hard', color: true,
-    colorFrequencyHz: 2500, colorAmount: 0.5, outputDb: -3, dryWet: 0.75,
+    enabled: true, hiQuality: true, driveDb: 18, curve: 'hard', color: true,
+    colorFrequencyHz: 2500, colorWidth: 0.57, colorLowDb: 0, colorHighDb: 6, bassThresholdDb: -12, warpDepth: 0.5, warpPeriod: 0.5, postClip: 'off', outputDb: -3, dryWet: 0.75,
   })
 
-  expect(saturator.byteLength).toBe(32)
-  expect(new DataView(saturator.buffer).getFloat32(4, true)).toBe(18)
+  expect(saturator.byteLength).toBe(60)
+  expect(new DataView(saturator.buffer).getFloat32(20, true)).toBe(18)
 
   const eq = encodeEqProcessorState({
     enabled: true,

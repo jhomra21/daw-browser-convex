@@ -521,7 +521,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         // Equal content reuses its edit identity, so each ACK opportunity is a
         // distinct sub-dB write that the registry orders after the previous one.
         const params: ReturnType<typeof normalizeUtilityParamsEnvelope> = { version: 1,
-          state: { ...createDefaultUtilityParams(), gainDb: knob() + ++cheapAcks * 0.01, swap: cheapAcks % 2 !== 0 } }
+          state: { ...createDefaultUtilityParams(), gainDb: knob() + ++cheapAcks * 0.01, channelMode: cheapAcks % 2 !== 0 ? 'swap' : 'both' } }
 
         const payload: NativeBuiltInParameterPayload = { effect: "utility", instanceId: "utility:1", targetId: "track", from: params, to: params }
         const edit = processorEdits.allocate(payload)
@@ -532,7 +532,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       else if (action.kind === "gain-patch") {
         // A real structural change is required to exercise patches after whole-content carrier selection.
         const params: ReturnType<typeof normalizeUtilityParamsEnvelope> = { version: 1,
-          state: { ...createDefaultUtilityParams(), gainDb: action.value ?? 0, swap: true } }
+          state: { ...createDefaultUtilityParams(), gainDb: action.value ?? 0, channelMode: 'swap' } }
 
         const payload: NativeBuiltInParameterPayload = { effect: "utility", instanceId: "utility:1", targetId: "track",
           from: { version: 1, state: createDefaultUtilityParams() }, to: params }
@@ -630,7 +630,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       else if (["gain", "preview", "flush"].includes(action.kind)) {
         ledger.beginGainEdit()
         tickGesture("utility:1", "utility", () => panel.utility.changeInstance("utility:1", (params) => ({ ...params, state: { ...params.state, gainDb: action.value ?? -6,
-          ...(action.mode === "pan" && { pan: 0.25 }), ...(action.mode === "pan-reset" && { pan: 0 }) } })))
+          ...(action.mode === "pan" && { balance: 0.25 }), ...(action.mode === "pan-reset" && { balance: 0 }) } })))
 
         if (action.kind !== "preview") commitGesture("utility:1", "utility")
       } else if (action.kind === "cancel") {

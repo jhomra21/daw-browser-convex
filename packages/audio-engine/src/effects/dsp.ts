@@ -1,5 +1,5 @@
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
-import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, linearFromDb, normalizeSaturatorParams, normalizeDelayParams, effectiveEqBand, EQ_BANDS_PER_CURVE, type ArpParams, type DelayParamsLite, type EqBandType, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, normalizeDelayParams, effectiveEqBand, EQ_BANDS_PER_CURVE, type ArpParams, type DelayParamsLite, type EqBandType, type EqChannelMode, type EqParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
 
@@ -88,51 +88,6 @@ function applyEqBandParams(filter: BiquadFilterNode, band: LegacyEqBand) {
   filter.frequency.value = band.frequency
   filter.Q.value = band.q
   filter.gain.value = band.gainDb
-}
-
-export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
-  const values = new Float32Array(new ArrayBuffer(4096 * Float32Array.BYTES_PER_ELEMENT))
-
-  for (let index = 0; index < values.length; index++) {
-    const x = (index / (values.length - 1)) * 2 - 1
-    const y = evaluateSaturatorCurvePoint(curve, x)
-    values[index] = Math.max(-1, Math.min(1, Number.isFinite(y) ? y : 0))
-  }
-
-  return values
-}
-
-const saturatorCurveCache = new Map<SaturatorCurve, Float32Array<ArrayBuffer>>()
-
-function getSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
-  const cached = saturatorCurveCache.get(curve)
-
-  if (cached) return cached
-  const values = createSaturatorCurve(curve)
-  saturatorCurveCache.set(curve, values)
-
-  return values
-}
-
-export function applySaturatorNodeParams(nodes: {
-  driveGain: GainNode
-  colorFilter: BiquadFilterNode
-  waveNode: ReturnType<BaseAudioContext['createWaveShaper']>
-  dryGain: GainNode
-  wetGain: GainNode
-  outputGain: GainNode
-}, params: SaturatorParamsLite) {
-  const normalized = normalizeSaturatorParams(params)
-  nodes.driveGain.gain.value = linearFromDb(normalized.driveDb)
-  nodes.colorFilter.type = 'peaking'
-  nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
-  nodes.colorFilter.Q.value = 0.8
-  nodes.colorFilter.gain.value = normalized.color ? normalized.colorAmount * 12 : 0
-  nodes.waveNode.curve = getSaturatorCurve(normalized.curve)
-  nodes.waveNode.oversample = '4x'
-  nodes.dryGain.gain.value = 1 - normalized.dryWet
-  nodes.wetGain.gain.value = normalized.dryWet
-  nodes.outputGain.gain.value = linearFromDb(normalized.outputDb)
 }
 
 const DELAY_DIVISION_BEATS = { '1/32': 0.125, '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }

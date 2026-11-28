@@ -182,7 +182,8 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
 
       if (!state) return false
       forgetLive()
-      edit.requiresRoutingRebuild = state.set(ctx, instance.params).requiresRoutingRebuild || edit.requiresRoutingRebuild
+      const result = await state.set(ctx, instance.params)
+      edit.requiresRoutingRebuild = result.requiresRoutingRebuild || edit.requiresRoutingRebuild
       edit.writtenInPlace.push(instance)
 
       return true
@@ -304,7 +305,7 @@ export const createEffectChainTransaction = (host: EffectChainHost) => {
 
     if (instance.kind === 'saturator') {
       const state = createSaturatorChainState()
-      state.set(ctx, instance.params)
+      await state.set(ctx, instance.params)
       resources.saturators.set(instance.id, state)
     } else if (instance.kind === 'delay') {
       const state = createDelayChainState()

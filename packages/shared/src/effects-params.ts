@@ -367,22 +367,32 @@ export function serializeReverbParams(params: ReverbParams): string {
   ].join('|')
 }
 
-export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip'
+export type SaturatorCurve = 'soft' | 'medium' | 'hard' | 'clip' | 'analog' | 'sine' | 'bass' | 'fold' | 'warp'
 
+export type SaturatorPostClip = 'off' | 'soft' | 'hard'
+
+// Color is a pre-EQ of two shelves around Frequency (Width sets their Q) ahead of the curve, and its exact inverse after it.
 export type SaturatorParams = {
   enabled: boolean
+  hiQuality: boolean
   driveDb: number
   curve: SaturatorCurve
   color: boolean
   colorFrequencyHz: number
-  colorAmount: number
+  colorWidth: number
+  colorLowDb: number
+  colorHighDb: number
+  bassThresholdDb: number
+  warpDepth: number
+  warpPeriod: number
+  postClip: SaturatorPostClip
   outputDb: number
   dryWet: number
 }
 
 export type SaturatorParamsLite = SaturatorParams
 
-export type SaturatorParamsInput = Partial<Omit<SaturatorParams, 'curve'>> & { curve?: JsonValue }
+export type SaturatorParamsInput = Partial<Omit<SaturatorParams, 'curve' | 'postClip'>> & { curve?: JsonValue; postClip?: JsonValue }
 
 export const SATURATOR_DRIVE_DB_MIN = 0
 export const SATURATOR_DRIVE_DB_MAX = 36
@@ -392,53 +402,111 @@ export const SATURATOR_DRY_WET_MIN = 0
 export const SATURATOR_DRY_WET_MAX = 1
 export const SATURATOR_COLOR_FREQUENCY_HZ_MIN = 100
 export const SATURATOR_COLOR_FREQUENCY_HZ_MAX = 10000
-export const SATURATOR_COLOR_AMOUNT_MIN = 0
-export const SATURATOR_COLOR_AMOUNT_MAX = 1
+export const SATURATOR_COLOR_WIDTH_MIN = 0
+export const SATURATOR_COLOR_WIDTH_MAX = 1
+export const SATURATOR_COLOR_DB_MIN = -12
+export const SATURATOR_COLOR_DB_MAX = 12
+export const SATURATOR_BASS_THRESHOLD_DB_MIN = -50
+export const SATURATOR_BASS_THRESHOLD_DB_MAX = 0
+export const SATURATOR_WARP_DEPTH_MIN = 0
+export const SATURATOR_WARP_DEPTH_MAX = 1
+export const SATURATOR_WARP_PERIOD_MIN = 0.1
+export const SATURATOR_WARP_PERIOD_MAX = 1
 
 export function createDefaultSaturatorParams(): SaturatorParams {
   return {
     enabled: true,
+    hiQuality: true,
     driveDb: 6,
     curve: 'soft',
     color: false,
     colorFrequencyHz: 1200,
-    colorAmount: 0,
+    colorWidth: 0.57,
+    colorLowDb: 0,
+    colorHighDb: 0,
+    bassThresholdDb: -12,
+    warpDepth: 0.5,
+    warpPeriod: 0.5,
+    postClip: 'off',
     outputDb: 0,
     dryWet: 1,
   }
 }
 
+const SATURATOR_CURVES: readonly SaturatorCurve[] = ['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp']
+
+const SATURATOR_POST_CLIPS: readonly SaturatorPostClip[] = ['off', 'soft', 'hard']
+
 export function isSaturatorCurve(value: JsonValue | undefined): value is SaturatorCurve {
-  return value === 'soft' || value === 'medium' || value === 'hard' || value === 'clip'
+  return SATURATOR_CURVES.some((curve) => curve === value)
 }
 
-export function evaluateSaturatorCurvePoint(curve: SaturatorCurve, input: number): number {
-  if (curve === 'soft') return Math.tanh(1.8 * input)
+export function isSaturatorPostClip(value: JsonValue | undefined): value is SaturatorPostClip {
+  return SATURATOR_POST_CLIPS.some((postClip) => postClip === value)
+}
 
-  if (curve === 'medium') return input < -0.666 ? -1 : input > 0.666 ? 1 : 1.5 * input - 0.5 * input * input * input
+const SATURATOR_HARD_SLOPE = Math.PI / 2
+const SATURATOR_MEDIUM_REACH = 1.5
+const SATURATOR_ANALOG_THRESHOLD = 0.5
 
-  if (curve === 'hard') return Math.atan(4 * input) / Math.atan(4)
+// Linear up to the threshold, then threshold + h tanh((x - threshold) / h), h = 1 - threshold: slope one, asymptote one, no corner.
+const saturatorKnee = (magnitude: number, threshold: number) => {
+  if (magnitude <= threshold) return magnitude
+  const height = Math.max(1 - threshold, 1e-4)
 
-  return clamp(input, -0.82, 0.82) / 0.82
+  return threshold + height * Math.tanh((magnitude - threshold) / height)
+}
+
+// The shaper the core runs (saturator_kernel.h SaturatorShape::value). Every curve has slope one at the origin and an asymptote
+// near one, so Drive 0 passes a quiet signal at unity whichever curve is chosen.
+export function evaluateSaturatorCurvePoint(
+  curve: SaturatorCurve,
+  input: number,
+  knobs: Pick<SaturatorParams, 'bassThresholdDb' | 'warpDepth' | 'warpPeriod'> = createDefaultSaturatorParams(),
+): number {
+  switch (curve) {
+    case 'medium': {
+      const reach = clamp(input, -SATURATOR_MEDIUM_REACH, SATURATOR_MEDIUM_REACH)
+
+      return reach - reach * reach * reach / 6.75
+    }
+
+    case 'hard': return Math.atan(SATURATOR_HARD_SLOPE * input) / SATURATOR_HARD_SLOPE
+    case 'clip': return clamp(input, -1, 1)
+    case 'analog': return Math.sign(input) * saturatorKnee(Math.abs(input), SATURATOR_ANALOG_THRESHOLD)
+    case 'sine': return Math.sin(clamp(input, -Math.PI / 2, Math.PI / 2))
+    case 'bass': return Math.sign(input) * saturatorKnee(Math.abs(input), 10 ** (knobs.bassThresholdDb / 20))
+    case 'fold': return Math.sin(input)
+    case 'warp': return (1 - knobs.warpDepth) * Math.tanh(input) + knobs.warpDepth * knobs.warpPeriod * Math.sin(input / knobs.warpPeriod)
+    default: return Math.tanh(input)
+  }
 }
 
 export function normalizeSaturatorParams(input: SaturatorParamsInput = {}): SaturatorParams {
   const defaults = createDefaultSaturatorParams()
-  const driveDb = readFiniteNumber(input.driveDb)
-  const colorFrequencyHz = readFiniteNumber(input.colorFrequencyHz)
-  const colorAmount = readFiniteNumber(input.colorAmount)
-  const outputDb = readFiniteNumber(input.outputDb)
-  const dryWet = readFiniteNumber(input.dryWet)
+
+  const read = (value: number | undefined, fallback: number, min: number, max: number) => {
+    const finite = readFiniteNumber(value)
+
+    return finite === undefined ? fallback : clamp(finite, min, max)
+  }
 
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
-    driveDb: driveDb === undefined ? defaults.driveDb : clamp(driveDb, SATURATOR_DRIVE_DB_MIN, SATURATOR_DRIVE_DB_MAX),
+    hiQuality: isJsonBoolean(input.hiQuality) ? input.hiQuality : defaults.hiQuality,
+    driveDb: read(input.driveDb, defaults.driveDb, SATURATOR_DRIVE_DB_MIN, SATURATOR_DRIVE_DB_MAX),
     curve: isSaturatorCurve(input.curve) ? input.curve : defaults.curve,
     color: isJsonBoolean(input.color) ? input.color : defaults.color,
-    colorFrequencyHz: colorFrequencyHz === undefined ? defaults.colorFrequencyHz : clamp(colorFrequencyHz, SATURATOR_COLOR_FREQUENCY_HZ_MIN, SATURATOR_COLOR_FREQUENCY_HZ_MAX),
-    colorAmount: colorAmount === undefined ? defaults.colorAmount : clamp(colorAmount, SATURATOR_COLOR_AMOUNT_MIN, SATURATOR_COLOR_AMOUNT_MAX),
-    outputDb: outputDb === undefined ? defaults.outputDb : clamp(outputDb, SATURATOR_OUTPUT_DB_MIN, SATURATOR_OUTPUT_DB_MAX),
-    dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, SATURATOR_DRY_WET_MIN, SATURATOR_DRY_WET_MAX),
+    colorFrequencyHz: read(input.colorFrequencyHz, defaults.colorFrequencyHz, SATURATOR_COLOR_FREQUENCY_HZ_MIN, SATURATOR_COLOR_FREQUENCY_HZ_MAX),
+    colorWidth: read(input.colorWidth, defaults.colorWidth, SATURATOR_COLOR_WIDTH_MIN, SATURATOR_COLOR_WIDTH_MAX),
+    colorLowDb: read(input.colorLowDb, defaults.colorLowDb, SATURATOR_COLOR_DB_MIN, SATURATOR_COLOR_DB_MAX),
+    colorHighDb: read(input.colorHighDb, defaults.colorHighDb, SATURATOR_COLOR_DB_MIN, SATURATOR_COLOR_DB_MAX),
+    bassThresholdDb: read(input.bassThresholdDb, defaults.bassThresholdDb, SATURATOR_BASS_THRESHOLD_DB_MIN, SATURATOR_BASS_THRESHOLD_DB_MAX),
+    warpDepth: read(input.warpDepth, defaults.warpDepth, SATURATOR_WARP_DEPTH_MIN, SATURATOR_WARP_DEPTH_MAX),
+    warpPeriod: read(input.warpPeriod, defaults.warpPeriod, SATURATOR_WARP_PERIOD_MIN, SATURATOR_WARP_PERIOD_MAX),
+    postClip: isSaturatorPostClip(input.postClip) ? input.postClip : defaults.postClip,
+    outputDb: read(input.outputDb, defaults.outputDb, SATURATOR_OUTPUT_DB_MIN, SATURATOR_OUTPUT_DB_MAX),
+    dryWet: read(input.dryWet, defaults.dryWet, SATURATOR_DRY_WET_MIN, SATURATOR_DRY_WET_MAX),
   }
 }
 
@@ -449,9 +517,12 @@ export function normalizeSaturatorParamsForUpdate(input: SaturatorParamsInput, e
 }
 
 export function serializeSaturatorParams(params: SaturatorParams): string {
-  const normalized = normalizeSaturatorParams(params)
+  const n = normalizeSaturatorParams(params)
 
-  return `${normalized.enabled ? 1 : 0}|${normalized.driveDb}|${normalized.curve}|${normalized.color ? 1 : 0}|${normalized.colorFrequencyHz}|${normalized.colorAmount}|${normalized.outputDb}|${normalized.dryWet}`
+  return [
+    n.enabled ? 1 : 0, n.hiQuality ? 1 : 0, n.driveDb, n.curve, n.color ? 1 : 0, n.colorFrequencyHz, n.colorWidth, n.colorLowDb, n.colorHighDb,
+    n.bassThresholdDb, n.warpDepth, n.warpPeriod, n.postClip, n.outputDb, n.dryWet,
+  ].join('|')
 }
 
 export type DelaySmoothing = 'repitch' | 'fade' | 'jump'
@@ -806,29 +877,46 @@ export function computeCompressorStaticCurveDb(inputDb: number, params: Compress
 
 export type ProcessorStateEnvelope<TState> = { version: 1; state: TState }
 
-export type UtilityPolarity = 'normal' | 'invert'
-
 export type UtilityInputMode = 'stereo' | 'mono-sum'
 
 export type UtilityMatrix = 'stereo' | 'mid-side-encode' | 'mid-side-decode'
 
+// Left and Right play that channel on both outputs and disable the width controls; Swap exchanges the channels.
+export type UtilityChannelMode = 'both' | 'left' | 'right' | 'swap'
+
+// Stereo scales the side signal by Width; Mid/Side scales mid or side by midSide (-1 mono, 0 as played, 1 side only).
+export type UtilityWidthMode = 'stereo' | 'mid-side'
+
+// A gain at or below the minimum is minus infinity: silence.
+export const UTILITY_GAIN_DB_MIN = -70
+export const UTILITY_GAIN_DB_MAX = 35
+export const UTILITY_BASS_MONO_HZ_MIN = 50
+export const UTILITY_BASS_MONO_HZ_MAX = 500
+
 export type UtilityParams = {
   enabled: boolean
   gainDb: number
-  polarity: UtilityPolarity
+  phaseLeft: boolean
+  phaseRight: boolean
   inputMode: UtilityInputMode
-  pan: number
   balance: number
   width: number
   matrix: UtilityMatrix
-  swap: boolean
+  channelMode: UtilityChannelMode
   dcBlock: boolean
+  mute: boolean
+  widthMode: UtilityWidthMode
+  midSide: number
+  bassMono: boolean
+  bassMonoHz: number
+  bassMonoAudition: boolean
 }
 
-export type UtilityParamsInput = Partial<Omit<UtilityParams, 'polarity' | 'inputMode' | 'matrix'>> & {
-  polarity?: JsonValue
+export type UtilityParamsInput = Partial<Omit<UtilityParams, 'inputMode' | 'matrix' | 'channelMode' | 'widthMode'>> & {
   inputMode?: JsonValue
   matrix?: JsonValue
+  channelMode?: JsonValue
+  widthMode?: JsonValue
 }
 
 export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
@@ -836,31 +924,43 @@ export type UtilityParamsEnvelope = ProcessorStateEnvelope<UtilityParams>
 const readObject = (value: JsonValue): JsonObject => isJsonObject(value) ? value : {}
 
 export function createDefaultUtilityParams(): UtilityParams {
-  return { enabled: true, gainDb: 0, polarity: 'normal', inputMode: 'stereo', pan: 0, balance: 0, width: 1, matrix: 'stereo', swap: false, dcBlock: true }
+  return {
+    enabled: true, gainDb: 0, phaseLeft: false, phaseRight: false, inputMode: 'stereo', balance: 0, width: 1, matrix: 'stereo',
+    channelMode: 'both', dcBlock: false, mute: false, widthMode: 'stereo', midSide: 0, bassMono: false, bassMonoHz: 120, bassMonoAudition: false,
+  }
 }
 
 export function normalizeUtilityParams(input: UtilityParamsInput = {}): UtilityParams {
   const defaults = createDefaultUtilityParams()
   const gainDb = readFiniteNumber(input.gainDb)
-  const pan = readFiniteNumber(input.pan)
   const balance = readFiniteNumber(input.balance)
   const width = readFiniteNumber(input.width)
+  const midSide = readFiniteNumber(input.midSide)
+  const bassMonoHz = readFiniteNumber(input.bassMonoHz)
 
   return {
     enabled: isJsonBoolean(input.enabled) ? input.enabled : defaults.enabled,
-    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, -60, 24),
-    polarity: input.polarity === 'invert' ? 'invert' : 'normal',
+    gainDb: gainDb === undefined ? defaults.gainDb : clamp(gainDb, UTILITY_GAIN_DB_MIN, UTILITY_GAIN_DB_MAX),
+    phaseLeft: isJsonBoolean(input.phaseLeft) ? input.phaseLeft : defaults.phaseLeft,
+    phaseRight: isJsonBoolean(input.phaseRight) ? input.phaseRight : defaults.phaseRight,
     inputMode: input.inputMode === 'mono-sum' ? 'mono-sum' : 'stereo',
-    pan: pan === undefined ? defaults.pan : clamp(pan, -1, 1),
     balance: balance === undefined ? defaults.balance : clamp(balance, -1, 1),
     width: width === undefined ? defaults.width : clamp(width, 0, 2),
     matrix: input.matrix === 'mid-side-encode' || input.matrix === 'mid-side-decode' ? input.matrix : 'stereo',
-    swap: isJsonBoolean(input.swap) ? input.swap : defaults.swap,
+    channelMode: input.channelMode === 'left' || input.channelMode === 'right' || input.channelMode === 'swap' ? input.channelMode : 'both',
     dcBlock: isJsonBoolean(input.dcBlock) ? input.dcBlock : defaults.dcBlock,
+    mute: isJsonBoolean(input.mute) ? input.mute : defaults.mute,
+    widthMode: input.widthMode === 'mid-side' ? 'mid-side' : 'stereo',
+    midSide: midSide === undefined ? defaults.midSide : clamp(midSide, -1, 1),
+    bassMono: isJsonBoolean(input.bassMono) ? input.bassMono : defaults.bassMono,
+    bassMonoHz: bassMonoHz === undefined ? defaults.bassMonoHz : clamp(bassMonoHz, UTILITY_BASS_MONO_HZ_MIN, UTILITY_BASS_MONO_HZ_MAX),
+    bassMonoAudition: isJsonBoolean(input.bassMonoAudition) ? input.bassMonoAudition : defaults.bassMonoAudition,
   }
 }
 
 const serializeUtilityParams = (params: UtilityParams) => JSON.stringify({ version: 1, state: normalizeUtilityParams(params) })
+
+const readBoolean = (value: JsonValue) => value === true || value === false ? value : undefined
 
 export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsEnvelope => {
   const envelope = readObject(value)
@@ -869,16 +969,22 @@ export const normalizeUtilityParamsEnvelope = (value: JsonValue): UtilityParamsE
   return {
     version: 1,
     state: normalizeUtilityParams({
-      enabled: state.enabled === true || state.enabled === false ? state.enabled : undefined,
+      enabled: readBoolean(state.enabled),
       gainDb: isJsonNumber(state.gainDb) ? state.gainDb : undefined,
-      polarity: state.polarity,
+      phaseLeft: readBoolean(state.phaseLeft),
+      phaseRight: readBoolean(state.phaseRight),
       inputMode: state.inputMode,
-      pan: isJsonNumber(state.pan) ? state.pan : undefined,
       balance: isJsonNumber(state.balance) ? state.balance : undefined,
       width: isJsonNumber(state.width) ? state.width : undefined,
       matrix: state.matrix,
-      swap: state.swap === true || state.swap === false ? state.swap : undefined,
-      dcBlock: state.dcBlock === true || state.dcBlock === false ? state.dcBlock : undefined,
+      channelMode: state.channelMode,
+      dcBlock: readBoolean(state.dcBlock),
+      mute: readBoolean(state.mute),
+      widthMode: state.widthMode,
+      midSide: isJsonNumber(state.midSide) ? state.midSide : undefined,
+      bassMono: readBoolean(state.bassMono),
+      bassMonoHz: isJsonNumber(state.bassMonoHz) ? state.bassMonoHz : undefined,
+      bassMonoAudition: readBoolean(state.bassMonoAudition),
     }),
   }
 }
@@ -1090,6 +1196,13 @@ export const AUTO_FILTER_MAX_Q = 8
 
 // Latency of the Hi-Quality half-band pair at the project rate, in frames; the native kernel reports the same number.
 export const AUTO_FILTER_HI_QUALITY_LATENCY_FRAMES = 63
+
+// The Saturator's Hi-Quality wet path trails the input by one 2x half-band pair for the curve and one for Post Clip; the dry path is held
+// back by the same frames (SaturatorKernel::latency_frames).
+const SATURATOR_HALF_BAND_LATENCY_FRAMES = 3
+
+export const saturatorLatencyFrames = (hiQuality: boolean, postClip: SaturatorPostClip) =>
+  hiQuality ? SATURATOR_HALF_BAND_LATENCY_FRAMES * (postClip === 'off' ? 1 : 2) : 0
 
 // One LFO cycle per entry, in the order of the native tempo table (2 bars, 1 bar, then straight/dotted/triplet to 1/32).
 export const AUTO_FILTER_LFO_DIVISIONS = ['2 bars', '1 bar', '1/2.', '1/2', '1/4.', '1/4', '1/4T', '1/8.', '1/8', '1/8T', '1/16.', '1/16', '1/16T', '1/32.', '1/32', '1/32T'] as const
@@ -1381,30 +1494,46 @@ export type LoFiQuantization = 'round' | 'floor' | 'truncate'
 
 export type LoFiDither = 'off' | 'rectangular' | 'triangular'
 
+// The rate is in Hz so a setting sounds the same at every host rate; the top of the range is the highest host rate the engine runs,
+// where nothing is dropped. preFilter band-limits the input to the reduced rate before it is held, postFilter smooths the held steps,
+// dcCorrection centres the Floor quantizer (its error averages minus half an LSB), and subSampleClock holds the input as it was when
+// the rate clock fired, between two host frames.
+export const LOFI_SAMPLE_RATE_HZ_MIN = 100
+export const LOFI_SAMPLE_RATE_HZ_MAX = 96000
+
 export type LoFiParams = {
   enabled: boolean
   bitDepth: number
-  sampleRateRatio: number
+  sampleRateHz: number
   jitter: number
   noiseDb: number
   quantization: LoFiQuantization
   dither: LoFiDither
   mix: number
   seed: number
+  preFilter: boolean
+  postFilter: boolean
+  dcCorrection: boolean
+  subSampleClock: boolean
 }
 
 export type LoFiParamsEnvelope = ProcessorStateEnvelope<LoFiParams>
 
+// A new Lo-Fi is transparent (16 bit with triangular dither, no added noise): the user dials the damage in. Stored instances keep their values.
 export const createDefaultLoFiParams = (): LoFiParams => ({
   enabled: true,
-  bitDepth: 12,
-  sampleRateRatio: 1,
+  bitDepth: 16,
+  sampleRateHz: LOFI_SAMPLE_RATE_HZ_MAX,
   jitter: 0,
-  noiseDb: -80,
+  noiseDb: -120,
   quantization: 'round',
-  dither: 'off',
+  dither: 'triangular',
   mix: 1,
   seed: 1,
+  preFilter: false,
+  postFilter: false,
+  dcCorrection: false,
+  subSampleClock: false,
 })
 
 export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelope => {
@@ -1418,13 +1547,17 @@ export const normalizeLoFiParamsEnvelope = (value: JsonValue): LoFiParamsEnvelop
     state: {
       enabled: isJsonBoolean(state.enabled) ? state.enabled : defaults.enabled,
       bitDepth: Math.round(normalizeNumber(state.bitDepth, defaults.bitDepth, 2, 24)),
-      sampleRateRatio: normalizeNumber(state.sampleRateRatio, defaults.sampleRateRatio, 0.01, 1),
+      sampleRateHz: normalizeNumber(state.sampleRateHz, defaults.sampleRateHz, LOFI_SAMPLE_RATE_HZ_MIN, LOFI_SAMPLE_RATE_HZ_MAX),
       jitter: normalizeNumber(state.jitter, defaults.jitter, 0, 1),
       noiseDb: normalizeNumber(state.noiseDb, defaults.noiseDb, -120, -24),
       quantization: state.quantization === 'floor' || state.quantization === 'truncate' ? state.quantization : 'round',
-      dither: state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : 'off',
+      dither: state.dither === 'off' || state.dither === 'rectangular' || state.dither === 'triangular' ? state.dither : defaults.dither,
       mix: normalizeNumber(state.mix, defaults.mix, 0, 1),
       seed: Math.max(1, Math.round(seed)) >>> 0,
+      preFilter: isJsonBoolean(state.preFilter) ? state.preFilter : defaults.preFilter,
+      postFilter: isJsonBoolean(state.postFilter) ? state.postFilter : defaults.postFilter,
+      dcCorrection: isJsonBoolean(state.dcCorrection) ? state.dcCorrection : defaults.dcCorrection,
+      subSampleClock: isJsonBoolean(state.subSampleClock) ? state.subSampleClock : defaults.subSampleClock,
     },
   }
 }

@@ -116,6 +116,7 @@ const createBiquad = () => Object.assign(createNode(), {
 const WORKLET_PARAMETER_IDS = [
   'gate.thresholdDb', 'gate.ratio',
   ...['timeMs', 'timeRightMs', 'offsetLeftPercent', 'offsetRightPercent', 'feedback', 'dryWet', 'filterHz', 'filterWidth'].map((id) => `delay.${id}`),
+  ...['driveDb', 'outputDb', 'dryWet', 'colorFrequencyHz', 'colorWidth', 'colorLowDb', 'colorHighDb', 'bassThresholdDb', 'warpDepth', 'warpPeriod'].map((id) => `saturator.${id}`),
   ...['wet', 'decaySec', 'preDelayMs', 'reflections', 'reflectionModAmountMs', 'reflectionModRateHz', 'reflectionShape', 'diffuse', 'size', 'diffusion', 'lowCutHz', 'highCutHz', 'lowShelfHz', 'highShelfHz', 'lowShelfDb', 'highShelfDb', 'chorusAmountMs', 'chorusRateHz', 'stereoWidth'].map((id) => `reverb.${id}`),
 ]
 
@@ -174,7 +175,6 @@ const created: FakeWorkletNode[] = []
 let failNextParamsPost = false
 let failNextTempoPost = false
 let failNextConstruction = false
-let failNextCurveWrite = false
 
 export const createFxTestAudio = () => {
   gainRampCount = 0
@@ -183,7 +183,6 @@ export const createFxTestAudio = () => {
   failNextParamsPost = false
   failNextTempoPost = false
   failNextConstruction = false
-  failNextCurveWrite = false
   failNextConnection = false
   failRampValue = undefined
   const original = Object.getOwnPropertyDescriptor(globalThis, 'AudioWorkletNode')
@@ -212,21 +211,6 @@ export const createFxTestAudio = () => {
     },
     createChannelSplitter: createNode,
     createChannelMerger: createNode,
-    ['createWaveShaper']: () => {
-      let curve: Float32Array | null = null
-
-      return Object.defineProperty(createNode(), 'curve', {
-        get: () => curve,
-        set: (next: Float32Array | null) => {
-          if (failNextCurveWrite) {
-            failNextCurveWrite = false
-            throw new Error('Wave shaper curve write failed.')
-          }
-
-          curve = next
-        },
-      })
-    },
     createBiquadFilter: () => {
       const filter = createBiquad()
       biquads.push(filter)
@@ -251,11 +235,11 @@ export const createFxTestAudio = () => {
     failNextTempoPost: () => { failNextTempoPost = true },
     // Whether the most recent delay worklet was last configured on (a delay worklet keeps its parameters when it is disabled).
     delayEnabled: () => created.findLast((node) => node.parameters.has('delay.timeMs'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
+    // The same for a saturator worklet: disabled, it stays in the routing and crossfades to dry inside the processor.
+    saturatorEnabled: () => created.findLast((node) => node.parameters.has('saturator.driveDb'))?.posted.findLast((message) => message.type === 'configure')?.state?.enabled,
     delayNode: () => created.findLast((node) => node.parameters.has('delay.timeMs')),
     // The tempo each delay worklet was last told.
     delayTempos: () => created.flatMap((node) => node.parameters.has('delay.timeMs') ? [node.posted.findLast((message) => message.type === 'tempo')?.bpm] : []),
-    // The next saturator curve assignment throws after the drive gain already changed.
-    failNextCurveWrite: () => { failNextCurveWrite = true },
     failNextConnection: () => { failNextConnection = true },
     failNextRampToValue: (value: number) => { failRampValue = value },
     failNextParameterWrite: (parameter: { value?: number } | undefined) => failNextWrite(parameter),
@@ -438,10 +422,10 @@ export const partialWriteCases = (
     name: 'saturator',
     before: saturatorInstance(0),
     after: saturatorInstance(6),
-    arm: () => audio.failNextCurveWrite(),
+    arm: () => failNextWrite(parameter('saturator.colorWidth', 'saturator-1')),
     read: () => parameter('saturator.driveDb', 'saturator-1')?.value,
-    heldBefore: 1,
-    heldAfter: 10 ** (6 / 20),
+    heldBefore: 0,
+    heldAfter: 6,
   },
   {
     name: 'reverb',

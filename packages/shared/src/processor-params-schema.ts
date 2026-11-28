@@ -39,9 +39,11 @@ const reverb = z.object({
 }).strict()
 
 const saturator = z.object({
-  enabled: z.boolean(), driveDb: finiteNumber, curve: z.enum(['soft', 'medium', 'hard', 'clip']),
-  color: z.boolean(), colorFrequencyHz: finiteNumber, colorAmount: finiteNumber,
-  outputDb: finiteNumber, dryWet: finiteNumber,
+  enabled: z.boolean(), hiQuality: z.boolean(), driveDb: finiteNumber,
+  curve: z.enum(['soft', 'medium', 'hard', 'clip', 'analog', 'sine', 'bass', 'fold', 'warp']),
+  color: z.boolean(), colorFrequencyHz: finiteNumber, colorWidth: finiteNumber, colorLowDb: finiteNumber, colorHighDb: finiteNumber,
+  bassThresholdDb: finiteNumber, warpDepth: finiteNumber, warpPeriod: finiteNumber,
+  postClip: z.enum(['off', 'soft', 'hard']), outputDb: finiteNumber, dryWet: finiteNumber,
 }).strict()
 
 const delayDivision = z.enum(['1/32', '1/16', '1/8', '1/4', '1/2', '1/1'])
@@ -70,10 +72,12 @@ const compressor = z.object({
 }).strict()
 
 const utility = envelope(z.object({
-  enabled: z.boolean(), gainDb: finiteNumber, polarity: z.enum(['normal', 'invert']),
-  inputMode: z.enum(['stereo', 'mono-sum']), pan: finiteNumber, balance: finiteNumber,
+  enabled: z.boolean(), gainDb: finiteNumber, phaseLeft: z.boolean(), phaseRight: z.boolean(),
+  inputMode: z.enum(['stereo', 'mono-sum']), balance: finiteNumber,
   width: finiteNumber, matrix: z.enum(['stereo', 'mid-side-encode', 'mid-side-decode']),
-  swap: z.boolean(), dcBlock: z.boolean(),
+  channelMode: z.enum(['both', 'left', 'right', 'swap']), dcBlock: z.boolean(), mute: z.boolean(),
+  widthMode: z.enum(['stereo', 'mid-side']), midSide: finiteNumber, bassMono: z.boolean(), bassMonoHz: finiteNumber,
+  bassMonoAudition: z.boolean(),
 }).strict())
 
 const gate = envelope(z.object({
@@ -144,9 +148,10 @@ const ensemble = envelope(z.object({
 const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
 
 const lofi = envelope(z.object({
-  enabled: z.boolean(), bitDepth: finiteNumber, sampleRateRatio: finiteNumber, jitter: finiteNumber,
+  enabled: z.boolean(), bitDepth: finiteNumber, sampleRateHz: finiteNumber, jitter: finiteNumber,
   noiseDb: finiteNumber, quantization: z.enum(['round', 'floor', 'truncate']),
   dither: z.enum(['off', 'rectangular', 'triangular']), mix: finiteNumber, seed: finiteNumber,
+  preFilter: z.boolean(), postFilter: z.boolean(), dcCorrection: z.boolean(), subSampleClock: z.boolean(),
 }).strict())
 
 const spectral = envelope(z.object({

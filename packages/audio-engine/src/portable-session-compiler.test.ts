@@ -788,7 +788,7 @@ test('rejects unsupported graph features and unresolved schedule targets without
     processor.latencyFrames,
     processor.tailFrames,
   ])).toEqual([
-    ['saturator', 0, 0],
+    ['saturator', 3, 0], // Hi-Quality is on for a new Saturator
     ['eq', 3, 0], // Hi-Quality is on for a new EQ
     ['chorus', 0, 768],
   ])

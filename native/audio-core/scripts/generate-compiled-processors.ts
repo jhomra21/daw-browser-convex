@@ -45,8 +45,9 @@ const utility = (overrides: Partial<ReturnType<typeof createDefaultUtilityParams
 const saturator = (enabled: boolean): Instance => ({
   id: 'subject', kind: 'saturator',
   params: {
-    ...createDefaultSaturatorParams(), enabled, driveDb: 18, curve: 'hard', color: true,
-    colorFrequencyHz: 2500, colorAmount: 0.5, outputDb: -3, dryWet: 0.75,
+    // The half-bands remember their input, and the transition matrix only holds memoryless edits.
+    ...createDefaultSaturatorParams(), enabled, hiQuality: false, driveDb: 18, curve: 'hard', color: true,
+    colorFrequencyHz: 2500, colorHighDb: 6, outputDb: -3, dryWet: 0.75,
   },
 })
 
@@ -159,9 +160,9 @@ const otherKinds: readonly (readonly [string, (enabled: boolean) => Instance])[]
 // sit in one graph differ.
 const subjects: readonly (readonly [string, string, Instance])[] = [
   ['stage-one', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false })],
-  ['stage-one-swap', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, swap: true })],
+  ['stage-one-swap', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, channelMode: 'swap' })],
   ['stage-one-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, enabled: false })],
-  ['stage-one-swap-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, swap: true, enabled: false })],
+  ['stage-one-swap-off', 'stage-one', utility({ gainDb: 6.0206, dcBlock: false, channelMode: 'swap', enabled: false })],
   ['stage-two', 'stage-two', saturator(true)],
   ['stage-two-off', 'stage-two', saturator(false)],
   ['dc-stage', 'dc-stage', utility({ dcBlock: true })],

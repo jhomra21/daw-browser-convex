@@ -315,7 +315,7 @@ describe('mixer routing plan', () => {
 
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     expect(snapshot.nodes[0]?.processorOrder.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength])).toEqual([
-      ['saturator', 2, 32],
+      ['saturator', 2, 60],
       ['eq', 3, 408],
     ])
     // Curve A keeps its targets 45-68; curve B (bands 9-16) sits at 144-167, then Scale and Output.
@@ -337,9 +337,14 @@ describe('mixer routing plan', () => {
     expect(snapshot.nodes[0]?.processorOrder[0]?.parameterTargets).toEqual([
       { id: 'saturator.driveDb', target: 69 },
       { id: 'saturator.colorFrequencyHz', target: 70 },
-      { id: 'saturator.colorAmount', target: 71 },
       { id: 'saturator.outputDb', target: 72 },
       { id: 'saturator.dryWet', target: 73 },
+      { id: 'saturator.colorHighDb', target: 203 },
+      { id: 'saturator.colorLowDb', target: 204 },
+      { id: 'saturator.colorWidth', target: 205 },
+      { id: 'saturator.bassThresholdDb', target: 206 },
+      { id: 'saturator.warpDepth', target: 207 },
+      { id: 'saturator.warpPeriod', target: 208 },
     ])
   })
 
@@ -450,11 +455,12 @@ describe('mixer routing plan', () => {
 
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 }).nodes[0]?.processorOrder
     expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
-      ['utility', 1, 40, 0, [
+      ['utility', 1, 64, 0, [
         { id: 'utility.gainDb', target: 1 },
-        { id: 'utility.pan', target: 2 },
         { id: 'utility.balance', target: 3 },
         { id: 'utility.width', target: 4 },
+        { id: 'utility.bassMonoHz', target: 210 },
+        { id: 'utility.midSide', target: 211 },
       ]],
       ['gate', 10, 76, 0, [
         { id: 'gate.thresholdDb', target: 105 },
@@ -602,7 +608,7 @@ describe('mixer routing plan', () => {
         { id: 'autofilter.outputDb', target: 143 },
       ],
       [
-        { id: 'lofi.sampleRateRatio', target: 41 },
+        { id: 'lofi.sampleRateHz', target: 209 },
         { id: 'lofi.jitter', target: 42 },
         { id: 'lofi.noiseDb', target: 43 },
         { id: 'lofi.mix', target: 44 },

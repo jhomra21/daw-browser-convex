@@ -50,7 +50,7 @@ test.each(["synth", "master", "master-structural"])("3B1 r3 portable %s live gai
   const calls: string[] = [], batches: unknown[] = []
   const graphs: Parameters<PortableWasmPlaybackSession["prepareGraph"]>[0][] = []
   const initial: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
-  const changed: UtilityParamsEnvelope = { version: 1, state: { ...initial.state, swap: true } }
+  const changed: UtilityParamsEnvelope = { version: 1, state: { ...initial.state, channelMode: 'swap' } }
   let projected = initial, rebuilds = 0
   const revision = 1
 
@@ -4684,7 +4684,7 @@ test('W-C9-inst-6 a replacement refused by blend capacity is retried after one p
   } finally { f.controller.dispose() }
 })
 
-const g9Utility = (swap: boolean): AudioEffectRuntimeInstance => ({ id: 'util-a', kind: 'utility', params: { version: 1, state: { ...createDefaultUtilityParams(), swap } } })
+const g9Utility = (swap: boolean): AudioEffectRuntimeInstance => ({ id: 'util-a', kind: 'utility', params: { version: 1, state: { ...createDefaultUtilityParams(), channelMode: swap ? 'swap' : 'both' } } })
 const g9Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-a', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
 const g9State = (f: Awaited<ReturnType<typeof e9Fixture>>) => Array.from(f.graphs.at(-1)?.nodes.find((node) => node.id === 'audio-a')?.processorOrder[0]?.state ?? [])
 

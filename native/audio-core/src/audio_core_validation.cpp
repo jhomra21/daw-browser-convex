@@ -131,11 +131,8 @@ bool valid_utility_state(const daw_audio_utility_state &state) {
     && std::isfinite(state.gain_db)
     && state.gain_db >= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MIN
     && state.gain_db <= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MAX
-    && (state.polarity == DAW_AUDIO_UTILITY_POLARITY_NORMAL || state.polarity == DAW_AUDIO_UTILITY_POLARITY_INVERT)
+    && state.phase_left <= 1 && state.phase_right <= 1 && state.mute <= 1
     && (state.input_mode == DAW_AUDIO_UTILITY_INPUT_MODE_STEREO || state.input_mode == DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM)
-    && std::isfinite(state.pan)
-    && state.pan >= DAW_AUDIO_CORE_UTILITY_PAN_MIN
-    && state.pan <= DAW_AUDIO_CORE_UTILITY_PAN_MAX
     && std::isfinite(state.balance)
     && state.balance >= DAW_AUDIO_CORE_UTILITY_BALANCE_MIN
     && state.balance <= DAW_AUDIO_CORE_UTILITY_BALANCE_MAX
@@ -145,22 +142,55 @@ bool valid_utility_state(const daw_audio_utility_state &state) {
     && (state.matrix == DAW_AUDIO_UTILITY_MATRIX_STEREO
       || state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_ENCODE
       || state.matrix == DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE)
-    && (state.swap == 0 || state.swap == 1)
-    && (state.dc_block == 0 || state.dc_block == 1);
+    && state.channel_mode <= DAW_AUDIO_UTILITY_CHANNEL_MODE_SWAP
+    && state.width_mode <= DAW_AUDIO_UTILITY_WIDTH_MODE_MID_SIDE
+    && std::isfinite(state.mid_side) && state.mid_side >= DAW_AUDIO_CORE_UTILITY_MID_SIDE_MIN && state.mid_side <= DAW_AUDIO_CORE_UTILITY_MID_SIDE_MAX
+    && state.bass_mono <= 1 && state.bass_mono_audition <= 1
+    && (state.bass_mono == 0
+      || (std::isfinite(state.bass_mono_hz) && state.bass_mono_hz >= DAW_AUDIO_CORE_UTILITY_BASS_MONO_HZ_MIN
+        && state.bass_mono_hz <= DAW_AUDIO_CORE_UTILITY_BASS_MONO_HZ_MAX))
+    && state.dc_block <= 1;
 }
 }  // namespace daw::audio_core_internal
 
 namespace {
 
+// 71 carried the Color amount before the Color shelves had their own ids; nothing is accepted there.
+bool saturator_parameter_target(uint32_t target) {
+  return target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ
+    || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET
+    || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD);
+}
+
+bool saturator_value_in_range(uint32_t target, float value) {
+  const auto within = [value](float minimum, float maximum) { return std::isfinite(value) && value >= minimum && value <= maximum; };
+  switch (target) {
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB: return within(DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MIN, DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_HIGH_DB_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_HIGH_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB: return within(DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MIN, DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET: return within(DAW_AUDIO_CORE_SATURATOR_DRY_WET_MIN, DAW_AUDIO_CORE_SATURATOR_DRY_WET_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_LOW_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH: return within(DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MIN, DAW_AUDIO_CORE_SATURATOR_COLOR_WIDTH_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB: return within(DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MIN, DAW_AUDIO_CORE_SATURATOR_BASS_THRESHOLD_DB_MAX);
+    case DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH: return within(DAW_AUDIO_CORE_SATURATOR_WARP_DEPTH_MIN, DAW_AUDIO_CORE_SATURATOR_WARP_DEPTH_MAX);
+    default: return within(DAW_AUDIO_CORE_SATURATOR_WARP_PERIOD_MIN, DAW_AUDIO_CORE_SATURATOR_WARP_PERIOD_MAX);
+  }
+}
+
 bool valid_saturator_state(const daw_audio_saturator_state &state) {
-  return (state.enabled == 0 || state.enabled == 1)
-    && std::isfinite(state.drive_db) && state.drive_db >= 0.0F && state.drive_db <= 36.0F
-    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_CLIP
-    && (state.color == 0 || state.color == 1)
-    && std::isfinite(state.color_frequency_hz) && state.color_frequency_hz >= 100.0F && state.color_frequency_hz <= 10000.0F
-    && std::isfinite(state.color_amount) && state.color_amount >= 0.0F && state.color_amount <= 1.0F
-    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
-    && std::isfinite(state.dry_wet) && state.dry_wet >= 0.0F && state.dry_wet <= 1.0F;
+  return state.enabled <= 1 && state.hi_quality <= 1 && state.color <= 1
+    && state.curve <= DAW_AUDIO_SATURATOR_CURVE_WARP && state.post_clip <= DAW_AUDIO_SATURATOR_POST_CLIP_HARD
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB, state.drive_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB, state.output_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET, state.dry_wet)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ, state.color_frequency_hz)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH, state.color_width)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB, state.color_low_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB, state.color_high_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB, state.bass_threshold_db)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH, state.warp_depth)
+    && saturator_value_in_range(DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD, state.warp_period);
 }
 
 bool valid_eq_band(const daw_audio_eq_band_state &band) {
@@ -360,7 +390,9 @@ bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
 bool valid_lofi_state(const daw_audio_lofi_state &state) {
   return state.enabled <= 1
     && state.bit_depth >= 2 && state.bit_depth <= 24
-    && std::isfinite(state.sample_rate_ratio) && state.sample_rate_ratio >= 0.01F && state.sample_rate_ratio <= 1.0F
+    && std::isfinite(state.sample_rate_hz) && state.sample_rate_hz >= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MIN
+    && state.sample_rate_hz <= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MAX
+    && state.pre_filter <= 1 && state.post_filter <= 1 && state.dc_correction <= 1 && state.sub_sample_clock <= 1
     && std::isfinite(state.jitter) && state.jitter >= 0.0F && state.jitter <= 1.0F
     && std::isfinite(state.noise_db) && state.noise_db >= -120.0F && state.noise_db <= -24.0F
     && state.quantization <= DAW_AUDIO_LOFI_QUANTIZATION_TRUNCATE
@@ -381,26 +413,32 @@ bool decode_processor_state(
   if (contract == nullptr || descriptor.state_version != contract->schema_version
     || descriptor.state == nullptr
     || !valid_processor_parameter_targets(descriptor)) return false;
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY && descriptor.state_size == 40) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY && descriptor.state_size == DAW_AUDIO_CORE_PROCESSOR_UTILITY_STATE_BYTES) {
     const daw_audio_utility_state state{
       .enabled = read_u32_le(descriptor.state), .gain_db = read_f32_le(descriptor.state + 4),
-      .polarity = read_u32_le(descriptor.state + 8), .input_mode = read_u32_le(descriptor.state + 12),
-      .pan = read_f32_le(descriptor.state + 16), .balance = read_f32_le(descriptor.state + 20),
+      .phase_left = read_u32_le(descriptor.state + 8), .phase_right = read_u32_le(descriptor.state + 12),
+      .input_mode = read_u32_le(descriptor.state + 16), .balance = read_f32_le(descriptor.state + 20),
       .width = read_f32_le(descriptor.state + 24), .matrix = read_u32_le(descriptor.state + 28),
-      .swap = read_u32_le(descriptor.state + 32), .dc_block = read_u32_le(descriptor.state + 36),
+      .channel_mode = read_u32_le(descriptor.state + 32), .dc_block = read_u32_le(descriptor.state + 36),
+      .mute = read_u32_le(descriptor.state + 40), .width_mode = read_u32_le(descriptor.state + 44),
+      .mid_side = read_f32_le(descriptor.state + 48), .bass_mono = read_u32_le(descriptor.state + 52),
+      .bass_mono_hz = read_f32_le(descriptor.state + 56), .bass_mono_audition = read_u32_le(descriptor.state + 60),
     };
     if (!valid_utility_state(state)) return false;
     out_processor->utility = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR && descriptor.state_size == 32) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_SATURATOR && descriptor.state_size == 60) {
+    const uint8_t *bytes = descriptor.state;
     const daw_audio_saturator_state state{
-      .enabled = read_u32_le(descriptor.state), .drive_db = read_f32_le(descriptor.state + 4),
-      .curve = read_u32_le(descriptor.state + 8), .color = read_u32_le(descriptor.state + 12),
-      .color_frequency_hz = read_f32_le(descriptor.state + 16), .color_amount = read_f32_le(descriptor.state + 20),
-      .output_db = read_f32_le(descriptor.state + 24), .dry_wet = read_f32_le(descriptor.state + 28),
+      .enabled = read_u32_le(bytes), .hi_quality = read_u32_le(bytes + 4), .curve = read_u32_le(bytes + 8),
+      .color = read_u32_le(bytes + 12), .post_clip = read_u32_le(bytes + 16),
+      .drive_db = read_f32_le(bytes + 20), .output_db = read_f32_le(bytes + 24), .dry_wet = read_f32_le(bytes + 28),
+      .color_frequency_hz = read_f32_le(bytes + 32), .color_width = read_f32_le(bytes + 36),
+      .color_low_db = read_f32_le(bytes + 40), .color_high_db = read_f32_le(bytes + 44),
+      .bass_threshold_db = read_f32_le(bytes + 48), .warp_depth = read_f32_le(bytes + 52), .warp_period = read_f32_le(bytes + 56),
     };
-    if (!valid_saturator_state(state) || descriptor.latency_frames != 0
+    if (!valid_saturator_state(state) || descriptor.latency_frames != daw::audio_core::SaturatorKernel::latency_frames(state.hi_quality != 0, state.post_clip)
       || descriptor.tail_frames != 0) return false;
     out_processor->saturator = state;
     return true;
@@ -587,13 +625,15 @@ bool decode_processor_state(
     out_processor->autofilter = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI && descriptor.state_size == 36) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_LOFI && descriptor.state_size == DAW_AUDIO_CORE_PROCESSOR_LOFI_STATE_BYTES) {
     const daw_audio_lofi_state state{
       .enabled = read_u32_le(descriptor.state), .bit_depth = read_u32_le(descriptor.state + 4),
-      .sample_rate_ratio = read_f32_le(descriptor.state + 8), .jitter = read_f32_le(descriptor.state + 12),
+      .sample_rate_hz = read_f32_le(descriptor.state + 8), .jitter = read_f32_le(descriptor.state + 12),
       .noise_db = read_f32_le(descriptor.state + 16), .quantization = read_u32_le(descriptor.state + 20),
       .dither = read_u32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
-      .seed = read_u32_le(descriptor.state + 32),
+      .seed = read_u32_le(descriptor.state + 32), .pre_filter = read_u32_le(descriptor.state + 36),
+      .post_filter = read_u32_le(descriptor.state + 40), .dc_correction = read_u32_le(descriptor.state + 44),
+      .sub_sample_clock = read_u32_le(descriptor.state + 48),
     };
     if (!valid_lofi_state(state) || descriptor.latency_frames != 0 || descriptor.tail_frames != 0) return false;
     out_processor->lofi = state;
@@ -626,11 +666,11 @@ bool decode_processor_state(
 bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
   switch (kind) {
     case DAW_AUDIO_PROCESSOR_KIND_UTILITY:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH;
+      return target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB || target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH || target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BASS_MONO_HZ
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET;
+      return saturator_parameter_target(target);
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
           && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST)
@@ -693,9 +733,8 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE)
         || target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI:
-      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX)
-        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_BIT_DEPTH;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER && target <= DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_BIT_DEPTH || target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ;
     default:
       return false;
   }
@@ -716,9 +755,11 @@ bool valid_processor_parameter_targets(const daw_audio_processor_descriptor &des
 
 bool valid_processor_parameter_value(uint32_t target, float value) {
   if (!std::isfinite(value)) return false;
-  if (target == 1) return value >= -60.0F && value <= 24.0F;
-  if (target == 2 || target == 3) return value >= -1.0F && value <= 1.0F;
-  if (target == 4) return value >= 0.0F && value <= 2.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB) return value >= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MIN && value <= DAW_AUDIO_CORE_UTILITY_GAIN_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE) return value >= DAW_AUDIO_CORE_UTILITY_BALANCE_MIN && value <= DAW_AUDIO_CORE_UTILITY_BALANCE_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH) return value >= DAW_AUDIO_CORE_UTILITY_WIDTH_MIN && value <= DAW_AUDIO_CORE_UTILITY_WIDTH_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BASS_MONO_HZ) return value >= DAW_AUDIO_CORE_UTILITY_BASS_MONO_HZ_MIN && value <= DAW_AUDIO_CORE_UTILITY_BASS_MONO_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE) return value >= DAW_AUDIO_CORE_UTILITY_MID_SIDE_MIN && value <= DAW_AUDIO_CORE_UTILITY_MID_SIDE_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS || target == DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS) {
     return value >= DAW_AUDIO_CORE_DELAY_TIME_MS_MIN && value <= DAW_AUDIO_CORE_DELAY_TIME_MS_MAX;
   }
@@ -749,7 +790,9 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE) return value >= -0.5F && value <= 0.5F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_OUTPUT_DB) return value >= -24.0F && value <= 24.0F;
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO) return value >= 0.01F && value <= 1.0F;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ) {
+    return value >= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_LOFI_SAMPLE_RATE_HZ_MAX;
+  }
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER) return value >= 0.0F && value <= 1.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB) return value >= -120.0F && value <= -24.0F;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX) return value >= 0.0F && value <= 1.0F;
@@ -758,26 +801,7 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
       && value <= DAW_AUDIO_CORE_LOFI_BIT_DEPTH_MAX
       && std::floor(value) == value;
   }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_DRIVE_DB_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_COLOR_FREQUENCY_HZ_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_COLOR_AMOUNT_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_COLOR_AMOUNT_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_OUTPUT_DB_MAX;
-  }
-  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET) {
-    return value >= DAW_AUDIO_CORE_SATURATOR_DRY_WET_MIN
-      && value <= DAW_AUDIO_CORE_SATURATOR_DRY_WET_MAX;
-  }
+  if (saturator_parameter_target(target)) return saturator_value_in_range(target, value);
   if (target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_MIX) {
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS) return value >= DAW_AUDIO_CORE_CHORUS_DELAY_MS_MIN && value <= DAW_AUDIO_CORE_CHORUS_DELAY_MS_MAX;
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DEPTH_MS) return value >= DAW_AUDIO_CORE_CHORUS_DEPTH_MS_MIN && value <= DAW_AUDIO_CORE_CHORUS_DEPTH_MS_MAX;

@@ -386,7 +386,8 @@ typedef enum daw_audio_processor_kind {
 
 typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB = 1,
-  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN = 2,
+  /* 2 was the Utility pan; Balance is the only left/right control now and nothing is accepted at 2. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_PAN_RETIRED = 2,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BALANCE = 3,
   DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_WIDTH = 4,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_LEFT_MS = 5,
@@ -421,7 +422,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_DEPTH_OCTAVES = 38,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_PHASE_OFFSET = 39,
   DAW_AUDIO_PROCESSOR_PARAMETER_AUTOFILTER_LFO_STEREO_PHASE = 40,
-  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO = 41,
+  /* 41 was the Lo-Fi sample-rate ratio; the rate in Hz took id 209 and nothing is accepted at 41 any more. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_RATIO_RETIRED = 41,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_JITTER = 42,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_NOISE_DB = 43,
   DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_MIX = 44,
@@ -451,7 +453,8 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_7_Q = 68,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB = 69,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_FREQUENCY_HZ = 70,
-  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT = 71,
+  /* 71 was the Color amount; the Color shelves took ids 203..204 and nothing is accepted at 71 any more. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_AMOUNT_RETIRED = 71,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_OUTPUT_DB = 72,
   DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET = 73,
   DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS = 74,
@@ -553,7 +556,17 @@ typedef enum daw_audio_processor_parameter {
   /* Delay targets 5..9 sit with the other early ids; the ones added by the rebuild start at 200 so they never meet another effect's. */
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_TIME_RIGHT_MS = 200,
   DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_LEFT_PERCENT = 201,
-  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT = 202
+  DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_OFFSET_RIGHT_PERCENT = 202,
+  /* 203..229 are shared by the Saturator, Lo-Fi and Utility rebuilds; the Saturator takes the low end. */
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_HIGH_DB = 203,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_LOW_DB = 204,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_COLOR_WIDTH = 205,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_BASS_THRESHOLD_DB = 206,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_DEPTH = 207,
+  DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_WARP_PERIOD = 208,
+  DAW_AUDIO_PROCESSOR_PARAMETER_LOFI_SAMPLE_RATE_HZ = 209,
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_BASS_MONO_HZ = 210,
+  DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_MID_SIDE = 211
 } daw_audio_processor_parameter;
 
 #define DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_0_FREQUENCY_HZ
@@ -685,11 +698,6 @@ typedef struct daw_audio_core_process_block {
   const struct daw_audio_instrument_event *instrument_events;
 } daw_audio_core_process_block;
 
-typedef enum daw_audio_utility_polarity {
-  DAW_AUDIO_UTILITY_POLARITY_NORMAL = 0,
-  DAW_AUDIO_UTILITY_POLARITY_INVERT = 1
-} daw_audio_utility_polarity;
-
 typedef enum daw_audio_utility_input_mode {
   DAW_AUDIO_UTILITY_INPUT_MODE_STEREO = 0,
   DAW_AUDIO_UTILITY_INPUT_MODE_MONO_SUM = 1
@@ -701,35 +709,79 @@ typedef enum daw_audio_utility_matrix {
   DAW_AUDIO_UTILITY_MATRIX_MID_SIDE_DECODE = 2
 } daw_audio_utility_matrix;
 
+/* Both passes the channels, Left and Right play that channel on both outputs (and disable width), Swap exchanges them. */
+typedef enum daw_audio_utility_channel_mode {
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH = 0,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_LEFT = 1,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_RIGHT = 2,
+  DAW_AUDIO_UTILITY_CHANNEL_MODE_SWAP = 3
+} daw_audio_utility_channel_mode;
+
+/* Stereo scales the side by width; Mid/Side scales mid or side by mid_side (-1 is mono, 0 is as played, 1 is side only). */
+typedef enum daw_audio_utility_width_mode {
+  DAW_AUDIO_UTILITY_WIDTH_MODE_STEREO = 0,
+  DAW_AUDIO_UTILITY_WIDTH_MODE_MID_SIDE = 1
+} daw_audio_utility_width_mode;
+
+/* The gain is minus infinity at or below DAW_AUDIO_CORE_UTILITY_GAIN_DB_MIN. bass_mono_hz is read only when bass_mono is on. */
 typedef struct daw_audio_utility_state {
   uint32_t enabled;
   float gain_db;
-  uint32_t polarity;
+  uint32_t phase_left;
+  uint32_t phase_right;
   uint32_t input_mode;
-  float pan;
   float balance;
   float width;
   uint32_t matrix;
-  uint32_t swap;
+  uint32_t channel_mode;
   uint32_t dc_block;
+  uint32_t mute;
+  uint32_t width_mode;
+  float mid_side;
+  uint32_t bass_mono;
+  float bass_mono_hz;
+  uint32_t bass_mono_audition;
 } daw_audio_utility_state;
 
+/* Every curve has slope one at the origin and an asymptote near one. Soft is tanh, Medium the cubic that reaches its rail with
+ * zero slope, Hard an arctangent, Clip (Live's Digital Clip) a hard clamp at one, Analog a clamp with a rounded knee, Sine a
+ * clamped sine, Bass a rounded knee whose threshold is a control, Fold a sine that folds past one and Warp a tanh with a
+ * superimposed sine (Depth and Period). */
 typedef enum daw_audio_saturator_curve {
   DAW_AUDIO_SATURATOR_CURVE_SOFT = 0,
   DAW_AUDIO_SATURATOR_CURVE_MEDIUM = 1,
   DAW_AUDIO_SATURATOR_CURVE_HARD = 2,
-  DAW_AUDIO_SATURATOR_CURVE_CLIP = 3
+  DAW_AUDIO_SATURATOR_CURVE_CLIP = 3,
+  DAW_AUDIO_SATURATOR_CURVE_ANALOG = 4,
+  DAW_AUDIO_SATURATOR_CURVE_SINE = 5,
+  DAW_AUDIO_SATURATOR_CURVE_BASS = 6,
+  DAW_AUDIO_SATURATOR_CURVE_FOLD = 7,
+  DAW_AUDIO_SATURATOR_CURVE_WARP = 8
 } daw_audio_saturator_curve;
 
+typedef enum daw_audio_saturator_post_clip {
+  DAW_AUDIO_SATURATOR_POST_CLIP_OFF = 0,
+  DAW_AUDIO_SATURATOR_POST_CLIP_SOFT = 1,
+  DAW_AUDIO_SATURATOR_POST_CLIP_HARD = 2
+} daw_audio_saturator_post_clip;
+
+/* Color is a pre-EQ (a low and a high shelf around the frequency; width sets their Q) before the curve and its exact inverse after it. */
 typedef struct daw_audio_saturator_state {
   uint32_t enabled;
-  float drive_db;
+  uint32_t hi_quality;
   uint32_t curve;
   uint32_t color;
-  float color_frequency_hz;
-  float color_amount;
+  uint32_t post_clip;
+  float drive_db;
   float output_db;
   float dry_wet;
+  float color_frequency_hz;
+  float color_width;
+  float color_low_db;
+  float color_high_db;
+  float bass_threshold_db;
+  float warp_depth;
+  float warp_period;
 } daw_audio_saturator_state;
 
 typedef enum daw_audio_eq_band_type {
@@ -1060,16 +1112,24 @@ typedef enum daw_audio_lofi_dither {
   DAW_AUDIO_LOFI_DITHER_TRIANGULAR = 2
 } daw_audio_lofi_dither;
 
+/* The rate is in Hz, so the same setting sounds the same at every host rate; a rate at or above the host's passes every sample.
+ * pre_filter band-limits the input to the reduced rate before it is held (no aliasing), post_filter smooths the held steps, and
+ * dc_correction centres the Floor quantizer (its error averages minus half an LSB). sub_sample_clock holds the input as it was when the rate clock
+ * fired, between two host frames. Clipping at one applies only when the bit depth is under 24 or the rate is reduced. */
 typedef struct daw_audio_lofi_state {
   uint32_t enabled;
   uint32_t bit_depth;
-  float sample_rate_ratio;
+  float sample_rate_hz;
   float jitter;
   float noise_db;
   uint32_t quantization;
   uint32_t dither;
   float mix;
   uint32_t seed;
+  uint32_t pre_filter;
+  uint32_t post_filter;
+  uint32_t dc_correction;
+  uint32_t sub_sample_clock;
 } daw_audio_lofi_state;
 
 typedef struct daw_audio_asset_descriptor {

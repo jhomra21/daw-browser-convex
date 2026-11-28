@@ -174,6 +174,37 @@ float PublishedEdgeGain(const float from, const float to, const std::uint32_t fr
   return from + (to - from) * (static_cast<float>(frame) / 240.0F);
 }
 
+// processor_contract_generated.h: Utility is schema 2, 64 bytes.
+constexpr std::uint32_t kUtilityStateVersion = 2;
+constexpr std::uint32_t kUtilityStateBytes = 64;
+
+// The Utility state in that schema: stereo, no phase flips, Bass Mono off.
+void AppendUtilityState(std::vector<std::uint8_t>& payload, const float gain_db) {
+  AppendLeU32(payload, 1);  // enabled
+  AppendLeFloat(payload, gain_db);
+  AppendLeU32(payload, 0);  // phase_left
+  AppendLeU32(payload, 0);  // phase_right
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
+  AppendLeFloat(payload, 0.0F);  // balance
+  AppendLeFloat(payload, 1.0F);  // width
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_CHANNEL_MODE_BOTH);
+  AppendLeU32(payload, 0);  // dc_block
+  AppendLeU32(payload, 0);  // mute
+  AppendLeU32(payload, DAW_AUDIO_UTILITY_WIDTH_MODE_STEREO);
+  AppendLeFloat(payload, 0.0F);  // mid_side
+  AppendLeU32(payload, 0);  // bass_mono
+  AppendLeFloat(payload, 120.0F);  // bass_mono_hz
+  AppendLeU32(payload, 0);  // bass_mono_audition
+}
+
+// The Utility gain is a one-pole on the linear gain with a 10 ms time constant (480 frames at 48 kHz), moved at the frame a set lands:
+// `frames` frames later it has covered 1 - exp(-frames / 480) of the way from `from` to the target.
+double SmoothedUtilityGain(const double from, const float to_db, const double frames) {
+  const double target = std::pow(10.0, static_cast<double>(to_db) / 20.0);
+  return target + (from - target) * std::exp(-frames / 480.0);
+}
+
 std::vector<std::uint8_t> GraphSnapshot(
   const std::uint32_t revision,
   const float gain,
@@ -217,8 +248,8 @@ std::vector<std::uint8_t> GraphSnapshot(
   if (with_utility) {
     AppendLeU64(payload, 2);
     AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_UTILITY);
-    AppendLeU32(payload, 1);
-    AppendLeU32(payload, 40);
+    AppendLeU32(payload, kUtilityStateVersion);
+    AppendLeU32(payload, kUtilityStateBytes);
     AppendLeU32(payload, 77);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
@@ -226,16 +257,7 @@ std::vector<std::uint8_t> GraphSnapshot(
     AppendLeU32(payload, 1);
     AppendLeU32(payload, 0);
     AppendLeU32(payload, 0);
-    AppendLeU32(payload, 1);
-    AppendLeFloat(payload, 0.0F);
-    AppendLeU32(payload, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
-    AppendLeU32(payload, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
-    AppendLeFloat(payload, 0.0F);
-    AppendLeFloat(payload, 0.0F);
-    AppendLeFloat(payload, 1.0F);
-    AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
-    AppendLeU32(payload, 0);
-    AppendLeU32(payload, 0);
+    AppendUtilityState(payload, 0.0F);
     AppendLeU32(payload, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
   }
   std::vector<std::uint8_t> frame;
@@ -501,24 +523,15 @@ std::vector<std::uint8_t> ProcessorStatePatch(const std::uint32_t revision, cons
   AppendLeU64(payload, 2);
   AppendLeU32(payload, 77);
   AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_UTILITY);
-  AppendLeU32(payload, 1);
-  AppendLeU32(payload, 40);
+  AppendLeU32(payload, kUtilityStateVersion);
+  AppendLeU32(payload, kUtilityStateBytes);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
   AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
   AppendLeU32(payload, 1);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, 0);
-  AppendLeU32(payload, 1);
-  AppendLeFloat(payload, gain_db);
-  AppendLeU32(payload, DAW_AUDIO_UTILITY_POLARITY_NORMAL);
-  AppendLeU32(payload, DAW_AUDIO_UTILITY_INPUT_MODE_STEREO);
-  AppendLeFloat(payload, 0.0F);
-  AppendLeFloat(payload, 0.0F);
-  AppendLeFloat(payload, 1.0F);
-  AppendLeU32(payload, DAW_AUDIO_UTILITY_MATRIX_STEREO);
-  AppendLeU32(payload, 0);
-  AppendLeU32(payload, 0);
+  AppendUtilityState(payload, gain_db);
   AppendLeU32(payload, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB);
   return payload;
 }
@@ -1206,6 +1219,13 @@ void TestProcessorStatePatchTimeoutCancelsAndReusesSlot() {
   assert(host.ProcessPlanar(input, output, 4));
   assert(applied.wait_for(std::chrono::seconds(1)) == std::future_status::ready);
   assert(applied.get().outcome == daw::audio_host_macos::ProcessorPatchOutcome::kApplied);
+  // The kernel reads its controls every 8 frames, so the patch shows at frame 8 and the gain then glides to +6 dB.
+  assert(output_left[0] == 1.0F);
+  assert(host.ProcessPlanar(input, output, 4));
+  for (unsigned frame = 0; frame < 4; ++frame) {
+    assert(std::abs(output_left[frame] - SmoothedUtilityGain(1.0, 6.0F, frame + 1.0)) < 1e-5);
+  }
+  for (unsigned block = 0; block < 1200; ++block) assert(host.ProcessPlanar(input, output, 4));
   assert(output_left[0] > 1.99F && output_left[0] < 2.01F);
   // A cancelled patch leaves no claim behind: the next edit prepares normally.
   assert(host.PrepareGraphRevision(3, GraphSnapshot(3, 1.0F, 0, true)).code
@@ -2493,6 +2513,16 @@ void TestScheduledProcessorRampExpandsAtAdaptiveStride() {
   const auto ideal = [](const std::uint64_t frame) {
     return std::pow(10.0, -6.0 * static_cast<double>(frame) / kRampFrames / 20.0);
   };
+  // The Utility reads its controls every 8 frames and glides to them (10 ms one-pole), so the rendered ramp is the ideal one sampled
+  // at multiples of 8 and smoothed; the same recurrence gives the expected gain.
+  std::vector<double> expected(kRampFrames + 1);
+  double smoothed = 1.0;
+  double held = 1.0;
+  for (std::uint64_t frame = 0; frame <= kRampFrames; ++frame) {
+    if (frame % 8 == 0) held = ideal(frame);
+    smoothed += (1.0 - std::exp(-1.0 / 480.0)) * (held - smoothed);
+    expected[frame] = smoothed;
+  }
   double largest_ideal_step = 0.0;
   for (std::uint64_t frame = 1; frame < kRampFrames; ++frame)
     largest_ideal_step = std::max(largest_ideal_step, std::abs(ideal(frame) - ideal(frame - 1)));
@@ -2503,14 +2533,14 @@ void TestScheduledProcessorRampExpandsAtAdaptiveStride() {
     double largest_step = 0.0, error = 0.0, signal = 0.0;
     for (std::uint64_t frame = 0; frame < kRampFrames; ++frame) {
       if (frame > 0) largest_step = std::max(largest_step, std::abs(double{gain[frame]} - gain[frame - 1]));
-      error += std::pow(gain[frame] - ideal(frame), 2);
-      signal += std::pow(ideal(frame), 2);
+      error += std::pow(gain[frame] - expected[frame], 2);
+      signal += std::pow(expected[frame], 2);
     }
     std::fprintf(stderr, "ramp block=%u largest_step/ideal=%g snr_db=%g\n", block_frames,
       largest_step / largest_ideal_step, 10.0 * std::log10(signal / error));
     assert(largest_step <= stride * largest_ideal_step * 1.01);
     assert(10.0 * std::log10(signal / error) >= 60.0);
-    assert(std::abs(gain[kRampFrames] - ideal(kRampFrames)) < 1e-6);
+    assert(std::abs(gain[kRampFrames] - expected[kRampFrames]) < 1e-5);
   }
 }
 
@@ -3697,9 +3727,10 @@ void TestPausedPublicationReconcilesScheduledTargets() {
     assert(host.ProcessPlanar(input, output, 128));
     assert(host.diagnostics().rejected_blocks == 0);
     std::fprintf(stderr, "retained automation removed=%d output=%g\n", removed, left[127]);
-    assert(std::abs(left[127] - (removed ? 1.F : std::pow(10.F, -6.F / 20.F))) < 1e-6F);
+    const double first_block = SmoothedUtilityGain(1.0, -6.F, 128.0);
+    assert(std::abs(left[127] - (removed ? 1.0 : first_block)) < 1e-5);
     assert(host.ProcessPlanar(input, output, 128));
-    assert(std::abs(left[127] - (removed ? 1.F : std::pow(10.F, -12.F / 20.F))) < 1e-6F);
+    assert(std::abs(left[127] - (removed ? 1.0 : SmoothedUtilityGain(first_block, -12.F, 128.0))) < 1e-5);
     host.Stop();
   }
   for (const bool removed : {false, true}) {
@@ -3894,7 +3925,9 @@ void TestActiveScheduleRefillsDuringGraphPreparation() {
     const std::array<const float*, 2> input{input_samples.data(), input_samples.data()};
     const std::array<float*, 2> output{left.data(), right.data()};
     assert(host.ProcessPlanar(input, output, 128));
-    assert(std::abs(left[127] - std::pow(10.F, -6.F / 20.F)) < 1e-6F);
+    // The instance starts on the first block's value, so that block is exactly -6 dB.
+    const double first_block = std::pow(10.0, -6.0 / 20.0);
+    assert(std::abs(left[127] - first_block) < 1e-6);
     assert(host.diagnostics().active_revision == 1);
     assert(host.diagnostics().transport_frame == 128);
     assert(host.QueueScheduleWindow(ScheduleProcessorSetWindow(
@@ -3903,11 +3936,12 @@ void TestActiveScheduleRefillsDuringGraphPreparation() {
     assert(!host.QueueScheduleWindow(ScheduleWindow(1, 1, 3, 256, 384, 0, 1, false)));
     assert(host.ProcessPlanar(input, output, 128));
     assert(host.InspectGraphRevision(2).code == GraphRevisionStatusCode::kPublished);
-    assert(std::abs(left[127] - std::pow(10.F, -12.F / 20.F)) < 1e-6F);
+    const double second_block = SmoothedUtilityGain(first_block, -12.F, 128.0);
+    assert(std::abs(left[127] - second_block) < 1e-5);
     assert(host.QueueScheduleWindow(ScheduleProcessorSetWindow(
       2, 1, 3, 256, 384, 77, DAW_AUDIO_PROCESSOR_PARAMETER_UTILITY_GAIN_DB, 256, -18.F)));
     assert(host.ProcessPlanar(input, output, 128));
-    assert(std::abs(left[127] - std::pow(10.F, -18.F / 20.F)) < 1e-6F);
+    assert(std::abs(left[127] - SmoothedUtilityGain(second_block, -18.F, 128.0)) < 1e-5);
     assert(host.diagnostics().transport_frame == 384);
     assert(host.diagnostics().transport_epoch == 1);
     assert(host.diagnostics().rejected_blocks == 0);
@@ -3989,7 +4023,9 @@ void TestCheckpoint2FuturePublication() {
   const auto proof = host.InspectGraphRevision(2);
   assert(proof.code == GraphRevisionStatusCode::kPublished && proof.publication_frame == 256);
   assert(host.diagnostics().transport_epoch == 1 && host.diagnostics().rejected_blocks == 0);
-  for (const auto sample : left) assert(std::abs(sample - std::pow(10.F, -6.F / 20.F)) < 1e-6F);
+  for (unsigned frame = 0; frame < left.size(); ++frame) {
+    assert(std::abs(left[frame] - SmoothedUtilityGain(1.0, -6.F, static_cast<double>(frame + 1))) < 1e-5);
+  }
   host.Stop();
 }
 
@@ -4244,7 +4280,10 @@ void TestCheckpoint2RebaseAndShortBlocks() {
   assert(proof.code == GraphRevisionStatusCode::kPublished && proof.publication_frame == static_cast<std::int64_t>(next));
   std::fprintf(stderr, "rebase seam first=%f before=%f after=%f last=%f\n", left[0], left[63], left[64], left[95]);
   for (unsigned frame = 0; frame < 64; ++frame) assert(std::abs(left[frame] - 1.F) < 1e-6F);
-  for (unsigned frame = 64; frame < 96; ++frame) assert(std::abs(left[frame] - std::pow(10.F, -18.F / 20.F)) < 1e-6F);
+  // The -18 dB set at the seam is approached, not jumped to.
+  for (unsigned frame = 64; frame < 96; ++frame) {
+    assert(std::abs(left[frame] - SmoothedUtilityGain(1.0, -18.F, static_cast<double>(frame - 63))) < 1e-5);
+  }
   assert(host.diagnostics().transport_epoch == 1 && host.diagnostics().rejected_blocks == 0);
   host.Stop();
 }

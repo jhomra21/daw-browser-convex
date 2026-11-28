@@ -1,8 +1,7 @@
 import { normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, isOwnedProcessorKind, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { applySaturatorNodeParams } from './dsp'
 import { scheduleAudioParamRamp } from '../audio-param-ramp'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
-import { compressorWorklet, delayWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
+import { compressorWorklet, delayWorklet, reverbWorklet, saturatorWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import type { StaticWorkletNodeChain } from './static-worklet-chain'
 import { loadWorkletModule } from '../worklet-loader'
 import { safeDisconnect } from '../safe-disconnect'
@@ -145,15 +144,11 @@ export function handleCompressorProcessorError(chain: CompressorFaultTransition,
   chain.processedGain.gain.linearRampToValueAtTime(0, currentTime + 0.01)
 }
 
+// The worklet is both ends of the chain: a disabled saturator stays in the routing, so its bypass is a crossfade inside the processor.
 export type SaturatorNodeChain = {
   enabled: boolean
-  internalsConnected: boolean
-  dryGain: GainNode
-  wetGain: GainNode
-  driveGain: GainNode
-  colorFilter: BiquadFilterNode
-  waveNode: ReturnType<BaseAudioContext['createWaveShaper']>
-  outputGain: GainNode
+  workletNode: AudioWorkletNode
+  revision: number
 }
 
 // The worklet is both ends of the chain: a disabled delay stays in the routing and keeps hearing its input, so its bypass is a crossfade inside the processor.
@@ -345,16 +340,20 @@ export function disconnectCompressorChain(chain: CompressorNodeChain) {
   try { chain.workletNode.port.close() } catch {}
 }
 
-export function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): SaturatorNodeChain {
+export async function createSaturatorNodeChain(ctx: BaseAudioContext, params: SaturatorParamsLite): Promise<SaturatorNodeChain> {
+  await loadWorkletModule(ctx, resolveWorkletModuleUrl(saturatorWorklet.modulePath))
+
   const chain: SaturatorNodeChain = {
     enabled: !!params.enabled,
-    internalsConnected: false,
-    dryGain: ctx.createGain(),
-    wetGain: ctx.createGain(),
-    driveGain: ctx.createGain(),
-    colorFilter: ctx.createBiquadFilter(),
-    waveNode: ctx['createWaveShaper'](),
-    outputGain: ctx.createGain(),
+    workletNode: new AudioWorkletNode(ctx, saturatorWorklet.processorName, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers',
+    }),
+    revision: 0,
   }
 
   applySaturatorNodeChainParams(chain, params)
@@ -365,22 +364,33 @@ export function createSaturatorNodeChain(ctx: BaseAudioContext, params: Saturato
 export function applySaturatorNodeChainParams(chain: SaturatorNodeChain, params: SaturatorParamsLite) {
   const normalized = normalizeSaturatorParams(params)
   chain.enabled = normalized.enabled
-  applySaturatorNodeParams(chain, normalized)
+  chain.revision += 1
+  chain.workletNode.port.postMessage({ type: 'configure', version: 1, revision: chain.revision, state: normalized })
+
+  for (const [parameterId, value] of [
+    ['saturator.driveDb', normalized.driveDb],
+    ['saturator.outputDb', normalized.outputDb],
+    ['saturator.dryWet', normalized.dryWet],
+    ['saturator.colorFrequencyHz', normalized.colorFrequencyHz],
+    ['saturator.colorWidth', normalized.colorWidth],
+    ['saturator.colorLowDb', normalized.colorLowDb],
+    ['saturator.colorHighDb', normalized.colorHighDb],
+    ['saturator.bassThresholdDb', normalized.bassThresholdDb],
+    ['saturator.warpDepth', normalized.warpDepth],
+    ['saturator.warpPeriod', normalized.warpPeriod],
+  ] as const) {
+    const parameter = chain.workletNode.parameters.get(parameterId)
+
+    if (parameter) parameter.value = value
+  }
 }
 
 export function disconnectSaturatorChain(chain: SaturatorNodeChain) {
-  disconnectAudioNodes([chain.dryGain, chain.wetGain, chain.driveGain, chain.colorFilter, chain.waveNode, chain.outputGain])
-  chain.internalsConnected = false
-}
+  disconnectAudioNodes([chain.workletNode])
 
-function connectSaturatorInternals(chain: SaturatorNodeChain) {
-  if (chain.internalsConnected) return
-  chain.driveGain.connect(chain.colorFilter)
-  chain.colorFilter.connect(chain.waveNode)
-  chain.waveNode.connect(chain.wetGain)
-  chain.dryGain.connect(chain.outputGain)
-  chain.wetGain.connect(chain.outputGain)
-  chain.internalsConnected = true
+  try { chain.workletNode.port.postMessage({ type: 'release', version: 1 }) } catch {}
+
+  try { chain.workletNode.port.close() } catch {}
 }
 
 export async function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsLite, bpm: number): Promise<DelayNodeChain> {
@@ -465,14 +475,12 @@ export function connectFxChain(
   const createStage = (stageConfig: FxChainStageConfig): FxStage | null => {
     const eqNodes = stageConfig.eqNodes ?? []
     const compressor = stageConfig.compressorChain?.enabled ? stageConfig.compressorChain : null
-    const saturator = stageConfig.saturatorChain?.enabled ? stageConfig.saturatorChain : null
+    // A disabled saturator stays in the chain on a dry output so it keeps hearing its input.
+    const saturator = stageConfig.saturatorChain ?? null
     // A disabled delay stays in the chain on a dry output so it keeps hearing its input.
     const delay = stageConfig.delayChain ?? null
     const reverb = stageConfig.reverbChain?.enabled ? stageConfig.reverbChain : null
     const staticWorklet = stageConfig.staticWorkletChain?.state === 'active' ? stageConfig.staticWorkletChain : null
-
-    if (saturator) connectSaturatorInternals(saturator)
-    else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
 
     if (reverb) connectReverbInternals(reverb)
     else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
@@ -516,14 +524,11 @@ export function connectFxChain(
 
     if (stageConfig.kind === 'saturator') {
       if (!saturator) return null
-      disconnectAudioNodes([saturator.outputGain])
+      disconnectAudioNodes([saturator.workletNode])
 
       return {
-        connectInput: (source) => {
-          source.connect(saturator.dryGain)
-          source.connect(saturator.driveGain)
-        },
-        outputs: [saturator.outputGain],
+        connectInput: (source) => source.connect(saturator.workletNode),
+        outputs: [saturator.workletNode],
       }
     }
 

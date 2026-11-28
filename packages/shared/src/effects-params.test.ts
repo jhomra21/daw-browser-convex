@@ -411,13 +411,15 @@ describe('Modulation effect contracts', () => {
 
 describe('Saturator params', () => {
   test('normalizes and serializes equivalent inputs', () => {
-    const normalized = normalizeSaturatorParams({ driveDb: 999, outputDb: -999, dryWet: 2, colorFrequencyHz: 1, colorAmount: 2 })
+    const normalized = normalizeSaturatorParams({ driveDb: 999, outputDb: -999, dryWet: 2, colorFrequencyHz: 1, colorHighDb: 99, bassThresholdDb: 5, warpPeriod: 0 })
 
     expect(normalized.driveDb).toBe(SATURATOR_DRIVE_DB_MAX)
     expect(normalized.outputDb).toBe(SATURATOR_OUTPUT_DB_MIN)
     expect(normalized.dryWet).toBe(1)
     expect(normalized.colorFrequencyHz).toBe(100)
-    expect(normalized.colorAmount).toBe(1)
+    expect(normalized.colorHighDb).toBe(12)
+    expect(normalized.bassThresholdDb).toBe(0)
+    expect(normalized.warpPeriod).toBe(0.1)
     expect(serializeSaturatorParams(normalized)).toBe(serializeSaturatorParams({ ...normalized, driveDb: 999 }))
   })
 

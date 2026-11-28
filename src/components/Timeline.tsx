@@ -626,7 +626,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     moveScrub,
     stopScrub,
     setScrollElement,
-    rescheduleChangedClips: playbackRescheduleChangedClips,
     restartTimelineSchedule,
     awaitPlaybackPreparation,
     portableRecording,
@@ -640,7 +639,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     audioEngine,
     requiresNativeAudio,
     tracks: renderTracks,
-    ensureClipBuffer: clipBuffers.preload,
     bpm,
     resolveAudioSource,
     loopEnabled,
@@ -762,7 +760,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     portableBrowserPlayback: requiresNativeAudio ? undefined : {
       projectGeneration: mountedProjectGeneration,
       compileSnapshot: (transport, context) => compilePlaybackSnapshot(transport, context, getAutomationPatches),
-      reportFault: (message) => notify("Portable browser playback stopped", message),
+      reportFault: (message) => notify("Playback unavailable", message),
     },
   });
 
@@ -810,40 +808,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     captureStructuralPlaybackIntent,
   });
 
-  function rescheduleChangedClips(clipIds: string[]) {
-    if (clipIds.length === 0) return;
+  // A prepared session, native or browser, adopts edits through the hook's follow.
+  const pauseTimelineFollow = () => {
     setFollowPaused(true);
-
-    // A prepared session, native or browser, adopts a clip edit through the hook's follow.
-    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) return;
-
-    if (!isPlaying()) return;
-    const enabled = loopEnabled();
-    const end = loopEndSec();
-    const lenOk = enabled && end > loopStartSec() + 1e-3;
-    playbackRescheduleChangedClips(
-      renderTracks(),
-      playheadSec(),
-      clipIds,
-      lenOk ? { endLimitSec: end } : undefined,
-    );
-    audioEngine.cancelAutomationSchedules();
-    audioEngine.scheduleAutomationFromPlayhead(playheadSec(), {
-      horizonSec: lenOk ? end - playheadSec() : undefined,
-      tracks: renderTracks(),
-    });
   }
 
-  function rescheduleTimeline() {
-    setFollowPaused(true);
-
-    // A prepared session, native or browser, adopts a structural edit through the hook's follow.
-    if (isNativePlaybackPrepared() || isPortableBrowserPlaybackPrepared()) return;
-
-    if (isPlaying()) restartTimelineSchedule(renderTracks()).catch((cause: unknown) => {
-      console.error("[Timeline] failed to reschedule legacy playback", cause);
-    });
-  }
+  const rescheduleChangedClips = (clipIds: string[]) => {
+    if (clipIds.length > 0) pauseTimelineFollow();
+  };
 
   const automation = useTimelineAutomationController({
     acceptance,
@@ -994,7 +966,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     commitClipFades: (clipId, fades) => projection.commitClipFades(clipId, fades),
     commitClipMidi: (clipId, midi) => handleLocalMidiSaved(clipId, midi),
     rescheduleChangedClips,
-    rescheduleTimeline,
+    pauseTimelineFollow,
     refreshLocalTimeline: async () => {
       await mediaRecovery.reloadLocalTimeline();
       await Promise.resolve();

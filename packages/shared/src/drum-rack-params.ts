@@ -45,6 +45,7 @@ export type DrumRackSampleAssignment = DrumRackPadSample
 
 export const DRUM_RACK_PAD_COUNT = 16
 export const DRUM_RACK_FIRST_NOTE = 36
+export const DRUM_RACK_MAX_DECODED_BYTES = 64 * 1024 * 1024
 
 const NOTE_NAMES = ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B']
 

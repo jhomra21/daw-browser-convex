@@ -1,4 +1,5 @@
-import { createSamplerBufferCache, type AudioEngine, type EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import { createSamplerBufferCache } from '@daw-browser/audio-engine/sampled-instrument-buffer-cache'
 import {
   resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
@@ -44,14 +45,13 @@ const withSampledInstrumentIdentity = (
   return next
 }
 
-export type SamplerZoneLoadState = 'engine-miss' | 'loading' | 'ready' | 'error' | 'missing'
+export type SamplerZoneLoadState = 'loading' | 'ready' | 'error' | 'missing'
 
 export type SamplerLoadStatus = {
   zones: ReadonlyMap<string, SamplerZoneLoadState>
   errors: ReadonlyMap<string, string>
   totalBytes: number
   maxBytes: number
-  misses: number
   overBudgetPinned: boolean
 }
 
@@ -141,7 +141,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
   const reservations = new Map<string, Set<{ release: () => void; commit: () => void }>>()
   const states = new Map<Track['id'], Map<string, SamplerZoneLoadState>>()
   const samplerErrors = new Map<Track['id'], Map<string, string>>()
-  const misses = new Map<Track['id'], number>()
   const granularStates = new Map<Track['id'], SamplerZoneLoadState>()
   const granularErrors = new Map<Track['id'], string>()
   const nativePreparation = new Map<string, NativeInstrumentPreparation>()
@@ -157,9 +156,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     pin: SampledInstrumentRegionPin
   }>()
 
-  const activePins = new Map<string, Map<number, { cachePin: { release: () => void }; pin: SampledInstrumentRegionPin }>>()
   const listeners = new Set<() => void>()
-  const listenerRemovers = new Map<AudioEngine, () => void>()
   let disposed = false
 
   const notify = () => {
@@ -286,21 +283,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     }
 
     granularPins.delete(trackId)
-  }
-
-  const releaseActivePins = (trackId: Track['id']) => {
-    const prefix = `sampler\u0000${trackId}\u0000`
-
-    for (const [key, pins] of activePins) {
-      if (!key.startsWith(prefix)) continue
-
-      for (const { cachePin, pin } of pins.values()) {
-        cachePin.release()
-        pin.release()
-      }
-
-      activePins.delete(key)
-    }
   }
 
   const releaseCache = (trackId: Track['id'], kind: SampledInstrumentKind) => {
@@ -504,101 +486,12 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     return [...unique.values()]
   }
 
-  const installRuntimeListeners = (engine: AudioEngine) => {
-    if (listenerRemovers.has(engine)) return
-
-    const remove = engine.instruments.addSamplerRuntimeListeners({
-      onAssetUse: (use) => {
-        const configured = enginesByTrack.get(use.trackId)
-
-        if (configured !== engine) return
-        const cache = samplerCaches.get(use.trackId)
-
-        if (!cache) return
-        const aggregateKey = `sampler\u0000${use.trackId}\u0000${use.regionKey}`
-
-        if (use.active) {
-          const cachePin = cache.pin(use.regionKey)
-
-          if (!cachePin) return
-          const pin = aggregate.pin(aggregateKey)
-
-          if (!pin) {
-            cachePin.release()
-
-            return
-          }
-
-          const owned = activePins.get(aggregateKey) ?? new Map<number, { cachePin: { release: () => void }; pin: SampledInstrumentRegionPin }>()
-          owned.set(use.voiceId, { cachePin, pin })
-          activePins.set(aggregateKey, owned)
-        } else {
-          const owned = activePins.get(aggregateKey)
-          const release = owned?.get(use.voiceId)
-          owned?.delete(use.voiceId)
-          release?.cachePin.release()
-          release?.pin.release()
-
-          if (owned && owned.size === 0) activePins.delete(aggregateKey)
-        }
-      },
-      onNoteMiss: (miss) => {
-        const configured = enginesByTrack.get(miss.trackId)
-
-        if (configured !== engine) return
-        misses.set(miss.trackId, (misses.get(miss.trackId) ?? 0) + 1)
-        setState(miss.trackId, miss.zoneId, 'engine-miss')
-        const config = configs.get(miss.trackId)
-        const zone = config?.params.zones.find((candidate) => candidate.id === miss.zoneId)
-
-        if (!config || !zone) return
-        const version = versions.get(miss.trackId)
-        missingSampleErrors.get(miss.trackId)?.delete(zone.sample.assetKey)
-        missingSampleAssetKeys.get(miss.trackId)?.delete(zone.sample.assetKey)
-        void loadRegion(miss.trackId, regionForZone(zone), config.params.maxDecodedBytes, 'sampler')
-          .then((result) => {
-            if (disposed || versions.get(miss.trackId) !== version) return
-
-            if (result.status === 'ready') {
-              samplerErrors.get(miss.trackId)?.delete(miss.zoneId)
-              missingSampleErrors.get(miss.trackId)?.delete(zone.sample.assetKey)
-              missingSampleAssetKeys.get(miss.trackId)?.delete(zone.sample.assetKey)
-              setState(miss.trackId, miss.zoneId, 'ready')
-            } else if (result.status === 'missing') {
-              const sampleName = zone.sample.name ?? zone.sample.assetKey
-              const error = `"${sampleName}" is missing. Restore the file and retry.`
-              samplerErrors.get(miss.trackId)?.set(miss.zoneId, error)
-              const errors = missingSampleErrors.get(miss.trackId) ?? new Map<string, string>()
-              errors.set(zone.sample.assetKey, error)
-              missingSampleErrors.set(miss.trackId, errors)
-              const keys = missingSampleAssetKeys.get(miss.trackId) ?? new Set<string>()
-              keys.add(zone.sample.assetKey)
-              missingSampleAssetKeys.set(miss.trackId, keys)
-              setState(miss.trackId, miss.zoneId, 'error')
-            }
-
-            if (disposed || versions.get(miss.trackId) !== version) return
-            installSamplerBuffers(miss.trackId)
-          })
-          .catch((cause) => {
-            if (!disposed && versions.get(miss.trackId) === version) {
-              samplerErrors.get(miss.trackId)?.set(miss.zoneId, cause instanceof Error ? cause.message : 'Sampler region loading failed.')
-              setState(miss.trackId, miss.zoneId, 'error')
-            }
-          })
-      },
-    })
-
-    listenerRemovers.set(engine, remove)
-  }
-
   const clearTrack = (trackId: Track['id']) => {
     abortControllers.get(trackId)?.abort()
     abortControllers.delete(trackId)
     samplerSyncs.delete(trackId)
     releaseTrackReservations(trackId)
     versions.set(trackId, (versions.get(trackId) ?? 0) + 1)
-    releaseActivePins(trackId)
     releaseGranularPin(trackId)
     configs.delete(trackId)
     granularConfigs.delete(trackId)
@@ -610,7 +503,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     samplerErrors.delete(trackId)
     granularStates.delete(trackId)
     granularErrors.delete(trackId)
-    misses.delete(trackId)
     nativePreparation.delete(trackId)
     missingSampleErrors.delete(trackId)
     missingSampleAssetKeys.delete(trackId)
@@ -624,7 +516,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     const version = (versions.get(trackId) ?? 0) + 1
     versions.set(trackId, version)
     disposed = false
-    installRuntimeListeners(engine)
     enginesByTrack.set(trackId, engine)
     granularConfigs.delete(trackId)
     granularEnginesByTrack.delete(trackId)
@@ -683,12 +574,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     samplerErrors.set(trackId, new Map())
     engine.instruments.setTrackSampler(trackId, params, new Map(), instanceId)
     installSamplerBuffers(trackId)
-
-    if (params.cachePolicy !== 'preload' && !options.nativeAudio?.()) {
-      notify()
-
-      return 'applied'
-    }
 
     let unique: RegionSpec[]
 
@@ -797,7 +682,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     abortControllers.set(trackId, abortController)
     const version = (versions.get(trackId) ?? 0) + 1
     versions.set(trackId, version)
-    installRuntimeListeners(engine)
     configs.delete(trackId)
     samplerSyncs.delete(trackId)
     enginesByTrack.delete(trackId)
@@ -1224,7 +1108,7 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
         }
       }
 
-      return { zones, errors, totalBytes: cache?.byteLength() ?? 0, maxBytes: cache?.maxByteLength() ?? 0, misses: misses.get(trackId) ?? 0, overBudgetPinned: cache?.overBudgetPinned() ?? false }
+      return { zones, errors, totalBytes: cache?.byteLength() ?? 0, maxBytes: cache?.maxByteLength() ?? 0, overBudgetPinned: cache?.overBudgetPinned() ?? false }
     },
     subscribe: (listener: () => void) => {
       listeners.add(listener)
@@ -1234,8 +1118,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     dispose: () => {
       disposed = true
 
-      for (const remove of listenerRemovers.values()) remove()
-      listenerRemovers.clear()
       versions.clear()
       configs.clear()
       samplerSyncs.clear()
@@ -1244,11 +1126,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       granularEnginesByTrack.clear()
 
       for (const trackId of granularPins.keys()) releaseGranularPin(trackId)
-
-      for (const pins of activePins.values()) for (const { cachePin, pin } of pins.values()) {
-        cachePin.release()
-        pin.release()
-      }
 
       for (const trackId of samplerCaches.keys()) releaseCache(trackId, 'sampler')
 
@@ -1268,7 +1145,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
       states.clear()
       nativePreparation.clear()
       granularStates.clear()
-      activePins.clear()
       listeners.clear()
     },
   }

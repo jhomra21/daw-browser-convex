@@ -19,7 +19,7 @@ import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { LiveProcessorEditIdentity } from '~/lib/live-processor-control'
 import { nativePlaybackFaultText, type NativePlaybackFault } from '~/lib/desktop/native-playback-controller'
 import { addInstanceLimit, clearInstanceLimits, clearVstInstanceFailures, instanceLimit, vstInstanceFailed } from '~/lib/desktop/vst-instance-failures'
-import type { AudioEffectRuntimeInstance, DeferredStretchWindow } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEffectRuntimeInstance } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { TimelineEditIntent } from '~/hooks/timeline-playback-types'
 import { createDefaultDelayParams, createDefaultDrumRackParams, createDefaultLimiterParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultSamplerParams, createDefaultUtilityParams, mergeSynthParams } from '@daw-browser/shared'
@@ -89,7 +89,7 @@ for (const kind of ["unprepared", "refused", "unconfirmed", "unavailable", "late
         const playback = createRoot(cleanup => {
           dispose = cleanup
 
-          return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          return useTimelinePlayback(createFakeEngine().engine,
             undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
               keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
               reportFault: fault => faults.push(fault) })
@@ -150,7 +150,7 @@ test("B6a3 terminal-routing hook host loss during latency publication preserves 
       const playback = createRoot(cleanup => {
         dispose = cleanup
 
-        return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+        return useTimelinePlayback(createFakeEngine().engine,
           undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
             reportFault: fault => { visibleFault = fault; faults.push(fault) } })
@@ -193,7 +193,7 @@ test("a rejected Keep Latency update is reported as a stopped native session, no
       const playback = createRoot(cleanup => {
         dispose = cleanup
 
-        return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+        return useTimelinePlayback(createFakeEngine().engine,
           undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             keepLatencyNodeIds: keep, compileSnapshot: nativeRequiredSnapshot,
             getDesiredProcessorState: (snapshot, rate) => {
@@ -220,11 +220,6 @@ test("a rejected Keep Latency update is reported as a stopped native session, no
     else Reflect.deleteProperty(globalThis, "window")
   }
 })
-
-type ScheduleCall = {
-  playheadSec: number
-  opts: Parameters<Parameters<typeof useTimelinePlayback>[0]['scheduleAllClipsFromPlayhead']>[2]
-}
 
 type LifecycleEmitter = { emit: (value: DesktopAudioLifecycle) => void }
 
@@ -313,7 +308,7 @@ test.each(["announce", "unsupported", "announce+sample"])("3B1 r2 actual playbac
         }
 
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+          createFakeEngine().engine, undefined, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             compileSnapshot: async (transport, context) => {
               const effects = {
@@ -890,10 +885,8 @@ const createNativeHookBridge = (
   }
 }
 
-const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
+const createFakeEngine = () => {
   let currentTimelineSec = 0
-  let stretchListener = () => {}
-  const scheduleCalls: ScheduleCall[] = []
   const transportEvents: string[] = []
 
   const engine = {
@@ -914,35 +907,16 @@ const createFakeEngine = (deferredWindow: DeferredStretchWindow) => {
     onTransportStart: () => {},
     onTransportStop: () => {},
     resume: async () => {},
-    rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
-      scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
-
-      return { deferredStretchWindows: [deferredWindow] }
-    },
-    scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
-      scheduleCalls.push({ playheadSec, opts })
-
-      return scheduleCalls.length === 1
-        ? { deferredStretchWindows: [deferredWindow] }
-        : { deferredStretchWindows: [] }
-    },
     scheduleAutomationFromPlayhead: () => {},
     stopAllSources: () => {},
-    subscribeStretchRenderState: (listener) => {
-      stretchListener = listener
-
-      return () => true
-    },
   } satisfies Parameters<typeof useTimelinePlayback>[0]
 
   return {
     engine,
-    scheduleCalls,
     transportEvents,
     setCurrentTimelineSec: (sec: number) => {
       currentTimelineSec = sec
     },
-    notifyStretchReady: () => stretchListener(),
   }
 }
 
@@ -1121,7 +1095,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
           dispose = cleanup
           const playbackInputs = createMemo(() => ({ revision: mixRevision() }))
 
-          return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
+          return useTimelinePlayback(createFakeEngine().engine,
             { getTracks: tracks, bpm, loopEnabled, loopStartSec: () => 0, loopEndSec }, {
               requiresNativeAudio: true, enabled: () => true, projectId,
               playbackInputs,
@@ -1391,7 +1365,7 @@ test.skipIf(isServer)('recording save hydration cannot retire active playback be
           dispose = cleanup
 
           return useTimelinePlayback(
-            createFakeEngine({ clipId: 'recorded', startSec: 0, endSec: 1 }).engine,
+            createFakeEngine().engine,
             { getTracks: tracks },
             {
               requiresNativeAudio: true,
@@ -1493,7 +1467,7 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
           dispose = cleanup
 
           return useTimelinePlayback(
-            createFakeEngine({ clipId: 'recorded', startSec: 0, endSec: 1 }).engine,
+            createFakeEngine().engine,
             { getTracks: tracks },
             {
               requiresNativeAudio: true,
@@ -1570,7 +1544,7 @@ test('fingerprints all playback-relevant audio clip compiler fields for paused p
     createRoot((cleanup) => {
       dispose = cleanup
 
-      return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
+      return useTimelinePlayback(createFakeEngine().engine, { getTracks: () => tracks() }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
       })
     })
@@ -1639,7 +1613,7 @@ test('waits for audio clip hydration before native paused preview and retries af
       dispose = cleanup
 
       return useTimelinePlayback(
-        createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine,
+        createFakeEngine().engine,
         { getTracks: () => tracks() },
         {
           requiresNativeAudio: true,
@@ -1684,7 +1658,7 @@ test('reports unhydrated native audio when playback is explicitly requested', as
   try {
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(
-        createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine,
+        createFakeEngine().engine,
         { getTracks: () => unhydratedTracks },
         {
           requiresNativeAudio: true,
@@ -1844,7 +1818,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
       const playback = createRoot(cleanup => {
         dispose = cleanup
 
-        return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
+        return useTimelinePlayback(createFakeEngine().engine,
           { getTracks: tracks, bpm: () => 120 }, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration,
             compileSnapshot: async transport => {
@@ -1980,7 +1954,7 @@ test("B6d2 a paused structural change requested while the pause is pending is no
       const playback = createRoot(cleanup => {
         dispose = cleanup
 
-        return useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
+        return useTimelinePlayback(createFakeEngine().engine,
           { getTracks: tracks, bpm: () => 120 }, {
             requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             compileSnapshot: async transport => {
@@ -2040,7 +2014,7 @@ test("B6d2 a paused structural change requested while the pause is pending is no
 describe('useTimelinePlayback deferred stretch retries', () => {
   test('playing seek cancels automation before updating transport seek', async () => {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine)
         await flushMicrotasks()
@@ -2059,7 +2033,7 @@ describe('useTimelinePlayback deferred stretch retries', () => {
     const transportEvents: string[] = []
 
     const engine = {
-      ...createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 }).engine,
+      ...createFakeEngine().engine,
       onTransportSeek: () => transportEvents.push('onTransportSeek'),
       applyAutomationAtTimelineSec: () => transportEvents.push('applyAutomationAtTimelineSec'),
     }
@@ -2072,268 +2046,6 @@ describe('useTimelinePlayback deferred stretch retries', () => {
     })
   })
 
-  test('loop wrap cancels automation before updating transport seek', async () => {
-    await withFakeRaf(async (flushRaf) => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine, {
-          loopEnabled: () => true,
-          loopStartSec: () => 2,
-          loopEndSec: () => 6,
-          getTracks: () => [track],
-        })
-
-        await flushMicrotasks()
-        await playback.handlePlay([track])
-
-        fake.transportEvents.length = 0
-        fake.setCurrentTimelineSec(6.1)
-        flushRaf()
-
-        expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
-        dispose()
-      })
-    })
-  })
-
-  test('RAF does not retry deferred stretch windows before they become imminent', async () => {
-    await withFakeRaf(async (flushRaf) => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-
-        fake.setCurrentTimelineSec(10)
-        flushRaf()
-
-        expect(fake.scheduleCalls).toHaveLength(1)
-        dispose()
-      })
-    })
-  })
-
-  test('stretch readiness retries non-imminent deferred stretch windows', async () => {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-
-        fake.setCurrentTimelineSec(10)
-        fake.notifyStretchReady()
-
-        expect(fake.scheduleCalls).toHaveLength(2)
-        expect(fake.scheduleCalls[1]).toEqual({
-          playheadSec: 10,
-          opts: {
-            preserveExisting: true,
-            startLimitSec: 12,
-            endLimitSec: 16,
-            clipIds: ['clip-1'],
-          },
-        })
-        dispose()
-      })
-    })
-  })
-
-  test('RAF retries deferred stretch windows once they become imminent', async () => {
-    await withFakeRaf(async (flushRaf) => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-
-        fake.setCurrentTimelineSec(11)
-        flushRaf()
-
-        expect(fake.scheduleCalls).toHaveLength(2)
-        expect(fake.scheduleCalls[1]?.opts?.startLimitSec).toBe(12)
-        dispose()
-      })
-    })
-  })
-
-  test('live reschedule tracks deferred stretch windows for readiness retry', async () => {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-
-        fake.setCurrentTimelineSec(10)
-        playback.rescheduleChangedClips([track], 10, ['clip-1'], { endLimitSec: 16 })
-        fake.notifyStretchReady()
-
-        expect(fake.scheduleCalls.at(-1)).toEqual({
-          playheadSec: 10,
-          opts: {
-            preserveExisting: true,
-            startLimitSec: 12,
-            endLimitSec: 16,
-            clipIds: ['clip-1'],
-          },
-        })
-        dispose()
-      })
-    })
-  })
-
-  test('restarts active playback from the current transport position', async () => {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 12, endSec: 16 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-        fake.setCurrentTimelineSec(4)
-        fake.transportEvents.length = 0
-
-        playback.restartTimelineSchedule([track])
-
-        expect(fake.transportEvents).toEqual(['cancelAutomationSchedules', 'onTransportSeek'])
-        expect(fake.scheduleCalls.at(-1)?.playheadSec).toBe(4)
-        dispose()
-      })
-    })
-  })
-
-  test('live reschedule clears stale deferred stretch windows when a clip no longer needs stretching', async () => {
-    await withFakeRaf(async () => {
-      let currentTimelineSec = 0
-      let stretchListener = () => {}
-      const scheduleCalls: ScheduleCall[] = []
-
-      const engine = {
-        get currentTimelineSec() {
-          return currentTimelineSec
-        },
-        ensureAudio: () => {},
-        applyAutomationAtTimelineSec: () => {},
-        cancelAutomationSchedules: () => {},
-        onTransportPause: () => {},
-        onTransportSeek: () => {},
-        onTransportStart: () => {},
-        onTransportStop: () => {},
-        resume: async () => {},
-        rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
-          scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
-
-          return { deferredStretchWindows: [] }
-        },
-        scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
-          scheduleCalls.push({ playheadSec, opts })
-
-          return scheduleCalls.length === 1
-            ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
-            : { deferredStretchWindows: [] }
-        },
-        scheduleAutomationFromPlayhead: () => {},
-        stopAllSources: () => {},
-        subscribeStretchRenderState: (listener) => {
-          stretchListener = listener
-
-          return () => true
-        },
-      } satisfies Parameters<typeof useTimelinePlayback>[0]
-
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(engine)
-        await playback.handlePlay([track])
-
-        currentTimelineSec = 10
-        playback.rescheduleChangedClips([track], 10, ['clip-1'], { endLimitSec: 16 })
-        stretchListener()
-
-        expect(scheduleCalls).toHaveLength(2)
-        dispose()
-      })
-    })
-  })
-
-  test('RAF keeps fallback stretch windows queued for render readiness replacement', async () => {
-    await withFakeRaf(async (flushRaf) => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 11, endSec: 15, replaceExistingSource: true })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine)
-        await playback.handlePlay([track])
-
-        fake.setCurrentTimelineSec(11)
-        flushRaf()
-        fake.notifyStretchReady()
-
-        expect(fake.scheduleCalls).toHaveLength(2)
-        expect(fake.scheduleCalls[1]).toEqual({
-          playheadSec: 11,
-          opts: {
-            startLimitSec: 11,
-            endLimitSec: 15,
-            clipIds: ['clip-1'],
-          },
-        })
-        dispose()
-      })
-    })
-  })
-
-  test('deferred queue upgrades matching windows to replace existing fallback sources', async () => {
-    await withFakeRaf(async () => {
-      let currentTimelineSec = 0
-      let stretchListener = () => {}
-      const scheduleCalls: ScheduleCall[] = []
-
-      const engine = {
-        get currentTimelineSec() {
-          return currentTimelineSec
-        },
-        ensureAudio: () => {},
-        applyAutomationAtTimelineSec: () => {},
-        cancelAutomationSchedules: () => {},
-        onTransportPause: () => {},
-        onTransportSeek: () => {},
-        onTransportStart: () => {},
-        onTransportStop: () => {},
-        resume: async () => {},
-        rescheduleClipsAtPlayhead: (_tracks, playheadSec, clipIds, opts) => {
-          scheduleCalls.push({ playheadSec, opts: { ...opts, clipIds } })
-
-          return scheduleCalls.length === 2
-            ? { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16, replaceExistingSource: true }] }
-            : { deferredStretchWindows: [] }
-        },
-        scheduleAllClipsFromPlayhead: (_tracks, playheadSec, opts) => {
-          scheduleCalls.push({ playheadSec, opts })
-
-          return { deferredStretchWindows: [{ clipId: 'clip-1', startSec: 12, endSec: 16 }] }
-        },
-        scheduleAutomationFromPlayhead: () => {},
-        stopAllSources: () => {},
-        subscribeStretchRenderState: (listener) => {
-          stretchListener = listener
-
-          return () => true
-        },
-      } satisfies Parameters<typeof useTimelinePlayback>[0]
-
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(engine)
-        await playback.handlePlay([track])
-
-        currentTimelineSec = 11
-        playback.rescheduleChangedClips([track], 11, ['clip-1'], { endLimitSec: 16 })
-        stretchListener()
-
-        expect(scheduleCalls.at(-1)).toEqual({
-          playheadSec: 11,
-          opts: {
-            startLimitSec: 12,
-            endLimitSec: 16,
-            clipIds: ['clip-1'],
-          },
-        })
-        dispose()
-      })
-    })
-  })
 })
 
 test('does not acknowledge stale recovery after suspend or unmount', async () => {
@@ -2358,7 +2070,7 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
 
   try {
     await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
         enabled: () => true,
         projectId: () => "project",
         compileSnapshot: nativeRequiredSnapshot,
@@ -2378,7 +2090,7 @@ test('does not acknowledge stale recovery after suspend or unmount', async () =>
   }
 })
 
-test('keeps legacy recovery inert until explicit play', async () => {
+test('keeps recovery inert until explicit play', async () => {
   const previousWindow = globalThis.window
   const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
 
@@ -2398,98 +2110,14 @@ test('keeps legacy recovery inert until explicit play', async () => {
   })
 
   try {
-    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    const fake = createFakeEngine()
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(fake.engine)
       fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
       await flushMicrotasks()
       expect(acknowledgements).toEqual([{ generation: 2, result: "ready" }])
-      expect(fake.scheduleCalls).toEqual([])
       expect(playback.isPlaying()).toBeFalse()
       dispose()
-    })
-  } finally {
-    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
-  }
-})
-
-test('plays through legacy Web Audio while lifecycle is recovering', async () => {
-  const previousWindow = globalThis.window
-
-  const fixture = createNativeHookBridge(undefined, {
-    initial: { state: "recovering", powerGeneration: 1 },
-    completeRecovery: async () => ({ accepted: true }),
-    retryRecovery: async () => ({ accepted: true }),
-  })
-
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine, undefined, {
-          enabled: () => true,
-          projectId: () => "project",
-          compileSnapshot: nativeRequiredSnapshot,
-        })
-
-        fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
-        await playback.handlePlay([track])
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        expect(fixture.calls).not.toContain("begin")
-        expect(fake.scheduleCalls.length).toBeGreaterThan(0)
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
-  }
-})
-
-test('plays through legacy Web Audio and retries native recovery while lifecycle is failed', async () => {
-  const previousWindow = globalThis.window
-  let retries = 0
-
-  const fixture = createNativeHookBridge(undefined, {
-    initial: { state: "failed", powerGeneration: 1 },
-    completeRecovery: async () => ({ accepted: true }),
-    retryRecovery: async () => {
-      retries += 1
-
-      return { accepted: true }
-    },
-  })
-
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine, undefined, {
-          enabled: () => true,
-          projectId: () => "project",
-          compileSnapshot: nativeRequiredSnapshot,
-        })
-
-        await flushMicrotasks()
-        fixture.emitLifecycle({ state: "failed", powerGeneration: 1 })
-        await flushMicrotasks()
-        await playback.handlePlay([track])
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        expect(retries).toBe(1)
-        expect(fixture.calls).not.toContain("begin")
-        dispose()
-      })
     })
   } finally {
     Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
@@ -2529,7 +2157,7 @@ test('native-required play retries failed recovery and stays stopped while recov
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
         requiresNativeAudio: true,
         enabled: () => true,
         projectId: () => "project",
@@ -2574,7 +2202,7 @@ test('native-required play reports rejected recovery and retries it on a later p
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
         requiresNativeAudio: true,
         enabled: () => true,
         projectId: () => "project",
@@ -2618,7 +2246,7 @@ test('coalesces concurrent native-required recovery retries', async () => {
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
         requiresNativeAudio: true,
         enabled: () => true,
         projectId: () => "project",
@@ -2669,7 +2297,7 @@ test('allows a rejected recovery retry to be attempted again in the same generat
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine)
         await flushMicrotasks()
@@ -2709,7 +2337,7 @@ test('coalesces concurrent recovery retries', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine)
         await flushMicrotasks()
@@ -2727,116 +2355,10 @@ test('coalesces concurrent recovery retries', async () => {
   }
 })
 
-test('serializes three rapid play calls into one legacy startup', async () => {
-  await withFakeRaf(async () => {
-    const resumeGate = Promise.withResolvers<void>()
-    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-    let resumeCalls = 0
-    let stopAllSourcesCalls = 0
-
-    const engine = {
-      ...fake.engine,
-      resume: () => {
-        resumeCalls += 1
-
-        return resumeGate.promise
-      },
-      stopAllSources: () => {
-        stopAllSourcesCalls += 1
-      },
-    }
-
-    await createRoot(async (dispose) => {
-      const first = useTimelinePlayback(engine)
-      const second = first.handlePlay([track])
-      const third = first.handlePlay([track])
-      await flushMicrotasks()
-      expect(resumeCalls).toBe(1)
-      resumeGate.resolve()
-      await Promise.all([second, third])
-      expect(resumeCalls).toBe(1)
-      expect(fake.scheduleCalls).toHaveLength(1)
-      expect(stopAllSourcesCalls).toBe(0)
-      expect(first.isPlaying()).toBeTrue()
-      expect(first.backendDiagnostics().activeBackend).toBe("legacy")
-      dispose()
-    })
-  })
-})
-
-test('cancels delayed legacy resume before it schedules playback', async () => {
-  await withFakeRaf(async () => {
-    const resumeGate = Promise.withResolvers<void>()
-    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-
-    const engine = {
-      ...fake.engine,
-      resume: () => resumeGate.promise,
-    }
-
-    await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(engine)
-      const play = playback.handlePlay([track])
-      await flushMicrotasks()
-      await playback.handlePause()
-      resumeGate.resolve()
-      await play
-      expect(playback.isPlaying()).toBeFalse()
-      expect(fake.scheduleCalls).toEqual([])
-      dispose()
-    })
-  })
-})
-
-test('waits for a cancelled play attempt before starting a fresh play', async () => {
-  await withFakeRaf(async () => {
-    const resumeGates = [
-      Promise.withResolvers<void>(),
-      Promise.withResolvers<void>(),
-    ]
-
-    let resumeCalls = 0
-    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-
-    const engine = {
-      ...fake.engine,
-      resume: () => {
-        const gate = resumeGates[resumeCalls]
-        resumeCalls += 1
-
-        if (!gate) throw new Error("Unexpected extra resume.")
-
-        return gate.promise
-      },
-    }
-
-    await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(engine)
-      const first = playback.handlePlay([track])
-      await flushMicrotasks()
-      await playback.handlePause()
-      const second = playback.handlePlay([track])
-      const third = playback.handlePlay([track])
-      await flushMicrotasks()
-
-      expect(resumeCalls).toBe(1)
-      resumeGates[0]?.resolve()
-      await flushMicrotasks()
-      expect(resumeCalls).toBe(2)
-      resumeGates[1]?.resolve()
-      await Promise.all([first, second, third])
-
-      expect(fake.scheduleCalls).toHaveLength(1)
-      expect(playback.isPlaying()).toBeTrue()
-      dispose()
-    })
-  })
-})
-
 test('cancels delayed portable resume before it can start the portable backend', async () => {
   await withFakeRaf(async () => {
     const resumeGate = Promise.withResolvers<void>()
-    const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+    const fake = createFakeEngine()
 
     const engine = {
       ...fake.engine,
@@ -2867,7 +2389,6 @@ test('cancels delayed portable resume before it can start the portable backend',
       await play
       expect(playback.isPlaying()).toBeFalse()
       expect(playback.backendDiagnostics().activeBackend).toBe("idle")
-      expect(fake.scheduleCalls).toEqual([])
       dispose()
     })
   })
@@ -2885,7 +2406,7 @@ test('cancels delayed native startup and disposes the late backend', async () =>
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           enabled: () => nativeEnabled,
@@ -2902,7 +2423,6 @@ test('cancels delayed native startup and disposes the late backend', async () =>
         await play
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe("idle")
-        expect(fake.scheduleCalls).toEqual([])
         expect(fixture.calls).toContain("teardown")
         dispose()
       })
@@ -2924,7 +2444,7 @@ test('settles a cancelled native start before replacement playback can rebuild',
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -3004,7 +2524,7 @@ const withOutputDeviceSwitch = async (
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         await run({
           fixture, requested, unavailable, faults,
@@ -3275,7 +2795,7 @@ test('cancels an in-flight native preview before selecting portable playback', a
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
 
         const engine = {
           ...fake.engine,
@@ -3345,7 +2865,7 @@ test('an acceptance-owned native session is never acquired or retired by the ren
   try {
     const faults: string[] = []
     await createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
         requiresNativeAudio: true,
         acceptance: { ownsNativeSession: false, mark: () => undefined, ui: () => undefined, adoption: () => undefined },
         enabled: () => true,
@@ -3394,7 +2914,7 @@ test('rebuilds from the persisted generation when native insertion races delayed
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -3459,7 +2979,7 @@ test('keeps a paused portable session compatible when enabling a loop', async ()
     )
 
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
 
       const engine = {
         ...fake.engine,
@@ -3521,7 +3041,7 @@ test('rebuilds active portable playback into compatibility playback for a loop',
     )
 
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
 
       const engine = {
         ...fake.engine,
@@ -3589,7 +3109,7 @@ test('preserves an explicitly captured native owner across queued generation reb
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
 
         const engine = {
           ...fake.engine,
@@ -3671,7 +3191,7 @@ test('pauses Web Audio transport before disposing portable playback on project g
     )
 
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
 
       const engine = {
         ...fake.engine,
@@ -3718,7 +3238,7 @@ test('pauses Web Audio transport before disposing active portable playback on cl
     )
 
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
 
       const engine = {
         ...fake.engine,
@@ -3757,7 +3277,7 @@ test('waits for lifecycle recovery before restarting an active native graph', as
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -3807,7 +3327,7 @@ test('resolves a pending rebuild when intentional teardown cancels lifecycle rea
     const playback = createRoot((cleanup) => {
       dispose = cleanup
 
-      return useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
+      return useTimelinePlayback(createFakeEngine().engine, undefined, {
         requiresNativeAudio: true,
         enabled: () => true,
         projectId: () => "project",
@@ -3847,7 +3367,7 @@ test('resumes an explicitly captured structural rebuild after project generation
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       let dispose = () => {}
 
       const playback = createRoot((cleanup) => {
@@ -3902,7 +3422,7 @@ test('resumes after the generation effect disposes playback before structural re
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -3963,7 +3483,7 @@ test('live schedule compile failure retains the active graph for a later retry',
 
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => {
@@ -4008,7 +3528,7 @@ test('typed-fault-forwarding: a delivery incident reaches the native reportFault
 
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
           reportFault: (fault, options) => received.push({ fault, options }),
           compileSnapshot: async (transport) => {
@@ -4170,7 +3690,7 @@ for (const edit of ["audio-add", "audio-move", "audio-resize", "audio-delete", "
 
     try {
       await withFakeRaf(async () => createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(createFakeEngine({ clipId: "x", startSec: 0, endSec: 1 }).engine,
+        const playback = useTimelinePlayback(createFakeEngine().engine,
           undefined, { requiresNativeAudio: true, enabled: () => true, projectId: () => "project",
             reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
             compileSnapshot: async (transport) => {
@@ -4261,7 +3781,7 @@ test('instrument readiness waits for Play preparation before comparing the prepa
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             requiresNativeAudio: true,
@@ -4320,7 +3840,7 @@ test('instrument readiness stops waiting on disposal during an unresolved compil
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             requiresNativeAudio: true,
@@ -4386,7 +3906,7 @@ test('keeps Play visible throughout a cold native rebuild and resumes at the sto
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             requiresNativeAudio: true,
@@ -4450,7 +3970,7 @@ for (const failure of ["loss", "suspended", "failed"]) {
       await withFakeRaf(async () => {
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(
-            createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+            createFakeEngine().engine,
             undefined,
             { requiresNativeAudio: true, enabled: () => true, outputDeviceId: device.outputDeviceId, projectId: () => "project",
               compileSnapshot: nativeRequiredSnapshot },
@@ -4496,7 +4016,7 @@ test('coalesces queued structural rebuilds and resumes once', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       let dispose = () => {}
 
       const playback = createRoot((cleanup) => {
@@ -4551,7 +4071,7 @@ test('carries the latest inserted processor through coalesced paused rebuild com
   try {
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, undefined, {
+        const playback = useTimelinePlayback(createFakeEngine().engine, undefined, {
           requiresNativeAudio: true,
           enabled: () => true,
           projectId: () => 'project',
@@ -4655,7 +4175,7 @@ test('preserves the latest instrument override across an active structural rebui
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4716,7 +4236,7 @@ test('does not restart after pause wins an active native rebuild', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4761,7 +4281,7 @@ test('does not resume a structural rebuild after stop wins', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4814,7 +4334,7 @@ test('does not resume a structural rebuild after switching projects', async () =
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4861,7 +4381,7 @@ test('rebuilds a delayed paused native preview without committing play intent', 
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4911,7 +4431,7 @@ test('fails safely when the fresh native graph cannot start after insertion', as
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -4961,7 +4481,7 @@ test('serializes a delayed native pause before immediate play', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           enabled: () => true,
@@ -5005,7 +4525,7 @@ test("a locate that cancels a Play resuming behind a delayed Pause, after a seco
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -5059,7 +4579,7 @@ test("a locate made while playing resumes on the rebuild when a generation chang
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const [generation, setGeneration] = createSignal(1)
 
@@ -5113,7 +4633,7 @@ test('serializes play behind an in-flight stop while retaining the native sessio
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           requiresNativeAudio: true,
@@ -5152,110 +4672,6 @@ test('serializes play behind an in-flight stop while retaining the native sessio
   }
 })
 
-test('keeps fallback startup alive across a failed native retry', async () => {
-  const previousWindow = globalThis.window
-  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
-  const resumeGate = Promise.withResolvers<void>()
-
-  const fixture = createNativeHookBridge(undefined, {
-    initial: { state: "failed", powerGeneration: 1 },
-    completeRecovery: async () => ({ accepted: true }),
-    retryRecovery: async () => {
-      emitLifecycle({ state: "recovering", powerGeneration: 2 })
-      emitLifecycle({ state: "failed", powerGeneration: 2 })
-
-      return { accepted: true }
-    },
-  })
-
-  emitLifecycle = fixture.emitLifecycle
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-
-      const engine = {
-        ...fake.engine,
-        resume: () => resumeGate.promise,
-      }
-
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(engine, undefined, {
-          enabled: () => true,
-          projectId: () => "project",
-          compileSnapshot: nativeRequiredSnapshot,
-        })
-
-        await flushMicrotasks()
-        const play = playback.handlePlay([track])
-        await flushMicrotasks()
-        expect(playback.backendDiagnostics().activeBackend).toBe("idle")
-        resumeGate.resolve()
-        await play
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        expect(fake.scheduleCalls).toHaveLength(1)
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
-  }
-})
-
-test('preserves active legacy playback across a failed native retry', async () => {
-  const previousWindow = globalThis.window
-  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
-  const retryGate = Promise.withResolvers<{ accepted: boolean }>()
-
-  const fixture = createNativeHookBridge(undefined, {
-    initial: { state: "failed", powerGeneration: 1 },
-    completeRecovery: async () => ({ accepted: true }),
-    retryRecovery: async () => {
-      await retryGate.promise
-      emitLifecycle({ state: "recovering", powerGeneration: 2 })
-      emitLifecycle({ state: "failed", powerGeneration: 2 })
-
-      return { accepted: true }
-    },
-  })
-
-  emitLifecycle = fixture.emitLifecycle
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(fake.engine, undefined, {
-          enabled: () => true,
-          projectId: () => "project",
-          compileSnapshot: nativeRequiredSnapshot,
-        })
-
-        await playback.handlePlay([track])
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        retryGate.resolve({ accepted: true })
-        await flushMicrotasks()
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        expect(fixture.calls).not.toContain("begin")
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
-  }
-})
-
 test('suspension cancels delayed native startup before it can commit playback', async () => {
   const previousWindow = globalThis.window
   const beginGate = Promise.withResolvers<NativeTransactionReply>()
@@ -5273,7 +4689,7 @@ test('suspension cancels delayed native startup before it can commit playback', 
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           enabled: () => true,
@@ -5289,7 +4705,6 @@ test('suspension cancels delayed native startup before it can commit playback', 
         beginGate.resolve({ ok: true, transactionToken: nativeTransactionToken })
         await play
         expect(playback.isPlaying()).toBeFalse()
-        expect(fake.scheduleCalls).toEqual([])
         dispose()
       })
     })
@@ -5315,7 +4730,7 @@ test('failed lifecycle transition cancels delayed native startup', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           enabled: () => true,
@@ -5332,7 +4747,6 @@ test('failed lifecycle transition cancels delayed native startup', async () => {
         await play
         expect(playback.isPlaying()).toBeFalse()
         expect(playback.backendDiagnostics().activeBackend).toBe("idle")
-        expect(fake.scheduleCalls).toEqual([])
         expect(fixture.calls).toContain("teardown")
         dispose()
       })
@@ -5352,7 +4766,7 @@ test('native live MIDI availability includes a recoverable native preview', asyn
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, undefined, {
           enabled: () => true,
@@ -5380,114 +4794,6 @@ test('native live MIDI availability includes a recoverable native preview', asyn
   }
 })
 
-test('retries failed recovery only after explicit play and stays paused until ready', async () => {
-  const previousWindow = globalThis.window
-  let failed = true
-  let emitLifecycle = (_lifecycle: DesktopAudioLifecycle) => {}
-  const acknowledgements: Array<{ generation: number; result: "ready" | "failed" }> = []
-
-  const fixture = createNativeHookBridge(
-    () => failed ? "begin" : undefined,
-    {
-      initial: { state: "suspended", powerGeneration: 1 },
-      completeRecovery: async (generation, result) => {
-        acknowledgements.push({ generation, result })
-        emitLifecycle({ state: result, powerGeneration: generation })
-
-        return { accepted: true }
-      },
-      retryRecovery: async () => {
-        emitLifecycle({ state: "recovering", powerGeneration: 3 })
-
-        return { accepted: true }
-      },
-    },
-  )
-
-  emitLifecycle = fixture.emitLifecycle
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine, undefined, {
-          enabled: () => true,
-          projectId: () => "project",
-          compileSnapshot: nativeRequiredSnapshot,
-        })
-
-        fixture.emitLifecycle({ state: "recovering", powerGeneration: 2 })
-
-        for (let index = 0; index < 100; index += 1) await Promise.resolve()
-        expect(acknowledgements).toContainEqual({ generation: 2, result: "failed" })
-        failed = false
-        await playback.handlePlay([track])
-        await flushMicrotasks()
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.backendDiagnostics().activeBackend).toBe("legacy")
-        expect(acknowledgements).toContainEqual({ generation: 3, result: "ready" })
-        expect(playback.isNativePlaybackPrepared()).toBeFalse()
-        await playback.handlePause()
-        await playback.handlePlay([track])
-        expect(playback.isPlaying()).toBeTrue()
-        expect(playback.isNativePlaybackPrepared()).toBeTrue()
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, "window", { configurable: true, value: previousWindow })
-  }
-})
-
-test('does not prepare native audio when disabled and keeps browser playback available', async () => {
-  const previousWindow = globalThis.window
-  const fixture = createNativeHookBridge()
-  Object.defineProperty(globalThis, 'window', {
-    configurable: true,
-    value: { dawDesktop: { audioHost: fixture.audioHost } },
-  })
-
-  try {
-    await withFakeRaf(async () => {
-      let webEnsures = 0
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
-
-      const engine = {
-        ...fake.engine,
-        ensureAudio: () => { webEnsures += 1 },
-      }
-
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(engine, undefined, {
-          enabled: () => false,
-          projectGeneration: () => 1,
-          compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
-            revision: 1,
-            bpm: 120,
-            transport,
-            tracks: [track],
-            renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
-            sidechainRoutes: [],
-          }),
-        })
-
-        expect(fixture.calls.filter((call) => call === 'begin')).toHaveLength(0)
-        expect(playback.nativeLiveMidi.isAvailable()).toBeFalse()
-        expect(playback.isNativePlaybackPrepared()).toBeFalse()
-        await playback.handlePlay([track])
-        expect(webEnsures).toBe(1)
-        expect(playback.isPlaying()).toBeTrue()
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
-  }
-})
-
 test('suppresses native faults while preparing an idle preview', async () => {
   const previousWindow = globalThis.window
   const fixture = createNativeHookBridge('begin')
@@ -5498,7 +4804,7 @@ test('suppresses native faults while preparing an idle preview', async () => {
   })
 
   try {
-    const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+    const engine = createFakeEngine().engine
     await createRoot(async (dispose) => {
       const playback = useTimelinePlayback(engine, undefined, {
         enabled: () => true,
@@ -5536,7 +4842,7 @@ test('reports native faults and stops active playback', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      const engine = createFakeEngine().engine
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           enabled: () => true,
@@ -5569,7 +4875,7 @@ test('reports native faults and stops active playback', async () => {
   }
 })
 
-test('uses the committed native backend without scheduling Web Audio', async () => {
+test('uses the committed native backend without starting Web Audio', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()
   const calls: string[] = []
@@ -5658,17 +4964,11 @@ test('uses the committed native backend without scheduling Web Audio', async () 
   try {
     await withFakeRaf(async () => {
       let nativeEnabled = true
-      let webSchedules = 0
       let webEnsures = 0
 
       const engine = {
-        ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+        ...createFakeEngine().engine,
         ensureAudio: () => { webEnsures += 1 },
-        scheduleAllClipsFromPlayhead: () => {
-          webSchedules += 1
-
-          return { deferredStretchWindows: [] }
-        },
       }
 
       await createRoot(async (dispose) => {
@@ -5687,7 +4987,6 @@ test('uses the committed native backend without scheduling Web Audio', async () 
 
         await playback.handlePlay([track])
         expect(webEnsures).toBe(0)
-        expect(webSchedules).toBe(0)
         expect(playback.isNativePlaybackPrepared()).toBeTrue()
         expect(playback.nativeLiveMidi.isAvailable()).toBeTrue()
         const initialCalls = [...calls]
@@ -5699,9 +4998,8 @@ test('uses the committed native backend without scheduling Web Audio', async () 
         expect(playback.backendDiagnostics()).toEqual({
           version: 2,
           browserDefaultBackend: 'portable-browser',
-          browserCompatibilityBackend: 'legacy',
           selection: 'startup-only',
-          preActivationFailure: 'compatibility-fallback',
+          preActivationFailure: 'blocking-message',
           runtimeFailure: 'stop-and-mute',
           portableBrowserRequiresOptIn: false,
           nativeRequiresOptIn: true,
@@ -5739,7 +5037,7 @@ test('native-required playback does not fall back when native startup fails', as
   })
 
   try {
-    const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+    const fake = createFakeEngine()
     let webEnsures = 0
 
     const engine = {
@@ -5779,7 +5077,7 @@ test('preserves a prepared native preview across a paused native seek', async ()
   try {
     await withFakeRaf(async () => {
       const transportEvents: string[] = []
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
 
       const engine = {
         ...fake.engine,
@@ -5859,7 +5157,7 @@ test('reconciles a paused seek superseded by native preview fingerprint disposal
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
           fake.engine,
@@ -5934,7 +5232,7 @@ test('B6d3 a paused seek superseded by a structural replacement keeps that repla
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -5986,7 +5284,7 @@ test('B6d3 a paused structural replacement prepares at the playhead a Stop publi
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6038,7 +5336,7 @@ for (const structural of [false, true]) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6115,7 +5413,7 @@ for (const { structural, stop } of [{ structural: false, stop: false }, { struct
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6194,7 +5492,7 @@ test('B6d4 a locate made while Play waits on an uncommitted preview is applied o
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6245,7 +5543,7 @@ test('B6d4 a Stop in the same tick as a paused structural edit reports no fault'
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6297,7 +5595,7 @@ test('B6d4 a Stop while the paused replacement is starting keeps a live graph at
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6362,7 +5660,7 @@ test('B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing ru
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6421,7 +5719,7 @@ for (const route of ['stop', 'pause'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6500,7 +5798,7 @@ for (const route of ['stop', 'pause'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6555,7 +5853,7 @@ test('B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live 
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6615,7 +5913,7 @@ for (const stop of ['none', 'waiting', 'after'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6682,7 +5980,7 @@ test('B6d5 a Play replayed from a locate stays pending until it plays', async ()
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6745,7 +6043,7 @@ for (const hold of ['teardown', 'capture'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6813,7 +6111,7 @@ test('B6d6 a Stop that lands as a Pause settles under a queued rebuild retires t
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -6872,7 +6170,7 @@ for (const release of ['begin', 'teardown'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -6955,7 +6253,7 @@ test('B6d7 a locate during a Pause that cancels a pending Play keeps its paused 
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -7013,7 +6311,7 @@ test("B6d7 a locate during a Pause that cancels a cold Play (native audio option
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: false,
@@ -7057,37 +6355,6 @@ test("B6d7 a locate during a Pause that cancels a cold Play (native audio option
   }
 })
 
-test('a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled', async () => {
-  const previousWindow = globalThis.window
-  const resumeGate = Promise.withResolvers<void>()
-  const fixture = createNativeHookBridge()
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: { dawDesktop: { audioHost: fixture.audioHost } } })
-
-  try {
-    await withFakeRaf(async () => {
-      const engine = { ...createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine, resume: () => resumeGate.promise }
-      await createRoot(async (dispose) => {
-        const playback = useTimelinePlayback(engine, undefined, { enabled: () => false, projectId: () => 'project', compileSnapshot: nativeRequiredSnapshot })
-        const play = playback.handlePlay([track])
-
-        for (let index = 0; index < 20; index += 1) await flushMicrotasks()
-        expect(playback.isPlayPending()).toBeTrue()
-        const pause = playback.handlePause()
-        resumeGate.resolve()
-        await Promise.allSettled([play, pause])
-
-        for (let index = 0; index < 60; index += 1) await flushMicrotasks()
-        expect(playback.isPlaying()).toBeFalse()
-        expect(fixture.calls).not.toContain('begin')
-        expect(playback.isNativePlaybackPrepared()).toBeFalse()
-        dispose()
-      })
-    })
-  } finally {
-    Object.defineProperty(globalThis, 'window', { configurable: true, value: previousWindow })
-  }
-})
-
 test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a live paused graph at the resume position', async () => {
   const previousWindow = globalThis.window
   const device = createDeviceMove()
@@ -7100,7 +6367,7 @@ test('B6d8 a Pause while a resuming rebuild retires the playing graph keeps a li
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -7167,7 +6434,7 @@ test('B6d8 a Pause while a paused rebuild is starting keeps a live paused graph 
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -7233,7 +6500,7 @@ for (const hold of ['begin', 'teardown'] as const) {
 
     try {
       await withFakeRaf(async () => {
-        const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+        const fake = createFakeEngine()
         await createRoot(async (dispose) => {
           const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
             requiresNativeAudio: true,
@@ -7320,7 +6587,7 @@ const runB6eSupersededRebuild = async (
 
   try {
     await withFakeRaf(async () => {
-      const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+      const fake = createFakeEngine()
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(fake.engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true,
@@ -7540,7 +6807,7 @@ test('rebuilds a prepared native backend while paused', async () => {
 
   try {
     await withFakeRaf(async () => {
-      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      const engine = createFakeEngine().engine
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           enabled: () => true,
@@ -7590,7 +6857,7 @@ test('re-establishes paused native preview after structural fingerprint disposal
 
   try {
     await withFakeRaf(async () => {
-      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      const engine = createFakeEngine().engine
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
           engine,
@@ -7681,7 +6948,7 @@ test('keeps optional paused structural rebuilds idle when native preview becomes
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           { getTracks: () => [track] },
           {
             requiresNativeAudio: false,
@@ -7742,7 +7009,7 @@ test('structural rebuild owns paused preview while reactive tracks change', asyn
 
   try {
     await withFakeRaf(async () => {
-      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      const engine = createFakeEngine().engine
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
           engine,
@@ -7820,7 +7087,7 @@ test('serializes stop teardown before a paused structural insertion', async () =
 
   try {
     await withFakeRaf(async () => {
-      const engine = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine
+      const engine = createFakeEngine().engine
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(engine, undefined, {
           requiresNativeAudio: true,
@@ -7872,7 +7139,7 @@ test('disposes the native backend even when state persistence fails', async () =
       let failCapture = false
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             enabled: () => true,
@@ -7918,7 +7185,7 @@ test('captures a prepared native graph against its original project after naviga
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             enabled: () => true,
@@ -7960,7 +7227,7 @@ test('serializes play behind capture and disposal of the previous native session
     await withFakeRaf(async () => {
       await createRoot(async (dispose) => {
         const playback = useTimelinePlayback(
-          createFakeEngine({ clipId: "clip-1", startSec: 1, endSec: 2 }).engine,
+          createFakeEngine().engine,
           undefined,
           {
             enabled: () => true,
@@ -8016,7 +7283,7 @@ const releaseB6fLive = (hold: B6fLiveHold) => {
 const b6fLiveEditedTracks: Track[] = [track, { ...track, id: 'track-b6f', name: 'B6f edit' }]
 
 const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
-  const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+  const fake = createFakeEngine()
   const audioContext = new AudioContext()
   let audioCreated = false
   const resumeHold = b6fLiveHold()
@@ -8118,7 +7385,11 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     timelineReschedule, resumingRebuild, mark: () => world.seq, liveSession: () => world.sessions.filter((session) => !session.closed).at(-1) }
 }
 
-const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promise<void>, nativeEnabled = true) => {
+const runB6fLive = async (
+  body: (live: ReturnType<typeof mountB6fLive>) => Promise<void>,
+  nativeEnabled = true,
+  audioHost?: ReturnType<typeof createNativeHookBridge>['audioHost'],
+) => {
   const previous = {
     window: Object.getOwnPropertyDescriptor(globalThis, 'window'),
     AudioContext: Object.getOwnPropertyDescriptor(globalThis, 'AudioContext'),
@@ -8167,7 +7438,7 @@ const runB6fLive = async (body: (live: ReturnType<typeof mountB6fLive>) => Promi
 
   const manifest = await readFile(new URL('../../public/audio-core/daw-audio-core.manifest.json', import.meta.url), 'utf8')
   const wasm = await readFile(new URL('../../public/audio-core/daw-audio-core.wasm', import.meta.url))
-  Object.defineProperty(globalThis, 'window', { configurable: true, value: {} })
+  Object.defineProperty(globalThis, 'window', { configurable: true, value: audioHost ? { dawDesktop: { audioHost } } : {} })
   Object.defineProperty(globalThis, 'AudioContext', { configurable: true, value: FakeAudioContext })
   Object.defineProperty(globalThis, 'AudioWorkletNode', { configurable: true, value: FakeAudioWorkletNode })
   Object.defineProperty(globalThis, 'fetch', { configurable: true, writable: true, value: async (input: string | URL) => (
@@ -8213,6 +7484,24 @@ test('B6f a Pause or Stop that cancels a pending Play leaves a live paused porta
     await Promise.allSettled([play, cancel])
     await live.expectLive(false, action === 'stop' ? 0 : 1, mark, 'none')
   })
+})
+
+test('B6f a Pause that cancels a pending Play with native playback disabled requests no native preview', async () => {
+  const fixture = createNativeHookBridge()
+
+  await runB6fLive(async (live) => {
+    live.playback.setPlayhead(1, live.tracks())
+    live.holds.compile.armed = true
+    const play = live.playback.handlePlay(live.tracks())
+    await live.holds.compile.reached.promise
+    const mark = live.mark()
+    const pause = live.playback.handlePause()
+    releaseB6fLive(live.holds.compile)
+    await Promise.allSettled([play, pause])
+    await live.expectLive(false, 1, mark, 'none')
+    expect(fixture.calls).not.toContain('begin')
+    expect(live.playback.isNativePlaybackPrepared()).toBeFalse()
+  }, false, fixture.audioHost)
 })
 
 test('B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit', async () => {
@@ -8579,7 +7868,7 @@ const b6f5Automation: AutomationEnvelope = { id: 'automation-b6f5', projectId: '
 const b6f5UtilityInstance = (params: UtilityParamsEnvelope): AudioEffectRuntimeInstance => ({ id: 'utility-1', kind: 'utility', params })
 
 const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
-  const fake = createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 })
+  const fake = createFakeEngine()
   const audioContext = new AudioContext()
   let audioCreated = false
   // A context the session cannot reach until the next ensureAudio: a seek then has nothing to compile with.
@@ -9605,7 +8894,7 @@ test('B6f5 renaming a track while paused on native does not recompile the paused
     const playback = createRoot((cleanup) => {
       dispose = cleanup
 
-      return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
+      return useTimelinePlayback(createFakeEngine().engine, { getTracks: () => tracks() }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
         reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
       })
@@ -10138,7 +9427,7 @@ test('C0G the clip fingerprint names every clip field a playback compile reads, 
       createRoot((cleanup) => {
         dispose = cleanup
 
-        return useTimelinePlayback(createFakeEngine({ clipId: "clip-audio", startSec: 0, endSec: 1 }).engine, { getTracks: () => tracks() }, {
+        return useTimelinePlayback(createFakeEngine().engine, { getTracks: () => tracks() }, {
           requiresNativeAudio: true, enabled: () => true, projectId: () => "project", projectGeneration: reload.projectGeneration, compileSnapshot,
           reportFault: () => undefined,
         })
@@ -10252,7 +9541,7 @@ test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no hos
 
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: tracks(),
@@ -10333,7 +9622,7 @@ test('W-FB-5 a paused native instrument replacement requested by the Timeline is
     await withFakeRaf(async () => createRoot(async (dispose) => {
       const faults: string[] = []
 
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         { getTracks: () => [track] }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport, context) => {
@@ -10412,7 +9701,7 @@ const vstLiveEdit = async (paused: boolean, edit: 'insert' | 'undo' | 'load-fail
   try {
     let outcome: VstLiveEditOutcome | undefined
     await withFakeRaf(async () => createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         { getTracks: () => [track] }, { requiresNativeAudio: true, enabled: () => true, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport, context) => {
@@ -10527,7 +9816,7 @@ const withNativeTransportEdit = async (
     await withFakeRaf(async () => createRoot(async (dispose) => {
       fixture.setScheduleComplete(false)
 
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         { getTracks: () => tracks() }, { requiresNativeAudio: true, enabled: () => options.enabled, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport, context) => {
@@ -10759,7 +10048,7 @@ test('UD7n W-S11d-E2 the browser limit notice clears when the native session hos
 
   try {
     await withFakeRaf(async () => createRoot(async (dispose) => {
-      const playback = useTimelinePlayback(createFakeEngine({ clipId: 'clip-1', startSec: 1, endSec: 2 }).engine,
+      const playback = useTimelinePlayback(createFakeEngine().engine,
         { getTracks: () => [track] }, { enabled: nativeEnabled, projectId: () => 'project',
           reportFault: (fault) => faults.push(nativePlaybackFaultText(fault)),
           compileSnapshot: async (transport) => compileLivePlaybackSnapshot({ revision: 1, bpm: 120, transport, tracks: [track],

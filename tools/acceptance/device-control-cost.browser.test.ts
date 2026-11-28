@@ -569,9 +569,8 @@ const runPartBScenario = async (spec: PartBSpec) => {
     const engine = {
       currentTimelineSec: 0, ensureAudio: () => undefined, applyAutomationAtTimelineSec: () => undefined, cancelAutomationSchedules: () => undefined,
       onTransportPause: () => undefined, onTransportSeek: () => undefined, onTransportStart: () => undefined, onTransportStop: () => undefined,
-      resume: async () => undefined, rescheduleClipsAtPlayhead: () => ({ deferredStretchWindows: [] }),
-      scheduleAllClipsFromPlayhead: () => ({ deferredStretchWindows: [] }), scheduleAutomationFromPlayhead: () => undefined,
-      stopAllSources: () => undefined, subscribeStretchRenderState: () => () => true,
+      resume: async () => undefined, scheduleAutomationFromPlayhead: () => undefined,
+      stopAllSources: () => undefined,
     } satisfies Parameters<typeof useTimelinePlayback>[0];
 
     const playback = createRoot((cleanup) => {

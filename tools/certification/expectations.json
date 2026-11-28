@@ -18,13 +18,13 @@
   "entries": {
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
-   "src/hooks/useTimelinePlayback.ts": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4",
+   "src/hooks/useTimelinePlayback.ts": "ef0663dd6e32846d0b3180966c512221d56308bb8bd3f5424a1afd2c48bac9aa",
    "src/lib/desktop/native-playback-controller.test.ts": "cbc36ddbd755cd08813fd498901b04af1f7abca611335da47ad8a1969115605d",
-   "src/hooks/useTimelinePlayback.test.ts": "9fec646e24dbdfcf956870057577822311adb186614377faebcab59c1ac723b0",
+   "src/hooks/useTimelinePlayback.test.ts": "7d7faafa92113e1bdc79fbcbff32781afa6e9ecacc992bd36719c0cfe72bab0a",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "eeac88ae3da3f1f04a357a1593e38c5d491f63c14f6e48e6e8ae71dfb861af47",
+   "src/components/Timeline.tsx": "05f71336b245e7cd063136de7daf520aa97b3f4f647f65878281277703597b6a",
    "src/components/Timeline.test.ts": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d",
    "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "cd09163df02d227ba9ef6bc43f6ac15abcb47d05735be876f2663683e0fad97d",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
@@ -32,19 +32,19 @@
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "61223c091f7dd8093d711116d29989b2ca75cead4ec3489cbfa751b6e92520b4",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "2f4995c0ee6ed2683081a39728799649039a329b5642510503e43b3cb6b7e481",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
-   "tools/acceptance/device-control-cost.browser.test.ts": "6ee6446d6cd8bedd5715e791f14b46ebb56a54c11222fab751325cfeed214938",
-   "src/lib/instrument-buffer-sync.test.ts": "781a7a9d3ae27aa8eb4d5ce74d2a61b0aa4d055a2160b0ac9519b8a03015731d",
+   "tools/acceptance/device-control-cost.browser.test.ts": "96127fbb6d3d4d8c202abb7b2913c413368212b88440e4ef9633c12017d8a823",
+   "src/lib/instrument-buffer-sync.test.ts": "7a73b89c82ee50283b26b1b41f55525090b9df075173a21f55f0bcf83e73fee2",
    "src/components/timeline/parameter-gesture-owner.ts": "c1508853dec2cbcdd350b27ea5e50861e15acbe2a814f916c13bf140b46c5b48",
    "src/components/timeline/create-persisted-effect-state.ts": "200343a8ef20a412aabdef8c0e8c057cb9e96b0b42db9487e337448de800628d",
    "src/components/timeline/create-effects-panel-state.ts": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38",
    "src/components/timeline/create-effects-panel-controller.ts": "91c61ab86293341896c946a8f2f32b83e1d360ebdd49f68583b7a21d24d93fb0",
-   "src/lib/portable-browser-playback-controller.ts": "6e12a3ff533ff650f3b7350028f3776fa5dc6e33fc2106785509db65feec4d7c",
-   "src/components/effects/Sampler.tsx": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8",
+   "src/lib/portable-browser-playback-controller.ts": "9c490543de6b04f48e8ee813974714af6091fe36632b8fdc9c70a3d3d3ecbc62",
+   "src/components/effects/Sampler.tsx": "bfa34f5ac57e4a7f3099e0f0fab2e8e42ecee6d616dc6f4392154d459ce1ef69",
    "src/components/effects/Granular.tsx": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e",
    "src/lib/when-number.ts": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5",
-   "tools/acceptance/device-control-cost.browser-runtime.tsx": "ac88f5c5ea40f99d1a1411bd0815abd66091bb3b6afb3826c8d6c3005a7d44d7",
+   "tools/acceptance/device-control-cost.browser-runtime.tsx": "ce527cebd2eea259c903b54da7d6391aa4aa9e41073924899b6068b56be22b7d",
    "tools/acceptance/device-control-cost.ts": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345",
    "src/hooks/useEffectsPanelAudioSync.test.ts": "1e028cb38009c1e30abececd2522efe39a5a62ae715fe53ee620d379de79fef9",
    "src/lib/portable-browser-playback-controller.test.ts": "003e6a4219e0f3af6dd608201c8ca6a32a166934a8e37c822f4411e585311ab0",
@@ -77,7 +77,7 @@
    "src/lib/timeline-audio-import.ts": "dd7f77d2d936121551b125a6543b65eaa90de3b39717230c90a7e9e754e454ad",
    "src/lib/timeline-audio-import-metadata-only.test.ts": "6dbde94e5ca069dd0b1c253321a4542a98af58e3df001bd0c8d214a99be6206f",
    "src/hooks/useTimelineProjectionState.test.ts": "b1f79c9e42930e9bbc5f19301641cda04a54a437c9e97dfcdf9941e1df9fbab3",
-   "tools/acceptance/b5c-playback-witness-support.ts": "7a8bbae539ef9b815d86cd4c19a8f10cdca3d1275ee554ab289508bb1dcb2744"
+   "tools/acceptance/b5c-playback-witness-support.ts": "b6896c716bb3800c39150904935d8f7ec8853f3e56f099c2774ed569c36a76a1"
   }
  },
  "rebase": {
@@ -156,7 +156,7 @@
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "186f262abd7f395221f3aed97ef24cfd99a8b0db03a8db10bb971d44e6d479f4",
+   "src/hooks/useTimelinePlayback.ts": "ef0663dd6e32846d0b3180966c512221d56308bb8bd3f5424a1afd2c48bac9aa",
    "src/components/timeline/create-effects-panel-audio-effects-state.ts": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e",
    "src/lib/desktop/native-playback-controller.ts": "2a064d7e1680e924bd58cbfc930bde8e30cd303a7e9ba3d58f8d340266c1dd2d",
    "src/lib/local-effects.ts": "04c38749303e54799a90735c0e2f7568d02b5f2924f42feae81fe59fbf43982c",
@@ -169,7 +169,7 @@
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "61223c091f7dd8093d711116d29989b2ca75cead4ec3489cbfa751b6e92520b4",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "ef980f2fab37ab8658679b436bc25cc4741610586f8b9afd74d5fb60da393243",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "2f4995c0ee6ed2683081a39728799649039a329b5642510503e43b3cb6b7e481",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-virtual-time.ts": "ae69c66aa9da0e5d3c32a6d7173caffc59344d776b64a7ee1f6ae49e6cd39bf5",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
@@ -1615,7 +1615,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 281,
+     "pass": 263,
      "skip": 1,
      "fail": 0
     },
@@ -1912,7 +1912,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 8,
+     "pass": 9,
      "skip": 0,
      "fail": 0
     },
@@ -1979,7 +1979,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 66,
+     "pass": 67,
      "skip": 0,
      "fail": 0
     },
@@ -2196,7 +2196,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 221,
+     "pass": 209,
      "skip": 0,
      "fail": 0
     },
@@ -2270,16 +2270,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-core.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/sampler-core.test.ts": {
-      "pass": 11,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/dsp-characterization.test.ts": {
       "pass": 12,
       "skip": 0,
@@ -2305,11 +2295,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-voice-allocation.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
       "pass": 13,
       "skip": 0,
@@ -2317,11 +2302,6 @@
      },
      "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
       "pass": 1,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/drum-rack-runtime.test.ts": {
-      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -2347,11 +2327,6 @@
      },
      "packages/audio-engine/src/reliability-characterization.test.ts": {
       "pass": 7,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/synth-voice.test.ts": {
-      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -2395,11 +2370,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-runtime.test.ts": {
-      "pass": 47,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-clock.test.ts": {
       "pass": 5,
       "skip": 0,
@@ -2412,11 +2382,6 @@
      },
      "packages/audio-engine/src/live-native-projection.test.ts": {
       "pass": 25,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/clip-scheduler.test.ts": {
-      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -2462,11 +2427,6 @@
      },
      "packages/audio-engine/src/media-pages.test.ts": {
       "pass": 10,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/granular-runtime.test.ts": {
-      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -2535,11 +2495,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-worklet.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-stretching.test.ts": {
       "pass": 48,
       "skip": 0,
@@ -2551,7 +2506,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-scheduling.test.ts": {
-      "pass": 14,
+      "pass": 11,
       "skip": 0,
       "fail": 0
      },
@@ -2709,6 +2664,11 @@
       "pass": 4,
       "skip": 0,
       "fail": 0
+     },
+     "packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts": {
+      "pass": 5,
+      "skip": 0,
+      "fail": 0
      }
     }
    }
@@ -2803,7 +2763,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 281,
+     "pass": 263,
      "skip": 1,
      "fail": 0
     },
@@ -3174,16 +3134,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-core.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/sampler-core.test.ts": {
-      "pass": 11,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/dsp-characterization.test.ts": {
       "pass": 12,
       "skip": 0,
@@ -3209,11 +3159,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-voice-allocation.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
       "pass": 13,
       "skip": 0,
@@ -3221,11 +3166,6 @@
      },
      "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
       "pass": 1,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/drum-rack-runtime.test.ts": {
-      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -3251,11 +3191,6 @@
      },
      "packages/audio-engine/src/reliability-characterization.test.ts": {
       "pass": 7,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/synth-voice.test.ts": {
-      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -3299,11 +3234,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-runtime.test.ts": {
-      "pass": 47,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-clock.test.ts": {
       "pass": 5,
       "skip": 0,
@@ -3316,11 +3246,6 @@
      },
      "packages/audio-engine/src/live-native-projection.test.ts": {
       "pass": 25,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/clip-scheduler.test.ts": {
-      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -3366,11 +3291,6 @@
      },
      "packages/audio-engine/src/media-pages.test.ts": {
       "pass": 10,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/granular-runtime.test.ts": {
-      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -3439,11 +3359,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-worklet.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-stretching.test.ts": {
       "pass": 48,
       "skip": 0,
@@ -3455,7 +3370,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-scheduling.test.ts": {
-      "pass": 14,
+      "pass": 11,
       "skip": 0,
       "fail": 0
      },
@@ -3613,6 +3528,11 @@
       "pass": 4,
       "skip": 0,
       "fail": 0
+     },
+     "packages/audio-engine/src/sampled-instrument-buffer-cache.test.ts": {
+      "pass": 5,
+      "skip": 0,
+      "fail": 0
      }
     }
    }
@@ -3640,7 +3560,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 221,
+     "pass": 209,
      "skip": 0,
      "fail": 0
     },
@@ -3670,8 +3590,8 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "c034bf55a2d37f18eb348ec0e831c9083da5c8360608f201ebcdf39be85842a7",
-     "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+     "results.json": "b7ee5fa1a5a13eabcdbac3f335471a939dd7ff582922edd6f309034d7e575021",
+     "engine-controls.json": "16d622a6c763691736b22a45c7fdff5e1e1c8255750c862fa5fdbc1afabb2c47",
      "README.md": "101729e2ffa9d71e39dd2a527a444159285528b4467585e7a69023a587ddf2a3"
     }
    }
@@ -3698,8 +3618,8 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "c034bf55a2d37f18eb348ec0e831c9083da5c8360608f201ebcdf39be85842a7",
-     "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
+     "results.json": "b7ee5fa1a5a13eabcdbac3f335471a939dd7ff582922edd6f309034d7e575021",
+     "engine-controls.json": "16d622a6c763691736b22a45c7fdff5e1e1c8255750c862fa5fdbc1afabb2c47",
      "README.md": "101729e2ffa9d71e39dd2a527a444159285528b4467585e7a69023a587ddf2a3"
     }
    }
@@ -4228,7 +4148,7 @@
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "5679a007a788b782f64ee567cc8fe692e894c5107c054b90b89519460f103338",
+   "treeSha256": "2a0709b4fb510b6d6a223275db636b1b33fe5b8e82f5314107f09641b8f2cecc",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -22402,7 +22322,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -22463,7 +22383,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 250,
       "skip": 1,
       "fail": 13
      },
@@ -22907,7 +22827,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -22968,7 +22888,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -23156,7 +23076,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -23223,7 +23143,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -23401,7 +23321,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -23462,7 +23382,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -24008,7 +23928,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -24069,7 +23989,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -24757,7 +24677,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -24818,7 +24738,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -24999,7 +24919,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25060,7 +24980,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -25243,7 +25163,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25304,7 +25224,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -25637,7 +25557,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25710,7 +25630,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -25908,7 +25828,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -25981,7 +25901,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 273,
+      "pass": 255,
       "skip": 1,
       "fail": 8
      },
@@ -26167,7 +26087,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -26228,7 +26148,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -27508,7 +27428,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -27569,7 +27489,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -27873,7 +27793,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -27934,9 +27854,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -27955,6 +27875,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -28128,7 +28049,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -28189,7 +28110,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -28368,7 +28289,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -28429,12 +28350,12 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
      "fails": [
-      "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -28968,7 +28889,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29029,7 +28950,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -29208,7 +29129,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29269,7 +29190,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -29572,7 +29493,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29633,7 +29554,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -29935,7 +29856,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -29996,7 +29917,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -30417,7 +30338,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -30478,7 +30399,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -30643,7 +30564,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -30830,7 +30751,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 256,
       "skip": 1,
       "fail": 7
      },
@@ -31001,7 +30922,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -31185,7 +31106,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -32567,7 +32488,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -32675,7 +32596,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -32738,7 +32659,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -32860,7 +32781,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -33027,7 +32948,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33212,7 +33133,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -33271,7 +33192,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -33379,7 +33300,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33444,11 +33365,12 @@
      "counts": {
       "pass": 2,
       "skip": 0,
-      "fail": 6
+      "fail": 7
      },
      "fails": [
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "B6f a Stop while playing or paused leaves a live paused portable session at the start",
       "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
       "B6f a paused locate moves the live paused portable session to the locate",
@@ -33569,13 +33491,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 247,
       "skip": 1,
-      "fail": 15
+      "fail": 16
      },
      "fails": [
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "B6f a Stop while playing or paused leaves a live paused portable session at the start",
       "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
       "B6f a paused locate moves the live paused portable session to the locate",
@@ -33642,7 +33565,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -33750,7 +33673,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -33815,11 +33738,12 @@
      "counts": {
       "pass": 6,
       "skip": 0,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
-      "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session"
+      "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -33936,13 +33860,14 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
-      "fail": 2
+      "fail": 3
      },
      "fails": [
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
-      "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session"
+      "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -33996,7 +33921,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -34104,7 +34029,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34167,7 +34092,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -34289,7 +34214,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -34349,7 +34274,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -34457,7 +34382,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34520,7 +34445,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -34642,7 +34567,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -34704,7 +34629,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -34812,7 +34737,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -34875,7 +34800,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -34997,7 +34922,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -35057,7 +34982,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -35163,7 +35088,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -35226,7 +35151,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 6,
+      "pass": 7,
       "skip": 0,
       "fail": 2
      },
@@ -35351,7 +35276,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -35413,7 +35338,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -35521,7 +35446,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -35584,7 +35509,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -35708,7 +35633,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -35876,7 +35801,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -36061,7 +35986,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36228,7 +36153,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -36413,7 +36338,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36580,7 +36505,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -36765,7 +36690,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -36932,7 +36857,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37117,7 +37042,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -37284,7 +37209,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37469,7 +37394,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -37691,7 +37616,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -37937,7 +37862,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -38108,7 +38033,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -38161,7 +38086,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -38348,7 +38273,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -38409,7 +38334,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -38632,7 +38557,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -38878,7 +38803,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -39155,7 +39080,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -39463,7 +39388,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -39690,7 +39615,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 8,
+      "pass": 9,
       "skip": 0,
       "fail": 0
      },
@@ -39743,7 +39668,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -39993,7 +39918,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 7,
+      "pass": 8,
       "skip": 0,
       "fail": 1
      },
@@ -40054,7 +39979,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -40348,7 +40273,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -40655,7 +40580,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -40932,7 +40857,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -41239,7 +41164,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 245,
       "skip": 1,
       "fail": 18
      },
@@ -42579,7 +42504,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -42817,7 +42742,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 258,
       "skip": 1,
       "fail": 5
      },
@@ -42995,7 +42920,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43218,7 +43143,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -43395,7 +43320,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43589,7 +43514,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -43763,7 +43688,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -43985,7 +43910,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -44160,7 +44085,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -44352,7 +44277,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -44528,7 +44453,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -44745,7 +44670,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 224,
+      "pass": 206,
       "skip": 1,
       "fail": 57
      },
@@ -44975,7 +44900,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -45106,21 +45031,25 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 219,
+      "pass": 215,
       "skip": 0,
-      "fail": 17
+      "fail": 21
      },
      "fails": [
       "B6F5PROBE native-on pending-cold-play-postcompile automation",
       "B6F5PROBE native-on pending-cold-play-postcompile master",
       "B6F5PROBE native-on pending-cold-play-postcompile mixer",
       "B6F5PROBE native-on pending-cold-play-postcompile proc-nonlive",
+      "B6F5PROBE native-on pending-cold-play-postcompile sampled",
       "B6F5PROBE native-on pending-cold-play-postcompile structural",
+      "B6F5PROBE native-on pending-cold-play-postcompile synth-nonlive",
       "B6F5PROBE native-on pending-cold-play-precompile automation",
       "B6F5PROBE native-on pending-cold-play-precompile master",
       "B6F5PROBE native-on pending-cold-play-precompile mixer",
       "B6F5PROBE native-on pending-cold-play-precompile proc-nonlive",
+      "B6F5PROBE native-on pending-cold-play-precompile sampled",
       "B6F5PROBE native-on pending-cold-play-precompile structural",
+      "B6F5PROBE native-on pending-cold-play-precompile synth-nonlive",
       "B6F5PROBE native-on pending-warm-play automation",
       "B6F5PROBE native-on pending-warm-play master",
       "B6F5PROBE native-on pending-warm-play mixer",
@@ -45185,7 +45114,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -45362,7 +45291,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -45618,7 +45547,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -45853,7 +45782,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -46054,7 +45983,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -46590,7 +46519,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -46785,7 +46714,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -47877,7 +47806,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -48063,7 +47992,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -48742,7 +48671,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -48928,7 +48857,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -49336,7 +49265,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -49522,7 +49451,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -50732,7 +50661,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -50855,7 +50784,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 259,
       "skip": 1,
       "fail": 4
      },
@@ -50968,7 +50897,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51090,7 +51019,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51200,7 +51129,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51320,7 +51249,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51430,7 +51359,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51608,7 +51537,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -51780,7 +51709,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -51958,7 +51887,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52130,7 +52059,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52308,7 +52237,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52480,7 +52409,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52658,7 +52587,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -52830,7 +52759,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -52952,7 +52881,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -63574,7 +63503,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -63641,9 +63570,9 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 242,
       "skip": 1,
-      "fail": 20
+      "fail": 21
      },
      "fails": [
       "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
@@ -63664,6 +63593,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -63723,9 +63653,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -63744,6 +63674,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -63803,7 +63734,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -63870,7 +63801,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -63940,7 +63871,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -64007,7 +63938,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -64077,7 +64008,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64146,9 +64077,9 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -64167,6 +64098,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -64226,9 +64158,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
-      "fail": 18
+      "fail": 19
      },
      "fails": [
       "B6d5 a Stop during a rebuild-owned start resumes nothing and keeps a live paused graph at the start",
@@ -64247,6 +64179,7 @@
       "B6e a Stop after a resuming rebuild's Play commits leaves a live paused graph of the edit at the start",
       "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
       "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview",
       "does not restart after pause wins an active native rebuild",
       "does not resume a structural rebuild after stop wins"
      ],
@@ -64312,7 +64245,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -64383,12 +64316,12 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
      "fails": [
-      "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
+      "B6f a Pause that cancels a pending Play with native playback disabled requests no native preview"
      ],
      "fuzz": null,
      "rejection": null,
@@ -64521,7 +64454,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64590,7 +64523,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64659,7 +64592,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -64729,7 +64662,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64798,7 +64731,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -64862,7 +64795,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -64917,7 +64850,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 263,
       "skip": 1,
       "fail": 0
      },
@@ -64978,7 +64911,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65510,7 +65443,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -65579,7 +65512,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65644,7 +65577,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -65714,7 +65647,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 261,
       "skip": 1,
       "fail": 2
      },
@@ -65778,7 +65711,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },
@@ -65847,7 +65780,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 260,
       "skip": 1,
       "fail": 3
      },
@@ -65912,7 +65845,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
       "fail": 1
      },

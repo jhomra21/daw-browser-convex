@@ -188,8 +188,7 @@ type PortableRecordingSession = {
 /**
  * Activates the browser portable renderer only after its immutable payload,
  * worklet, graph, assets, source schedule, and running transport are all
- * acknowledged. A failure before activation leaves the caller on legacy;
- * a fault after activation disconnects the portable node without fallback.
+ * acknowledged. A fault after activation disconnects the portable node.
  */
 export const createPortableBrowserPlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>
@@ -291,6 +290,15 @@ export const createPortableBrowserPlaybackController = (input: {
   let nextLiveNoteId = 1
   // Apart from the schedule's and the parameter events' sequences.
   let nextLiveNoteSequence = 1_000_000
+  // The last unsupported reason shown: a paused preparation repeats on every locate, so it speaks once per reason.
+  let lastUnavailableMessage: string | undefined
+
+  const reportUnavailable = (reasons: readonly string[], runTransport: boolean) => {
+    const message = `Playback is unavailable: ${reasons.join(" ")}`
+
+    if (runTransport || message !== lastUnavailableMessage) input.reportFault?.(message)
+    lastUnavailableMessage = message
+  }
 
   const releasePreparedStretchAssets = async (assets: readonly PortablePreparedStretch[]) => {
     const leases = new Set(assets.flatMap((asset) => isPagedStretchAsset(asset) ? [asset.lease] : []))
@@ -574,7 +582,11 @@ export const createPortableBrowserPlaybackController = (input: {
 
       if (cancelled()) return undefined
 
-      if (!compilation.supported) return undefined
+      if (!compilation.supported) {
+        reportUnavailable(compilation.reasons, runTransport)
+
+        return undefined
+      }
 
       if (hasStretchClips(compilation.snapshot)) {
         const preparation = await prepareStretch(compilation.snapshot, projectGeneration, preparationAbortController.signal)
@@ -610,12 +622,22 @@ export const createPortableBrowserPlaybackController = (input: {
         ordinaryDescriptors,
       )
 
-      if (!prepared.supported) return undefined
+      if (!prepared.supported) {
+        reportUnavailable(prepared.reasons, runTransport)
+
+        return undefined
+      }
+
       const selection = await select(prepared.qualification)
 
       if (cancelled()) return undefined
 
-      if (!selection.selected) return undefined
+      if (!selection.selected) {
+        reportUnavailable([selection.reason], runTransport)
+
+        return undefined
+      }
+
       const playbackSession = await backend.createPlaybackSession(context, selection.capability, 8_192)
       session = playbackSession
       unsubscribeSessionFault = playbackSession.onFault((error: Error) => {
@@ -762,6 +784,7 @@ export const createPortableBrowserPlaybackController = (input: {
       }
 
       transferredStretchOwnership = true
+      lastUnavailableMessage = undefined
 
       return runtime
     } catch (error) {
@@ -2201,7 +2224,13 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   const enqueueLiveNote = (work: () => Promise<void>) => {
-    liveNoteTail = liveNoteTail.then(work).catch(() => undefined)
+    liveNoteTail = liveNoteTail.then(async () => {
+      try {
+        await work()
+      } catch (error) {
+        input.reportFault?.(error instanceof Error ? error.message : "A live note could not be played.")
+      }
+    })
   }
 
   const postLiveNoteEvent = (session: PortableSession, handle: PortableLiveNoteHandle, type: "note-on" | "note-off", value: number) =>
@@ -2213,7 +2242,13 @@ export const createPortableBrowserPlaybackController = (input: {
   // Readies the paused session ahead of the first note; a session or a start in flight already is that.
   const prepareLiveNotes = (transport: LivePlaybackTransport) => {
     if (active || pendingStart) return
-    void ensurePrepared(transport).catch(() => undefined)
+    void (async () => {
+      try {
+        await ensurePrepared(transport)
+      } catch (error) {
+        input.reportFault?.(error instanceof Error ? error.message : "The paused session could not be prepared.")
+      }
+    })()
   }
 
   // `transport` prepares the paused session when none exists; with a session or a start in flight it is not used.

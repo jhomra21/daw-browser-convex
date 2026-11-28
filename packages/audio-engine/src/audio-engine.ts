@@ -2,7 +2,6 @@ import type { AudioRuntime, AudioRuntimeOptions } from './audio-runtime'
 import { closeAudioRuntime, createAudioRuntime, decodeAudioData, getOutputLatencySec } from './audio-runtime'
 import { isPlanarPcmForAsset, type AudioAssetRef, type PlanarPcm } from '../../audio-core-contract/src/index'
 import type { AudioAssetRegistration, AudioAssetRelease } from './audio-asset-types'
-import { canFallbackToRepitchStretch, createClipScheduler, type DeferredStretchWindow, type ScheduleOptions, type ScheduleResult } from './clip-scheduler'
 import { createAudioStretchCache, isStretchQualityWarning, type AudioStretchRenderState } from './audio-stretch-cache'
 import { arpeggiatorParamsEqual, automationTargetKey, getAutomationParameterDescriptor, normalizeMasterVolume, parseSynthAutomationKey, valueAtAutomationTime, type ArpParams, type AudioPcmSourceDescriptor, type AutomationEnvelope, type MidiMappingTarget, type SpectrumSettings, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
 import { createLiveMixerRuntime } from './live-mixer-runtime'
@@ -14,7 +13,6 @@ import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
 
-export { createSamplerBufferCache } from './sampler-core'
 
 import { createTransportClock } from './transport-clock'
 import { rampAudioParam } from './audio-param-ramp'
@@ -40,11 +38,11 @@ const MASTER_FADE_UP_SEC = 0.006
 const MASTER_STOP_DELAY_SEC = 0.004
 export const LIVE_SCHEDULE_HORIZON_SEC = 30
 
-export { canFallbackToRepitchStretch, isStretchQualityWarning }
+export { isStretchQualityWarning }
 
 export { decodeEncodedAudioData } from './audio-runtime'
 
-export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, EngineDisposition, AudioStretchRenderState, CompressorMeterFrame, DeferredStretchWindow, GateMeterFrame, MasterStereoLevelsListener, SpectrumFrame, TrackMeterFrame, TrackMeterFrameBatch, TrackStereoLevels, TrackStereoLevelsBatch }
+export type { AudioEffectRuntimeInstance, AudioRuntimeOptions, EngineDisposition, AudioStretchRenderState, CompressorMeterFrame, GateMeterFrame, MasterStereoLevelsListener, SpectrumFrame, TrackMeterFrame, TrackMeterFrameBatch, TrackStereoLevels, TrackStereoLevelsBatch }
 
 export type { RecordingEpoch, RecordingMonitorMode, RecordingRuntimeStatus, StartRecordingCaptureOptions } from './recording/recording-runtime'
 
@@ -85,15 +83,7 @@ export class AudioEngine {
   private masterVolume = 1
   private sources = createSourceRegistry()
   private workletBudget = createLiveWorkletBudget()
-  readonly instruments = createInstrumentRuntime({
-    ensureAudio: () => this.ensureAudio(),
-    getAudioContext: () => this.audioCtx,
-    getBpm: () => this.clock.getBpm(),
-    timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
-    ensureTrackInput: (trackId) => this.mixer.ensureTrackInput(trackId),
-    sources: this.sources,
-    getAutomationEnvelopes: () => this.automationEnvelopes,
-  })
+  readonly instruments = createInstrumentRuntime()
   readonly mixer = createLiveMixerRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
@@ -118,20 +108,6 @@ export class AudioEngine {
         this.publishRuntimeSnapshot()
       }
     },
-  })
-  private scheduler = createClipScheduler({
-    getAudioContext: () => this.audioCtx,
-    getBpm: () => this.clock.getBpm(),
-    timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
-    updateTrackGains: (tracks) => this.updateTrackGains(tracks),
-    ensureTrackInput: (trackId) => this.mixer.ensureTrackInput(trackId),
-    stopClipSources: () => this.stopClipSources(),
-    stopSourcesForClip: (clipId) => this.stopSourcesForClip(clipId),
-    scheduleMidiClip: (track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec) => this.scheduleMidiClip(track, clip, playheadSec, nowCtx, startLimitSec, endLimitSec),
-    ensureStretchedClip: (clip) => this.stretchCache.ensure(clip, this.clock.getBpm()),
-    getStretchedClip: (clip) => this.stretchCache.getReady(clip, this.clock.getBpm()),
-    stretchRenderAheadSec: LIVE_SCHEDULE_HORIZON_SEC,
-    sources: this.sources,
   })
   readonly masterFx = createMasterFxRuntime({
     getFaultGeneration: () => this.faultGeneration,
@@ -532,14 +508,6 @@ export class AudioEngine {
     this.instruments.clearTrackInstrument(trackId)
   }
 
-  private stopActiveNotesForClip(clipId: string) {
-    this.instruments.stopClip(clipId)
-  }
-
-  private stopAllActiveNotes() {
-    this.instruments.stopAll()
-  }
-
   setBpm(nextBpm: number) {
     if (!this.clock.setBpm(nextBpm)) return
     this.metronome.onBpmChange(this.audioCtx)
@@ -920,12 +888,11 @@ export class AudioEngine {
     return envelope.target.kind === 'master'
       ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
       : parseSynthAutomationKey(envelope.parameterId)
-        ? this.instruments.resolveSynthAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? []
         : this.mixer.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
   }
 
   private stopClipSources() {
-    this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = this.sources.snapshot()
     // Reset tracking immediately so subsequent schedules are isolated
@@ -956,31 +923,6 @@ export class AudioEngine {
   stopAllSources() {
     this.stopClipSources()
     this.metronome.reset()
-  }
-
-  private scheduleMidiClip(track: RuntimeTrack, clip: RuntimeClip, playheadSec: number, nowCtx: number, startLimitSec?: number, endLimitSec?: number): boolean {
-    if (!this.audioCtx) return false
-
-    return this.instruments.scheduleMidiClip(
-      track,
-      clip,
-      startLimitSec ?? playheadSec,
-      nowCtx,
-      endLimitSec,
-      { scheduleVoiceAutomation: false },
-    )
-  }
-  scheduleAllClipsFromPlayhead(tracks: RuntimeTrack[], playheadSec: number, opts?: ScheduleOptions): ScheduleResult {
-    return this.scheduler.scheduleAllClipsFromPlayhead(tracks, playheadSec, opts)
-  }
-
-  private stopSourcesForClip(clipId: string) {
-    this.sources.stopClip(clipId)
-    this.stopActiveNotesForClip(clipId)
-  }
-
-  rescheduleClipsAtPlayhead(tracks: RuntimeTrack[], playheadSec: number, clipIds: string[], opts?: ScheduleOptions) {
-    return this.scheduler.rescheduleClipsAtPlayhead(tracks, playheadSec, clipIds, opts)
   }
 
   async resume() {

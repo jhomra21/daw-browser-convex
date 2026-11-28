@@ -1,12 +1,11 @@
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
-import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import {
   resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
-import type { DrumRackPadSample, DrumRackParams, TrackInstrumentParams } from '@daw-browser/shared'
+import { DRUM_RACK_MAX_DECODED_BYTES, type DrumRackPadSample, type DrumRackParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import {
   loadSampledInstrumentRegion,
@@ -26,9 +25,8 @@ import {
 import {
   createSampledInstrumentRegionBudget,
   type SampledInstrumentRegionBudget,
-  type SampledInstrumentRegionPin,
 } from '~/lib/sampled-instrument-region-budget'
-import { createSamplerBufferCache } from '@daw-browser/audio-engine/audio-engine'
+import { createSamplerBufferCache } from '@daw-browser/audio-engine/sampled-instrument-buffer-cache'
 import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 /* oxlint-disable eslint/no-restricted-imports -- NativeInstrumentPreparation stays next to the desktop budget policy until the batch that owns the certification-pinned playback files moves it */
 import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'
@@ -81,9 +79,6 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
   )
 
   const reservations = new Map<string, Set<{ release: () => void; commit: () => void }>>()
-  const pinned = new Map<string, Map<number, { cachePin: { release: () => void }; pin: SampledInstrumentRegionPin }>>()
-  const retired = new Set<string>()
-  const listenerRemovers = new Map<AudioEngine, () => void>()
   const listeners = new Set<() => void>()
   const nativePreparation = new Map<string, NativeInstrumentPreparation>()
   const missingSampleErrors = new Map<string, Map<string, string>>()
@@ -117,53 +112,14 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
   const releaseTrackCache = (
     trackId: string,
     keep: ReadonlySet<string> = new Set(),
-    force = false,
   ) => {
     const regionCache = regionCaches.get(trackId)
 
     for (const regionKey of regionCache?.keys() ?? []) {
       if (keep.has(regionKey)) continue
       const key = aggregateKey(trackId, regionKey)
-
-      if (!force && (pinned.get(key)?.size ?? 0) > 0) {
-        retired.add(key)
-        continue
-      }
-
       aggregate.release(key)
-      pinned.delete(key)
-      retired.delete(key)
       regionCache?.delete(regionKey)
-    }
-  }
-
-  const isCurrentRegion = (trackId: Track['id'], regionKey: string) => (
-    paramsByTrack.get(trackId)?.pads.some((pad) => (
-      pad.sample !== undefined
-      && regionForSample(pad.sample, pad.startSec, pad.endSec).key === regionKey
-    )) ?? false
-  )
-
-  const releaseRetiredRegion = (trackId: Track['id'], regionKey: string) => {
-    const key = aggregateKey(trackId, regionKey)
-
-    if (!retired.has(key) || isCurrentRegion(trackId, regionKey)) return
-    retired.delete(key)
-    regionCaches.get(trackId)?.delete(regionKey)
-  }
-
-  const releaseActivePins = (trackId: Track['id']) => {
-    const prefix = `drum\u0000${trackId}\u0000`
-
-    for (const [key, pins] of pinned) {
-      if (!key.startsWith(prefix)) continue
-
-      for (const { cachePin, pin } of pins.values()) {
-        cachePin.release()
-        pin.release()
-      }
-
-      pinned.delete(key)
     }
   }
 
@@ -185,55 +141,9 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
     notify()
   }
 
-  const installRuntimeListeners = (engine: AudioEngine) => {
-    if (listenerRemovers.has(engine)) return
-
-    const remove = engine.instruments.addSamplerRuntimeListeners({
-      onDrumRackAssetUse: (use) => {
-        const configured = enginesByTrack.get(use.trackId)
-
-        if (configured !== engine) return
-        const key = aggregateKey(use.trackId, use.regionKey)
-
-        if (use.active) {
-          const regionCache = regionCaches.get(use.trackId)
-          const cachePin = regionCache?.pin(use.regionKey)
-
-          if (!cachePin) return
-          const pin = aggregate.pin(key)
-
-          if (!pin) {
-            cachePin.release()
-
-            return
-          }
-
-          const owned = pinned.get(key) ?? new Map<number, { cachePin: { release: () => void }; pin: SampledInstrumentRegionPin }>()
-          owned.set(use.hitId, { cachePin, pin })
-          pinned.set(key, owned)
-
-          return
-        }
-
-        const owned = pinned.get(key)
-        const release = owned?.get(use.hitId)
-        owned?.delete(use.hitId)
-        release?.cachePin.release()
-        release?.pin.release()
-
-        if (!owned || owned.size === 0) {
-          pinned.delete(key)
-          releaseRetiredRegion(use.trackId, use.regionKey)
-        }
-      },
-    })
-
-    listenerRemovers.set(engine, remove)
-  }
-
   const getRegionCache = (trackId: Track['id']) => {
     if (cacheProjects.get(trackId) !== projectId()) {
-      releaseTrackCache(trackId, new Set(), true)
+      releaseTrackCache(trackId)
       regionCaches.delete(trackId)
     }
 
@@ -335,18 +245,13 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
     enginesByTrack.get(trackId)?.instruments.clearTrackDrumRack(trackId)
     abortControllers.get(trackId)?.abort()
     abortControllers.delete(trackId)
-    releaseActivePins(trackId)
     releaseTrackReservations(trackId)
-    releaseTrackCache(trackId, new Set(), true)
+    releaseTrackCache(trackId)
     cache.delete(trackId)
     nativePreparation.delete(trackId)
     missingSampleErrors.delete(trackId)
     regionCaches.delete(trackId)
     cacheProjects.delete(trackId)
-
-    for (const key of retired) {
-      if (key.startsWith(`drum\u0000${trackId}\u0000`)) retired.delete(key)
-    }
 
     enginesByTrack.delete(trackId)
     paramsByTrack.delete(trackId)
@@ -377,7 +282,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
 
     if (previous && previous.projectId !== projectKey) {
       engine.instruments.clearTrackDrumRack(trackId)
-      releaseTrackCache(trackId, new Set(), true)
+      releaseTrackCache(trackId)
       regionCaches.get(trackId)?.clear()
       cache.delete(trackId)
     }
@@ -391,7 +296,6 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
     versions.set(trackId, version)
     enginesByTrack.set(trackId, engine)
     paramsByTrack.set(trackId, params)
-    installRuntimeListeners(engine)
 
     const jobs = params.pads.flatMap((pad) => {
       if (!pad.sample) return []
@@ -623,8 +527,7 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
 
       for (const trackId of new Set([...cache.keys(), ...enginesByTrack.keys()])) {
         enginesByTrack.get(trackId)?.instruments.clearTrackDrumRack(trackId)
-        releaseActivePins(trackId)
-        releaseTrackCache(trackId, new Set(), true)
+        releaseTrackCache(trackId)
       }
 
       for (const owned of reservations.values()) {
@@ -632,8 +535,6 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       }
 
       reservations.clear()
-      pinned.clear()
-      retired.clear()
       cache.clear()
       nativePreparation.clear()
       missingSampleErrors.clear()
@@ -645,8 +546,6 @@ export function createDrumRackBufferSync(options: DrumRackBufferSyncOptions = {}
       for (const controller of abortControllers.values()) controller.abort()
       abortControllers.clear()
 
-      for (const remove of listenerRemovers.values()) remove()
-      listenerRemovers.clear()
       enginesByTrack.clear()
       paramsByTrack.clear()
       listeners.clear()

@@ -14,7 +14,6 @@ type Options = {
   audioEngine: AudioEngine
   tracks: Accessor<RuntimeTrack[]>
   bpm?: Accessor<number>
-  ensureClipBuffer: (clipId: string, sampleUrl?: string) => Promise<void>
   resolveAudioSource?: AudioPcmSourceResolver
   loopEnabled?: Accessor<boolean>
   loopStartSec?: Accessor<number>
@@ -47,7 +46,7 @@ type Options = {
   }
 }
 
-export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, visibleStartSec, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
+export function usePlayheadControls({ audioEngine, tracks, bpm, resolveAudioSource, loopEnabled, loopStartSec, loopEndSec, pixelsPerSecond, visibleStartSec, preflightPlayback, requiresNativeAudio, nativePlayback, portableBrowserPlayback }: Options) {
   const playback = useTimelinePlayback(audioEngine, {
     bpm,
     loopEnabled,
@@ -55,19 +54,6 @@ export function usePlayheadControls({ audioEngine, tracks, bpm, ensureClipBuffer
     loopEndSec,
     getTracks: tracks,
     preflightPlayback,
-    hydrateLegacyAudio: async () => {
-      const pendingBuffers: Promise<void>[] = []
-
-      for (const track of tracks()) {
-        for (const clip of track.clips) {
-          if (!clip.buffer && !(clip.audioWarp?.enabled === true && clip.audioWarp.mode === 'stretch')) {
-            pendingBuffers.push(ensureClipBuffer(clip.id, clip.sampleUrl))
-          }
-        }
-      }
-
-      await Promise.all(pendingBuffers)
-    },
   }, nativePlayback ? { ...nativePlayback, requiresNativeAudio, resolveAudioSource } : undefined, portableBrowserPlayback ? { ...portableBrowserPlayback, resolveAudioSource } : undefined)
 
   let scrollEl: HTMLDivElement | undefined

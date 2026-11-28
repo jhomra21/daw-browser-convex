@@ -4,7 +4,6 @@ import { createDesktopAudioLifecycleReconciler, type DesktopAudioLifecycle } fro
 import type { createNativePlaybackController } from '~/lib/desktop/native-playback-controller'
 import type { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { DesktopBridge } from '~/types/desktop-bridge'
-import type { createDeferredStretch } from './deferred-stretch'
 import type {
   ActiveAudioBackend,
   NativePlaybackOptions,
@@ -23,7 +22,6 @@ type AudioLifecycleInput = {
   audioEngine: TimelinePlaybackAudioEngine
   nativePlayback: ReturnType<typeof createNativePlaybackController>
   portableBrowserPlayback: ReturnType<typeof createPortableBrowserPlaybackController>
-  deferredStretchQueue: ReturnType<typeof createDeferredStretch>["deferredStretchQueue"]
   isPlaying: () => boolean
   setIsPlaying: (next: boolean) => void
   isRebuildingPlayback: () => boolean
@@ -41,7 +39,6 @@ type AudioLifecycleInput = {
     clearRebuildHostLoss: () => void
     invalidatePlayAttempt: () => void
     publishPlayhead: (sec: number) => void
-    prepareLegacyPaused: () => void
     reportNativeStopped: (message: string) => void
     reportNativeStateCaptureFailure: (error: Error) => void
     disposePreparedBackends: (options: undefined, reason: string) => Promise<void>
@@ -53,12 +50,12 @@ type AudioLifecycleInput = {
 export const createAudioLifecycle = (input: AudioLifecycleInput) => {
   const {
     audioHostBridge, requiresNativeAudio, externalNativeSession, nativeOptions, portableBrowserOptions, audioEngine,
-    nativePlayback, portableBrowserPlayback, deferredStretchQueue, isPlaying, setIsPlaying, isRebuildingPlayback,
+    nativePlayback, portableBrowserPlayback, isPlaying, setIsPlaying, isRebuildingPlayback,
     setIsRebuildingPlayback, setActiveBackend, host,
   } = input
 
   const {
-    cancelRaf, clearRebuildHostLoss, invalidatePlayAttempt, publishPlayhead, prepareLegacyPaused, reportNativeStopped,
+    cancelRaf, clearRebuildHostLoss, invalidatePlayAttempt, publishPlayhead, reportNativeStopped,
     reportNativeStateCaptureFailure, disposePreparedBackends,
   } = host
 
@@ -266,7 +263,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
         if (prepared) setActiveBackend("native")
       }
 
-      if (!prepared && !requiresNativeAudio) prepareLegacyPaused()
+      if (!prepared && !requiresNativeAudio) setActiveBackend("idle")
 
       if (!prepared && requiresNativeAudio) {
         throw new Error("Native audio recovery did not prepare a native playback graph.")
@@ -358,7 +355,6 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
         audioEngine.cancelAutomationSchedules()
       }
 
-      deferredStretchQueue.clear()
       void disposePreparedBackends(undefined, "audio-host-suspended")
 
       return

@@ -4,6 +4,14 @@ export type SampledInstrumentBuffer = {
   sourceIdentity?: string
 }
 
+export type SamplerResolvedBuffers = ReadonlyMap<string, SampledInstrumentBuffer>
+
+export type DrumRackResolvedBuffers = ReadonlyMap<string, SampledInstrumentBuffer>
+
+export type GranularInstalledBuffer = {
+  assetKey: string
+} & SampledInstrumentBuffer
+
 export type SampledInstrumentSource = {
   durationSec: number
   sampleRate: number

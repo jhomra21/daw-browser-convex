@@ -56,7 +56,6 @@ const Sampler: Component<SamplerProps> = (props) => {
           <label>Cache <select class="bg-app-surface text-foreground" value={props.params.cachePolicy} onChange={(event) => props.onUpdate({ cachePolicy: event.currentTarget.value === "lazy" ? "lazy" : "preload" })}><option value="preload">Preload</option><option value="lazy">Lazy</option></select></label>
           <span>{props.params.zones.length} zones</span>
           <span>{Math.round((props.status?.totalBytes ?? 0) / 1048576)} / {Math.round((props.status?.maxBytes ?? props.params.maxDecodedBytes) / 1048576)} MB</span>
-          <span>{props.status?.misses ?? 0} misses</span>
           <span class={{ "text-destructive": props.status?.overBudgetPinned }}> {props.status?.overBudgetPinned ? "Over budget" : ""}</span>
         </div>
         <div class="min-h-14 border border-dashed border-border p-2" onDragOver={(event) => { if (props.canWrite && event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) event.preventDefault(); }} onDrop={drop}>

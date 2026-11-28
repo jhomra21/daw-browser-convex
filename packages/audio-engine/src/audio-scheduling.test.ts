@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
 import { getAudioBufferPlaybackDurationSec, getClipFadeSchedulePlan, getPlayableMidiNotes, getScheduledMidiEvents } from './audio-scheduling'
-import { clipSchedulerTestInternals } from './clip-scheduler'
 
 describe('MIDI scheduling note filtering', () => {
   test('preserves valid note array identity and filters invalid legacy notes', () => {
@@ -202,36 +201,6 @@ describe('audio clip playback duration', () => {
     expect(map.sourceStartSec).toBe(0)
     expect(map.sourceDurationSec).toBe(4)
     expect(map.mode).toBe('raw')
-  })
-})
-
-describe('clip scheduler stretch horizon', () => {
-  test('includes stretch clips inside the live render horizon', () => {
-    expect(clipSchedulerTestInternals.shouldScheduleStretchSource({
-      playheadSec: 10,
-      renderAheadSec: 30,
-      timelineStartSec: 39,
-      timelineDurationSec: 4,
-    })).toBe(true)
-  })
-
-  test('excludes stretch clips beyond the live render horizon', () => {
-    expect(clipSchedulerTestInternals.shouldScheduleStretchSource({
-      playheadSec: 10,
-      renderAheadSec: 30,
-      timelineStartSec: 40,
-      timelineDurationSec: 4,
-    })).toBe(false)
-  })
-
-  test('uses requested end limit before stretch render horizon', () => {
-    expect(clipSchedulerTestInternals.shouldScheduleStretchSource({
-      playheadSec: 10,
-      renderAheadSec: 30,
-      endLimitSec: 20,
-      timelineStartSec: 20,
-      timelineDurationSec: 4,
-    })).toBe(false)
   })
 })
 

@@ -1812,7 +1812,9 @@ try {
   if (measured.length !== 6) throw new Error(`A8 expected six rows, received ${measured.length}`)
 
   for (const row of measured) {
-    const expected = { calls: row.ticks + 1, applications: row.ticks, skips: 1, joins: 0 }
+    // The instrument declaration has no content to compare, so its equal close applies (see runA8).
+    const declaration = row.name.startsWith("A8-persisted-synth")
+    const expected = { calls: row.ticks + 1, applications: declaration ? row.ticks + 1 : row.ticks, skips: declaration ? 0 : 1, joins: 0 }
     const current = { calls: row.actual.calls, applications: row.actual.applications, skips: row.actual.skips, joins: row.actual.joins }
     const failure = sameEvidence(current, expected)
     const expectedFailure = null

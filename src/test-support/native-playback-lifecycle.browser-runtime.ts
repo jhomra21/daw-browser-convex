@@ -731,11 +731,8 @@ if (timelineJourney) {
     onTransportSeek: () => undefined,
     onTransportStart: () => undefined,
     onTransportStop: () => undefined,
-    rescheduleClipsAtPlayhead: () => ({ deferredStretchWindows: [] }),
-    scheduleAllClipsFromPlayhead: () => ({ deferredStretchWindows: [] }),
     scheduleAutomationFromPlayhead: () => undefined,
     stopAllSources: () => undefined,
-    subscribeStretchRenderState: () => () => true,
   }, {
     getTracks: () => tracks,
     loopEnabled: () => loop().enabled,

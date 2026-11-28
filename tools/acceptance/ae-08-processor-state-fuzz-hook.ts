@@ -183,10 +183,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         currentTimelineSec: 0, ensureAudio: () => {}, applyAutomationAtTimelineSec: () => {},
         cancelAutomationSchedules: () => {}, onTransportPause: () => {}, onTransportSeek: () => {},
         onTransportStart: () => {}, onTransportStop: () => {}, resume: async () => {},
-        rescheduleClipsAtPlayhead: () => ({ deferredStretchWindows: [] }),
-        scheduleAllClipsFromPlayhead: () => ({ deferredStretchWindows: [] }),
         scheduleAutomationFromPlayhead: () => {}, stopAllSources: () => {},
-        subscribeStretchRenderState: () => () => true,
       }, { getTracks: tracks, bpm, loopEnabled, loopStartSec: () => 0, loopEndSec: loopEnd }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => projectId, projectGeneration: () => 1,
         playbackInputs: () => inputs(),

@@ -1,26 +1,6 @@
-import { createDrumRackRuntime, type DrumRackRegionUse, type DrumRackResolvedBuffers } from './drum-rack-runtime'
-import { createSynthRuntime } from './synth-runtime'
-import { createSamplerRuntime, type SamplerNoteMiss, type SamplerRegionUse, type SamplerResolvedBuffers } from './sampler-runtime'
-import { createGranularRuntime, type GranularInstalledBuffer } from './granular-runtime'
-import type { SourceRegistry } from './source-registry'
+import type { ArpParams, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
 import type { EngineDisposition } from './engine-disposition'
-import { parseGranularAutomationKey, type ArpParams, type AutomationEnvelope, type SynthParamsInput, type TrackInstrumentParams } from '@daw-browser/shared'
-import { getScheduledMidiEvents } from './audio-scheduling'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
-
-type RuntimeClip = Clip<AudioBuffer>
-
-type RuntimeTrack = Track<AudioBuffer>
-
-type InstrumentRuntimeOptions = {
-  ensureAudio: () => void
-  getAudioContext: () => AudioContext | null
-  getBpm: () => number
-  timelineToCtxTime: (timelineSec: number) => number
-  ensureTrackInput: (trackId: string) => GainNode
-  sources: SourceRegistry
-  getAutomationEnvelopes?: () => readonly AutomationEnvelope[]
-}
+import type { DrumRackResolvedBuffers, GranularInstalledBuffer, SamplerResolvedBuffers } from './sampled-instrument-region'
 
 export type SetTrackInstrumentInput =
   | { instrument: Pick<Extract<TrackInstrumentParams, { kind: 'synth' }>, 'kind' | 'params'> & { instanceId?: string } }
@@ -28,194 +8,34 @@ export type SetTrackInstrumentInput =
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
 
-type InstrumentRuntimeListeners = {
-  onNoteMiss?: (miss: SamplerNoteMiss) => void
-  onAssetUse?: (use: SamplerRegionUse) => void
-  onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
-}
-
-export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
-  let primaryListeners: InstrumentRuntimeListeners = {}
-  const additionalListeners = new Set<InstrumentRuntimeListeners>()
-
-  const notifyListeners = (notify: (listeners: InstrumentRuntimeListeners) => void) => {
-    notify(primaryListeners)
-
-    for (const listeners of additionalListeners) notify(listeners)
-  }
-
+// The browser engine plays no instrument voices: the portable session renders them. This registry only records each
+// track's declared instrument kind and arpeggiator so the editor and the portable compiler read one source.
+export function createInstrumentRuntime() {
   const activeKinds = new Map<string, TrackInstrumentParams['kind']>()
   const arpeggiators = new Map<string, ArpParams>()
 
-  const synthRuntime = createSynthRuntime({
-    ...options,
-    getArpeggiator: (trackId) => arpeggiators.get(trackId),
-    getAutomationEnvelopes: options.getAutomationEnvelopes,
-  })
+  const declare = (trackId: string, kind: TrackInstrumentParams['kind']): EngineDisposition => {
+    activeKinds.set(trackId, kind)
 
-  const drumRackRuntime = createDrumRackRuntime({
-    ...options,
-    getArpeggiator: (trackId) => arpeggiators.get(trackId),
-    onAssetUse: (use) => {
-      notifyListeners((listeners) => listeners.onDrumRackAssetUse?.(use))
-    },
-  })
-
-  const samplerRuntime = createSamplerRuntime({
-    ...options,
-    getArpeggiator: (trackId) => arpeggiators.get(trackId),
-    getAutomationEnvelopes: options.getAutomationEnvelopes ?? (() => []),
-    onNoteMiss: (miss) => {
-      notifyListeners((listeners) => listeners.onNoteMiss?.(miss))
-    },
-    onAssetUse: (use) => {
-      notifyListeners((listeners) => listeners.onAssetUse?.(use))
-    },
-  })
-
-  const granularRuntimes = new Map<string, Awaited<ReturnType<typeof createGranularRuntime>>>()
-  const granularInstanceIds = new Map<string, string>()
-  const granularRevisions = new Map<string, number>()
-
-  const disposeGranular = (trackId: string) => {
-    granularRevisions.set(trackId, (granularRevisions.get(trackId) ?? 0) + 1)
-    granularRuntimes.get(trackId)?.close()
-    granularRuntimes.delete(trackId)
-    granularInstanceIds.delete(trackId)
-  }
-
-  const setTrackGranular = async (
-    trackId: string,
-    params: Extract<TrackInstrumentParams, { kind: 'granular' }>['params'],
-    installedBuffer?: GranularInstalledBuffer,
-    instanceId = '',
-  ): Promise<EngineDisposition> => {
-    options.ensureAudio()
-    const context = options.getAudioContext()
-
-    if (!context) return 'dropped'
-    disposeGranular(trackId)
-    const revision = granularRevisions.get(trackId) ?? 0
-    let runtime: Awaited<ReturnType<typeof createGranularRuntime>>
-
-    try {
-      runtime = await createGranularRuntime({
-        context,
-        destination: options.ensureTrackInput(trackId),
-        params,
-      })
-    } catch (error) {
-      if (granularRevisions.get(trackId) !== revision) return 'superseded'
-      throw error
-    }
-
-    if (granularRevisions.get(trackId) !== revision) {
-      runtime.close()
-
-      return 'superseded'
-    }
-
-    granularRuntimes.set(trackId, runtime)
-    granularInstanceIds.set(trackId, instanceId)
-    runtime.setFrozen(params.freeze)
-
-    try {
-      const disposition = installedBuffer ? await runtime.installSample(installedBuffer) : 'applied'
-
-      if (granularRevisions.get(trackId) !== revision || granularRuntimes.get(trackId) !== runtime) return 'superseded'
-
-      return disposition
-    } catch (error) {
-      if (granularRevisions.get(trackId) !== revision || granularRuntimes.get(trackId) !== runtime) return 'superseded'
-
-      if (granularRuntimes.get(trackId) === runtime) {
-        runtime.close()
-        granularRuntimes.delete(trackId)
-        granularInstanceIds.delete(trackId)
-      }
-
-      throw error
-    }
-  }
-
-  const setTrackSynth = (trackId: string, params: SynthParamsInput, instanceId?: string): EngineDisposition => {
-    disposeGranular(trackId)
-    drumRackRuntime.clearTrackDrumRack(trackId)
-    samplerRuntime.disposeTrack(trackId)
-    activeKinds.set(trackId, 'synth')
-
-    return synthRuntime.setTrackSynth(trackId, params, instanceId)
-  }
-
-  const clearTrackInstrument = (trackId: string) => {
-    activeKinds.delete(trackId)
-    synthRuntime.disposeTrack(trackId)
-    drumRackRuntime.clearTrackDrumRack(trackId)
-    samplerRuntime.disposeTrack(trackId)
-    disposeGranular(trackId)
+    return 'applied'
   }
 
   return {
-    // The synth and asynchronous granular route report their actual installation outcomes.
-    setTrackInstrument: (trackId: string, input: SetTrackInstrumentInput): EngineDisposition => {
-      if (input.instrument.kind === 'synth') return setTrackSynth(trackId, input.instrument.params, input.instrument.instanceId)
-      synthRuntime.disposeTrack(trackId)
-
-      if (input.instrument.kind === 'drum-rack') {
-        disposeGranular(trackId)
-        samplerRuntime.disposeTrack(trackId)
-        activeKinds.set(trackId, 'drum-rack')
-        drumRackRuntime.setTrackDrumRack(trackId, input.instrument.params, 'buffers' in input ? input.buffers : undefined)
-
-        return 'applied'
-      }
-
-      if (input.instrument.kind === 'granular') {
-        drumRackRuntime.clearTrackDrumRack(trackId)
-        samplerRuntime.disposeTrack(trackId)
-        activeKinds.set(trackId, 'granular')
-        void setTrackGranular(trackId, input.instrument.params, 'installedBuffer' in input ? input.installedBuffer : undefined, input.instrument.instanceId).catch(() => undefined)
-
-        return 'applied'
-      }
-
-      disposeGranular(trackId)
-      drumRackRuntime.clearTrackDrumRack(trackId)
-      samplerRuntime.disposeTrack(trackId)
-      activeKinds.set(trackId, 'sampler')
-      samplerRuntime.setTrackSampler(trackId, input.instrument.instanceId, input.instrument.params, 'buffers' in input ? input.buffers : undefined)
-
-      return 'applied'
+    setTrackInstrument: (trackId: string, input: SetTrackInstrumentInput): EngineDisposition => declare(trackId, input.instrument.kind),
+    clearTrackInstrument: (trackId: string) => {
+      activeKinds.delete(trackId)
     },
-    clearTrackInstrument,
-    setTrackSynth,
-    setTrackDrumRack: (trackId: string, params: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>['params'], buffers?: DrumRackResolvedBuffers): EngineDisposition => {
-      disposeGranular(trackId)
-      synthRuntime.disposeTrack(trackId)
-      samplerRuntime.disposeTrack(trackId)
-      activeKinds.set(trackId, 'drum-rack')
-
-      return drumRackRuntime.setTrackDrumRack(trackId, params, buffers)
-    },
+    setTrackSynth: (trackId: string, _params: SynthParamsInput, _instanceId?: string): EngineDisposition => declare(trackId, 'synth'),
+    setTrackDrumRack: (trackId: string, _params: Extract<TrackInstrumentParams, { kind: 'drum-rack' }>['params'], _buffers?: DrumRackResolvedBuffers): EngineDisposition => declare(trackId, 'drum-rack'),
     clearTrackDrumRack: (trackId: string) => {
       if (activeKinds.get(trackId) === 'drum-rack') activeKinds.delete(trackId)
-      drumRackRuntime.clearTrackDrumRack(trackId)
     },
-    setTrackSampler: (trackId: string, params: Extract<TrackInstrumentParams, { kind: 'sampler' }>['params'], buffers?: SamplerResolvedBuffers, instanceId?: string) => {
-      disposeGranular(trackId)
-      synthRuntime.disposeTrack(trackId)
-      drumRackRuntime.clearTrackDrumRack(trackId)
-      activeKinds.set(trackId, 'sampler')
-      samplerRuntime.setTrackSampler(trackId, instanceId, params, buffers)
+    setTrackSampler: (trackId: string, _params: Extract<TrackInstrumentParams, { kind: 'sampler' }>['params'], _buffers?: SamplerResolvedBuffers, _instanceId?: string) => {
+      declare(trackId, 'sampler')
     },
-    setTrackGranular: (trackId: string, params: Extract<TrackInstrumentParams, { kind: 'granular' }>['params'], installedBuffer?: GranularInstalledBuffer, instanceId?: string): Promise<EngineDisposition> => {
-      synthRuntime.disposeTrack(trackId)
-      drumRackRuntime.clearTrackDrumRack(trackId)
-      samplerRuntime.disposeTrack(trackId)
-      activeKinds.set(trackId, 'granular')
-
-      return setTrackGranular(trackId, params, installedBuffer, instanceId)
-    },
+    setTrackGranular: (trackId: string, _params: Extract<TrackInstrumentParams, { kind: 'granular' }>['params'], _installedBuffer?: GranularInstalledBuffer, _instanceId?: string): Promise<EngineDisposition> => (
+      Promise.resolve(declare(trackId, 'granular'))
+    ),
     setTrackArpeggiator: (trackId: string, params: ArpParams) => {
       arpeggiators.set(trackId, params)
     },
@@ -224,96 +44,13 @@ export function createInstrumentRuntime(options: InstrumentRuntimeOptions) {
       arpeggiators.delete(trackId)
     },
     getTrackInstrumentKind: (trackId: string) => activeKinds.get(trackId),
-    resolveSynthAutomationBindings: (trackId: string, parameterId: string) => (
-      synthRuntime.resolveAutomationBindings(trackId, parameterId)
-    ),
-    scheduleMidiClip: (
-      track: RuntimeTrack,
-      clip: RuntimeClip,
-      playheadSec: number,
-      nowCtx: number,
-      endLimitSec?: number,
-      scheduleOptions?: { scheduleVoiceAutomation?: boolean },
-    ): boolean => {
-      if (activeKinds.get(track.id) === 'drum-rack') return drumRackRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
-
-      if (activeKinds.get(track.id) === 'sampler') return samplerRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec)
-
-      if (activeKinds.get(track.id) === 'granular') {
-        if (!clip.midi) return false
-        const runtime = granularRuntimes.get(track.id)
-
-        if (!runtime) return false
-        const instanceId = granularInstanceIds.get(track.id)
-
-        const envelopes = options.getAutomationEnvelopes?.().filter((envelope) => {
-          const key = parseGranularAutomationKey(envelope.parameterId)
-
-          return key?.trackId === track.id && key.instanceId === instanceId
-        }) ?? []
-
-        const events = getScheduledMidiEvents({ clip, bpm: options.getBpm(), notes: clip.midi.notes, rangeStartSec: playheadSec, rangeEndSec: endLimitSec, arp: arpeggiators.get(track.id) })
-
-        for (const note of events) {
-          const timelineStartSec = note.startSec
-          const durationSec = note.endSec - note.startSec
-          runtime.scheduleNote({
-            clipId: clip.id,
-            when: Math.max(nowCtx, options.timelineToCtxTime(timelineStartSec)),
-            durationSec,
-            timelineStartSec,
-            timelineToCtxTime: options.timelineToCtxTime,
-            automationEnvelopes: envelopes,
-          })
-        }
-
-        return events.length > 0
-      }
-
-      return synthRuntime.scheduleMidiClip(track, clip, playheadSec, nowCtx, endLimitSec, scheduleOptions)
-    },
-    setSamplerRuntimeListeners: (listeners: {
-      onNoteMiss?: (miss: SamplerNoteMiss) => void
-      onAssetUse?: (use: SamplerRegionUse) => void
-      onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
-    }) => {
-      primaryListeners = listeners
-    },
-    addSamplerRuntimeListeners: (listeners: InstrumentRuntimeListeners) => {
-      additionalListeners.add(listeners)
-
-      return () => additionalListeners.delete(listeners)
-    },
-    stopClip: (clipId: string) => {
-      synthRuntime.stopClip(clipId)
-      drumRackRuntime.stopClip(clipId)
-      samplerRuntime.stopClip(clipId)
-
-      for (const runtime of granularRuntimes.values()) runtime.stopClip(clipId)
-    },
-    stopAll: () => {
-      synthRuntime.stopAll()
-      drumRackRuntime.stopAll()
-      samplerRuntime.stopAll()
-
-      for (const runtime of granularRuntimes.values()) runtime.stop()
-    },
     disposeTrack: (trackId: string) => {
       activeKinds.delete(trackId)
       arpeggiators.delete(trackId)
-      synthRuntime.disposeTrack(trackId)
-      drumRackRuntime.disposeTrack(trackId)
-      samplerRuntime.disposeTrack(trackId)
-      disposeGranular(trackId)
     },
     clear: () => {
       activeKinds.clear()
       arpeggiators.clear()
-      synthRuntime.clear()
-      drumRackRuntime.clear()
-      samplerRuntime.clear()
-
-      for (const trackId of Array.from(granularRuntimes.keys())) disposeGranular(trackId)
     },
   }
 }

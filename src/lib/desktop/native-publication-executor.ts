@@ -11,12 +11,8 @@ import type {
   ProcessorDesired,
   Publication,
 } from "./native-processor-state-owner"
-import {
-  createPublicationTransaction,
-  runPublication,
-  type PublicationStrategy,
-  type PublicationTransaction,
-} from "./native-publication-transaction"
+import { createLatencyPublication, type LatencyHost } from "./native-latency-publication"
+import { createPublicationTransaction, runPublication, type PublicationTransaction } from "./native-publication-transaction"
 import {
   createSchedulePublication,
   type ScheduleHost,
@@ -28,20 +24,6 @@ import type { NativeScheduleCoordinator } from "./native-schedule-coordinator"
 export type PublicationPayload =
   | { kind: "schedule"; candidate: ScheduleRevisionCandidate; intent: number; attempt: AdoptionAttempt }
   | { kind: "latency" }
-
-// What one publication captured of the prepared session, which both kinds of publication start from.
-export type PublicationFacts = {
-  previous: LivePlaybackSnapshot
-  previousGraph: AudioCoreGraphSnapshot
-  projectId: string
-  coordinator: NativeScheduleCoordinator
-  revisions: NativeRevisionSession
-  publicationEpoch: number
-  snapshot: LivePlaybackSnapshot
-  graph: AudioCoreGraphSnapshot
-  keep: Set<string>
-  inputVersion: number
-}
 
 type LatencyCapture = {
   graph: AudioCoreGraphSnapshot
@@ -61,6 +43,7 @@ export type PublicationExecutorHost<Session extends ExecutorSession> = {
   }
   processorState: ReturnType<typeof createNativeProcessorStateOwner<ScheduleRevisionCandidate>>
   scheduleHost: ScheduleHost
+  latencyHost: LatencyHost
   readonly stagedTransportIntent: number
   readonly prepared: boolean
   readonly active: boolean
@@ -96,7 +79,6 @@ export type PublicationExecutorHost<Session extends ExecutorSession> = {
     transactionToken?: string,
     mark?: (name: string) => void,
   ) => Promise<void>
-  createLatencyPublication: (tx: PublicationTransaction, facts: PublicationFacts) => PublicationStrategy
 }
 
 const stagesInstruments = <Session extends ExecutorSession>(
@@ -168,8 +150,8 @@ export const createPublicationExecutor = <Session extends ExecutorSession>(host:
         createMappedAsset: (asset, mapping, preparedStretchArtifactId, mark) =>
           host.createMappedAsset(session, asset, mapping, preparedStretchArtifactId, undefined, mark),
       }, host.scheduleHost)
-      : host.createLatencyPublication(tx, {
+      : createLatencyPublication(tx, {
         previous, previousGraph, projectId, coordinator, revisions, publicationEpoch, snapshot, graph, keep,
         inputVersion: host.latencyInputVersion,
-      }))
+      }, host.latencyHost))
 }

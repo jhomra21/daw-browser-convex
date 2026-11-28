@@ -1,4 +1,3 @@
-import { maxVst3WorkerFrames } from "@daw-browser/plugin-host-protocol"
 import {
   type Accessor,
   type Component,
@@ -59,10 +58,10 @@ import { buildClipFadesHistoryEntry, buildClipMidiNotesHistoryEntry } from "~/li
 import type { MidiEditorNote } from "~/lib/midi-editor-grid";
 import createTimelineEffectCommit from "~/components/timeline/create-timeline-effect-commit";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
+import { createPlaybackSnapshotCompiler } from "~/components/timeline/create-playback-snapshot-compiler";
+import { createNativeOfflineExternalAttachments } from "~/components/timeline/native-offline-external-attachments";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import {
-  awaitCompileInstruments,
-  compileEffectsProjection,
   createApplyPortableProcessor,
   createInstrumentPlaybackChange,
   createMixedReorderCommitted,
@@ -113,10 +112,9 @@ import { removeAutoCreatedCloudTrack } from "~/lib/timeline-audio-import";
 import {
   canUseVst3CatalogAction,
   classifyNativeVst3PlaybackFault,
-  hasVst3TrustAcknowledgement,
-  saveVst3TrustAcknowledgement,
   vst3TrustDisclosure,
 } from "~/lib/external-plugin-ui";
+import { createVst3CatalogScan, createVst3Trust } from "~/lib/desktop/plugin-catalog-session";
 import {
   createCapturedEditorStatePersister,
   createExternalProcessorEditorRequests,
@@ -124,14 +122,10 @@ import {
 import {
   type CapturedLocalExternalProcessorState,
   createLocalExternalProcessorCache,
-  getLocalExternalProcessor,
   listLocalExternalProcessors,
   persistLocalExternalProcessorState,
-  readLocalExternalProcessorState,
 } from "~/lib/external-plugins";
 import { localVstStateOwnerId } from "~/lib/external-plugin-artifacts";
-import { compileNativeExternalAttachmentPlan } from "~/lib/desktop/native-external-attachment-plan";
-import { resolveNativeLivePlaybackProcessors } from "~/lib/desktop/native-live-playback-processors";
 import TimelineChrome from "./timeline/timeline-chrome";
 import AppMessageDialog, {
   type AppMessageDialogState,
@@ -161,11 +155,9 @@ import { createVstParameterFeedbackController } from "~/lib/desktop/vst-paramete
 import { createExportQueue } from "~/lib/export/export-queue";
 import { createImportJobQueue } from "~/lib/desktop/import-job-queue";
 import { createTimelineExportService } from "~/lib/export/timeline-export-service";
-import { createExportRenderStateSnapshot } from "~/lib/export/export-render-state"
 import { resolveDesiredPlaybackFx, type ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { createDesktopNativeOfflinePcmRenderer } from "~/lib/export/desktop-native-offline-pcm-renderer";
-import { compileDesiredNativeProcessorState, compileLivePlaybackSnapshot, type LivePlaybackCompileContext, type LivePlaybackTransport } from "~/lib/live-playback-snapshot";
-import { withInstrumentOverride } from "~/lib/export/export-effect-rows";
+import { compileDesiredNativeProcessorState } from "~/lib/live-playback-snapshot";
 import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
 import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
@@ -212,55 +204,8 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [appMessage, setAppMessage] =
     createSignal<AppMessageDialogState | null>(null);
 
-  const vst3TrustStorage = (() => {
-    try {
-      return window.localStorage;
-    } catch {
-      return undefined;
-    }
-  })();
-
-  const [vst3TrustAcknowledged, setVst3TrustAcknowledged] = createSignal(
-    hasVst3TrustAcknowledgement(vst3TrustStorage),
-  );
-
-  let vst3ScanPromise: Promise<void> | undefined;
-
-  const scanVst3Catalog = async () => {
-    if (vst3ScanPromise) return vst3ScanPromise;
-
-    const scan = async () => {
-      const bridge = desktopBridge()?.pluginCatalog;
-
-      if (!bridge) {
-        throw new Error("Plug-in rescanning requires the desktop app.");
-      }
-
-      if (!canUseVst3CatalogAction("scan", vst3TrustAcknowledged())) {
-        throw new Error("Acknowledge the VST3 plug-in disclosure before rescanning.");
-      }
-
-      const result = await bridge.scan();
-
-      if ("catalog" in result) {
-        window.dispatchEvent(new Event("daw-plugin-catalog-changed"));
-        setAppMessage(null);
-
-        return;
-      }
-
-      if (!result.ok) throw new Error(result.error);
-    };
-
-    const promise = scan();
-    vst3ScanPromise = promise;
-
-    try {
-      await promise;
-    } finally {
-      vst3ScanPromise = undefined;
-    }
-  };
+  const vst3Trust = createVst3Trust();
+  const scanVst3Catalog = createVst3CatalogScan({ trust: vst3Trust, onScanned: () => setAppMessage(null) });
 
   const [pendingDeleteTrackId, setPendingDeleteTrackId] = createSignal<
     Track["id"] | null
@@ -533,219 +478,25 @@ const Timeline: Component<TimelineProps> = (props) => {
   const localExternalProcessors = createLocalExternalProcessorCache();
   onCleanup(localExternalProcessors.dispose);
 
-  const compilePlaybackSnapshot = async (
-    transport: LivePlaybackTransport,
-    context: LivePlaybackCompileContext | undefined,
-    automationPatches: () => ExportAutomationPatch[],
-  ) => {
-    const effects = effectsExportSnapshot();
-    const instrumentReadiness = await awaitCompileInstruments(effects, context);
-
-    try {
-      const effectsProjection = compileEffectsProjection(effects, instrumentReadiness);
-      const processorStateSequence = processorEdits.sequence();
-      const snapshotTracks = renderTracks();
-      const snapshotBpm = bpm();
-
-      const snapshotTimeSignature = {
-        numerator: fullView.data?.project.timeSignatureNumerator ?? 4,
-        denominator: fullView.data?.project.timeSignatureDenominator ?? 4,
-      };
-
-      const snapshotSidechains = effects?.snapshotSidechainRoutes() ?? sidechainRoutes();
-
-      const projectedEffects = !instrumentReadiness && context?.instrumentOverride
-        ? withInstrumentOverride(effectsProjection ?? { replaceAudioEffectTargets: [], upsertDeviceRows: [] }, context.instrumentOverride.targetId, context.instrumentOverride.instrument)
-        : effectsProjection;
-
-      const compiledProjectId = projectId();
-
-      // The processor list does not depend on the render state, so its read (a cache hit unless the project changed) runs beside it.
-      const persistedProcessors = isLocalId("project", compiledProjectId)
-        ? localExternalProcessors.read(compiledProjectId)
-        : undefined;
-
-      const renderState = await createExportRenderStateSnapshot({
-        projectId: projectId(),
-        userId: userId(),
-        masterVolume: masterVolume.volume(),
-        externalPluginPolicy: "native-playback",
-        cloudRows: fullView.data
-          ? {
-              effects: fullView.data.effects,
-              automationEnvelopes: fullView.data.automationEnvelopes,
-            }
-          : undefined,
-        effectsProjection: projectedEffects,
-        automationPatches: automationPatches(),
-      });
-
-      context?.mark?.("compile-render-state-ready");
-
-      const hydratedRenderState = instrumentReadiness?.hydrateInstrumentBuffers(renderState)
-        ?? effects?.hydrateInstrumentBuffers?.(renderState) ?? renderState;
-
-      const result = compileLivePlaybackSnapshot({
-        revision: nativePlaybackRevision,
-        processorStateSequence,
-        bpm: snapshotBpm,
-        timeSignature: snapshotTimeSignature,
-        transport,
-        tracks: snapshotTracks,
-        renderState: hydratedRenderState,
-        sidechainRoutes: snapshotSidechains,
-      });
-
-      if (!result.supported || !persistedProcessors) return result;
-
-      const liveProcessors = (await persistedProcessors)
-        .filter((processor) => !processor.bypassed && processor.health.state !== "degraded");
-
-      const processors = await resolveNativeLivePlaybackProcessors({
-        projectId: compiledProjectId,
-        persisted: liveProcessors,
-        seed: context?.externalProcessor,
-        readPersisted: getLocalExternalProcessor,
-      });
-
-      context?.mark?.("compile-processors-ready");
-
-      if (processors.length === 0) return result;
-
-      const attachmentPlan = compileNativeExternalAttachmentPlan({
-        target: "native",
-        graph: result.snapshot.mixer.graph,
-        processors,
-        workerTransport: {
-          slotCount: 2,
-          maximumFrames: maxVst3WorkerFrames,
-          maximumEventsPerBlock: 128,
-        },
-      });
-
-      if (!attachmentPlan.supported) {
-        return {
-          supported: true as const,
-          snapshot: {
-            ...result.snapshot,
-            requiresNativePlayback: true,
-          },
-        };
-      }
-
-      const nativeExternalAttachmentStates = await Promise.all(attachmentPlan.plan.attachments
-        .filter((attachment) => !attachment.bypassed)
-        .map(async (attachment) => {
-          const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
-
-          if (!processor?.manifest.supportsState) return undefined
-
-          const state = processor
-            ? await readLocalExternalProcessorState(compiledProjectId, processor)
-            : undefined
-
-          return state ? { instanceId: attachment.instanceId, ...state } : undefined
-        }))
-
-      const nativeExternalAttachmentStateRequirements = processors
-        .filter((processor) => !processor.bypassed
-          && processor.manifest.supportsState
-          && (processor.state !== undefined || processor.launchReference?.state !== undefined))
-        .map((processor) => processor.instanceId)
-
-      return {
-        supported: true as const,
-        snapshot: {
-          ...result.snapshot,
-          nativeExternalAttachmentPlan: attachmentPlan.plan,
-          nativeExternalAttachmentStates: nativeExternalAttachmentStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
-          nativeExternalAttachmentStateRequirements,
-          requiresNativePlayback: true,
-        },
-      };
-    } finally {
-      instrumentReadiness?.release();
-      context?.mark?.("compile-end");
-    }
-  };
+  const compilePlaybackSnapshot = createPlaybackSnapshotCompiler({
+    projectId,
+    userId,
+    fullView,
+    renderTracks,
+    bpm,
+    sidechainRoutes,
+    masterVolume,
+    effectsExportSnapshot,
+    processorEdits,
+    localExternalProcessors,
+    playbackRevision: () => nativePlaybackRevision,
+  });
 
   const exportService = createTimelineExportService({
     queue: exportQueue,
     nativeRendererRequired: requiresNativeAudio,
     nativeOfflinePcmRenderer,
-    getNativeOfflineExternalAttachments: async ({ projectId: capturedProjectId, localProject, tracks, renderState, bpm, timeSignature, sidechainRoutes }) => {
-      if (!capturedProjectId || !localProject) return undefined
-
-      const processors = (await listLocalExternalProcessors(capturedProjectId))
-        .filter((processor) => !processor.bypassed)
-
-      if (processors.length === 0) return undefined
-
-      const playback = compileLivePlaybackSnapshot({
-        revision: 1,
-        bpm,
-        timeSignature,
-        transport: {
-          state: "stopped",
-          playheadSec: 0,
-          loopEnabled: false,
-          loopStartSec: 0,
-          loopEndSec: 0,
-        },
-        tracks,
-        renderState,
-        sidechainRoutes,
-      })
-
-      if (!playback.supported) throw new Error(playback.reasons.join(" "))
-
-      const attachmentPlan = compileNativeExternalAttachmentPlan({
-        target: "native",
-        graph: playback.snapshot.mixer.graph,
-        processors,
-        workerTransport: {
-          slotCount: 2,
-          maximumFrames: maxVst3WorkerFrames,
-          maximumEventsPerBlock: 128,
-        },
-      })
-
-      if (!attachmentPlan.supported) throw new Error(attachmentPlan.reasons.join(" "))
-
-      const capturedVstStates = await Promise.all(attachmentPlan.plan.attachments
-        .filter((attachment) => !attachment.bypassed)
-        .map(async (attachment) => {
-          const processor = processors.find((candidate) => candidate.instanceId === attachment.instanceId)
-
-          if (!processor) throw new Error(`Native VST3 processor "${attachment.instanceId}" is missing.`)
-
-          if (!processor.manifest.supportsState) return undefined
-          const capture = await desktopBridge()?.audioHost?.session.captureVstState(attachment.instanceId)
-
-          if (capture?.ok) {
-            const persisted = await persistLocalExternalProcessorState(
-              capturedProjectId,
-              attachment.instanceId,
-              capture,
-              userId() ?? processor.state?.ownerId ?? processor.launchReference?.state?.ownerId ?? "",
-            )
-
-            if (!persisted) throw new Error(`Native VST3 processor "${attachment.instanceId}" was deleted during export.`)
-
-            return { instanceId: attachment.instanceId, bytes: capture.bytes, sha256: capture.sha256 }
-          }
-
-          const persisted = await readLocalExternalProcessorState(capturedProjectId, processor)
-
-          if (persisted) return { instanceId: attachment.instanceId, ...persisted }
-          throw new Error(`Native VST3 attachment "${attachment.instanceId}" live state capture failed${capture?.error ? `: ${capture.error}` : "."}`)
-        }))
-
-      return {
-        plan: attachmentPlan.plan,
-        capturedVstStates: capturedVstStates.filter((state): state is NonNullable<typeof state> => state !== undefined),
-      }
-    },
+    getNativeOfflineExternalAttachments: createNativeOfflineExternalAttachments(userId),
     getTracks: renderTracks,
     getProjectGeneration: mountedProjectGeneration,
     createBuffer: (channels, frames, sampleRate) => (
@@ -966,17 +717,16 @@ const Timeline: Component<TimelineProps> = (props) => {
             action: {
               label: "Rescan plug-ins",
               busyLabel: "Rescanning…",
-              enabled: () => canUseVst3CatalogAction("scan", vst3TrustAcknowledged()),
+              enabled: () => canUseVst3CatalogAction("scan", vst3Trust.acknowledged()),
               onAction: scanVst3Catalog,
             },
             cancelLabel: "Cancel",
             trustAcknowledgement: {
-              acknowledged: vst3TrustAcknowledged,
+              acknowledged: vst3Trust.acknowledged,
               onChange: (acknowledged) => {
-                setVst3TrustAcknowledged(acknowledged);
+                vst3Trust.set(acknowledged);
 
                 if (!acknowledged) return;
-                saveVst3TrustAcknowledgement(vst3TrustStorage);
                 void scanVst3Catalog().catch((error) => {
                   setAppMessage((current) => current
                     ? {

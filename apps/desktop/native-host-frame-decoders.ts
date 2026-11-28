@@ -1,23 +1,53 @@
+import { unsigned32Max } from "@daw-browser/desktop-protocol/wire-patterns"
+import { audioCoreWasmAbiVersion } from "@daw-browser/audio-core-wasm"
 import { maxVst3WorkerEventsPerBlock } from "@daw-browser/plugin-host-protocol"
 import {
+  portableGraphContractHash,
+  processorContractHash,
+} from "@daw-browser/audio-core-contract/generated"
+import {
   nativeAudioHostFrameHeaderBytes as headerBytes,
+  nativeAudioHostMagic as magic,
   nativeAudioHostMaximumMeterEntries as maximumMeterEntries,
+  nativeAudioHostMaximumVstStringBytes as maximumVstStringBytes,
+  nativeAudioHostProtocolVersion as protocolVersion,
+  nativeAudioHostArtifactId,
   nativeAudioHostCodeName,
+  nativeAudioHostControlTypes,
   nativeAudioHostLifecycleStates,
   nativeAudioHostMaximumSpectrumBins as maximumSpectrumBins,
+  nativeAudioHostNotificationKinds,
+  nativeAudioHostPatchOutcomes,
+  nativeAudioHostPatchRefusals,
+  nativeAudioHostProcessorPatchStatusBytes,
+  nativeAudioHostReadinessReasons,
+  nativeAudioHostRequiredCapabilities,
   nativeAudioHostRevisionContinuities,
   nativeAudioHostRevisionStatusCodes,
   nativeAudioHostScheduleProgressBytes,
 } from "@daw-browser/desktop-protocol/native-audio-host"
+import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import type { NativeGraphRevisionStatus } from "@daw-browser/desktop-protocol/native-revision"
 import type {
+  NativeAudioDevice,
   NativeHostDiagnostics,
   NativeHostMeterBatch,
+  NativeHostRecordingStatus,
   NativeHostSpectrumFrame,
+  NativeInputDevice,
+  NativeOutputDevice,
+  NativeProcessorPatchStatus,
   NativeScheduleProgress,
 } from "@daw-browser/audio-engine/native-host-wire"
 import { readDiagnosticInstanceId } from "./diagnostic-instance-id"
+import { coreAudioDeviceId } from "./native-host-frame-encoders"
 import type { NativeVstEditorStatus } from "./native-request-broker"
+
+const { hostCapabilities: hostCapabilitiesType } = nativeAudioHostControlTypes
+
+const nativeVstInstanceId = (value: string): boolean => (
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value)
+)
 
 export const decodeDiagnostics = (frame: Buffer): NativeHostDiagnostics | undefined => {
   if (frame.byteLength < headerBytes + 256 || frame.byteLength > headerBytes + 512) return undefined
@@ -239,4 +269,311 @@ export const decodeScheduleProgress = (frame: Buffer): NativeScheduleProgress | 
   }
 
   return progress
+}
+
+export type NativeMainRecordingStatus = NativeHostRecordingStatus & { fileDevice: bigint; fileInode: bigint }
+
+export type AudioHostHello = NativeAudioHostParkingLimits & {
+  capabilities: number
+  abiVersion: number
+  processorContractHash: string
+  graphContractHash: string
+  artifactId: string
+  deviceState: "idle" | "configured" | "running" | "faulted"
+  readinessReason: "ready" | "device-not-configured" | "graph-not-prepared" | "transport-not-prepared"
+}
+
+type NativeWorkerNotificationBase = {
+  graphRevision: number
+  graphNodeId: bigint
+  instanceId: string
+}
+
+export type NativeWorkerNotification =
+  | (NativeWorkerNotificationBase & {
+    kind: "latency" | "buses" | "restart" | "fault" | "miss" | "tail" | "editor-interaction" | "editor-state"
+    value: number
+  })
+  | (NativeWorkerNotificationBase & {
+    kind: "parameter-edit"
+    parameterId: number
+    normalizedValue: number
+  })
+
+export const readResponse = (bytes: Buffer): AudioHostHello | undefined => {
+  if (!(bytes.byteLength >= headerBytes + 12
+  && bytes.readUInt32BE(0) === magic
+  && bytes.readUInt32BE(4) === protocolVersion
+  && bytes.readUInt32BE(8) === hostCapabilitiesType
+  && bytes.readUInt32BE(headerBytes) === protocolVersion)) return undefined
+  let offset = headerBytes + 12
+
+  const readString = () => {
+    if (offset + 4 > bytes.byteLength) return undefined
+    const length = bytes.readUInt32BE(offset)
+    offset += 4
+
+    if (length === 0 || offset + length > bytes.byteLength) return undefined
+    const value = bytes.subarray(offset, offset + length).toString("utf8")
+    offset += length
+
+    return value
+  }
+
+  const processorContractHash = readString()
+  const graphContractHash = readString()
+  const artifactId = readString()
+
+  if (!processorContractHash || !graphContractHash || !artifactId || offset + 16 !== bytes.byteLength) return undefined
+  const parsedDeviceState = nativeAudioHostCodeName(nativeAudioHostLifecycleStates, bytes.readUInt32BE(offset))
+  const parsedReadinessReason = nativeAudioHostCodeName(nativeAudioHostReadinessReasons, bytes.readUInt32BE(offset + 4))
+
+  if (!parsedDeviceState || !parsedReadinessReason) return undefined
+  const maximumParkedInstances = bytes.readUInt32BE(offset + 8)
+  const parkedAgeMs = bytes.readUInt32BE(offset + 12)
+
+  if (parkedAgeMs === 0) return undefined
+
+  return {
+    capabilities: bytes.readUInt32BE(headerBytes + 4),
+    abiVersion: bytes.readUInt32BE(headerBytes + 8),
+    processorContractHash,
+    graphContractHash,
+    artifactId,
+    deviceState: parsedDeviceState,
+    readinessReason: parsedReadinessReason,
+    maximumParkedInstances,
+    parkedAgeMs,
+  }
+}
+
+export const isCompatibleAudioHostHello = (hello: AudioHostHello) => (
+  (hello.capabilities & nativeAudioHostRequiredCapabilities) === nativeAudioHostRequiredCapabilities
+  && hello.abiVersion === audioCoreWasmAbiVersion
+  && hello.processorContractHash === processorContractHash
+  && hello.graphContractHash === portableGraphContractHash
+  && hello.artifactId === nativeAudioHostArtifactId
+)
+
+/** Anything but the three valid outcome/refusal/token/core combinations is a protocol error. */
+export const decodeNativeProcessorPatchStatus = (payload: Buffer): NativeProcessorPatchStatus | undefined => {
+  if (payload.byteLength !== nativeAudioHostProcessorPatchStatusBytes) return undefined
+  const outcome = payload.readUInt32BE(0)
+  const refusalName = nativeAudioHostCodeName(nativeAudioHostPatchRefusals, payload.readUInt32BE(4))
+  const refusalCode = payload.readUInt32BE(4)
+  const coreResult = payload.readUInt32BE(8)
+  const token = payload.readBigUInt64BE(12)
+
+  if (outcome === 1) return refusalCode === 0 && coreResult === 0 && token === 0n ? { outcome: "applied" } : undefined
+
+  if (outcome === 3) return refusalCode === 0 && coreResult === 0 && token !== 0n ? { outcome: "claimed", token } : undefined
+  const refusal = outcome === nativeAudioHostPatchOutcomes.refused && refusalName !== "none" ? refusalName : undefined
+
+  if (!refusal) return undefined
+
+  if ((token !== 0n) !== (refusal === "claim-pending")) return undefined
+
+  if (coreResult !== 0 && refusal !== "stage-failed" && refusal !== "apply-failed") return undefined
+
+  return token === 0n ? { outcome: "refused", refusal, coreResult } : { outcome: "refused", refusal, coreResult, token }
+}
+
+export const decodeWorkerNotification = (frame: Buffer): NativeWorkerNotification | undefined => {
+  const payload = frame.subarray(headerBytes)
+
+  if (payload.byteLength < 24) return undefined
+  const kindValue = payload.readUInt32BE(0)
+
+  const kind = nativeAudioHostCodeName(nativeAudioHostNotificationKinds, kindValue)
+
+  if (kind === "parameter-edit") {
+    if (payload.byteLength < 32) return undefined
+    const parameterId = payload.readUInt32BE(16)
+    const normalizedValue = payload.readDoubleBE(20)
+    const instanceBytes = payload.readUInt32BE(28)
+    const instanceId = payload.subarray(32).toString("utf8")
+
+    if (parameterId > unsigned32Max
+      || !Number.isFinite(normalizedValue)
+      || normalizedValue < 0
+      || normalizedValue > 1
+      || instanceBytes === 0
+      || instanceBytes > maximumVstStringBytes
+      || payload.byteLength !== 32 + instanceBytes
+      || !nativeVstInstanceId(instanceId)) return undefined
+
+    return {
+      kind,
+      graphRevision: payload.readUInt32BE(4),
+      graphNodeId: payload.readBigUInt64BE(8),
+      parameterId,
+      normalizedValue,
+      instanceId,
+    }
+  }
+
+  const instanceBytes = payload.readUInt32BE(20)
+
+  if (!kind || instanceBytes === 0 || instanceBytes > maximumVstStringBytes
+    || payload.byteLength !== 24 + instanceBytes) return undefined
+
+  return {
+    kind,
+    graphRevision: payload.readUInt32BE(4),
+    graphNodeId: payload.readBigUInt64BE(8),
+    value: payload.readUInt32BE(16),
+    instanceId: payload.subarray(24).toString("utf8"),
+  }
+}
+
+const deviceStringReader = (payload: Buffer, start: number) => {
+  let offset = start
+
+  return {
+    offset: () => offset,
+    advance: (bytes: number) => { offset += bytes },
+    string: () => {
+      if (offset + 4 > payload.byteLength) return undefined
+      const length = payload.readUInt32BE(offset)
+      offset += 4
+
+      if (length === 0 || offset + length > payload.byteLength) return undefined
+      const value = payload.subarray(offset, offset + length).toString("utf8")
+      offset += length
+
+      return value
+    },
+  }
+}
+
+export const decodeDeviceInventory = (frame: Buffer): NativeAudioDevice[] | undefined => {
+  const payload = frame.subarray(headerBytes)
+
+  if (payload.byteLength < 4) return undefined
+  const count = payload.readUInt32BE(0)
+  const reader = deviceStringReader(payload, 4)
+  const devices: NativeAudioDevice[] = []
+
+  for (let index = 0; index < count; index += 1) {
+    const deviceId = reader.string()
+    const name = reader.string()
+    const offset = reader.offset()
+
+    if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 > payload.byteLength) return undefined
+    const availability = payload.readUInt32BE(offset + 12)
+
+    if (availability !== 0 && availability !== 1) return undefined
+    devices.push({
+      deviceId,
+      name,
+      nominalSampleRateHz: payload.readUInt32BE(offset),
+      inputChannelCount: payload.readUInt32BE(offset + 4),
+      outputChannelCount: payload.readUInt32BE(offset + 8),
+      available: availability === 1,
+    })
+    reader.advance(16)
+  }
+
+  return reader.offset() === payload.byteLength ? devices : undefined
+}
+
+export const decodeOutputDevice = (frame: Buffer): NativeOutputDevice | null | undefined => {
+  const payload = frame.subarray(headerBytes)
+
+  if (payload.byteLength === 4 && payload.readUInt32BE(0) === 0) return null
+
+  if (payload.byteLength < 4 || payload.readUInt32BE(0) !== 1) return undefined
+  const reader = deviceStringReader(payload, 4)
+  const deviceId = reader.string()
+  const name = reader.string()
+  const offset = reader.offset()
+
+  if (!deviceId || !coreAudioDeviceId(deviceId) || !name || offset + 16 !== payload.byteLength) return undefined
+  const nominalSampleRateHz = payload.readUInt32BE(offset)
+  const outputChannelCount = payload.readUInt32BE(offset + 4)
+  const maximumFramesPerBlock = payload.readUInt32BE(offset + 8)
+  const availability = payload.readUInt32BE(offset + 12)
+
+  if (availability !== 0 && availability !== 1) return undefined
+
+  return { deviceId, name, nominalSampleRateHz, outputChannelCount, maximumFramesPerBlock, available: availability === 1 }
+}
+
+export const decodeInputDevice = (frame: Buffer): NativeInputDevice | null | undefined => {
+  const device = decodeOutputDevice(frame)
+
+  if (device === undefined || device === null) return device
+
+  return {
+    deviceId: device.deviceId,
+    name: device.name,
+    nominalSampleRateHz: device.nominalSampleRateHz,
+    inputChannelCount: device.outputChannelCount,
+    maximumFramesPerBlock: device.maximumFramesPerBlock,
+    available: device.available,
+  }
+}
+
+const safeUnsigned64 = (value: bigint) => value <= BigInt(Number.MAX_SAFE_INTEGER) ? Number(value) : undefined
+
+export const decodeRecordingStatus = (frame: Buffer): NativeMainRecordingStatus | undefined => {
+  const payload = frame.subarray(headerBytes)
+
+  if (payload.byteLength !== 120) return undefined
+  const timelineFrame = payload.readBigInt64BE(12)
+  const capturedFrames = safeUnsigned64(payload.readBigUInt64BE(20))
+  const droppedFrames = safeUnsigned64(payload.readBigUInt64BE(28))
+  const flags = payload.readUInt32BE(56)
+  const rms = payload.readFloatBE(48)
+  const peak = payload.readFloatBE(52)
+  const availableBlocks = payload.readUInt32BE(40)
+  const queuedBlocks = payload.readUInt32BE(44)
+
+  if (
+    timelineFrame < 0 || timelineFrame > BigInt(Number.MAX_SAFE_INTEGER)
+    || capturedFrames === undefined || droppedFrames === undefined
+    || payload.readUInt32BE(0) === 0 || payload.readBigUInt64BE(4) === 0n
+    || !Number.isFinite(rms) || rms < 0 || !Number.isFinite(peak) || peak < 0
+    || availableBlocks > 32 || queuedBlocks > 32 || availableBlocks + queuedBlocks > 32
+    || (flags & ~31) !== 0
+  ) return undefined
+  const state = payload.readUInt32BE(60)
+  const error = payload.readUInt32BE(64)
+  const systemError = payload.readInt32BE(68)
+  const writtenFrames = safeUnsigned64(payload.readBigUInt64BE(72))
+  const writtenBytes = safeUnsigned64(payload.readBigUInt64BE(80))
+  const writtenBlocks = safeUnsigned64(payload.readBigUInt64BE(88))
+  const fileDevice = payload.readBigUInt64BE(96)
+  const fileInode = payload.readBigUInt64BE(104)
+  const sampleRateHz = payload.readUInt32BE(112)
+  const channelCount = payload.readUInt32BE(116)
+
+  if (state > 4 || error > 13 || systemError < 0 || writtenFrames === undefined || writtenBytes === undefined
+    || writtenBlocks === undefined || (channelCount !== 1 && channelCount !== 2)
+    || sampleRateHz > 384000 || (state === 1 && sampleRateHz === 0)) return undefined
+
+  if (state === 2 && (error !== 0 || systemError !== 0 || (flags & 8) === 0 || (flags & 19) !== 0
+    || queuedBlocks !== 0 || sampleRateHz === 0
+    || fileInode === 0n || writtenFrames !== capturedFrames || droppedFrames !== 0
+    || payload.readUInt32BE(36) !== 0 || writtenBytes !== 4 * writtenBlocks + 4 * writtenFrames * channelCount
+    || !Number.isSafeInteger(4 * writtenBlocks + 4 * writtenFrames * channelCount))) return undefined
+
+  return {
+    fileDevice, fileInode,
+    spool: { state, error, systemError, writtenFrames, writtenBytes, writtenBlocks,
+      published: (flags & 8) !== 0, partialRetained: (flags & 16) !== 0, sampleRateHz, channelCount },
+    generation: payload.readUInt32BE(0),
+    sessionId: payload.readBigUInt64BE(4),
+    timelineFrame: Number(timelineFrame),
+    capturedFrames,
+    droppedFrames,
+    droppedBlocks: payload.readUInt32BE(36),
+    availableBlocks,
+    queuedBlocks,
+    rms,
+    peak,
+    fatal: (flags & 1) !== 0,
+    active: (flags & 2) !== 0,
+    configured: (flags & 4) !== 0,
+  }
 }

@@ -13,9 +13,9 @@ import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol
 import {
   NativeAudioHostCommandError,
   type NativeAudioHostSupervisor,
-  type NativeWorkerNotification,
-  type ResolvedVst3Attachment,
 } from "./audio-host"
+import type { NativeWorkerNotification } from "./native-host-frame-decoders"
+import type { ResolvedVst3Attachment } from "./native-host-frame-encoders"
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"

@@ -1040,8 +1040,8 @@ std::vector<std::uint8_t> SidechainCompressorGraph(
   if (with_key_edge) append_edge(12, 1, 2, kCompressorInstance, key_gain, 1);
   AppendLeU64(payload, 2);
   AppendLeU32(payload, DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR);
-  AppendLeU32(payload, 1);
-  AppendLeU32(payload, 72);
+  AppendLeU32(payload, 2);
+  AppendLeU32(payload, 76);
   AppendLeU32(payload, kCompressorInstance);
   AppendLeU32(payload, 0);
   AppendLeU32(payload, DAW_AUDIO_GRAPH_LAYOUT_STEREO);
@@ -1063,6 +1063,7 @@ std::vector<std::uint8_t> SidechainCompressorGraph(
   for (std::size_t field = 0; field < 5; ++field) AppendLeU32(payload, 0);
   AppendLeFloat(payload, 120.0F);
   AppendLeFloat(payload, 0.707F);
+  AppendLeU32(payload, 0);
   std::vector<std::uint8_t> frame;
   AppendBeU64(frame, revision);
   AppendBeU32(frame, static_cast<std::uint32_t>(payload.size()));

@@ -335,6 +335,11 @@ export const normalizeSynthParams = (input: SynthParamsInput): SynthParams => {
   return normalizeV2SynthParams(input)
 }
 
+/** The v1 -> v2 step: legacy params (wave1, attackMs, ...) become the v2 shape; params already in the v2 shape pass through. */
+export const migrateSynthParamsV1 = (params: JsonValue): JsonValue => (
+  isJsonObject(params) && isLegacySynthParams(params) ? normalizeSynthParams(params) : params
+)
+
 export const mergeSynthParams = (current: SynthParams, update: SynthParamsUpdate): SynthParams => {
   const base = normalizeSynthParams(current)
 

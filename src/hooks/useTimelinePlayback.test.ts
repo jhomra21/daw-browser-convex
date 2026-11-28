@@ -5,10 +5,11 @@ import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import type { ExportEffectsProjection } from "~/lib/export/export-effect-rows";
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
 import { readFile } from 'node:fs/promises'
-import { createComputed, createMemo, createRoot, createSignal, untrack } from 'solid-js'
-import { isServer } from 'solid-js/web'
+import { createMemo, createSignal, untrack, createRenderEffect, flush } from 'solid-js';
+import { createFlushedRoot as createRoot } from '~/test-support/create-flushed-root';
+import { isServer } from '@solidjs/web'
 
-import { useTimelinePlayback } from './useTimelinePlayback'
+import { useTimelinePlayback as createTimelinePlayback } from './useTimelinePlayback'
 import { createParameterGestureOwner } from '../components/timeline/parameter-gesture-owner'
 import { effectAdmission } from '../components/timeline/effect-publication-result'
 import { createPendingWorkOwner } from './useEffectsPanelAudioSync'
@@ -600,6 +601,15 @@ const withFakeRaf = async (run: (flushRaf: () => void) => Promise<void>) => {
   }
 }
 
+// Effects created while the hook builds (lifecycle subscription, project reset) run at the next flush; tests drive the
+// hook right after creating it, as the 1.x synchronous effects allowed.
+const useTimelinePlayback: typeof createTimelinePlayback = (...args) => {
+  const playback = createTimelinePlayback(...args)
+  flush()
+
+  return playback
+}
+
 const flushMicrotasks = async () => {
   for (let index = 0; index < 20; index += 1) await Promise.resolve()
 }
@@ -1172,6 +1182,8 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
             setTracks([desired])
             await publishing.promise
             setLoopEnabled(false)
+            // updateNativeLoop reads the loop accessor now; the write is visible after the flush.
+            flush()
             const loop = playback.updateNativeLoop()
             await settle()
             expect(fixture.calls.slice(before).filter((call) => call === "transport")).toHaveLength(0)
@@ -1506,6 +1518,7 @@ test.skipIf(isServer)('pending save hydration still reports real host loss and h
           else setGeneration(1)
           await flushMicrotasks()
           flushRaf()
+          flush()
           expect(playback.isPlaying()).toBeFalse()
           expect(playback.isNativePlayback()).toBeFalse()
 
@@ -3024,6 +3037,8 @@ const createDeviceMove = () => {
   let moves = 0
 
   return { outputDeviceId, move: () => { setOutputDeviceId(`coreaudio:move-${moves += 1}`);
+    // The saved-device effect runs at the flush; a lifecycle event emitted right after the move must see the rebuild started.
+    flush()
 
  return settleRebuild() } }
 }
@@ -3033,7 +3048,8 @@ const createDeviceMove = () => {
 const createProjectReload = () => {
   const [projectGeneration, setProjectGeneration] = createSignal(1)
 
-  return { projectGeneration, reload: () => setProjectGeneration(generation => generation + 1) }
+  // The reset effect runs at the flush; a Play pressed right after the reload must find it already applied.
+  return { projectGeneration, reload: () => { setProjectGeneration(generation => generation + 1); flush() } }
 }
 
 const lastRunningFrame = (fixture: ReturnType<typeof createNativeHookBridge>) => (
@@ -7363,6 +7379,7 @@ const runB6eSupersededRebuild = async (
         if (action === 'pause') pending = playback.handlePause()
 
         if (action === 'stop') pending = playback.handleStop()
+        flush()
         const playheadAtAction = playback.playheadSec()
 
         for (let index = 0; index < 20; index += 1) await flushMicrotasks()
@@ -8097,7 +8114,7 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     rebuildBackend: true, resumePlayback: true, playheadSec: 2, owner: 'portable-browser', projectId: projectId(), projectGeneration: generation(),
   })
 
-  return { playback, tracks, setTracks, setProjectId, setGeneration, holds, until, summary, expectLive, playFrom, pausedAt,
+  return { sessionCount: () => world.sessions.length, playback, tracks, setTracks, setProjectId, setGeneration, holds, until, summary, expectLive, playFrom, pausedAt,
     timelineReschedule, resumingRebuild, mark: () => world.seq, liveSession: () => world.sessions.filter((session) => !session.closed).at(-1) }
 }
 
@@ -8202,6 +8219,7 @@ test('B6f a Pause or Stop during a resuming rebuild leaves a live paused portabl
   for (const [hold, action] of [['compile', 'pause'], ['transport', 'stop']] as const) await runB6fLive(async (live) => {
     await live.playFrom(1)
     live.setTracks(b6fLiveEditedTracks)
+    flush()
     live.holds[hold].armed = true
     const rebuild = live.resumingRebuild()
     await live.holds[hold].reached.promise
@@ -8271,12 +8289,16 @@ test('B6f a project switch leaves a live paused portable session of the new proj
     // The project route moves the generation, then the project id; the new project's tracks load once
     // the previous project's session is gone.
     live.setGeneration(2)
+    // The generation's effects settle before the id moves (the 1.x writes ran them synchronously).
+    flush()
     live.setProjectId('project-b')
     await live.until(() => previous?.closed === true)
     expect(previous?.closed).toBeTrue()
     live.setTracks(b6fLiveEditedTracks)
     await live.timelineReschedule()
     await live.expectLive(false, 0, mark, 'structure')
+    // The session kept at the Pause and the new project's: a paused re-run with no edit prepares nothing else.
+    expect(live.sessionCount()).toBe(2)
   }, nativeEnabled)
 })
 
@@ -8378,10 +8400,13 @@ test('B6f2 a project switch that moves the generation, then the project id, with
     const mark = live.mark()
     // useTimelineProjectRoute.ts setProjectId moves them one after the other; nothing re-runs the paused-preview effect.
     live.setGeneration(2)
+    // The generation's effects settle before the id moves (the 1.x writes ran them synchronously).
+    flush()
     live.setProjectId('project-b')
     await live.until(() => previous?.closed === true)
     expect(previous?.closed).toBeTrue()
     await live.expectLive(false, 0, mark, 'none')
+    expect(live.sessionCount()).toBe(2)
   }, nativeEnabled)
 })
 
@@ -8589,7 +8614,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
   // The registry observes the effective projection; the playback inputs carry master volume,
   // automation and the processor structure.
   const registry = createProcessorEditRegistry(() => 120)
-  createComputed(() => { const fx = fxOf(); untrack(() => registry.observe(fx)) })
+  createRenderEffect(() => fxOf(), (fx) => { untrack(() => registry.observe(fx)) })
 
   const playbackInputs = createMemo(() => ({ masterVolume: masterVolume(), automationEnvelopes: automation(),
     processorStructure: registry.structure() }))
@@ -8833,7 +8858,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
 
   const rebuild = (next: Track[]) => syncPlaybackBackend(next)
 
-  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop, hideAudioContext: () => { audioHidden = true }, readCompileTracksAtStart: () => { compileReadsAtStart = true }, mark: () => world.seq,
+  return { playback, tracks, observeTracksRead: (observer: () => void) => { onTracksRead = observer }, edit, replaceInstrument, addEffect, insertEffect, insertLimiter, rebuild, expectEnd, settle, until, playFrom, pausedAt, resumingRebuild, setTracks, setVolume, setBpm, setLoop: (value: ReturnType<typeof loop>) => { setLoop(value); flush() }, hideAudioContext: () => { audioHidden = true }, readCompileTracksAtStart: () => { compileReadsAtStart = true }, mark: () => world.seq,
     locate: (sec: number) => playback.setPlayhead(sec, tracks()),
     liveSession: () => world.sessions.filter((session) => !session.closed).at(-1),
     holds: { resume: resumeHold, compile: compileHold, transport: world.transportHold, pause: world.pauseHold } }
@@ -9029,7 +9054,7 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     const rebuild = live.resumingRebuild()
 
     // The rebuild's own session runs and the hook committed it while the rebuild still owns the transport.
-    const committed = () => playback.isPortableBrowserPlayback() && playback.isPlayPending() === false && playback.isStructuralRebuildInProgress()
+    const committed = () => (flush(), playback.isPortableBrowserPlayback()) && playback.isPlayPending() === false && playback.isStructuralRebuildInProgress()
       && (world.sessions.at(-1)?.createdSeq ?? 0) > before && world.sessions.at(-1)?.positions.at(-1)?.running === true
       && world.sessions.filter((session) => !session.closed).length === 1
 
@@ -9037,6 +9062,8 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
     expect(committed()).toBeTrue()
     const mark = live.mark()
     live.edit(kind)
+    // The edit's effects run while the rebuild still owns the transport, as the 1.x synchronous write ran them.
+    flush()
     await rebuild.catch(() => undefined)
 
     return live.expectEnd(true, undefined, mark, kind, false)
@@ -9044,6 +9071,9 @@ const b6f5Cell = (state: B6f5State, kind: B6f5Kind, nativeEnabled: boolean) => r
 
   // A paused locate moves the kept session in place; an edit that lands with it reaches that session.
   await live.pausedAt(1)
+  // The Pause keeps its session: a paused re-run with no edit prepares nothing else, and disposes nothing a locate then needs.
+  await live.until(() => world.sessions.length !== 1)
+  expect(world.sessions.length).toBe(1)
   const mark = live.mark()
   live.locate(3)
   live.edit(kind)
@@ -10512,7 +10542,7 @@ const withNativeTransportEdit = async (
               renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] }, sidechainRoutes: [] })
           } })
 
-      await run(world, playback, (volume) => setTracks((current) => current.map((entry) => ({ ...entry, volume }))), setTracks)
+      await run(world, playback, (volume) => { setTracks((current) => current.map((entry) => ({ ...entry, volume }))); flush() }, setTracks)
       dispose()
     }))
   } finally {

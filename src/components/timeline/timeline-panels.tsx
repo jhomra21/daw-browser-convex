@@ -1,6 +1,6 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
-import { type Component, Show, Suspense, createEffect, lazy } from 'solid-js'
+import { type Component, Show, Loading, createEffect, lazy } from 'solid-js'
 import { Button } from '~/components/ui/button'
 import type { AudioEngine, EngineDisposition, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { isLocalId, type AutomationEnvelope, type AutomationTargetDeviceInstance, type TrackInstrumentParams } from '@daw-browser/shared'
@@ -165,11 +165,16 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
     return Boolean(projectId && !isLocalId('project', projectId))
   }
 
-  createEffect(() => {
-    if (!canUseSharedChat() && panels().chat.sharedChatOpen) {
-      panels().chat.closeSharedChat()
-    }
-  })
+  createEffect(
+    () => {
+      const chat = panels().chat
+
+      return !canUseSharedChat() && chat.sharedChatOpen ? chat : undefined
+    },
+    (chat) => {
+      chat?.closeSharedChat()
+    },
+  )
 
   return (
     <ExportProvider queue={panels().exportQueue} service={panels().exportService}>
@@ -187,7 +192,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
       </Show>
 
       <Show when={canUseSharedChat() && panels().chat.sharedChatOpen}>
-        <Suspense fallback={null}>
+        <Loading fallback={null}>
           <SharedChat
             isOpen={panels().chat.sharedChatOpen}
             onClose={panels().chat.closeSharedChat}
@@ -195,7 +200,7 @@ const TimelinePanels: Component<TimelinePanelsContainerProps> = (props) => {
             userId={panels().chat.userId}
             bottomOffsetPx={panels().chat.bottomOffsetPx}
           />
-        </Suspense>
+        </Loading>
       </Show>
 
       <EffectsPanel

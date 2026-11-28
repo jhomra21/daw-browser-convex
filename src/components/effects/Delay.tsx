@@ -93,9 +93,9 @@ function DelayValueStrip(props: {
   return (
     <div
       role="slider"
-      tabIndex={props.disabled ? undefined : 0}
+      tabindex={props.disabled ? undefined : 0}
       aria-label={props.label}
-      aria-disabled={props.disabled}
+      aria-disabled={props.disabled ? "true" : "false"}
       aria-valuemin={props.min}
       aria-valuemax={props.max}
       aria-valuenow={control.visualValue()}

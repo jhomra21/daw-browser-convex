@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { createRoot } from 'solid-js'
+import { createFlushedRoot as createRoot } from '~/test-support/create-flushed-root';
 
 import { createLocalTrack } from '~/lib/tracks'
 import { RECORDING_TARGET_LOCKED_REASON, createRecordingTargetLock } from '~/lib/track-recording-target'

@@ -41,38 +41,39 @@ export const useCloudSyncTick = (options: Options) => {
     timers.set(projectId, timer)
   }
 
-  createEffect(() => {
-    const projectId = options.projectId()
+  createEffect(
+    () => options.projectId(),
+    (projectId) => {
+      if (!projectId) return
 
-    if (!projectId) return
+      const onProjectChanged = () => {
+        const alreadyPending = pendingChanges.has(projectId)
+        pendingChanges.add(projectId)
 
-    const onProjectChanged = () => {
-      const alreadyPending = pendingChanges.has(projectId)
-      pendingChanges.add(projectId)
-
-      if (options.enabled()) {
-        scheduleSync(projectId)
-      } else if (!alreadyPending) {
-        setChangeVersion((version) => version + 1)
+        if (options.enabled()) {
+          scheduleSync(projectId)
+        } else if (!alreadyPending) {
+          setChangeVersion((version) => version + 1)
+        }
       }
-    }
 
-    const unsubscribeProjectChanges = subscribeToLocalProjectChanges(projectId, onProjectChanged)
-    const unsubscribeProjectStateChanges = subscribeToLocalProjectStateChanges(projectId, onProjectChanged)
-    onCleanup(() => {
-      unsubscribeProjectChanges()
-      unsubscribeProjectStateChanges()
-    })
-  })
+      const unsubscribeProjectChanges = subscribeToLocalProjectChanges(projectId, onProjectChanged)
+      const unsubscribeProjectStateChanges = subscribeToLocalProjectStateChanges(projectId, onProjectChanged)
 
-  createEffect(() => {
-    const projectId = options.projectId()
-    const enabled = options.enabled()
-    changeVersion()
+      return () => {
+        unsubscribeProjectChanges()
+        unsubscribeProjectStateChanges()
+      }
+    },
+  )
 
-    if (!projectId || !enabled || !pendingChanges.has(projectId)) return
-    scheduleSync(projectId)
-  })
+  createEffect(
+    () => ({ projectId: options.projectId(), enabled: options.enabled(), version: changeVersion() }),
+    ({ projectId, enabled }) => {
+      if (!projectId || !enabled || !pendingChanges.has(projectId)) return
+      scheduleSync(projectId)
+    },
+  )
 
   onCleanup(() => {
     for (const timer of timers.values()) window.clearTimeout(timer)

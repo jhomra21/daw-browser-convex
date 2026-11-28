@@ -1,4 +1,4 @@
-import { createSignal, untrack, type Setter } from 'solid-js'
+import { createSignal, untrack } from 'solid-js'
 
 import { createDesktopAudioLifecycleReconciler, type DesktopAudioLifecycle } from '~/lib/desktop-audio-lifecycle'
 import type { createNativePlaybackController } from '~/lib/desktop/native-playback-controller'
@@ -25,10 +25,10 @@ type AudioLifecycleInput = {
   portableBrowserPlayback: ReturnType<typeof createPortableBrowserPlaybackController>
   deferredStretchQueue: ReturnType<typeof createDeferredStretch>["deferredStretchQueue"]
   isPlaying: () => boolean
-  setIsPlaying: Setter<boolean>
+  setIsPlaying: (next: boolean) => void
   isRebuildingPlayback: () => boolean
-  setIsRebuildingPlayback: Setter<boolean>
-  setActiveBackend: Setter<ActiveAudioBackend>
+  setIsRebuildingPlayback: (next: boolean) => void
+  setActiveBackend: (next: ActiveAudioBackend) => void
   // The hook's transport state and teardown, which a lifecycle change moves.
   host: {
     mounted: () => boolean
@@ -64,9 +64,9 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
 
   const hasAudioLifecycle = audioHostBridge !== undefined
 
-  const [audioLifecycleState, setAudioLifecycleState] = createSignal<DesktopAudioLifecycle["state"]>(
-    hasAudioLifecycle ? "recovering" : "ready",
-  )
+  // Recovery and rebuild paths read the state they just set, so it is a plain variable; the signal publishes it.
+  let lifecycleState: DesktopAudioLifecycle["state"] = hasAudioLifecycle ? "recovering" : "ready"
+  const [audioLifecycleState, publishAudioLifecycleState] = createSignal<DesktopAudioLifecycle["state"]>(lifecycleState)
 
   let audioLifecycleGeneration = -1
   let recoveryAttempt: RecoveryAttempt | undefined
@@ -79,7 +79,8 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
   }>()
 
   const setLifecycleState = (state: DesktopAudioLifecycle["state"]) => {
-    setAudioLifecycleState(state)
+    lifecycleState = state
+    publishAudioLifecycleState(state)
 
     if (state === "ready") {
       for (const waiter of lifecycleReadyWaiters) {
@@ -99,9 +100,9 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
   }
 
   const waitForLifecycleReady = async () => {
-    if (!hasAudioLifecycle || audioLifecycleState() === "ready") return
+    if (!hasAudioLifecycle || lifecycleState === "ready") return
 
-    if (audioLifecycleState() === "failed") {
+    if (lifecycleState === "failed") {
       throw new Error(host.lastNativeFault() ?? "Native audio recovery failed.")
     }
 
@@ -117,7 +118,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
 
       lifecycleReadyWaiters.add(waiter)
 
-      if (untrack(() => audioLifecycleState()) === "ready") {
+      if (lifecycleState === "ready") {
         lifecycleReadyWaiters.delete(waiter)
         clearTimeout(waiter.timer)
         resolve()
@@ -142,14 +143,14 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
       recoveryAttempt.cancelled = true
       void recoveryAttempt.promise?.then(() => {
         if (
-          untrack(() => host.mounted() && audioLifecycleState() === "recovering")
+          untrack(() => host.mounted()) && lifecycleState === "recovering"
           && audioLifecycleGeneration === lifecycle.powerGeneration
         ) {
           void recoverPausedAudio(lifecycle)
         }
       }, () => {
         if (
-          untrack(() => host.mounted() && audioLifecycleState() === "recovering")
+          untrack(() => host.mounted()) && lifecycleState === "recovering"
           && audioLifecycleGeneration === lifecycle.powerGeneration
         ) {
           void recoverPausedAudio(lifecycle)
@@ -172,7 +173,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
       && recoveryAttempt === attempt
       && token === recoveryToken
       && !attempt.cancelled
-      && audioLifecycleState() === "recovering"
+      && lifecycleState === "recovering"
       && audioLifecycleGeneration === recoveryGeneration
     )
 
@@ -305,7 +306,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
     if (lifecycle.powerGeneration < audioLifecycleGeneration) return
 
     const lifecycleChanged = lifecycle.powerGeneration !== audioLifecycleGeneration
-      || lifecycle.state !== audioLifecycleState()
+      || lifecycle.state !== lifecycleState
 
     if (lifecycleChanged && isRebuildingPlayback()
       && (lifecycle.state === "suspended" || lifecycle.state === "failed")) {
@@ -371,7 +372,7 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
         void acknowledgeRecovery(lifecycle.powerGeneration, "ready")
           .then(() => {
             if (
-              untrack(() => host.mounted() && audioLifecycleState() === "recovering")
+              untrack(() => host.mounted()) && lifecycleState === "recovering"
               && audioLifecycleGeneration === lifecycle.powerGeneration
             ) setLifecycleState("ready")
           })
@@ -417,5 +418,5 @@ export const createAudioLifecycle = (input: AudioLifecycleInput) => {
     lifecycleReadyWaiters.clear()
   }
 
-  return { audioLifecycleState, audioLifecycleGeneration: () => audioLifecycleGeneration, waitForLifecycleReady, releaseLifecycle, removeAudioLifecycle }
+  return { audioLifecycleState, readAudioLifecycleState: () => lifecycleState, audioLifecycleGeneration: () => audioLifecycleGeneration, waitForLifecycleReady, releaseLifecycle, removeAudioLifecycle }
 }

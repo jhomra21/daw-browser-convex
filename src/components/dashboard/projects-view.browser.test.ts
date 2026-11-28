@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
 
@@ -12,7 +12,7 @@ const fixtureId = 'virtual:project-dashboard-fixture'
 
 const buildFixture = async () => {
   const source = `
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { createSignal } from 'solid-js'
 import { DashboardProjectsView } from '~/components/dashboard/projects-view'
 

@@ -1,4 +1,4 @@
-import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent } from "solid-js";
+import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent, untrack } from "solid-js";
 import { REORDER_ACTIVATION_THRESHOLD_PX } from "~/components/timeline/device-interaction";
 import { createStoredValue } from "~/lib/stored-value";
 
@@ -45,8 +45,15 @@ const collapsedDevices = createStoredValue<Set<string>>({
 });
 
 export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | undefined>) {
-  const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(new Set());
+  // The set the handlers read and write; the signal publishes it to the cards.
+  let current = new Set<string>();
+  const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(current);
   let loadedProjectId: string | undefined;
+
+  const publish = (next: Set<string>) => {
+    current = next;
+    setCollapsedIdentities(next);
+  };
 
   const reload = () => {
     const currentProjectId = projectId();
@@ -54,18 +61,18 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
     if (currentProjectId === loadedProjectId) return;
     loadedProjectId = currentProjectId;
 
-    setCollapsedIdentities(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
+    publish(currentProjectId ? collapsedDevices.read(currentProjectId) : new Set<string>());
   };
 
-  createEffect(reload);
+  createEffect(projectId, () => untrack(reload));
 
   const setCollapsed = (identity: DeviceCollapseIdentity, collapsed: boolean) => {
     reload();
-    const next = new Set(collapsedIdentities());
+    const next = new Set(current);
 
     if (collapsed) next.add(identity);
     else next.delete(identity);
-    setCollapsedIdentities(next);
+    publish(next);
     const currentProjectId = projectId();
 
     if (currentProjectId) collapsedDevices.write(currentProjectId, next);
@@ -76,7 +83,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
   return {
     isCollapsed,
     setCollapsed,
-    toggle: (identity: DeviceCollapseIdentity) => setCollapsed(identity, !collapsedIdentities().has(identity)),
+    toggle: (identity: DeviceCollapseIdentity) => setCollapsed(identity, !current.has(identity)),
   };
 }
 
@@ -89,14 +96,14 @@ type DeviceCollapseContextValue = {
   nativeLimit?: Accessor<string | undefined>;
 };
 
-const DeviceCollapseContext = createContext<DeviceCollapseContextValue>();
+const DeviceCollapseContext = createContext<DeviceCollapseContextValue | null>(null);
 
 export const useDeviceCollapseContext = () => useContext(DeviceCollapseContext);
 
 export const DeviceCollapseProvider: ParentComponent<DeviceCollapseContextValue> = (props) => (
-  <DeviceCollapseContext.Provider value={props}>
+  <DeviceCollapseContext value={props}>
     {props.children}
-  </DeviceCollapseContext.Provider>
+  </DeviceCollapseContext>
 );
 
 const stableHash = (value: string) => {

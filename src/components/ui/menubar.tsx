@@ -1,17 +1,15 @@
 import type {
   Accessor,
   Component,
-  ComponentProps,
-  JSX,
-  ValidComponent,
 } from "solid-js";
+import type { ComponentProps, JSX, ValidComponent } from "@solidjs/web";
 import {
   createContext,
   createEffect,
   createMemo,
   createSignal,
-  mergeProps,
-  splitProps,
+  merge,
+  omit,
   untrack,
   useContext,
 } from "solid-js";
@@ -34,16 +32,12 @@ type MenubarAnimationContextValue = {
 const MenubarAnimationContext = createContext<MenubarAnimationContextValue>();
 const MenubarMenuValueContext = createContext<Accessor<string | undefined>>();
 
-const useMenubarAnimation = () => {
-  const context = useContext(MenubarAnimationContext);
-
-  return assertDefined(context, "MenubarContent must be used within Menubar.");
-};
+const useMenubarAnimation = () => useContext(MenubarAnimationContext);
 
 const useMenubarMenuValue = () => {
   const value = useContext(MenubarMenuValueContext);
 
-  return () => assertDefined(value?.(), "MenubarContent must be used within MenubarMenu.");
+  return () => assertDefined(value(), "MenubarContent must be used within MenubarMenu.");
 };
 
 type MenubarProps = MenubarPrimitive.MenubarRootProps & {
@@ -63,14 +57,17 @@ const Menubar: Component<MenubarProps> = (props) => {
     string | null | undefined
   >(initialValue);
 
-  const [local, rest] = splitProps(props, ["onValueChange"]);
+  const rest = omit(props, "onValueChange");
 
-  createEffect(() => {
-    if (props.value !== undefined) setCurrentValue(props.value);
-  });
+  createEffect(
+    () => props.value,
+    (value) => {
+      if (value !== undefined) setCurrentValue(value);
+    },
+  );
 
   return (
-    <MenubarAnimationContext.Provider value={{ animation }}>
+    <MenubarAnimationContext value={{ animation }}>
       <MenubarPrimitive.Root
         {...rest}
         onValueChange={(nextValue) => {
@@ -80,21 +77,21 @@ const Menubar: Component<MenubarProps> = (props) => {
             value: nextValue ?? previousValue,
           });
           setCurrentValue(nextValue);
-          local.onValueChange?.(nextValue);
+          props.onValueChange?.(nextValue);
         }}
       />
-    </MenubarAnimationContext.Provider>
+    </MenubarAnimationContext>
   );
 };
 
 const MenubarMenu: Component<MenubarPrimitive.MenubarMenuProps> = (props) => {
-  const mergedProps = mergeProps({ gutter: 8, shift: -4 }, props);
+  const mergedProps = merge({ gutter: 8, shift: -4 }, props);
   const value = createMemo(() => props.value);
 
   return (
-    <MenubarMenuValueContext.Provider value={value}>
+    <MenubarMenuValueContext value={value}>
       <MenubarPrimitive.Menu {...mergedProps} />
-    </MenubarMenuValueContext.Provider>
+    </MenubarMenuValueContext>
   );
 };
 
@@ -109,14 +106,14 @@ function MenubarTrigger<T extends ValidComponent = "button">(
 function MenubarTrigger(
   props: PolymorphicProps<ValidComponent, MenubarTriggerProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
   return (
     <MenubarPrimitive.Trigger
       class={cn(
         "inline-flex items-center justify-center gap-2 whitespace-nowrap text-sm font-medium !cursor-pointer focus-visible:outline-none disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:size-4 [&_svg]:shrink-0",
         "h-9 px-3 text-xs hover:bg-accent hover:text-accent-foreground data-[expanded]:bg-accent data-[expanded]:text-accent-foreground",
-        local.class,
+        props.class,
       )}
       {...rest}
     />
@@ -136,7 +133,7 @@ function MenubarContent<T extends ValidComponent = "div">(
 function MenubarContent(
   props: PolymorphicProps<ValidComponent, MenubarContentProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
   const animation = useMenubarAnimation();
   const menuValue = useMenubarMenuValue();
 
@@ -152,7 +149,7 @@ function MenubarContent(
           shouldAnimate()
             ? "origin-[var(--kb-menu-content-transform-origin)] data-[expanded]:animate-in data-[closed]:animate-out data-[closed]:fade-out-0 data-[expanded]:fade-in-0 data-[closed]:zoom-out-95 data-[expanded]:zoom-in-95 data-[placement=bottom]:slide-in-from-top-2 data-[placement=left]:slide-in-from-right-2 data-[placement=right]:slide-in-from-left-2 data-[placement=top]:slide-in-from-bottom-2"
             : "data-[closed]:hidden",
-          local.class,
+          props.class,
         )}
         {...rest}
       />
@@ -174,14 +171,14 @@ function MenubarItem<T extends ValidComponent = "div">(
 function MenubarItem(
   props: PolymorphicProps<ValidComponent, MenubarItemProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, rest] = splitProps(props, ["class", "inset"]);
+  const rest = omit(props, "class", "inset");
 
   return (
     <MenubarPrimitive.Item
       class={cn(
         "relative flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 leading-5 outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0",
-        local.inset && "pl-6",
-        local.class,
+        props.inset && "pl-6",
+        props.class,
       )}
       {...rest}
     />
@@ -191,11 +188,11 @@ function MenubarItem(
 ;
 
 const MenubarShortcut: Component<ComponentProps<"span">> = (props) => {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
   return (
     <span
-      class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-[11px] tracking-wide opacity-60", local.class)}
+      class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-[11px] tracking-wide opacity-60", props.class)}
       {...rest}
     />
   );
@@ -212,11 +209,11 @@ function MenubarSeparator<T extends ValidComponent = "hr">(
 function MenubarSeparator(
   props: PolymorphicProps<ValidComponent, MenubarSeparatorProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
   return (
     <MenubarPrimitive.Separator
-      class={cn("-mx-0.5 my-0.5 h-px bg-muted", local.class)}
+      class={cn("-mx-0.5 my-0.5 h-px bg-muted", props.class)}
       {...rest}
     />
   );

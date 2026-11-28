@@ -693,7 +693,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                   )}
                   type="button"
                   disabled={muteDisabled}
-                  aria-pressed={!muted()}
+                  aria-pressed={!muted() ? "true" : "false"}
                   aria-label={
                     muted()
                       ? `Activate track ${trackNumber()}`
@@ -724,7 +724,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                         : "border-border bg-timeline-surface-muted text-foreground hover:bg-muted",
                   )}
                   type="button"
-                  aria-pressed={soloed()}
+                  aria-pressed={soloed() ? "true" : "false"}
                   aria-label={
                     soloed()
                       ? `Unsolo track ${trackNumber()}`
@@ -757,7 +757,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                         : "border-red-500 text-red-400 hover:bg-red-500/20",
                   )}
                   type="button"
-                  aria-pressed={isRecordArmed()}
+                  aria-pressed={isRecordArmed() ? "true" : "false"}
                   aria-label={
                     isRecordArmed()
                       ? `Disarm track ${trackNumber()} for recording`
@@ -848,8 +848,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
 
               </div>
               <div
-                class="contents"
-                classList={{ hidden: track.collapsed }}
+                class={["contents", { hidden: track.collapsed }]}
               >
                 <button
                   class={cn(
@@ -859,7 +858,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                       : "border-border bg-timeline-surface-muted text-red-300 hover:bg-red-500/20",
                   )}
                   type="button"
-                  aria-pressed={displayedAutomationVisible()}
+                  aria-pressed={displayedAutomationVisible() ? "true" : "false"}
                   aria-label={
                     displayedAutomationVisible()
                       ? `Hide automation for track ${trackNumber()}`
@@ -995,8 +994,7 @@ const TrackSidebarRow: Component<TrackSidebarRowProps> = (props) => {
                 >
                   <div class="flex items-center gap-1 overflow-hidden">
                     <span
-                      class="h-1.5 w-1.5 shrink-0 rounded-full bg-red-500"
-                      classList={{ "opacity-30": !envelope() }}
+                      class={["h-1.5 w-1.5 shrink-0 rounded-full bg-red-500", { "opacity-30": !envelope() }]}
                     />
                     <span class="truncate">Automation</span>
                   </div>

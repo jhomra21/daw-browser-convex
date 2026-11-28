@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, onSettled, untrack, type Accessor } from "solid-js";
 import type { TimelineBrowserTab, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import {
   clampTimelineLeftBrowserWidth,
@@ -40,7 +40,7 @@ export const useTimelineLeftBrowserState = (
 
   const saveSnapshot = () => saveTimelineLeftBrowserState(scopeId(), untrack(readSnapshot));
 
-  onMount(() => {
+  onSettled(() => {
     const element = options.getContainerElement();
 
     if (!element) return;
@@ -54,39 +54,46 @@ export const useTimelineLeftBrowserState = (
     });
 
     observer.observe(element);
-    onCleanup(() => observer.disconnect());
+
+    return () => observer.disconnect();
   });
 
-  createEffect(on(scopeId, () => {
-    const loaded = loadTimelineLeftBrowserState(
-      scopeId(),
-      untrack(containerWidthPx),
-      untrack(options.rightSidebarWidthPx),
-    );
+  createEffect(
+    scopeId,
+    () => untrack(() => {
+      const loaded = loadTimelineLeftBrowserState(
+        scopeId(),
+        untrack(containerWidthPx),
+        untrack(options.rightSidebarWidthPx),
+      );
 
-    setOpenSignal(loaded.open);
-    setWidthPx(loaded.widthPx);
-    setActiveTabSignal(loaded.activeTab);
-    setSearchQueryByTab(loaded.searchQueryByTab);
-    setScrollTopByTab(loaded.scrollTopByTab);
-    setTreeExpansionByTab(loaded.treeExpansionByTab);
-  }));
+      setOpenSignal(loaded.open);
+      setWidthPx(loaded.widthPx);
+      setActiveTabSignal(loaded.activeTab);
+      setSearchQueryByTab(loaded.searchQueryByTab);
+      setScrollTopByTab(loaded.scrollTopByTab);
+      setTreeExpansionByTab(loaded.treeExpansionByTab);
+    }),
+  );
 
-  createEffect(() => {
-    const nextWidth = clampWidth(widthPx());
-    setWidthPx((current) => {
-      if (current === nextWidth) return current;
+  createEffect(
+    () => clampWidth(widthPx()),
+    (nextWidth) => {
+      setWidthPx((current) => {
+        if (current === nextWidth) return current;
 
-      return nextWidth;
-    });
-  });
+        return nextWidth;
+      });
+    },
+  );
 
-  onMount(() => {
+  onSettled(() => {
     window.addEventListener("pagehide", saveSnapshot);
-    onCleanup(() => {
+
+    return () => {
       saveSnapshot();
       window.removeEventListener("pagehide", saveSnapshot);
-    });
+    };
   });
 
   const setOpen = (nextOpen: boolean) => {

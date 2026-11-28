@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, flush } from 'solid-js'
+import { render } from '@solidjs/web'
 
 import EffectShell from '~/components/effects/EffectShell'
 import { DeviceCollapseProvider } from './create-effects-panel-device-collapse'
@@ -37,12 +37,16 @@ scenarios['expanded-device-offers-fold'] =
 
 fold()?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
 
+flush()
+
 scenarios['fold-click-hides-the-body-and-offers-unfold'] =
   fold()?.getAttribute('aria-label') === 'Unfold device'
   && fold()?.getAttribute('aria-expanded') === 'false'
   && content()?.hasAttribute('hidden') === true
 
 fold()?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+
+flush()
 
 scenarios['unfold-click-restores-the-body'] =
   fold()?.getAttribute('aria-expanded') === 'true' && content()?.hasAttribute('hidden') === false
@@ -51,6 +55,8 @@ scenarios['no-limit-shows-no-notice'] = notice() === null
 
 setNativeLimit('The native engine cannot carry this routing yet.')
 
+flush()
+
 scenarios['native-limit-is-a-neutral-status-with-the-reason'] =
   notice()?.textContent === 'Not supported yet'
   && notice()?.getAttribute('title')?.includes('The native engine cannot carry this routing yet.') === true
@@ -58,11 +64,15 @@ scenarios['native-limit-is-a-neutral-status-with-the-reason'] =
 
 setCollapsed(true)
 
+flush()
+
 scenarios['folded-device-hides-the-notice'] = notice() === null
 
 const title = host.querySelector('[data-effect-shell-header] > div span')
 
 title?.dispatchEvent(new MouseEvent('dblclick', { bubbles: true, cancelable: true }))
+
+flush()
 
 scenarios['double-click-on-the-title-unfolds'] = fold()?.getAttribute('aria-expanded') === 'true'
 

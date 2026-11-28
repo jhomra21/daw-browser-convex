@@ -1,4 +1,4 @@
-import { createSignal, onCleanup, onMount } from 'solid-js'
+import { createSignal, onCleanup, onSettled } from 'solid-js'
 
 export const useDevicePixelRatio = () => {
   const [devicePixelRatio, setDevicePixelRatio] = createSignal(1)
@@ -14,7 +14,7 @@ export const useDevicePixelRatio = () => {
     mediaQuery.addEventListener('change', listener)
   }
 
-  onMount(arm)
+  onSettled(arm)
   onCleanup(() => {
     mediaQuery?.removeEventListener('change', listener ?? (() => undefined))
   })

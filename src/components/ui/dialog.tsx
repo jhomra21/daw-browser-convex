@@ -1,5 +1,6 @@
-import type { Component, ComponentProps, JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { Component } from "solid-js"
+import type { ComponentProps, JSX, ValidComponent } from "@solidjs/web"
+import { omit } from "solid-js"
 
 import * as DialogPrimitive from "@kobalte/core/dialog"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -9,7 +10,7 @@ import { cn } from "~/lib/utils"
 const Dialog = DialogPrimitive.Root
 
 const DialogPortal: Component<DialogPrimitive.DialogPortalProps> = (props) => {
-  const [, rest] = splitProps(props, ["children"])
+  const rest = omit(props, "children")
 
   return (
     <DialogPrimitive.Portal {...rest}>
@@ -29,7 +30,7 @@ function DialogOverlay<T extends ValidComponent = "div">(
 function DialogOverlay(
   props: PolymorphicProps<ValidComponent, DialogOverlayProps<ValidComponent>>,
 ): JSX.Element {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <DialogPrimitive.Overlay
@@ -55,7 +56,7 @@ function DialogContent<T extends ValidComponent = "div">(
 function DialogContent(
   props: PolymorphicProps<ValidComponent, DialogContentProps<ValidComponent>>,
 ): JSX.Element {
-  const [, rest] = splitProps(props, ["class", "children", "showCloseButton"])
+  const rest = omit(props, "class", "children", "showCloseButton")
 
   return (
     <DialogPortal>
@@ -92,7 +93,7 @@ function DialogContent(
 }
 
 const DialogHeader: Component<ComponentProps<"div">> = (props) => {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <div class={cn("flex flex-col space-y-1.5 text-center sm:text-left", props.class)} {...rest} />
@@ -100,7 +101,7 @@ const DialogHeader: Component<ComponentProps<"div">> = (props) => {
 }
 
 const DialogFooter: Component<ComponentProps<"div">> = (props) => {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <div
@@ -120,7 +121,7 @@ function DialogTitle<T extends ValidComponent = "h2">(
 function DialogTitle(
   props: PolymorphicProps<ValidComponent, DialogTitleProps<ValidComponent>>,
 ): JSX.Element {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <DialogPrimitive.Title
@@ -141,7 +142,7 @@ function DialogDescription<T extends ValidComponent = "p">(
 function DialogDescription(
   props: PolymorphicProps<ValidComponent, DialogDescriptionProps<ValidComponent>>,
 ): JSX.Element {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <DialogPrimitive.Description

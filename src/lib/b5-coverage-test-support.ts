@@ -1,6 +1,7 @@
 import type { Track } from "@daw-browser/timeline-core/types";
 import { parseSharedTimelineOperation, type SharedTimelineOperation } from "@daw-browser/shared";
-import { createComponent, createEffect, createRoot, untrack } from "solid-js";
+import { createComponent, createEffect, untrack } from "solid-js";
+import { createFlushedRoot as createRoot, mountElement } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { convexApi, convexClient, useConvexQuery } from "~/lib/convex";
 import type { FunctionReturnType } from "convex/server";
@@ -142,7 +143,9 @@ export const b5SubscribeEffects = (
   read: () => Promise<FunctionReturnType<typeof convexApi.effects.listByRoom>>,
   publishRows: (rows: FunctionReturnType<typeof convexApi.effects.listByRoom>) => void,
 ) => {
-  const transport = b5EffectsSubscription(read), client = new QueryClient();
+  const transport = b5EffectsSubscription(read);
+  // Offline would pause the first fetch, and a paused query holds its data read until it resolves.
+  const client = new QueryClient({ defaultOptions: { queries: { networkMode: "always" } } });
   const wasOnline = onlineManager.isOnline();
   onlineManager.setOnline(false);
   let dispose = () => {};
@@ -150,16 +153,17 @@ export const b5SubscribeEffects = (
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       const query = untrack(() => useConvexQuery(convexApi.effects.listByRoom, () => ({ projectId }),
         () => ["b5-subscription", projectId]));
 
-      createEffect(() => { const rows = query.data;
-
- if (rows) publishRows(rows); });
+      createEffect(
+        () => query.data,
+        (rows) => { if (rows) publishRows(rows); },
+      );
 
       return null;
-    } });
+    } }));
   });
 
   return {

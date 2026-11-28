@@ -1,4 +1,4 @@
-import { For, type Component, createEffect, createMemo, createSignal, onCleanup, untrack } from 'solid-js'
+import { For, type Component, createEffect, createMemo, createSignal, untrack } from 'solid-js'
 import { isStretchQualityWarning, type AudioEngine, type AudioStretchRenderState } from '@daw-browser/audio-engine/audio-engine'
 import type { AudioWarp, Clip } from '@daw-browser/timeline-core/types'
 import { dbToLinearGain, linearGainToDb } from '@daw-browser/shared'
@@ -65,33 +65,42 @@ const SampleClipPanel: Component<SampleClipPanelProps> = (props) => {
 
   const syncBpmState = () => setBpmState(props.sample.bpmDetection.getState(props.sample.clip.id))
 
-  createEffect(() => {
-    if (!stretchEnabled()) {
-      setRenderState({ status: 'idle' })
+  createEffect(
+    () => stretchEnabled() ? { audioEngine: props.audioEngine, clip: props.sample.clip } : undefined,
+    (stretch) => {
+      if (!stretch) {
+        setRenderState({ status: 'idle' })
 
-      return
-    }
+        return
+      }
 
-    props.audioEngine.ensureStretchRender(props.sample.clip)
-    setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip))
-  })
+      stretch.audioEngine.ensureStretchRender(stretch.clip)
+      setRenderState(stretch.audioEngine.getStretchRenderState(stretch.clip))
+    },
+  )
 
-  createEffect(() => {
-    const unsubscribe = props.audioEngine.subscribeStretchRenderState(() => {
-      untrack(() => setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip)))
-    })
+  createEffect(
+    () => props.audioEngine,
+    (audioEngine) => {
+      const unsubscribe = audioEngine.subscribeStretchRenderState(() => {
+        untrack(() => setRenderState(props.audioEngine.getStretchRenderState(props.sample.clip)))
+      })
 
-    onCleanup(unsubscribe)
-  })
+      return unsubscribe
+    },
+  )
 
-  createEffect(() => {
-    syncBpmState()
-  })
+  createEffect(
+    () => props.sample.bpmDetection.getState(props.sample.clip.id),
+    (bpmState) => {
+      setBpmState(bpmState)
+    },
+  )
 
-  createEffect(() => {
-    const unsubscribe = props.sample.bpmDetection.subscribe(syncBpmState)
-    onCleanup(unsubscribe)
-  })
+  createEffect(
+    () => props.sample.bpmDetection,
+    (bpmDetection) => untrack(() => bpmDetection.subscribe(syncBpmState)),
+  )
 
   const commit = (patch: Partial<AudioWarp>) => {
     const sample = props.sample

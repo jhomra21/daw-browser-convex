@@ -1,4 +1,4 @@
-import { createEffect, createSignal, on, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { FunctionReturnType } from "convex/server";
 import {
   type ArpeggiatorParams,
@@ -282,19 +282,31 @@ export function useEffectsPanelAudioSync(
 
   onCleanup(readinessOwner.dispose);
 
-  createEffect(on(options.projectId, () => readinessOwner.projectChanged()));
+  createEffect(
+    options.projectId,
+    () => {
+      readinessOwner.projectChanged()
+    },
+  );
 
-  createEffect(() => {
-    const projectId = options.projectId();
+  createEffect(
+    () => {
+      const projectId = options.projectId();
 
-    if (!projectId || isLocalId("project", projectId)) return;
-    readinessOwner.updateRemote(
-      projectId,
-      options.roomEffects(),
-      options.roomEffectsStatus(),
-      options.roomEffectsError(),
-    );
-  });
+      if (!projectId || isLocalId("project", projectId)) return undefined;
+
+      return {
+        projectId,
+        rows: options.roomEffects(),
+        status: options.roomEffectsStatus(),
+        error: options.roomEffectsError(),
+      };
+    },
+    (remote) => {
+      if (!remote) return;
+      readinessOwner.updateRemote(remote.projectId, remote.rows, remote.status, remote.error);
+    },
+  );
 
   let syncedTrackIds = new Set<Track["id"]>();
   let syncedProjectId: string | null = null;
@@ -318,29 +330,40 @@ export function useEffectsPanelAudioSync(
     void audioEngine.setMasterFxInstances([]).catch(() => undefined);
   };
 
+  createEffect(
+    () => ({ audioEngine: options.audioEngine(), clear: options.usesLegacyAudioEngine() && !options.projectId() }),
+    ({ audioEngine, clear }) => {
+      if (!clear) return;
+      clearSyncedTrackState(audioEngine, syncedTrackIds);
+      clearSyncedMasterState(audioEngine);
+      syncedTrackIds = new Set();
+      syncedProjectId = null;
+    },
+  );
+
+  // Split, so the rows apply after the readiness update above: applies run in creation order, and a tracked effect's body does not wait for them.
   createEffect(() => {
-    const audioEngine = options.audioEngine();
-
-    if (!options.usesLegacyAudioEngine()) return;
-    const projectId = options.projectId();
-
-    if (projectId) return;
-    clearSyncedTrackState(audioEngine, syncedTrackIds);
-    clearSyncedMasterState(audioEngine);
-    syncedTrackIds = new Set();
-    syncedProjectId = null;
-  });
-
-  createEffect(function reconcileEffectsRows() {
     const audioEngine = options.audioEngine();
     const usesLegacyAudioEngine = options.usesLegacyAudioEngine();
     const projectId = options.projectId();
+    // After a project switch the view still holds the previous project's rows until its owner publishes again.
+    const localView = projectId && isLocalId("project", projectId) ? localEffectsView.view() : undefined;
+    const currentView = localView?.projectId === projectId ? localView : undefined;
 
     const effects: SyncedEffectRow[] | undefined = projectId && isLocalId("project", projectId)
-      ? localEffectsView.view()?.rows
+      ? currentView?.rows
       : options.roomEffects();
 
     const tracks = options.tracks();
+
+    return {
+      audioEngine, usesLegacyAudioEngine, projectId, effects, tracks,
+      sidechainRoutes: effects !== undefined && projectId && usesLegacyAudioEngine ? options.sidechainRoutes() : [],
+      remoteStatus: options.roomEffectsStatus(),
+      remoteError: options.roomEffectsError(),
+      publicationId: currentView?.publicationId,
+    };
+  }, function reconcileEffectsRows({ audioEngine, usesLegacyAudioEngine, projectId, effects, tracks, sidechainRoutes, remoteStatus, remoteError, publicationId }) {
     const currentTrackIds = new Set(tracks.map((track) => track.id));
 
     if (effects === undefined) {
@@ -394,8 +417,12 @@ export function useEffectsPanelAudioSync(
     }
 
     const acknowledgeRows = () => {
-      if (isLocalId("project", projectId)) localEffectsView.acknowledge(localEffectsView.view()?.publicationId);
-      else readinessOwner.markRowsProcessed(projectId);
+      if (isLocalId("project", projectId)) localEffectsView.acknowledge(publicationId);
+      else {
+        // The readiness update above can apply after these rows; the owner must hold their status before they are marked.
+        readinessOwner.updateRemote(projectId, effects, remoteStatus, remoteError);
+        readinessOwner.markRowsProcessed(projectId);
+      }
     };
 
     if (!usesLegacyAudioEngine) {
@@ -407,7 +434,7 @@ export function useEffectsPanelAudioSync(
     }
 
     clearSyncedTrackState(audioEngine, staleTrackIds);
-    audioEngine.setExternalSidechainRoutes(options.sidechainRoutes());
+    audioEngine.setExternalSidechainRoutes(sidechainRoutes);
 
     syncedTrackIds = new Set(currentTrackIds);
     syncedProjectId = projectId;
@@ -418,9 +445,12 @@ export function useEffectsPanelAudioSync(
 
   const spectrumSubscription = createSpectrumSubscriptionOwner(setSpectrum);
   spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
-  createEffect(() => {
-    spectrumSubscription.update(options.isOpen(), options.spectrumProvider?.(), options.currentTargetId());
-  });
+  createEffect(
+    () => ({ isOpen: options.isOpen(), provider: options.spectrumProvider?.(), targetId: options.currentTargetId() }),
+    ({ isOpen, provider, targetId }) => {
+      spectrumSubscription.update(isOpen, provider, targetId);
+    },
+  );
   onCleanup(spectrumSubscription.dispose);
 
   return {

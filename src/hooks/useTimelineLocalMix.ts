@@ -1,4 +1,4 @@
-import { createEffect, on, type Accessor } from 'solid-js'
+import { createEffect, type Accessor } from 'solid-js'
 
 import { projectPreferenceStorage } from '~/lib/project-preference-storage'
 import {
@@ -69,12 +69,15 @@ export function useTimelineLocalMix(
     },
   })
 
-  createEffect(on(() => ({
-    writableTrackIds: options.writableTrackIds(),
-    localMix: persistedState.value(),
-  }), ({ writableTrackIds }) => {
-    persistedState.setValue((current) => stripSharedTrackLocalOverrides(current, writableTrackIds))
-  }))
+  createEffect(
+    () => ({
+      writableTrackIds: options.writableTrackIds(),
+      localMix: persistedState.value(),
+    }),
+    ({ writableTrackIds }) => {
+      persistedState.setValue((current) => stripSharedTrackLocalOverrides(current, writableTrackIds))
+    },
+  )
 
   return {
     byTrackId: persistedState.value,

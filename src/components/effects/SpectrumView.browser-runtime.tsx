@@ -1,5 +1,5 @@
-import { createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createSignal, flush } from 'solid-js'
+import { render } from '@solidjs/web'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 
 import SpectrumView from '~/components/effects/SpectrumView'
@@ -38,8 +38,12 @@ const run = async () => {
   scenarios['both-views-render-a-curve-and-a-spectrogram-canvas'] =
     canvases().map((canvas) => canvas.getAttribute('aria-label')).join() === 'Spectrum,Spectrogram'
 
-  // More frames than the ring holds: it must scroll, not grow.
-  for (let index = 0; index < 400; index++) setFrame(toneFrame(1000))
+  // More frames than the ring holds: it must scroll, not grow. Each frame is its own delivery, so each is flushed to the view.
+  for (let index = 0; index < 400; index++) {
+    setFrame(toneFrame(1000))
+    flush()
+  }
+
   await nextFrame()
 
   const spectrogram = canvases()[1]
@@ -69,7 +73,9 @@ const run = async () => {
     Math.abs(brightestRow(1) - expectedRow) < tolerance
 
   setFrame(toneFrame(100))
+  flush()
   setFrame(toneFrame(100))
+  flush()
   await nextFrame()
   const lowRow = spectrogram.height * (1 - Math.log(100 / 20) / Math.log(1000))
   scenarios['a-new-tone-scrolls-in-on-the-right-while-the-old-one-stays-left'] =
@@ -97,8 +103,13 @@ const run = async () => {
   scenarios['a-null-frame-clears-the-history'] = brightness(spectrogram.width - 2, Math.round(lowRow)) < 60
     && brightness(1, Math.round(expectedRow)) < 60 && accentPixels() === 0
   setFrame(toneFrame(1000))
+  flush()
 
-  for (let index = 0; index < 150; index++) setFrame(toneFrame(3000 + index * 20))
+  for (let index = 0; index < 150; index++) {
+    setFrame(toneFrame(3000 + index * 20))
+    flush()
+  }
+
   await nextFrame()
   scenarios['a-screenshot-scene-was-rendered'] = screenshotReady === 2
 

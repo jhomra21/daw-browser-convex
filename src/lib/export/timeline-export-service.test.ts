@@ -1,7 +1,6 @@
 import "fake-indexeddb/auto"
 import { expect, test } from "bun:test"
-import { untrack } from "solid-js"
-import { createMutable, createStore } from "solid-js/store"
+import { createStore, untrack } from "solid-js"
 import {
   AUDIO_EFFECT_CONTRACTS,
   automationTargetKey,
@@ -376,13 +375,13 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
     })),
   })
 
-  const routes = createMutable([{
+  const [routes] = createStore([{
     sourceTrackId: "track-solid-runtime",
     targetTrackId: "track-solid-runtime",
     effectInstanceId: "eq-solid-runtime",
   }])
 
-  const automation = createMutable([{
+  const [automation] = createStore([{
     targetKey: "track:solid-runtime",
     envelope: {
       id: "automation-solid-runtime",
@@ -427,7 +426,11 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
     getMasterVolume: () => 1,
     getProjectId: () => "cloud-solid-runtime",
     getUserId: () => "user-1",
-    getCloudRenderRows: () => createMutable({ effects: [], automationEnvelopes: [] }),
+    getCloudRenderRows: () => {
+      const [rows] = createStore({ effects: [], automationEnvelopes: [] })
+
+      return rows
+    },
     getAutomationPatches: () => automation,
     getEffectsExportSnapshot: () => ({
       awaitInstrumentReadiness: async () => undefined,

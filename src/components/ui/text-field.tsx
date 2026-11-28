@@ -1,7 +1,7 @@
-import type { JSX, ValidComponent } from "solid-js"
-import { mergeProps, splitProps } from "solid-js"
+import type { JSX, ValidComponent } from "@solidjs/web"
+import { merge, omit } from "solid-js"
 
-import type { PolymorphicProps } from "@kobalte/core"
+import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import * as TextFieldPrimitive from "@kobalte/core/text-field"
 import { cva } from "class-variance-authority"
 
@@ -18,9 +18,9 @@ function TextField<T extends ValidComponent = "div">(
 function TextField(
   props: PolymorphicProps<ValidComponent, TextFieldRootProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, others] = splitProps(props, ["class"])
+  const others = omit(props, "class")
 
-  return <TextFieldPrimitive.Root class={cn("flex flex-col gap-1", local.class)} {...others} />
+  return <TextFieldPrimitive.Root class={cn("flex flex-col gap-1", props.class)} {...others} />
 }
 
 type TextFieldInputProps<T extends ValidComponent = "input"> =
@@ -57,15 +57,15 @@ function TextFieldInput<T extends ValidComponent = "input">(
 function TextFieldInput(
   rawProps: PolymorphicProps<ValidComponent, TextFieldInputProps<ValidComponent>>,
 ): JSX.Element {
-  const props = mergeProps({ type: "text" }, rawProps)
-  const [local, others] = splitProps(props, ["type", "class"])
+  const props = merge({ type: "text" }, rawProps)
+  const others = omit(props, "type", "class")
 
   return (
     <TextFieldPrimitive.Input
-      type={local.type}
+      type={props.type}
       class={cn(
         "flex h-10 w-full border border-input bg-transparent px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 data-[invalid]:border-error-foreground data-[invalid]:text-error-foreground",
-        local.class
+        props.class
       )}
       {...others}
     />
@@ -97,9 +97,9 @@ function TextFieldLabel<T extends ValidComponent = "label">(
 function TextFieldLabel(
   props: PolymorphicProps<ValidComponent, TextFieldLabelProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, others] = splitProps(props, ["class"])
+  const others = omit(props, "class")
 
-  return <TextFieldPrimitive.Label class={cn(labelVariants(), local.class)} {...others} />
+  return <TextFieldPrimitive.Label class={cn(labelVariants(), props.class)} {...others} />
 }
 
 export {

@@ -1,5 +1,5 @@
 import { createFileRoute } from '@tanstack/solid-router'
-import { createSignal, onCleanup, onMount } from 'solid-js'
+import { createSignal, onSettled } from 'solid-js'
 import { Dashboard } from '~/components/dashboard/dashboard'
 import Timeline from '~/components/Timeline'
 import { isLocalId } from '@daw-browser/shared'
@@ -22,14 +22,15 @@ function Index() {
     return readLocationSearchParam('projectId')
   }
 
-  onMount(() => {
+  onSettled(() => {
     const syncLocationState = () => {
       setProjectId(readProjectIdFromLocation())
       setShareToken(readLocationSearchParam('shareToken'))
     }
 
     syncLocationState()
-    onCleanup(subscribeLocationSearch(syncLocationState))
+
+    return subscribeLocationSearch(syncLocationState)
   })
 
   const openProject = (nextProjectId: string) => {

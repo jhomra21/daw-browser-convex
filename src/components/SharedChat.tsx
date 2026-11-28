@@ -41,11 +41,14 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     return Array.isArray(messagesQ.data) ? messagesQ.data : []
   }
 
-  createEffect(() => {
-    if (props.isOpen) {
-      queueMicrotask(() => { try { textareaRef?.focus() } catch {} })
-    }
-  })
+  createEffect(
+    () => props.isOpen,
+    (isOpen) => {
+      if (isOpen) {
+        queueMicrotask(() => { try { textareaRef?.focus() } catch {} })
+      }
+    },
+  )
 
   function scrollToBottom() {
     const el = bottomAnchorRef
@@ -55,11 +58,18 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     try { el.scrollIntoView({ behavior: 'auto', block: 'end' }) } catch {}
   }
 
-  createEffect(() => {
-    if (!props.isOpen) return
-    void messages().length
-    requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
-  })
+  createEffect(
+    () => {
+      if (!props.isOpen) return false
+      void messages().length
+
+      return true
+    },
+    (shouldScroll) => {
+      if (!shouldScroll) return
+      requestAnimationFrame(() => requestAnimationFrame(() => scrollToBottom()))
+    },
+  )
 
   onCleanup(() => {
     if (rateErrorTimer) { clearTimeout(rateErrorTimer); rateErrorTimer = null }

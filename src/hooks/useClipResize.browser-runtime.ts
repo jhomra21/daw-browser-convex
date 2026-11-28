@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createRoot, createSignal, untrack } from 'solid-js'
+import { createEffect, createMemo, createRoot, createSignal, flush, untrack } from 'solid-js'
 import { ConvexClient } from 'convex/browser'
 
 import { useClipResize } from './useClipResize'
@@ -89,12 +89,30 @@ const emptyBuffers = {
 const [drafts, setDrafts] = createSignal(new Map<string, { duration?: number }>())
 const [visibleStartSec, setVisibleStartSec] = createSignal(20_000)
 let dispose = () => {}
+let projectionUpdates = 0
 
-createRoot((cleanup) => {
+const [projectId] = createSignal('cloud-project')
+const [currentSnapshot, setCurrentSnapshotSignal] = createSignal(snapshot)
+const [gridEnabled, setGridEnabledSignal] = createSignal(false)
+
+const setCurrentSnapshot = (next: TimelineSnapshot) => {
+  setCurrentSnapshotSignal(next)
+  flush()
+}
+
+const setGridEnabled = (next: boolean) => {
+  setGridEnabledSignal(next)
+  flush()
+}
+
+// The fixture drives the hook from the page, like pointer events do: each write settles before the next read.
+const dispatchWindowEvent = (event: Event) => {
+  window.dispatchEvent(event)
+  flush()
+}
+
+const { resize, resolvedTracks } = createRoot((cleanup) => {
   dispose = cleanup
-  const [projectId] = createSignal('cloud-project')
-  const [currentSnapshot, setCurrentSnapshot] = createSignal(snapshot)
-  const [gridEnabled, setGridEnabled] = createSignal(false)
 
   const resolve = (draftEditsById: Map<string, { duration?: number }>) => resolveTimelineTracks({
     projectId: currentSnapshot().projectId,
@@ -141,9 +159,8 @@ createRoot((cleanup) => {
   })
 
   const resolvedTracks = createMemo(() => resolve(drafts()))
-  createEffect(() => { resolvedTracks() })
+  createEffect(() => resolvedTracks(), () => {})
   const selection = useTimelineSelectionState({ projectId, tracks: resolvedTracks })
-  let projectionUpdates = 0
 
   const resize = useClipResize({
     tracks: committedTracks,
@@ -179,6 +196,10 @@ createRoot((cleanup) => {
     historyPush: () => {},
   })
 
+  return { resize, resolvedTracks }
+})
+
+{
   const target = document.createElement('div')
   document.body.append(target)
   target.addEventListener('pointerdown', (event) => {
@@ -198,10 +219,11 @@ createRoot((cleanup) => {
       bubbles: true,
       cancelable: true,
     }))
+    flush()
   }
 
   const moveResize = (pointerId: number, clientX: number) => {
-    window.dispatchEvent(new PointerEvent('pointermove', { pointerId, clientX }))
+    dispatchWindowEvent(new PointerEvent('pointermove', { pointerId, clientX }))
   }
 
   const readTiming = () => {
@@ -224,7 +246,7 @@ createRoot((cleanup) => {
     .find((clip) => clip.id === 'clip:5000')
 
   const projectedDuration = resolvedTarget?.duration
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 4 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 4 }))
   const initialCommittedDuration = committedDuration
   const noDraftConstraintComputations = constraintComputations - initialConstraintComputations
 
@@ -265,21 +287,21 @@ createRoot((cleanup) => {
   moveResize(5, 800)
   const reorderedTrackDuration = readTiming().duration
   const remoteConstraintComputations = constraintComputations - initialConstraintComputations
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 5 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 5 }))
   setCurrentSnapshot(snapshot)
   setGridEnabled(true)
   startResize('left', 6)
   moveResize(6, 151)
   const snappedLeftTiming = readTiming()
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 6 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 6 }))
   startResize('right', 7)
   moveResize(7, 231)
   const snappedRightTiming = readTiming()
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 7 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 7 }))
   const commitCountBeforeCancel = commitDurations.length
   startResize('right', 8)
   moveResize(8, 500)
-  window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 8 }))
+  dispatchWindowEvent(new PointerEvent('pointercancel', { pointerId: 8 }))
   const canceledTiming = readTiming()
   const cancelDidNotCommit = commitDurations.length === commitCountBeforeCancel
   const commitCountBeforeDialogEscape = commitDurations.length
@@ -299,8 +321,9 @@ createRoot((cleanup) => {
   })
 
   dialogButton.dispatchEvent(dialogEscape)
+  flush()
   const dialogEscapeNotConsumed = !dialogEscape.defaultPrevented && resize.isResizing()
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 9 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 9 }))
   dialog.remove()
 
   const dialogEscapeDoesNotCancelResize = dialogEscapeNotConsumed
@@ -314,14 +337,15 @@ createRoot((cleanup) => {
     tracks: [snapshot.tracks[1]],
     clips: snapshot.clips.filter((clip) => clip.trackId !== 'track:dense'),
   })
-  window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 10 }))
+  dispatchWindowEvent(new PointerEvent('pointerup', { pointerId: 10 }))
   const removedTrackDoesNotCommit = commitDurations.length === commitCountBeforeTrackRemoval
-  const removedTrackClearsDraft = !drafts().has('clip:5000')
+  const removedTrackClearsDraft = !untrack(drafts).has('clip:5000')
   const removedTrackEndsResize = !resize.isResizing()
   setCurrentSnapshot(snapshot)
 
   setGridEnabled(false)
   setVisibleStartSec(19_996)
+  flush()
   startResize('left', 11)
   setCurrentSnapshot({
     ...snapshot,
@@ -331,7 +355,7 @@ createRoot((cleanup) => {
   })
   moveResize(11, 250)
   const leftResizeWithRemoteNeighborStartSec = readTiming().startSec ?? 0
-  window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 11 }))
+  dispatchWindowEvent(new PointerEvent('pointercancel', { pointerId: 11 }))
 
   Object.defineProperty(window, '__clipResizeDenseResult', {
     value: {
@@ -361,4 +385,4 @@ createRoot((cleanup) => {
   dispose()
   target.remove()
   scroll.remove()
-})
+}

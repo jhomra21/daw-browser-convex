@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createRoot, createSignal } from "solid-js";
+import { createRoot, createSignal, flush } from "solid-js";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultSynthParams, createDefaultUtilityParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { Track } from "@daw-browser/timeline-core/types";
@@ -231,8 +231,10 @@ test("opens an inserted VST editor only after the matching playback rebuild and 
     expect(mounted.log).toEqual(["open:track", "sync", "capture:vst:ready", "persist:project:a:vst:ready"]);
     expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
     mounted.requests.autoOpenHandled("vst:other");
+    flush();
     expect(mounted.requests.autoOpenInstanceId()).toBe("vst:ready");
     mounted.requests.autoOpenHandled("vst:ready");
+    flush();
     expect(mounted.requests.autoOpenInstanceId()).toBeUndefined();
   } finally { mounted.dispose(); restore(); }
 });

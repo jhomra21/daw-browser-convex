@@ -1,5 +1,5 @@
-import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js"
-import { isServer } from "solid-js/web"
+import { createMemo, createRoot, createSignal, untrack, createRenderEffect, flush } from "solid-js"
+import { isServer } from "@solidjs/web"
 import { z } from "zod"
 import { replaceEqualDeep } from "@tanstack/solid-query"
 import { AudioEngine, type AudioEffectRuntimeInstance } from "@daw-browser/audio-engine/audio-engine"
@@ -318,12 +318,12 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       // Timeline.tsx observes the effective projection before any compile or
       // dispatch reads the desired order; a scope change clears membership first.
       let observed = false
-      createComputed(() => {
+      createRenderEffect(() => {
         projection()
 
-        const fx = resolveDesiredPlaybackFx({ trackFx: instrument ? { parallel: { instances: [], instrument: synthInstrument } } : {}, masterFxInstances: [], masterVolume: 1 },
+        return resolveDesiredPlaybackFx({ trackFx: instrument ? { parallel: { instances: [], instrument: synthInstrument } } : {}, masterFxInstances: [], masterVolume: 1 },
           panel.snapshotExportProjection(), undefined)
-
+      }, (fx) => {
         untrack(() => {
           if (!observed) { processorEdits.reset(); observed = true }
 
@@ -338,7 +338,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
           timeSignature: meter(), automationEnvelopes: [], masterVolume: 1, automation: [], sidechains: [],
           processorStructure: processorEdits.structure(),
         })
-      }, undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous })
+      }, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous })
 
       return { playback, panel, history, commitPath, committedGain }
     })
@@ -513,6 +513,8 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
       else if (action.kind === "meter") setMeter({ numerator: action.value ?? 7, denominator: 8 })
       else if (action.kind === "long-loop") {
         declaredLoopEnd = 60; setLoopEnd(60); setLoopEnabled(true)
+        // Timeline.tsx reconciles the loop from an effect, which runs after the writes flush.
+        flush()
         watch("long-loop", playback.updateNativeLoop())
       }
       else if (action.kind === "cheap-ack") {
@@ -609,6 +611,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         declaredLoopEnd = action.value ?? 1
 
         if (mutation !== "no-loop-end") setLoopEnd(declaredLoopEnd)
+        flush()
 
         if (playback.isNativePlaybackPrepared()) watch("loop-end", playback.updateNativeLoop())
       }
@@ -662,7 +665,7 @@ export default async function createHookFixture(output: RecordEvent, seed: numbe
         }, ...(mutation === "two-sources" && action.mode === "latest" ? [staleClip] : [])] } : track))
       } else if (action.kind === "pause") { h.domain++; ledger.resetConfirmed(); watch("pause", playback.handlePause()) }
       else if (action.kind === "seek") { h.domain++; ledger.resetConfirmed(); playback.setPlayhead(action.value ?? 0.25, untrack(tracks)) }
-      else if (action.kind === "loop") { h.domain++; ledger.resetConfirmed(); setLoopEnabled((value) => !value); watch("loop", playback.updateNativeLoop()) }
+      else if (action.kind === "loop") { h.domain++; ledger.resetConfirmed(); setLoopEnabled((value) => !value); flush(); watch("loop", playback.updateNativeLoop()) }
       else if (action.kind === "patch-mode") h.patchMode = action.mode ?? "normal"
       else if (action.kind === "loss") { h.lose(); h.endLeases() }
       else if (action.kind === "dispose") { panelDispose(); dispose(); disposed = true }

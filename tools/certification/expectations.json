@@ -16,42 +16,42 @@
   "path": "tools/certification/manifest-7a.json",
   "sha256": "efc72e432e6bf4716ac10f6971096347ca62ffbd219721544b5d03a6ab300376",
   "entries": {
-   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
+   "src/lib/desktop/native-playback-controller.ts": "35e5ea10b7333540d9a0765b898a3fe6df8a995d112ea4a705b8b9b48add66ca",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
-   "src/hooks/useTimelinePlayback.ts": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
-   "src/lib/desktop/native-playback-controller.test.ts": "3f0bdeb3be2b1d066df98f753b370261d645261519e09b8297040a7f11cfefc7",
-   "src/hooks/useTimelinePlayback.test.ts": "f014517b6a8ed9ac33486935daeb16ad4f688ff2399616f86956505e6abfbbc3",
+   "src/hooks/useTimelinePlayback.ts": "f2c739f71501f706ac87571c12e0e6c4b8062693d90532d4ab883d42985d14ab",
+   "src/lib/desktop/native-playback-controller.test.ts": "e1b7e4650627992cee0e5aaab4df51e87d5bc2b539d4be004628d8a1559e029d",
+   "src/hooks/useTimelinePlayback.test.ts": "fec2942d3ef2cf9bc4f0a686ec4426bcb0fa864db2e9b87f94026c9c1de8658f",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-waiters.ts": "87fc943ad3159603cc300de5797ccebf556d45eef2489b24022e540766147c6b",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
-   "src/components/Timeline.tsx": "c25d7d8d37d084608423071b469b379e4433bca52393f3f61c5bef0cff1be0ee",
-   "src/components/Timeline.test.ts": "3ace76f0b468af4c65cb695530a4e79e4b192074960387ff16aaefff94f3385f",
-   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "9ce4c89b9bcd2c42c6e315e64c3f14227444746b5fd3cd640c018603194f0405",
+   "src/components/Timeline.tsx": "c34e9523ad66733773f80805dea3ddee549c0bc2c2ff562d5fb56eba6e68a26d",
+   "src/components/Timeline.test.ts": "696ee6ade05492ec5cec9eb6c1912466501c73199ae8049c331393d431d3aa1d",
+   "src/lib/desktop/native-playback-lifecycle.browser.test.ts": "7b74d9bbbb913da16896efaf98ba15786cdcf11729c040176d2a8d87aefa0ea9",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
    "tools/acceptance/ae-08-processor-state-fuzz-classes.ts": "2c81dbdc18f7fd5e0af78fb6ace1231041398b4352a363ab7aa4125675104002",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "da5ce3f99aa0291e5824745f98bba8fe7272ae71d6e59b45745ec1a87e44c16f",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "906d40daeceb6ac1b1b5794616fc10489ee0d1ad55a26dca17a568de23b98a8a",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "07da8fac0157b1287ebe8a2886968e671f4de723722d00d88d93b7593ccfbc6b",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-commit.ts": null,
-   "tools/acceptance/device-control-cost.browser.test.ts": "b0157aa0300671b73cc7951eade89667872e0737f83098969a74f467476e0808",
-   "src/lib/instrument-buffer-sync.test.ts": "17aeed4e6a336d93272308fcf49f22f11efa48ca8ab6d00da153acaa337586ef",
-   "src/components/timeline/parameter-gesture-owner.ts": "6b6ee1ed625da949a06f55df690d7a50ca3f2cb6b81b47facf230e0d0abce049",
-   "src/components/timeline/create-persisted-effect-state.ts": "3331f5f47be4e672820d8a08e6d9dd71147d382b00eab3c8186b74410d945b49",
+   "tools/acceptance/device-control-cost.browser.test.ts": "f52fb5a80e4d8c01ff5fc457e7a906c77cdb94cfde31a6a91fd91a90653fe389",
+   "src/lib/instrument-buffer-sync.test.ts": "f198b72e77121b0d7dba549ffcee1afcdd0846a4e28bb66f21cc8485733cd376",
+   "src/components/timeline/parameter-gesture-owner.ts": "c1508853dec2cbcdd350b27ea5e50861e15acbe2a814f916c13bf140b46c5b48",
+   "src/components/timeline/create-persisted-effect-state.ts": "200343a8ef20a412aabdef8c0e8c057cb9e96b0b42db9487e337448de800628d",
    "src/components/timeline/create-effects-panel-state.ts": "ede8b2fc7e7a1d1d189bfaa9274d56ad86bd666de12a879ba7f5e080052abe38",
-   "src/components/timeline/create-effects-panel-controller.ts": "8506a3a20c2171015bb4a1837fadbffacae7f3b6acb6441c1d92188f217116c9",
+   "src/components/timeline/create-effects-panel-controller.ts": "978a49ecf05c163cdc05de1a87b6868361fc89179ea7592a9e1df87d3ef6f99d",
    "src/lib/portable-browser-playback-controller.ts": "6e984e3219debb419935a9e75ec76507a79afa91a42807de9a87098444292b09",
-   "src/components/effects/Sampler.tsx": "2572d8391dab1389f6ea2224270c0299700ae2f7350055068dc0204cba30476f",
+   "src/components/effects/Sampler.tsx": "068f7a3d306151b4c74c40c470f3266aeec7bd255fc03005f89f4afe3b660dd8",
    "src/components/effects/Granular.tsx": "5dc9d7ba48ecc449c4f6b99ecfca288ee8693663c40098cb9f2fa4eda5cdbf6e",
    "src/lib/when-number.ts": "3e57f1361e8651d60c0be138c61db9577c7179f689b0b47607770536e6eb44e5",
-   "tools/acceptance/device-control-cost.browser-runtime.tsx": "94458f86647d66188efa35b88abaf5e8cad9a80c0d76b17d00f7c9d71a543c06",
+   "tools/acceptance/device-control-cost.browser-runtime.tsx": "55ab790559fd0655281a2a294e24234e0491cd45fe922e7660f2c03a645147a7",
    "tools/acceptance/device-control-cost.ts": "6fa0974b6afd5f8b96e3869bc9c7dc88bbc84be01d3830d2e47bd6e2dc567345",
-   "src/hooks/useEffectsPanelAudioSync.test.ts": "0447a7a1df2b7c19965e5c2040e747eee01d863afcd0e33c764564e06a56f8f8",
+   "src/hooks/useEffectsPanelAudioSync.test.ts": "b59c7be4e86858c38c62ab84a4414f50c1423e279bb6e164dec46a4daa4e073d",
    "src/lib/portable-browser-playback-controller.test.ts": "a87d91e459b09aa0230fc9167caaca447a179e8c55eef0a4b2f038217715c443",
-   "src/components/timeline/create-persisted-effect-state.test.ts": "188a1d6d71fc57661991f3bb6ca09b326522afed8226f0dde78aa7764f36d5d9",
-   "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "f3c83aeddff4c77f0d2414832c60871f0dfd7b4e7272bc9be76352e48b33741e",
-   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
-   "src/hooks/pointer-gesture-ownership.browser.test.ts": "6a30900bf4447887d657ae17034f91e6cb3a12dcc3cea5bc4d4a3c39175ad7cb",
+   "src/components/timeline/create-persisted-effect-state.test.ts": "4015e82cc121cb819afb990b2078c06ca996e0732fcb9184592f324682c5eead",
+   "src/components/timeline/create-effects-panel-audio-effects-state.test.ts": "0da64041beda5de695b159d1652f3359119aff52097923a45ebc744adc8e3708",
+   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "e597d99243fdf4e8564b01d2de17212619bb13d7823bcb2692740ea050607d76",
+   "src/hooks/pointer-gesture-ownership.browser.test.ts": "0f21dd1b705357af71f098e18c98562c1d7c8c998c730a927a81bec01574cd60",
    "native/audio-core/src/audio_core.cpp": "b5b01c55142bae810988fc06179cf5e5bb09ef152f3d53bd6e5748c97e1bdf4e",
    "native/audio-core/include/daw/audio_core.h": "a3c9b1ed429bf9ca9c93f0b8dd9cefdc867d602c5941e575a877eb9abb3d4a44",
    "native/audio-core/tests/audio_core_test.cpp": "cdf9ca491268e000ad026b0c365c99f1ea0f88e55e8915ffb2ed9a4aee3dc711",
@@ -76,8 +76,8 @@
    "tools/performance/30-track/native-spool-wav.test.ts": "c45c841717be1dc771e1bc7327706b29357aabbc0b7c299536c24ac88becdabf",
    "src/lib/timeline-audio-import.ts": "dd7f77d2d936121551b125a6543b65eaa90de3b39717230c90a7e9e754e454ad",
    "src/lib/timeline-audio-import-metadata-only.test.ts": "6dbde94e5ca069dd0b1c253321a4542a98af58e3df001bd0c8d214a99be6206f",
-   "src/hooks/useTimelineProjectionState.test.ts": "cd0ca0446b51a8e7270527a6c42bbe4e18732bb1db464ac51d3522520b3a6648",
-   "tools/acceptance/b5c-playback-witness-support.ts": "66ac4947e85da7189372feb3714b812ffb84a3e82ac3af30a4873e1933620f10"
+   "src/hooks/useTimelineProjectionState.test.ts": "b1f79c9e42930e9bbc5f19301641cda04a54a437c9e97dfcdf9941e1df9fbab3",
+   "tools/acceptance/b5c-playback-witness-support.ts": "7a8bbae539ef9b815d86cd4c19a8f10cdca3d1275ee554ab289508bb1dcb2744"
   }
  },
  "rebase": {
@@ -126,12 +126,12 @@
  },
  "fuzzSources": {
   "controller": {
-   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
+   "src/lib/desktop/native-playback-controller.ts": "35e5ea10b7333540d9a0765b898a3fe6df8a995d112ea4a705b8b9b48add66ca",
    "src/lib/desktop/native-schedule-coordinator.ts": "702e457db755553d65eccb93693f2482c00dab6c874f08adca05bf6021d472cf",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
    "src/lib/live-processor-control.ts": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a",
-   "src/components/timeline/create-processor-edit-registry.ts": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b",
+   "src/components/timeline/create-processor-edit-registry.ts": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc",
    "src/lib/live-playback-snapshot.ts": "3a3d721a6b275cf05a36c22cae25bc239638592178d2d5ca7cded60ecd527bf5",
    "packages/audio-engine/src/native-host-wire.ts": "9bc4e20db021dae7b7b49edb06bd70bd0a8f0f7c979f518eccf3c3c07c53d7e0",
    "apps/desktop/audio-host.ts": "4f5c0d7353606f6b939cac7913f6f0a655998aa058030039d332ee60b9590156",
@@ -156,20 +156,20 @@
    "src/lib/desktop/native-parameter-events.ts": "3b0e5ba2345cc66458b9e220f82fcadf13f958d941dcac63161f10e84cdb9f37"
   },
   "hook": {
-   "src/hooks/useTimelinePlayback.ts": "2ab76f7fc23e57fad08b6f6e4b31aa9619c27d6f47ee1bc138935edfac93338e",
-   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "ce1b33ce58d065ad0be0590dc12c98ce58a895f04cf408f4ae54ab801d016e02",
-   "src/lib/desktop/native-playback-controller.ts": "3ac152bcb3f26f34e9799f0f67c2026c2fe96dd5acc5a29f930ea8a8ef162053",
+   "src/hooks/useTimelinePlayback.ts": "f2c739f71501f706ac87571c12e0e6c4b8062693d90532d4ab883d42985d14ab",
+   "src/components/timeline/create-effects-panel-audio-effects-state.ts": "e597d99243fdf4e8564b01d2de17212619bb13d7823bcb2692740ea050607d76",
+   "src/lib/desktop/native-playback-controller.ts": "35e5ea10b7333540d9a0765b898a3fe6df8a995d112ea4a705b8b9b48add66ca",
    "src/lib/local-effects.ts": "22cf5a4841c321f6ed549344b16e91fa0f4b662aba6729345d6d6bad351e2f40",
    "src/lib/desktop/native-processor-state-owner.ts": "35a4b4f16192a5460bb790954df9f398ce7a82e678713ff05dafe9f7c4c0c4cd",
    "src/lib/desktop/native-built-in-parameter-mapper.ts": "3cad9a47b30b0b4138366bf79ace341028ff48cada7e81a0329d29522ebb6dd2",
    "src/lib/live-processor-control.ts": "eb8d15eca27b7e851424b5049bd865168d8b222a611d395a02386fd366dc237a",
-   "src/components/timeline/create-processor-edit-registry.ts": "42fae08a8e2b62759fc9a9a35fa95c352ad80f744ca9bee1bb7a8452ff16df5b",
+   "src/components/timeline/create-processor-edit-registry.ts": "0229c145500f6d6bda9c7b388a43447981ffddf64e6537e06fd40836041c22bc",
    "src/components/timeline/create-timeline-effect-commit.ts": "d484104548d68392c418cb02098eebbfc0880cb18e65d3cee92fd57a557beef9",
    "tools/acceptance/ae-08-processor-state-fuzz.ts": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6",
    "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts": "da5ce3f99aa0291e5824745f98bba8fe7272ae71d6e59b45745ec1a87e44c16f",
    "tools/acceptance/ae-08-processor-state-fuzz-host.ts": "13e168d8424d5167a9b4b00d272b15826ad1a33417478ff3d28dab6c8c7f7f56",
    "tools/acceptance/ae-08-processor-state-fuzz-oracle.ts": "bee93fb827ac390ce4185a1010d3771d6b6566acf306fac8ee12c8eb10229a7b",
-   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "906d40daeceb6ac1b1b5794616fc10489ee0d1ad55a26dca17a568de23b98a8a",
+   "tools/acceptance/ae-08-processor-state-fuzz-hook.ts": "07da8fac0157b1287ebe8a2886968e671f4de723722d00d88d93b7593ccfbc6b",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts": "b235c55943deae01731def5a9b36e02ea01d2d30b0b751ed59b1ba88ee9f7fe8",
    "tools/acceptance/ae-08-processor-state-fuzz-virtual-time.ts": "ae69c66aa9da0e5d3c32a6d7173caffc59344d776b64a7ee1f6ae49e6cd39bf5",
    "tools/acceptance/ae-08-processor-state-fuzz-hook-classes.ts": "25ed91a7d31411619f743ece528f6e673b0b7cd3219fd0925378c9d34d5e2a63",
@@ -979,7 +979,7 @@
   "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step3-5/overlay-js.ts": "c3c01bbd564a9d72bcbc59181d736f204211d9a8ab3e3cc618ae83a2f0d2318e",
   "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step3-5/probe.ts": "2a479be66c2fd933464d0df723abc774fe3eaf456d3cc0f4edb734ff3d3a5a80",
   "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe.ts": "97d5104d2248a0930cdeb147a248dd75f8673adeaed61288e4b5d4d7e8eb2751",
-  "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe160-adoption.ts": "08807059ca705947ef597faa57efb58a2319e60f325db063c2ca16a744e6ddf6",
+  "/tmp/dv01-b6/rc5/tools/dv01-b6f5-step5b/probe160-adoption.ts": "001c1fd119a05a15920de0f896d6161fb7fd123df8add0004a12e14ec33ec53e",
   "/tmp/dv01-b6/rc5/tools/dv01-optA/overlay.ts": "c07a27c8390f1fbd62da9d5304fee3ca40c5acdb67571e13cbea56987b7ea774",
   "/tmp/dv01-b6/rc5/tools/dv01-p1-impl/overlay.ts": "ea1d4d35fa440fb7ccf7896c6e13db0f2a6ad54b8c3da06ef4291c6011598a95",
   "/tmp/dv01-b6/rc7/compare-b6-traces.ts": "fdbee58812f5e6b17dfe5fc145f8db47634b8134a19c635e6d4bcab934a8ad4b",
@@ -3660,7 +3660,7 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be",
+     "results.json": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
      "README.md": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
     }
@@ -3688,7 +3688,7 @@
     "kind": "dp",
     "exit": 0,
     "files": {
-     "results.json": "edb0c0d0d0d532bcb998b6e09981854e84af2ec4b7aa502ed636be15a828f1be",
+     "results.json": "c3bd7a613884da48b288be378389e8fc595916633613dfaeed211656e51162ad",
      "engine-controls.json": "8fabb5294599afb78165e7defb6d9b520f3230bc5a287e546ba76aff1fa3fe52",
      "README.md": "878e780276790d585411d7555ddc18fcf3d74d11b1f1c11b7c111ddf0194953d"
     }
@@ -4140,9 +4140,9 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
+    "logSha256": "d0d32d9bcdfc7719cbc6545ca9a1ae70ea0239e612220ee56c519860434cc273",
     "gateSha256": "c83cf025f591a6b2fb031e626a64ba0ca3433b201b0a3e1a78a6bb64d501d2cb",
-    "summarySha256": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
+    "summarySha256": "31ce8657b56b2b9a88cdadd7f21240ff73f63bc94ef81652989fab21fe901617"
    }
   },
   {
@@ -4180,21 +4180,21 @@
    "judge": {
     "kind": "campaign",
     "exit": 0,
-    "logSha256": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417",
+    "logSha256": "d0d32d9bcdfc7719cbc6545ca9a1ae70ea0239e612220ee56c519860434cc273",
     "gateSha256": "c83cf025f591a6b2fb031e626a64ba0ca3433b201b0a3e1a78a6bb64d501d2cb",
-    "summarySha256": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
+    "summarySha256": "31ce8657b56b2b9a88cdadd7f21240ff73f63bc94ef81652989fab21fe901617"
    }
   }
  ],
  "traces": {
   "controller": {
-   "treeSha256": "804697678477eeaf8ef47340dd076d6ad2e7af8d929c94ac3332a832f12f3e51",
+   "treeSha256": "250a76f01105b76c179f97bd01afd87261cfb5fb89d7b87a885c4c3b84f3aa33",
    "files": 701,
    "a": "trace-controller-a",
    "b": "trace-controller-b"
   },
   "hook": {
-   "treeSha256": "360db82e5e16c12e7aa9819bdc6f42231fcee54846787d497ceff62189980796",
+   "treeSha256": "7bfc56aa353ba93899e9ba055533d9e4e9effebfec069c357769f6c0d5f740a6",
    "files": 4459,
    "a": "trace-hook-a",
    "b": "trace-hook-b"
@@ -23047,11 +23047,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -23172,11 +23172,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -24895,7 +24895,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -25013,7 +25013,7 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -28382,8 +28382,8 @@
      "changes": [
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -32693,8 +32693,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -32756,8 +32756,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -32815,8 +32815,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'native' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33045,8 +33045,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33106,8 +33106,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -33167,8 +33167,8 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
-       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n"
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
+       "to": "        if (backend === 'portable-browser' && seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n"
       }
      ]
     },
@@ -34608,14 +34608,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 277,
       "skip": 1,
-      "fail": 3
+      "fail": 4
      },
      "fails": [
       "B6f a paused locate moves the live paused portable session to the locate",
       "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
-      "B6f2 two paused locates while the first seek is pending end at the second"
+      "B6f2 two paused locates while the first seek is pending end at the second",
+      "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
      ],
      "fuzz": null,
      "rejection": null,
@@ -36594,7 +36595,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -36659,7 +36660,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -36718,7 +36719,7 @@
      "changes": [
       {
        "file": "src/hooks/useTimelinePlayback.ts",
-       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (untrack(playheadSec) !== sec) return ensureLivePortableSession()\n",
+       "from": "    // A pending ensurePrepared answers a newer locate with the older position: seek again.\n    if (lastPublishedPlayheadSec !== sec) return ensureLivePortableSession()\n",
        "to": ""
       }
      ]
@@ -40018,14 +40019,16 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 263,
       "skip": 1,
-      "fail": 16
+      "fail": 18
      },
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
       "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+      "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+      "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
       "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
       "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
@@ -41201,14 +41204,16 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 265,
+      "pass": 263,
       "skip": 1,
-      "fail": 16
+      "fail": 18
      },
      "fails": [
       "B6f a project switch leaves a live paused portable session of the new project at the start",
       "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
       "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+      "B6f5 481 a rebuild that lands on a pending warm Play resumes that Play; one that lands after its Stop does not",
+      "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
       "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
       "B6f5 UD7p W-UD7p-2 a note edit while paused is adopted in place and Play resumes the same session",
       "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session",
@@ -44705,9 +44710,9 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 225,
+      "pass": 224,
       "skip": 1,
-      "fail": 56
+      "fail": 57
      },
      "fails": [
       "B6d2 a paused structural change requested while the pause is pending is not dropped",
@@ -44753,6 +44758,7 @@
       "adopted snapshot loop-adopted preserves the latest live intent",
       "adopted snapshot loop-clip preserves the latest live intent",
       "adopted snapshot loop-inflight preserves the latest live intent",
+      "adopted snapshot loop-ui preserves the latest live intent",
       "adopted snapshot mixer-only preserves the latest live intent",
       "adopted snapshot move-trim preserves the latest live intent",
       "adopted snapshot pending-exhaustion preserves the latest live intent",
@@ -45144,12 +45150,15 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 277,
       "skip": 1,
-      "fail": 1
+      "fail": 4
      },
      "fails": [
-      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from"
+      "B6f5 E with native playback on, an edit during a pending browser Play keeps the session that Play starts from",
+      "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+      "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+      "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt"
      ],
      "fuzz": null,
      "rejection": null,
@@ -56231,11 +56240,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -56781,7 +56790,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -57987,8 +57996,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -60207,11 +60216,11 @@
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
        "from": "    const token = nativeLifecycleToken\n    void pendingNativeDispose",
-       "to": "    const token = nativeLifecycleToken\n    const playhead = untrack(playheadSec)\n    void pendingNativeDispose"
+       "to": "    const token = nativeLifecycleToken\n    const playhead = lastPublishedPlayheadSec\n    void pendingNativeDispose"
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        return nativePlayback.ensureLivePreview(untrack(playheadSec)).then((result) => {",
+       "from": "        return nativePlayback.ensureLivePreview(lastPublishedPlayheadSec).then((result) => {",
        "to": "        return nativePlayback.ensureLivePreview(playhead).then((result) => {"
       }
      ],
@@ -60757,7 +60766,7 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(playheadSec(), tracks)\n",
+       "from": "        if (seekSequence !== nativeSeekSequence) setPlayhead(lastPublishedPlayheadSec, tracks)\n",
        "to": ""
       }
      ],
@@ -61963,8 +61972,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -62979,8 +62988,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,
@@ -64326,8 +64335,8 @@
       },
       {
        "file": "/src/hooks/useTimelinePlayback.ts",
-       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n",
-       "to": "    if (await nativePlayback.ensureLivePreview(untrack(playheadSec)) === \"started\") return\n"
+       "from": "    if (nativePreviewRequested && await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n",
+       "to": "    if (await nativePlayback.ensureLivePreview(lastPublishedPlayheadSec) === \"started\") return\n"
       }
      ],
      "bounded": false,

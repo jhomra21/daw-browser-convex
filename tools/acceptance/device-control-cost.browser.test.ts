@@ -5,10 +5,10 @@ import { expect, mock, test } from "bun:test";
 import { mkdir } from "node:fs/promises";
 import { resolve } from "node:path";
 import { build } from "vite";
-import solidPlugin from "vite-plugin-solid";
+import solidPlugin from "@solidjs/vite-plugin";
 import tailwindcss from "@tailwindcss/vite";
-import { createComputed, createMemo, createRoot, createSignal, untrack } from "solid-js";
-import { isServer } from "solid-js/web";
+import { createMemo, createRoot, createSignal, untrack, createRenderEffect } from "solid-js";
+import { isServer } from "@solidjs/web";
 import { z } from "zod";
 import { automationTargetKey, createDefaultDelayParams, createDefaultEqParams, createDefaultGateParams, createDefaultSpectralParams, createDefaultSynthParams, createDefaultDrumRackParams, createDefaultSamplerParams, createDefaultGranularParams, createDefaultCompressorParams, type AutomationEnvelope, type DelayParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import type { NativeBuiltInParameterPayload } from "~/lib/processor-edit-semantics";
@@ -584,11 +584,12 @@ const runPartBScenario = async (spec: PartBSpec) => {
         return { masterVolume: 1, effects: projectionFor(param()), automation: [], sidechains: [] };
       });
 
-      createComputed(() => {
-        const captured = capturedInputs();
-        const fx = resolveDesiredPlaybackFx({ masterVolume: 1, masterFxInstances: [], trackFx: {} }, captured.effects, undefined);
-        untrack(() => processorEdits.observe(fx));
-      });
+      createRenderEffect(
+        () => resolveDesiredPlaybackFx({ masterVolume: 1, masterFxInstances: [], trackFx: {} }, capturedInputs().effects, undefined),
+        (fx) => {
+          untrack(() => processorEdits.observe(fx));
+        },
+      );
 
       const playbackInputs = createMemo(() => {
         const captured = capturedInputs();
@@ -596,7 +597,7 @@ const runPartBScenario = async (spec: PartBSpec) => {
         return pickNativePlaybackInputs({ timeSignature: { numerator: 4, denominator: 4 }, automationEnvelopes: [],
           masterVolume: captured.masterVolume, automation: captured.automation, sidechains: captured.sidechains,
           processorStructure: processorEdits.structure() });
-      }, undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
+      }, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
 
       return useTimelinePlayback(engine, { getTracks: () => [track] }, {
         requiresNativeAudio: true, enabled: () => true, projectId: () => "project", playbackInputs,

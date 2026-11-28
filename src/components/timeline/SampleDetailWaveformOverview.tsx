@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type Component } from 'solid-js'
+import { createMemo, createSignal, onCleanup, onSettled, type Component, createTrackedEffect } from 'solid-js'
 
 import { drawWaveformSignal } from '@daw-browser/waveforms/draw-waveform-signal'
 import type { Clip } from '@daw-browser/timeline-core/types'
@@ -71,7 +71,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     }
   })
 
-  onMount(() => {
+  onSettled(() => {
     const measure = () => {
       const bounds = overviewRef?.getBoundingClientRect()
 
@@ -84,7 +84,8 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     const resizeObserver = new ResizeObserver(measure)
 
     if (overviewRef) resizeObserver.observe(overviewRef)
-    onCleanup(() => resizeObserver.disconnect())
+
+    return () => resizeObserver.disconnect()
   })
 
   onCleanup(() => {
@@ -197,7 +198,7 @@ const SampleDetailWaveformOverview: Component<SampleDetailWaveformOverviewProps>
     }
   }
 
-  createEffect(() => draw())
+  createTrackedEffect(() => draw())
 
   return (
     <button

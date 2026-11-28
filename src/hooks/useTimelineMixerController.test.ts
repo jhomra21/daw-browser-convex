@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
-import { createRoot, createSignal } from 'solid-js'
+import { createSignal } from 'solid-js';
+import { createFlushedRoot as createRoot, flushChain } from '~/test-support/create-flushed-root';
 
 import { getProjectDbName } from '~/lib/local-project-db'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
@@ -70,6 +71,8 @@ describe('useTimelineMixerController browser reactivity', () => {
             const first = muteFirst ? controller.handleToggleTrackMute : controller.handleToggleTrackSolo
             const second = muteFirst ? controller.handleToggleTrackSolo : controller.handleToggleTrackMute
             first(originalTrackId)
+            // The pending-mix memo publishes at the flush.
+            flushChain()
             expect(controller.pendingSharedTrackMix().get(originalTrackId)).toEqual(
               muteFirst ? { muted: !initial } : { soloed: !initial },
             )
@@ -84,6 +87,7 @@ describe('useTimelineMixerController browser reactivity', () => {
             }
 
             second(originalTrackId)
+            flushChain()
             expect(controller.pendingSharedTrackMix().get(originalTrackId)).toEqual({
               muted: !initial,
               soloed: !initial,
@@ -112,11 +116,13 @@ describe('useTimelineMixerController browser reactivity', () => {
               ...current,
               serverMuted: new Map([[originalTrackId, !initial]]),
             }))
+            flushChain()
             expect(controller.pendingSharedTrackMix().get(originalTrackId)).toEqual({ soloed: !initial })
             setServerTrackState((current) => ({
               ...current,
               serverSoloed: new Map([[originalTrackId, !initial]]),
             }))
+            flushChain()
             expect(controller.pendingSharedTrackMix().has(originalTrackId)).toBe(false)
           } finally {
             dispose()
@@ -223,6 +229,7 @@ describe('useTimelineMixerController browser reactivity', () => {
         await new Promise((settle) => setTimeout(settle, 0))
         controller.applyTrackVolume(originalTrackId, 0.35)
         setTracks([track(originalTrackId), track(autoCreatedTrackId)])
+        flushChain()
         expect(controller.pendingSharedTrackVolumes()).toEqual(new Map([[originalTrackId, 0.35]]))
 
         setOptimisticTrackIds(new Set<Track['id']>())

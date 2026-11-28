@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 
 // Each gesture is owned by real Chromium mouse input (pointer 1 with real
@@ -237,8 +237,8 @@ test('clip resize commits only on owner release and reverts on every cancel path
 
 const effectLifecycleFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup, Show } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createComponent, createEffect, createSignal, Show } from 'solid-js'
+import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createUndoManager } from '~/lib/undo/manager'
 import { buildEffectParamsHistoryEntry } from '~/lib/undo/builders'
@@ -281,10 +281,7 @@ window.effectLifecycleFixture = {
     const undo = createUndoManager({})
     let device
     const Card = () => {
-      createEffect(() => {
-        const targetId = target()
-        onCleanup(() => device.interruptGesture('delay-1', targetId))
-      })
+      createEffect(target, (targetId) => () => device.interruptGesture('delay-1', targetId))
       const base = device.gestureOwner('delay-1', 'delay', target())
       return createComponent(ParameterGestureProvider, {
         owner: { ...base, open: holder => { if (!base.isOpen(holder)) begins.push(target()); base.open(holder) } },
@@ -626,8 +623,8 @@ export const createAudioEffectInstanceId = () => 'fixture-instance'
 
 const utilityFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createComponent, createEffect, createSignal } from 'solid-js'
+import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS, normalizeUtilityParamsEnvelope } from '@daw-browser/shared'
 import Utility from '~/components/effects/Utility'
 import { ParameterGestureProvider } from '~/components/effects/effect-parameter-interaction'
@@ -826,8 +823,8 @@ test('Utility Gain restores the pre-gesture value on every cancel path', async (
 
 const deviceKnobFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
-import { createComponent, createEffect, createSignal, onCleanup } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createComponent, createEffect, createSignal } from 'solid-js'
+import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createUndoManager } from '~/lib/undo/manager'
 import { buildEffectParamsHistoryEntry } from '~/lib/undo/builders'
@@ -862,10 +859,7 @@ window.deviceKnobFixture = {
     window.deviceKnobFixtureResolvePersistence = () => resolvePersistence?.()
     let device
     const dispose = render(() => {
-      createEffect(() => {
-        ownerKey()
-        onCleanup(() => device?.interruptGesture('delay-1', targetId))
-      })
+      createEffect(ownerKey, () => () => device?.interruptGesture('delay-1', targetId))
       device = createEffectsPanelAudioDevice({
         audioEngine: () => engine,
         projectId: () => 'project:delay-knob-fixture',
@@ -1258,7 +1252,7 @@ test('effect engine failures are not reported as persistence failures', async ()
 
 const eqFixture = `
 import { createComponent, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { createDefaultEqParams } from '@daw-browser/shared'
 import Eq from '~/components/effects/Eq'
 import { ParameterGestureProvider } from '~/components/effects/effect-parameter-interaction'
@@ -1340,7 +1334,7 @@ import { createProcessorEditRegistry } from '~/components/timeline/create-proces
 import { createAudioEffectParameterPayload } from '~/lib/audio-effect-parameter-payload'
 import { captureNativeBuiltInParameterValues } from '~/lib/desktop/native-built-in-parameter-mapper'
 import { createComponent } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import Eq from '~/components/effects/Eq'
 import Limiter from '~/components/effects/Limiter'
@@ -2041,7 +2035,7 @@ const effectCommitContractFixture = `
 import { createProcessorEditRegistry } from '~/components/timeline/create-processor-edit-registry'
 import { createAudioEffectParameterPayload } from '~/lib/audio-effect-parameter-payload'
 import { createComponent } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { AUDIO_EFFECT_CONTRACTS } from '@daw-browser/shared'
 import { createUndoManager } from '~/lib/undo/manager'
 import { buildEffectParamsHistoryEntry } from '~/lib/undo/builders'
@@ -2431,7 +2425,7 @@ test('effect commits order flush, persist, and history without double flushes or
 
 const midiFixture = `
 import { createComponent } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import MidiClipEditor from '~/components/midi/MidiClipEditor'
 import '~/index.css'
 

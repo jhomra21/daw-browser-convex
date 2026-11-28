@@ -1,7 +1,6 @@
 import tailwindcss from '@tailwindcss/vite';
 import { defineConfig } from 'vite';
-import solidPlugin from 'vite-plugin-solid';
-import devtools from 'solid-devtools/vite';
+import solidPlugin from '@solidjs/vite-plugin';
 import { cloudflare } from '@cloudflare/vite-plugin';
 import path from 'path';
 import { tanstackRouter } from '@tanstack/router-plugin/vite'
@@ -11,7 +10,7 @@ export default defineConfig({
   plugins: [tanstackRouter({
     target: 'solid',
     autoCodeSplitting: false,
-  }),devtools(), solidPlugin(), tailwindcss(), VitePWA({
+  }), solidPlugin(), tailwindcss(), VitePWA({
     registerType: 'autoUpdate',
     manifest: {
       name: 'Browser DAW',

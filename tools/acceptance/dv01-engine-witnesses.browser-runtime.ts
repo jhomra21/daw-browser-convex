@@ -10,8 +10,8 @@ import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-re
 import { createSourceRegistry } from "../../packages/audio-engine/src/source-registry";
 import { createSynthRuntime } from "../../packages/audio-engine/src/synth-runtime";
 import { countFactoryCalls } from "./device-control-cost-spy";
-import { createRoot } from "solid-js";
 import { createCompressorChainState } from "../../packages/audio-engine/src/effects/compressor-chain-state";
+import { createFlushedRoot } from "~/test-support/create-flushed-root";
 import { createEffectsPanelAudioDevice } from "~/components/timeline/create-effects-panel-audio-effects-state";
 import { ParameterGestureHolder } from "~/components/timeline/parameter-gesture-owner";
 import { createLocalEffectsView } from "~/components/timeline/create-local-effects-view";
@@ -230,7 +230,8 @@ const panelCompressorCancelRow = () => withEngine("R4-5 compressor in-place pend
   await engine.setTrackFxInstances(track, [initial]);
   let dispose = () => {};
 
-  const f = createRoot(end => {
+  // The view and panel start from effects that run at the first flush; nothing else triggers one before the gesture opens.
+  const f = createFlushedRoot(end => {
     dispose = end;
     const view = createLocalEffectsView({ projectId: () => projectId });
 

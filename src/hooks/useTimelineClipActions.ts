@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { batch, createSignal, type Accessor, type Setter } from 'solid-js'
+import { createSignal, type Accessor, type Setter } from 'solid-js'
 
 import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
@@ -190,15 +190,13 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         return null
       })()
 
-      batch(() => {
-        selection.setSelectedClip(nextPrimary)
-        selection.setSelectedClipIds(remainingSelectedIds)
+      selection.setSelectedClip(nextPrimary)
+      selection.setSelectedClipIds(remainingSelectedIds)
 
-        if (nextPrimary) {
-          selection.setSelectedTrackId(nextPrimary.trackId)
-          selection.setSelectedFXTarget(nextPrimary.trackId)
-        }
-      })
+      if (nextPrimary) {
+        selection.setSelectedTrackId(nextPrimary.trackId)
+        selection.setSelectedFXTarget(nextPrimary.trackId)
+      }
     }
 
     const deletion = await createTimelineClipWriteAdapter({ projectId: rid, userId: uid }).deleteClips(Array.from(writableSelectedIds))
@@ -667,13 +665,12 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
 
       for (const deletedTrackId of deletedTrackIds) removeLocalTrack(deletedTrackId)
       const next = snapshot.filter(entry => !deletedTrackIds.has(entry.id))
-      batch(() => {
-        if (next.length > 0) {
-          selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
-        } else {
-          selection.selectMasterTarget()
-        }
-      })
+
+      if (next.length > 0) {
+        selection.selectTrackTarget(next[0].id, { clearClipSelection: true })
+      } else {
+        selection.selectMasterTarget()
+      }
     }
 
     if (rid && isLocalId('project', rid)) {

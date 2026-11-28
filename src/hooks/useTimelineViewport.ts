@@ -1,4 +1,4 @@
-import { batch, createRenderEffect, createSignal, on, onCleanup, type Accessor } from 'solid-js'
+import { createRenderEffect, createSignal, onCleanup, type Accessor, untrack } from 'solid-js'
 
 import {
   minimumVisibleDuration,
@@ -52,8 +52,23 @@ type TimelineWheelEvent = Pick<
 >
 
 export function useTimelineViewport(options: UseTimelineViewportOptions) {
-  const [visibleStartSec, setVisibleStartSec] = createSignal(0)
-  const [viewportWidth, setViewportWidth] = createSignal(0)
+  // The scroll, wheel and zoom handlers read the start and width they just wrote, so those are plain variables; the
+  // signals only publish them to the UI.
+  let visibleStart = 0
+  let liveWidthPx = 0
+  const [visibleStartSec, publishVisibleStartSec] = createSignal(visibleStart)
+  const [viewportWidth, publishViewportWidth] = createSignal(liveWidthPx)
+
+  const setVisibleStartSec = (startSec: number) => {
+    visibleStart = startSec
+    publishVisibleStartSec(startSec)
+  }
+
+  const setViewportWidth = (widthPx: number) => {
+    liveWidthPx = widthPx
+    publishViewportWidth(widthPx)
+  }
+
   let element: TimelineScrollElement | undefined
   let observer: ResizeObserver | undefined
   let wheelCommitTimeout: ReturnType<typeof setTimeout> | undefined
@@ -67,6 +82,16 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     viewportWidth(),
     TIMELINE_PHYSICAL_RUNWAY_WIDTH_PX,
   )
+
+  const viewportOf = (startSec: number, widthPx: number): TimelineViewport => ({
+    ...createTimelineViewport({
+      visibleStartSec: startSec,
+      viewportWidthPx: widthPx,
+      pixelsPerSecond: options.pixelsPerSecond(),
+      durationSec: options.durationSec(),
+    }),
+    runwayWidth: Math.max(widthPx, TIMELINE_PHYSICAL_RUNWAY_WIDTH_PX),
+  })
 
   const clearWheelCommit = () => {
     if (!wheelCommitTimeout) return
@@ -90,7 +115,11 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     setPhysicalAnchor()
   }
 
-  createRenderEffect(on(options.persistenceScope, resetForPersistenceScopeChange, { defer: true }))
+  createRenderEffect(
+    options.persistenceScope,
+    () => untrack(resetForPersistenceScopeChange),
+    { defer: true },
+  )
 
   const measureWidth = () => {
     if (!element) return
@@ -106,8 +135,8 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     options.onManualNavigation?.()
 
     const next = visibleStartAfterScrollDelta({
-      visibleStartSec: visibleStartSec(),
-      viewportWidthPx: viewportWidth(),
+      visibleStartSec: visibleStart,
+      viewportWidthPx: liveWidthPx,
       pixelsPerSecond: options.pixelsPerSecond(),
       durationSec: options.durationSec(),
     }, deltaPx)
@@ -134,34 +163,24 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
   }
 
   const visibleDurationSec = () => (
-    viewportWidth() / Math.max(1e-9, options.pixelsPerSecond())
+    liveWidthPx / Math.max(1e-9, options.pixelsPerSecond())
   )
 
-  const viewport = (): TimelineViewport => ({
-    ...createTimelineViewport({
-      visibleStartSec: visibleStartSec(),
-      viewportWidthPx: viewportWidth(),
-      pixelsPerSecond: options.pixelsPerSecond(),
-      durationSec: options.durationSec(),
-    }),
-    runwayWidth: physicalRunwayWidth(),
-  })
+  const viewport = () => viewportOf(visibleStartSec(), viewportWidth())
 
   const applyVisibleRange = (range: TimelineRange, commit: boolean, isWheelPreview = false) => {
     options.onManualNavigation?.()
     const benchmarkStartedAt = beginPerformanceBenchmark()
     incrementPerformanceBenchmarkCounter('timeline.viewport-computations')
-    const width = viewportWidth()
-    const minimumDuration = minimumVisibleDuration(width)
+    const minimumDuration = minimumVisibleDuration(liveWidthPx)
     const normalizedRange = normalizeTimelineRange(range, options.durationSec(), minimumDuration)
-    const nextScale = pixelsPerSecondForRange(normalizedRange, width)
-    batch(() => {
-      if (commit) options.commitPixelsPerSecond(nextScale)
-      else options.previewPixelsPerSecond(nextScale)
-      setVisibleStartSec(normalizedRange.startSec)
-      // Zoom changes logical time only; physical anchor is maintained by bind,
-      // resize, reset, and native scroll paths.
-    })
+    const nextScale = pixelsPerSecondForRange(normalizedRange, liveWidthPx)
+
+    if (commit) options.commitPixelsPerSecond(nextScale)
+    else options.previewPixelsPerSecond(nextScale)
+    setVisibleStartSec(normalizedRange.startSec)
+    // Zoom changes logical time only; physical anchor is maintained by bind,
+    // resize, reset, and native scroll paths.
 
     if (!isWheelPreview) clearWheelCommit()
     setPerformanceBenchmarkGauge('timeline.pixels-per-second', nextScale)
@@ -178,22 +197,21 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     if (!isWheelPreview) clearWheelCommit()
 
     if (!options.canZoom()) return
-    const width = viewportWidth()
-    const range = viewport().visibleRange
+    const range = viewportOf(visibleStart, liveWidthPx).visibleRange
 
     const next = zoomRangeAtAnchor(
       range,
-      width > 0 ? viewportX / width : 0.5,
+      liveWidthPx > 0 ? viewportX / liveWidthPx : 0.5,
       factor,
       options.durationSec(),
-      width / MAX_PIXELS_PER_SECOND,
+      liveWidthPx / MAX_PIXELS_PER_SECOND,
     )
 
     return applyVisibleRange(next, commit, isWheelPreview)
   }
 
-  const zoomIn = () => zoomAtPointer(viewportWidth() / 2, ZOOM_STEP_FACTOR, true)
-  const zoomOut = () => zoomAtPointer(viewportWidth() / 2, 1 / ZOOM_STEP_FACTOR, true)
+  const zoomIn = () => zoomAtPointer(liveWidthPx / 2, ZOOM_STEP_FACTOR, true)
+  const zoomOut = () => zoomAtPointer(liveWidthPx / 2, 1 / ZOOM_STEP_FACTOR, true)
 
   const zoomToFit = () => {
     clearWheelCommit()
@@ -221,8 +239,8 @@ export function useTimelineViewport(options: UseTimelineViewportOptions) {
     const rect = element?.getBoundingClientRect()
 
     const viewportX = rect
-      ? Math.min(viewportWidth(), Math.max(0, event.clientX - rect.left))
-      : viewportWidth() / 2
+      ? Math.min(liveWidthPx, Math.max(0, event.clientX - rect.left))
+      : liveWidthPx / 2
 
     const previewedScale = zoomAtPointer(
       viewportX,

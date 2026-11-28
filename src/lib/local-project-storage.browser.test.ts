@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
 
@@ -13,7 +13,7 @@ const fixtureId = 'virtual:local-project-storage'
 test('catalog upgrades and fair cross-tab cleanup preserve concurrent publications in Chromium', async () => {
   const source = `
 import { openDB, deleteDB } from 'idb'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import { DashboardProjectsView } from '~/components/dashboard/projects-view'
 import {
   createLocalProject, listLocalProjects, getLocalProject, openLocalProjectDb,

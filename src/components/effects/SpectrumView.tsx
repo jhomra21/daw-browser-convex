@@ -1,4 +1,4 @@
-import { For, Show, createEffect, onCleanup, onMount } from 'solid-js'
+import { For, Show, createEffect, onSettled, untrack } from 'solid-js'
 import type { SpectrumView as SpectrumViewMode } from '@daw-browser/shared'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { DeviceToggleButton } from '~/components/ui/device-control'
@@ -24,7 +24,7 @@ export function SpectrumViewToggle(props: { view: SpectrumViewMode; disabled?: b
 
 type SpectrumCanvasProps = {
   frame: SpectrumFrame | null
-  paint: (context: CanvasRenderingContext2D, width: number, height: number, canvas: HTMLCanvasElement) => void
+  paint: (context: CanvasRenderingContext2D, width: number, height: number, canvas: HTMLCanvasElement, frame: SpectrumFrame | null) => void
   label: string
 }
 
@@ -32,15 +32,17 @@ type SpectrumCanvasProps = {
 function SpectrumCanvas(props: SpectrumCanvasProps) {
   let frame: HTMLDivElement | undefined
   let canvas: HTMLCanvasElement | undefined
+  // The frame is carried from the effect that observes it: reading a lazy prop getter from an effect callback would create a memo there.
+  let latestFrame = untrack(() => props.frame)
 
   const paint = () => {
     const context = canvas?.getContext('2d')
 
     if (!canvas || !context || canvas.width === 0 || canvas.height === 0) return
-    props.paint(context, canvas.width, canvas.height, canvas)
+    props.paint(context, canvas.width, canvas.height, canvas, latestFrame)
   }
 
-  onMount(() => {
+  onSettled(() => {
     // The canvas is out of flow so resizing its bitmap never changes the size being observed.
     const observer = new ResizeObserver(() => {
       if (!frame || !canvas) return
@@ -50,12 +52,16 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
     })
 
     if (frame) observer.observe(frame)
-    onCleanup(() => observer.disconnect())
+
+    return () => observer.disconnect()
   })
-  createEffect(() => {
-    void props.frame
-    paint()
-  })
+  createEffect(
+    () => props.frame,
+    (nextFrame) => {
+      latestFrame = nextFrame
+      untrack(paint)
+    },
+  )
 
   return (
     <div ref={(element) => (frame = element)} class="relative min-h-0 flex-1" data-spectrum-canvas>
@@ -67,10 +73,13 @@ function SpectrumCanvas(props: SpectrumCanvasProps) {
 export default function SpectrumView(props: { frame: SpectrumFrame | null; view: SpectrumViewMode }) {
   const history = createSpectrogramHistory()
   // One column per delivered frame; a null frame means the analysed target changed or stopped.
-  createEffect(() => {
-    if (props.frame) history.push(props.frame)
-    else history.clear()
-  })
+  createEffect(
+    () => props.frame,
+    (frame) => {
+      if (frame) history.push(frame)
+      else history.clear()
+    },
+  )
 
   const curveColors = (canvas: HTMLCanvasElement) => {
     const style = getComputedStyle(canvas)
@@ -88,7 +97,7 @@ export default function SpectrumView(props: { frame: SpectrumFrame | null; view:
         <SpectrumCanvas
           frame={props.frame}
           label="Spectrum"
-          paint={(context, width, height, canvas) => drawSpectrumCurve(context, props.frame, width, height, curveColors(canvas))}
+          paint={(context, width, height, canvas, frame) => drawSpectrumCurve(context, frame, width, height, curveColors(canvas))}
         />
       </Show>
       <Show when={props.view !== 'spectrum'}>

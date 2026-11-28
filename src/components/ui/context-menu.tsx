@@ -1,5 +1,6 @@
-import type { Component, ComponentProps, JSX } from "solid-js";
-import { splitProps } from "solid-js";
+import type { Component } from "solid-js";
+import type { ComponentProps, JSX } from "@solidjs/web";
+import { omit } from "solid-js";
 
 import * as ContextMenuPrimitive from "@kobalte/core/context-menu";
 
@@ -17,14 +18,14 @@ type ContextMenuContentProps = ContextMenuPrimitive.ContextMenuContentProps & {
 };
 
 const ContextMenuContent: Component<ContextMenuContentProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
         class={cn(
           "z-50 min-w-32 max-h-(--kb-menu-content-available-height) overflow-y-auto overflow-x-hidden border border-border bg-app-surface p-0.5 text-xs text-foreground shadow-md shadow-background/40 outline-none",
-          local.class,
+          props.class,
         )}
         {...rest}
       />
@@ -39,14 +40,14 @@ type ContextMenuItemProps = ContextMenuPrimitive.ContextMenuItemProps & {
 };
 
 const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class", "inset"]);
+  const rest = omit(props, "class", "inset");
 
   return (
     <ContextMenuPrimitive.Item
       class={cn(
         "relative flex min-h-6 cursor-default select-none items-center gap-2 whitespace-nowrap px-2 py-0.5 leading-5 text-foreground outline-none transition-colors focus:bg-muted focus:text-foreground data-[highlighted]:bg-muted data-[highlighted]:text-foreground data-[disabled]:pointer-events-none data-[disabled]:text-muted-foreground data-[disabled]:opacity-50 [&>svg]:size-3.5 [&>svg]:shrink-0",
-        local.inset && "pl-6",
-        local.class,
+        props.inset && "pl-6",
+        props.class,
       )}
       {...rest}
     />
@@ -54,9 +55,9 @@ const ContextMenuItem: Component<ContextMenuItemProps> = (props) => {
 };
 
 const ContextMenuShortcut: Component<ComponentProps<"span">> = (props) => {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
-  return <span class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-xxs tracking-wide opacity-60", local.class)} {...rest} />;
+  return <span class={cn("ml-auto shrink-0 whitespace-nowrap pl-4 text-xxs tracking-wide opacity-60", props.class)} {...rest} />;
 };
 
 type ContextMenuLabelProps = ComponentProps<"div"> & {
@@ -65,11 +66,11 @@ type ContextMenuLabelProps = ComponentProps<"div"> & {
 };
 
 const ContextMenuLabel: Component<ContextMenuLabelProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class", "inset"]);
+  const rest = omit(props, "class", "inset");
 
   return (
     <div
-      class={cn("px-2 py-1 text-xs font-semibold leading-5 text-foreground", local.inset && "pl-6", local.class)}
+      class={cn("px-2 py-1 text-xs font-semibold leading-5 text-foreground", props.inset && "pl-6", props.class)}
       {...rest}
     />
   );
@@ -80,11 +81,11 @@ type ContextMenuSeparatorProps = ContextMenuPrimitive.ContextMenuSeparatorProps 
 };
 
 const ContextMenuSeparator: Component<ContextMenuSeparatorProps> = (props) => {
-  const [local, rest] = splitProps(props, ["class"]);
+  const rest = omit(props, "class");
 
   return (
     <ContextMenuPrimitive.Separator
-      class={cn("-mx-0.5 my-0.5 h-px border-0 bg-muted", local.class)}
+      class={cn("-mx-0.5 my-0.5 h-px border-0 bg-muted", props.class)}
       {...rest}
     />
   );

@@ -13,25 +13,34 @@ export function useTimelineAudioLifecycle(input: {
   projectId: Accessor<string>
   clearClipBufferCaches: () => void
 }) {
-  createEffect(() => {
-    input.audioEngine.updateTrackGains(input.tracks())
-  })
+  createEffect(
+    () => input.tracks(),
+    (tracks) => {
+      input.audioEngine.updateTrackGains(tracks)
+    },
+  )
 
-  createEffect(() => {
-    input.audioEngine.setBpm(input.bpm())
-  })
+  createEffect(
+    () => input.bpm(),
+    (bpm) => {
+      input.audioEngine.setBpm(bpm)
+    },
+  )
 
-  createEffect(() => {
-    input.audioEngine.setMetronomeEnabled(input.metronomeEnabled())
-  })
+  createEffect(
+    () => input.metronomeEnabled(),
+    (enabled) => {
+      input.audioEngine.setMetronomeEnabled(enabled)
+    },
+  )
 
-  createEffect(() => {
-    input.projectId()
-    onCleanup(() => {
+  createEffect(
+    () => input.projectId(),
+    () => () => {
       input.clearClipBufferCaches()
       void flushLocalTimelineWrites()
-    })
-  })
+    },
+  )
 
   onCleanup(() => {
     input.audioEngine.close()

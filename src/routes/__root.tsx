@@ -1,5 +1,5 @@
 import { createRootRoute, Outlet, HeadContent } from '@tanstack/solid-router'
-import { ErrorBoundary, Suspense, lazy } from 'solid-js'
+import { Errored, Loading, lazy } from 'solid-js'
 
 const TanStackRouterDevtools = import.meta.env.DEV
   ? lazy(() => import('@tanstack/solid-router-devtools').then((mod) => ({ default: mod.TanStackRouterDevtools })))
@@ -41,12 +41,12 @@ export const Route = createRootRoute({
   component: () => (
     <>
       <HeadContent />
-      <ErrorBoundary fallback={(error) => <AppErrorFallback error={error} />}>
+      <Errored fallback={(error) => <AppErrorFallback error={error()} />}>
         <Outlet />
-      </ErrorBoundary>
-      <Suspense fallback={null}>
+      </Errored>
+      <Loading fallback={null}>
         {TanStackRouterDevtools ? <TanStackRouterDevtools /> : null}
-      </Suspense>
+      </Loading>
     </>
   ),
 })

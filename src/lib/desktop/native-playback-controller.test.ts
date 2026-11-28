@@ -3,7 +3,8 @@ import "fake-indexeddb/auto"
 import { z } from "zod"
 import { convexTest } from "convex-test"
 import schema from "../../../convex/schema"
-import { createRenderEffect, createRoot, createSignal, untrack } from "solid-js"
+import { createRenderEffect, createSignal, flush, untrack } from "solid-js";
+import { createFlushedRoot as createRoot } from "~/test-support/create-flushed-root";
 
 import { createNativePlaybackController, nativePlaybackFaultText, type NativePlaybackFault } from "./native-playback-controller"
 import { classifyNativeVst3PlaybackFault, nativeVst3LaunchAuthorizationRequiredMessage } from "~/lib/external-plugin-ui"
@@ -1557,6 +1558,7 @@ describe("DV01 STEP7 frozen inputs and cleanup witnesses", () => {
       f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: crypto.randomUUID() })
       expect(vstInstanceFailed(attachment.instanceId)).toBe(false)
       f.fixture.emitVstInstanceEvent({ kind: "failed", instanceId: attachment.instanceId })
+      flush()
       expect(vstInstanceFailed(attachment.instanceId)).toBe(true)
       await step7Turns()
       expect(f.fixture.graphPayloads.length).toBe(before)
@@ -9838,9 +9840,12 @@ test.skipIf(!stampBrowserChild)("the effects panel confirms its latest mapped st
     }, () => "track", () => undefined)
 
     await new Promise<void>((resolve) => {
-      createRenderEffect(() => {
-        if (device.snapshotExportRows(["track"]).some((row) => row.instanceId === "utility:1")) resolve()
-      })
+      createRenderEffect(
+        () => device.snapshotExportRows(["track"]).some((row) => row.instanceId === "utility:1"),
+        (found) => {
+          if (found) resolve()
+        },
+      )
     })
     const gesture = device.gestureOwner("utility:1", "utility")
     const holder = new ParameterGestureHolder()

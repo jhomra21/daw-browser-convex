@@ -15,7 +15,7 @@ test("scans only after trust consent and refreshes catalog consumers", async () 
   if (rescanStart < 0 || rescanEnd < 0) throw new Error("Expected the rescan handler.");
   const rescan = source.slice(rescanStart, rescanEnd);
   const updateStart = source.indexOf("const update = (");
-  const updateEnd = source.indexOf("\n\n  onMount", updateStart);
+  const updateEnd = source.indexOf("\n\n  onSettled", updateStart);
 
   if (updateStart < 0 || updateEnd < 0) throw new Error("Expected the catalog update handler.");
   const update = source.slice(updateStart, updateEnd);

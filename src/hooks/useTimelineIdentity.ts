@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { createEffect, createSignal, on, type Accessor } from 'solid-js'
+import { createEffect, createSignal, type Accessor } from 'solid-js'
 
 import type { convexApi } from '~/lib/convex'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -73,64 +73,73 @@ export function useTimelineIdentity(
     })
   }
 
-  createEffect(on(options.projectId, () => {
-    setTrackHistoryRefsById(new Map())
-    setTrackNamesByHistoryRef(new Map<string, string>())
-    setClipHistoryRefsById(new Map<string, string>())
-  }))
+  createEffect(
+    options.projectId,
+    () => {
+      setTrackHistoryRefsById(new Map())
+      setTrackNamesByHistoryRef(new Map<string, string>())
+      setClipHistoryRefsById(new Map<string, string>())
+    },
+  )
 
-  createEffect(() => {
-    const data = options.serverData()
+  createEffect(
+    () => {
+      const data = options.serverData()
 
-    if (!data) return
+      return data ? { data, historyRefs: trackHistoryRefsById() } : undefined
+    },
+    (server) => {
+      if (!server) return
+      const { data, historyRefs } = server
 
-    setTrackHistoryRefsById((current) => {
-      let next: Map<Track['id'], string> | null = null
+      setTrackHistoryRefsById((current) => {
+        let next: Map<Track['id'], string> | null = null
 
-      for (const track of data.tracks) {
-        const trackId = track._id
+        for (const track of data.tracks) {
+          const trackId = track._id
 
-        if (current.has(trackId)) continue
+          if (current.has(trackId)) continue
 
-        if (!next) next = new Map(current)
-        next.set(trackId, trackId)
-      }
+          if (!next) next = new Map(current)
+          next.set(trackId, trackId)
+        }
 
-      return next ?? current
-    })
+        return next ?? current
+      })
 
-    setTrackNamesByHistoryRef((current) => {
-      let next: Map<string, string> | null = null
+      setTrackNamesByHistoryRef((current) => {
+        let next: Map<string, string> | null = null
 
-      for (let index = 0; index < data.tracks.length; index++) {
-        const trackId = data.tracks[index]._id
-        const historyRef = trackHistoryRefsById().get(trackId) ?? trackId
-        const name = data.tracks[index]?.name
+        for (let index = 0; index < data.tracks.length; index++) {
+          const trackId = data.tracks[index]._id
+          const historyRef = historyRefs.get(trackId) ?? trackId
+          const name = data.tracks[index]?.name
 
-        if (!name || current.get(historyRef) === name) continue
+          if (!name || current.get(historyRef) === name) continue
 
-        if (!next) next = new Map(current)
-        next.set(historyRef, name)
-      }
+          if (!next) next = new Map(current)
+          next.set(historyRef, name)
+        }
 
-      return next ?? current
-    })
+        return next ?? current
+      })
 
-    setClipHistoryRefsById((current) => {
-      let next: Map<string, string> | null = null
+      setClipHistoryRefsById((current) => {
+        let next: Map<string, string> | null = null
 
-      for (const clip of data.clips) {
-        const clipId = String(clip._id)
+        for (const clip of data.clips) {
+          const clipId = String(clip._id)
 
-        if (current.has(clipId)) continue
+          if (current.has(clipId)) continue
 
-        if (!next) next = new Map(current)
-        next.set(clipId, clipId)
-      }
+          if (!next) next = new Map(current)
+          next.set(clipId, clipId)
+        }
 
-      return next ?? current
-    })
-  })
+        return next ?? current
+      })
+    },
+  )
 
   return {
     trackHistoryRefsById,

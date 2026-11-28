@@ -1,5 +1,5 @@
 import { createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { render } from '@solidjs/web'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import { createDefaultSpectrumParams, type SpectrumParams } from '@daw-browser/shared'
 

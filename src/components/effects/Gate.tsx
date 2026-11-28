@@ -5,7 +5,7 @@ import AutomatedKnob from '~/components/effects/AutomatedKnob'
 import Knob from '~/components/ui/knob'
 import type { Track } from '@daw-browser/timeline-core/types'
 import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
-import { For, createEffect, createSignal, onCleanup } from 'solid-js'
+import { For, createEffect, createSignal } from 'solid-js'
 import { formatDeviceDb, formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type GateProps = {
@@ -30,17 +30,28 @@ const formatMs = (value: number) => formatDeviceMilliseconds(value, value < 10 ?
 
 export default function Gate(props: GateProps) {
   const [gainReductionDb, setGainReductionDb] = createSignal(0)
-  createEffect(() => {
-    setGainReductionDb(0)
+  createEffect(
+    () => {
+      const audioEngine = props.audioEngine
 
-    if (!props.audioEngine) return
+      if (!audioEngine) return undefined
 
-    const unsubscribe = props.targetId === 'master'
-      ? props.audioEngine.masterFx.subscribeGateMeter(props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
-      : props.audioEngine.mixer.subscribeTrackGateMeter(props.targetId, props.effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+      return { audioEngine, targetId: props.targetId, effectInstanceId: props.effectInstanceId }
+    },
+    (meter) => {
+      setGainReductionDb(0)
 
-    onCleanup(unsubscribe)
-  })
+      if (!meter) return
+
+      const { audioEngine, targetId, effectInstanceId } = meter
+
+      const unsubscribe = targetId === 'master'
+        ? audioEngine.masterFx.subscribeGateMeter(effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+        : audioEngine.mixer.subscribeTrackGateMeter(targetId, effectInstanceId, (frame) => setGainReductionDb(frame.gainReductionDb))
+
+      return unsubscribe
+    },
+  )
 
   return (
     <EffectShell title="Gate" typeLabel="Audio" enabled={props.params.enabled} onToggleEnabled={props.onToggleEnabled} onReset={props.onReset} class="device-gate">

@@ -1,4 +1,4 @@
-import { createRoot, createSignal, indexArray } from 'solid-js'
+import { createRoot, createSignal, mapArray } from 'solid-js'
 import { describe, expect, test } from 'bun:test'
 
 describe('TimelineRuler indexed marker slots', () => {
@@ -7,11 +7,11 @@ describe('TimelineRuler indexed marker slots', () => {
       const [indices, setIndices] = createSignal([0, 1, 2])
       let mappedCount = 0
 
-      const slots = indexArray(indices, (index) => {
+      const slots = mapArray(indices, (index) => {
         mappedCount += 1
 
         return { index }
-      })
+      }, { keyed: false })
 
       const initial = slots()
       setIndices([1, 2, 3, 4])

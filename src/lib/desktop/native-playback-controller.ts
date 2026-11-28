@@ -1226,14 +1226,19 @@ export const createNativePlaybackController = (input: {
     let attemptedPageManager: NativeTimelinePageManager | undefined
     let attemptStartController = startAbortController
     const resume = { abandoned: false }
+    const stagedIntentAtStart = stagedTransportIntent
 
-    const cancelled = () => resume.abandoned
+    const supersededByIntent = () => resume.abandoned
       || generation !== lifecycleGeneration
       || projectGeneration !== resolveProjectGeneration()
       || preparedProjectIdForAttempt !== input.getProjectId?.()
       || (attemptStartController !== undefined && startAbortController !== attemptStartController)
-      || (attemptedCoordinator !== undefined
-        && (scheduleCoordinator !== attemptedCoordinator || attemptedCoordinator.isDisposed()))
+
+    const coordinatorMoved = () => attemptedCoordinator !== undefined
+      && (scheduleCoordinator !== attemptedCoordinator || attemptedCoordinator.isDisposed())
+
+    const cancelled = () => supersededByIntent()
+      || coordinatorMoved()
       || (attemptedPageManager !== undefined
         && (nativeTimelinePageManager !== attemptedPageManager || attemptedPageManager.isDisposed()))
 
@@ -1312,7 +1317,17 @@ export const createNativePlaybackController = (input: {
             if (preparedGraph) executeReconcile(processorState.reconcile(targetKinds(preparedGraph, refreshed.snapshot)))
           }
 
-          if (cancelled()) return "unavailable"
+          if (cancelled()) {
+            // A paused-session adoption that landed during the compile moved the session to a new coordinator. The session
+            // is still this Play's, so it compiles again against the one it now has. A locate or pause moves it by
+            // staging a transport intent, and then the caller replays or abandons the Play.
+            const adoptedMeanwhile = !supersededByIntent() && stagedIntentAtStart === stagedTransportIntent && scheduleCoordinator !== undefined && !scheduleCoordinator.isDisposed()
+              && (attemptedPageManager === undefined || (nativeTimelinePageManager === attemptedPageManager && !attemptedPageManager.isDisposed()))
+
+            return adoptedMeanwhile
+              ? startAttempt(transport, generation, projectGeneration, runTransport, compileContext, previewAttempt)
+              : "unavailable"
+          }
 
           // An orphaned prepare leaves its tracks `loading` while the session stays prepared: resuming it restores `ready`.
           const resumed = (): "started" => {

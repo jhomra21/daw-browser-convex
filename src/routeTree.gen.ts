@@ -9,20 +9,15 @@
 // Additionally, you should also exclude this file from your linter and/or formatter to prevent it from being checked or modified.
 
 import { Route as rootRouteImport } from './routes/__root'
-import { Route as DspCharacterizationRouteImport } from './routes/dsp-characterization'
-import { Route as AboutRouteImport } from './routes/about'
-import { Route as LoginRouteImport } from './routes/Login'
 import { Route as IndexRouteImport } from './routes/index'
+import { Route as LoginRouteImport } from './routes/Login'
+import { Route as AboutRouteImport } from './routes/about'
+import { Route as DspCharacterizationRouteImport } from './routes/dsp-characterization'
 import { Route as OauthConsentRouteImport } from './routes/oauth/consent'
 
-const DspCharacterizationRoute = DspCharacterizationRouteImport.update({
-  id: '/dsp-characterization',
-  path: '/dsp-characterization',
-  getParentRoute: () => rootRouteImport,
-} as any)
-const AboutRoute = AboutRouteImport.update({
-  id: '/about',
-  path: '/about',
+const IndexRoute = IndexRouteImport.update({
+  id: '/',
+  path: '/',
   getParentRoute: () => rootRouteImport,
 } as any)
 const LoginRoute = LoginRouteImport.update({
@@ -30,9 +25,14 @@ const LoginRoute = LoginRouteImport.update({
   path: '/Login',
   getParentRoute: () => rootRouteImport,
 } as any)
-const IndexRoute = IndexRouteImport.update({
-  id: '/',
-  path: '/',
+const AboutRoute = AboutRouteImport.update({
+  id: '/about',
+  path: '/about',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const DspCharacterizationRoute = DspCharacterizationRouteImport.update({
+  id: '/dsp-characterization',
+  path: '/dsp-characterization',
   getParentRoute: () => rootRouteImport,
 } as any)
 const OauthConsentRoute = OauthConsentRouteImport.update({
@@ -66,11 +66,7 @@ export interface FileRoutesById {
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
   fullPaths:
-    | '/'
-    | '/Login'
-    | '/about'
-    | '/dsp-characterization'
-    | '/oauth/consent'
+    '/' | '/Login' | '/about' | '/dsp-characterization' | '/oauth/consent'
   fileRoutesByTo: FileRoutesByTo
   to: '/' | '/Login' | '/about' | '/dsp-characterization' | '/oauth/consent'
   id:
@@ -92,18 +88,11 @@ export interface RootRouteChildren {
 
 declare module '@tanstack/solid-router' {
   interface FileRoutesByPath {
-    '/dsp-characterization': {
-      id: '/dsp-characterization'
-      path: '/dsp-characterization'
-      fullPath: '/dsp-characterization'
-      preLoaderRoute: typeof DspCharacterizationRouteImport
-      parentRoute: typeof rootRouteImport
-    }
-    '/about': {
-      id: '/about'
-      path: '/about'
-      fullPath: '/about'
-      preLoaderRoute: typeof AboutRouteImport
+    '/': {
+      id: '/'
+      path: '/'
+      fullPath: '/'
+      preLoaderRoute: typeof IndexRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/Login': {
@@ -113,11 +102,18 @@ declare module '@tanstack/solid-router' {
       preLoaderRoute: typeof LoginRouteImport
       parentRoute: typeof rootRouteImport
     }
-    '/': {
-      id: '/'
-      path: '/'
-      fullPath: '/'
-      preLoaderRoute: typeof IndexRouteImport
+    '/about': {
+      id: '/about'
+      path: '/about'
+      fullPath: '/about'
+      preLoaderRoute: typeof AboutRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/dsp-characterization': {
+      id: '/dsp-characterization'
+      path: '/dsp-characterization'
+      fullPath: '/dsp-characterization'
+      preLoaderRoute: typeof DspCharacterizationRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/oauth/consent': {

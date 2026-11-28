@@ -1,4 +1,4 @@
-import { createEffect, createRoot, createSignal } from 'solid-js'
+import { createEffect, createRoot, createSignal, flush } from 'solid-js'
 import { compileLivePlaybackSnapshot, type LivePlaybackTransport, type LivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import { useTimelinePlayback } from '~/hooks/useTimelinePlayback'
 import { createPreparedStretchArtifactRepository } from '@daw-browser/audio-engine/prepared-stretch-store'
@@ -771,12 +771,14 @@ if (timelineJourney) {
   on('range-commit', () => {
     record('ui.ruler-loop-range-commit')
     setLoop((value) => ({ ...value, enabled: true, startSec: 0.2, endSec: 0.3 }))
+    flush()
     trackOperation(playback.updateNativeLoop())
   })
   on('fail-loop', () => {
     record('ui.failed-loop-range-commit')
     scheduleSubmissionsToReject = 8
     setLoop((value) => ({ ...value, enabled: true, startSec: 0.15, endSec: 0.6 }))
+    flush()
     trackOperation(playback.updateNativeLoop())
   })
   on('switch', () => { record('ui.project-switch'); setProjectGeneration((value) => value + 1) })
@@ -818,11 +820,14 @@ if (timelineJourney) {
     faults: [...faults], trace: [...trace],
   })
 
-  createEffect(() => {
-    const status = document.getElementById('status')
+  createEffect(
+    () => playback.isPlaying(),
+    (isPlaying) => {
+      const status = document.getElementById('status')
 
-    if (status) status.textContent = playback.isPlaying() ? 'Playing' : 'Stopped'
-  })
+      if (status) status.textContent = isPlaying ? 'Playing' : 'Stopped'
+    },
+  )
   Object.assign(window, {
     nativeLifecycle: {
       snapshot,
@@ -867,6 +872,7 @@ if (timelineJourney) {
       setLoopProbePosition: (position: number) => playback.setPlayhead(position, tracks),
       setLoopRange: (startSec: number, endSec: number) => {
         setLoop({ enabled: true, startSec, endSec })
+        flush()
         trackOperation(playback.updateNativeLoop())
       },
       retireForColdPlay: async () => {

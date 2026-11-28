@@ -46,6 +46,22 @@ function buildAuth(env: Env) {
       delete: async (key: string) => {
         await env.daw_convex_auth_kv.delete(key);
       },
+      // Workers KV has no atomic read-modify-write, so these two are best effort under concurrent requests.
+      getAndDelete: async (key: string) => {
+        const value = await env.daw_convex_auth_kv.get(key);
+
+        if (value !== null) await env.daw_convex_auth_kv.delete(key);
+
+        return value;
+      },
+      increment: async (key: string, ttl: number) => {
+        const { value, metadata } = await env.daw_convex_auth_kv.getWithMetadata<{ expiresAt: number }>(key);
+        const count = Number(value ?? 0) + 1;
+        const expiresAt = metadata?.expiresAt ?? Math.floor(Date.now() / 1000) + Math.max(60, Math.ceil(ttl));
+        await env.daw_convex_auth_kv.put(key, String(count), { expiration: expiresAt, metadata: { expiresAt } });
+
+        return count;
+      },
     },
     session: {
       storeSessionInDatabase: true,

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, type Accessor } from 'solid-js'
 import { useConvexQuery, convexApi } from '~/lib/convex'
 import { listLocalExportMetadata } from '~/lib/local-export-metadata'
 import { isLocalId } from '@daw-browser/shared'
@@ -39,47 +39,50 @@ export function useProjectExports(options: UseProjectExportsArgs): UseProjectExp
   // A local project lists its export metadata from IndexedDB; a cloud project lists them through a Convex query.
   const isLocalProject = createMemo(() => isLocalId('project', projectId()))
 
-  createEffect(() => {
-    localRetry()
-    setLocalExports([])
-    setLocalLoading(false)
-    setLocalError(null)
+  createEffect(
+    () => {
+      localRetry()
 
-    if (enabled && !enabled()) {
-      return
-    }
+      if (enabled && !enabled()) return undefined
 
-    const rid = projectId()
+      const rid = projectId()
 
-    if (!rid || !isLocalProject()) {
-      return
-    }
+      return rid && isLocalProject() ? rid : undefined
+    },
+    (rid) => {
+      setLocalExports([])
+      setLocalLoading(false)
+      setLocalError(null)
 
-    let active = true
-    onCleanup(() => { active = false })
-    setLocalLoading(true)
-    const isCurrentProject = () => active && (!enabled || enabled()) && projectId() === rid
-    void listLocalExportMetadata(rid).then((rows) => {
-      if (!isCurrentProject()) return
-      setLocalExports(rows.map((row) => ({
-        _id: row.id,
-        projectId: rid,
-        name: row.name,
-        url: '',
-        r2Key: '',
-        format: row.format,
-        duration: row.durationSec,
-        sampleRate: row.sampleRate,
-        sizeBytes: row.sizeBytes,
-        createdAt: row.createdAt,
-        createdBy: 'local',
-      })))
-    }).catch((error) => {
-      if (isCurrentProject()) setLocalError(error)
-    }).finally(() => {
-      if (isCurrentProject()) setLocalLoading(false)
-    })
-  })
+      if (!rid) return
+
+      let active = true
+      setLocalLoading(true)
+      const isCurrentProject = () => active && (!enabled || enabled()) && projectId() === rid
+      void listLocalExportMetadata(rid).then((rows) => {
+        if (!isCurrentProject()) return
+        setLocalExports(rows.map((row) => ({
+          _id: row.id,
+          projectId: rid,
+          name: row.name,
+          url: '',
+          r2Key: '',
+          format: row.format,
+          duration: row.durationSec,
+          sampleRate: row.sampleRate,
+          sizeBytes: row.sizeBytes,
+          createdAt: row.createdAt,
+          createdBy: 'local',
+        })))
+      }).catch((error) => {
+        if (isCurrentProject()) setLocalError(error)
+      }).finally(() => {
+        if (isCurrentProject()) setLocalLoading(false)
+      })
+
+      return () => { active = false }
+    },
+  )
 
   const raw = useConvexQuery(
     convexApi.exports.listByRoom,

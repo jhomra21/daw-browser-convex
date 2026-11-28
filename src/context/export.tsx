@@ -1,6 +1,6 @@
-import { createContext, createSignal, onCleanup, type Accessor, type JSX, untrack, useContext } from 'solid-js'
+import { createContext, createSignal, onCleanup, type Accessor, untrack, useContext } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 
-import { assertDefined } from '@daw-browser/shared'
 import type { ExportOutcome, ExportProgress } from '~/lib/export/export-job-types'
 import type { ExportQueue } from '~/lib/export/export-queue'
 import { createBrowserExportOutputTargetFactory } from '~/lib/export/browser-export-output-targets'
@@ -34,7 +34,8 @@ type ExportProviderProps = {
 }
 
 export function ExportProvider(props: ExportProviderProps) {
-  const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>()
+  // subscribe() replays the queue's current job synchronously, inside this component body. The signal is private to the provider.
+  const [activeJob, setActiveJob] = createSignal<ExportJob | undefined>(undefined, { ownedWrite: true })
   const unsubscribe = untrack(() => props.queue.subscribe(setActiveJob))
 
   const bridge = isDesktopRenderer() ? desktopBridge() : undefined
@@ -60,14 +61,12 @@ export function ExportProvider(props: ExportProviderProps) {
   })
 
   return (
-    <ExportContext.Provider value={{ activeJob, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
+    <ExportContext value={{ activeJob, enqueueTimelineExport, enqueueStemExport, cancelExport }}>
       {props.children}
-    </ExportContext.Provider>
+    </ExportContext>
   )
 }
 
 export function useExportContext(): ExportContextValue {
-  const context = useContext(ExportContext)
-
-  return assertDefined(context, 'ExportProvider is missing')
+  return useContext(ExportContext)
 }

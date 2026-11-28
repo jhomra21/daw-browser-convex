@@ -1,4 +1,4 @@
-import { For, Show, createEffect, createSignal, onCleanup, untrack, type Component } from "solid-js";
+import { For, Show, createEffect, createSignal, untrack, type Component } from "solid-js";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import type { PluginParameterDescriptor } from "@daw-browser/plugin-host-protocol";
 import { encodeNativeExternalAttachmentPlan } from "@daw-browser/plugin-host-protocol";
@@ -177,30 +177,34 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
     liveEditorSupported(),
   );
 
-  createEffect(() => {
-    const instanceId = props.processor.instanceId;
+  createEffect(
+    () => props.processor.instanceId,
+    (instanceId) => {
+      if (!instanceId || instanceId === editorInstanceId) return;
+      editorInstanceId = instanceId;
+      setAutoOpenStarted(false);
+      autoOpenFailed = false;
+      setEditorOpen(false);
+      setEditorMessage();
+      setLiveEditorSupported();
+    },
+  );
+  createEffect(
+    () => ({
+      instanceId: props.processor.instanceId,
+      projectId: props.projectId,
+      subscribe: desktopBridge()?.audioHost?.onVstEditorState,
+    }),
+    ({ instanceId, projectId, subscribe }) => {
+      if (!subscribe || !projectId) return;
 
-    if (!instanceId || instanceId === editorInstanceId) return;
-    editorInstanceId = instanceId;
-    setAutoOpenStarted(false);
-    autoOpenFailed = false;
-    setEditorOpen(false);
-    setEditorMessage();
-    setLiveEditorSupported();
-  });
-  createEffect(() => {
-    const instanceId = props.processor.instanceId;
-    const projectId = props.projectId;
-    const subscribe = desktopBridge()?.audioHost?.onVstEditorState;
+      const unsubscribe = subscribe((state) => {
+        if (state.projectId === projectId && state.instanceId === instanceId) setEditorOpen(state.open);
+      });
 
-    if (!subscribe || !projectId) return;
-
-    const unsubscribe = subscribe((state) => {
-      if (state.projectId === projectId && state.instanceId === instanceId) setEditorOpen(state.open);
-    });
-
-    onCleanup(unsubscribe);
-  });
+      return unsubscribe;
+    },
+  );
 
   const updateBypass = (bypassed: boolean) => {
     if (!props.canWrite) return;
@@ -297,35 +301,46 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
     }
   };
 
-  createEffect(() => {
-    if (!props.autoOpen) {
-      autoOpenFailed = false;
+  createEffect(
+    () => {
+      if (!props.autoOpen) return undefined;
 
-      return;
-    }
-
-    const available = nativeEditorCommandAvailable(
-      editorBridgeAvailable(),
-      props.processor.manifest.supportsEditor,
-      liveEditorSupported(),
-    );
-
-    if (autoOpenStarted() || autoOpenFailed || !available) return;
-    setAutoOpenStarted(true);
-    void editor("open").then((opened) => {
-      if (opened) {
-        // The insertion request is consumed only after the native session
-        // confirms that the editor is open.
-        untrack(() => props.onAutoOpenHandled?.(props.processor.instanceId));
+      return {
+        available: nativeEditorCommandAvailable(
+          editorBridgeAvailable(),
+          props.processor.manifest.supportsEditor,
+          liveEditorSupported(),
+        ),
+        started: autoOpenStarted(),
+        // The editor command reads these synchronously, so a change re-evaluates the auto-open.
+        bridge: desktopBridge(),
+        projectId: props.projectId,
+      };
+    },
+    (autoOpen) => {
+      if (!autoOpen) {
+        autoOpenFailed = false;
 
         return;
       }
 
-      autoOpenFailed = true;
-      setAutoOpenStarted(false);
-      console.error("[native-vst3] editor auto-open result failure", { opened });
-    });
-  });
+      if (autoOpen.started || autoOpenFailed || !autoOpen.available) return;
+      setAutoOpenStarted(true);
+      void editor("open").then((opened) => {
+        if (opened) {
+          // The insertion request is consumed only after the native session
+          // confirms that the editor is open.
+          untrack(() => props.onAutoOpenHandled?.(props.processor.instanceId));
+
+          return;
+        }
+
+        autoOpenFailed = true;
+        setAutoOpenStarted(false);
+        console.error("[native-vst3] editor auto-open result failure", { opened });
+      });
+    },
+  );
 
   return (
     <EffectShell

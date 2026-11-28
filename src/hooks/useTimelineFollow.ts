@@ -17,29 +17,43 @@ export const useTimelineFollow = (input: {
   scrollElement: Accessor<HTMLDivElement | undefined>;
   pixelsPerSecond: Accessor<number>;
 }) => {
-  createEffect(() => {
-    if (input.gestureActive()) input.setFollowPaused(true);
-  });
-  createEffect(() => {
-    if (!input.playback.isPlaying()) input.setFollowPaused(false);
-  });
-  createEffect(() => {
-    const playhead = input.playback.playheadSec();
+  createEffect(
+    () => input.gestureActive(),
+    (gestureActive) => {
+      if (gestureActive) input.setFollowPaused(true);
+    },
+  );
+  createEffect(
+    () => input.playback.isPlaying(),
+    (isPlaying) => {
+      if (!isPlaying) input.setFollowPaused(false);
+    },
+  );
+  createEffect(
+    () => {
+      const playhead = input.playback.playheadSec();
 
-    if (!input.preferences.follow() || input.followPaused() || !input.playback.isPlaying()) return;
-    const scroll = input.scrollElement();
+      if (!input.preferences.follow() || input.followPaused() || !input.playback.isPlaying()) return undefined;
+      const scroll = input.scrollElement();
 
-    if (!scroll) return;
-    const visibleStart = input.viewport.visibleRange().startSec;
-    const visibleDuration = scroll.clientWidth / Math.max(1e-9, input.pixelsPerSecond());
+      if (!scroll) return undefined;
+      const visibleStart = input.viewport.visibleRange().startSec;
+      const visibleDuration = scroll.clientWidth / Math.max(1e-9, input.pixelsPerSecond());
 
-    if (!(visibleDuration > 0)) return;
-    const visibleEnd = visibleStart + visibleDuration;
+      if (!(visibleDuration > 0)) return undefined;
 
-    if (playhead < visibleStart || playhead >= visibleEnd) {
-      input.viewport.setVisibleStart(Math.max(0, playhead - visibleDuration * 0.1));
-    }
-  });
+      return { playhead, visibleStart, visibleDuration };
+    },
+    (follow) => {
+      if (!follow) return;
+      const { playhead, visibleStart, visibleDuration } = follow;
+      const visibleEnd = visibleStart + visibleDuration;
+
+      if (playhead < visibleStart || playhead >= visibleEnd) {
+        input.viewport.setVisibleStart(Math.max(0, playhead - visibleDuration * 0.1));
+      }
+    },
+  );
 
   return {
     toggle: () => {

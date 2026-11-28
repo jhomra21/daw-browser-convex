@@ -24,10 +24,16 @@ type ProjectDeleteDialogProps = {
 export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
   const [confirmation, setConfirmation] = createSignal('')
 
-  createEffect(() => {
-    if (!props.open) setConfirmation('')
-    void props.project?.id
-  })
+  createEffect(
+    () => {
+      void props.project?.id
+
+      return props.open
+    },
+    (open) => {
+      if (!open) setConfirmation('')
+    },
+  )
 
   const confirmDelete = () => {
     const project = props.project

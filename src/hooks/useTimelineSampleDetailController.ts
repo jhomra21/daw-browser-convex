@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, type Accessor, type Setter } from "solid-js";
+import { createEffect, createMemo, createSignal, type Accessor, type Setter, onSettled } from "solid-js";
 import type { AudioWarp, Clip } from "@daw-browser/timeline-core/types";
 import { normalizeClipGain } from "@daw-browser/shared";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
@@ -96,14 +96,14 @@ export function useTimelineSampleDetailController(options: Options) {
     options.setOpen(true);
   };
 
-  createEffect(() => {
-    if (options.mode() !== "clip-detail") return;
+  createEffect(
+    () => options.mode() === "clip-detail" && !selectedClip(),
+    (shouldClose) => {
+      if (shouldClose) close();
+    },
+  );
 
-    if (selectedClip()) return;
-    close();
-  });
-
-  createEffect(() => {
+  onSettled(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key !== "Escape" || options.mode() !== "clip-detail") return;
 
@@ -116,7 +116,10 @@ export function useTimelineSampleDetailController(options: Options) {
     };
 
     window.addEventListener("keydown", handleKeyDown, { capture: true });
-    onCleanup(() => window.removeEventListener("keydown", handleKeyDown, { capture: true }));
+
+    const removeListener = () => window.removeEventListener("keydown", handleKeyDown, { capture: true });
+
+    return removeListener;
   });
 
   const changeGain = async (clip: Clip, gain: number) => {

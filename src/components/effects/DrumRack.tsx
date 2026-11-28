@@ -1,4 +1,4 @@
-import { createEffect, createSignal, For, onCleanup, Show, type Component, untrack } from "solid-js";
+import { createEffect, createSignal, For, Show, type Component, untrack, onSettled } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { loadWaveformSourceData } from "@daw-browser/waveforms/select-waveform-window";
 import type { WaveformSourceData } from "@daw-browser/waveforms/types";
@@ -92,52 +92,53 @@ const SampleWaveform: Component<{
   const [canvasSize, setCanvasSize] = createSignal({ width: SAMPLE_WAVEFORM_BINS, height: 56 });
   let waveformRequestKey: string | undefined;
 
-  createEffect(() => {
-    const sample = props.sample;
-    const buffer = props.buffer;
-    const region = sampledInstrumentRegion(sample.source, props.sourceStartSec, props.sourceEndSec);
-    const regionAssetKey = sampledInstrumentRegionIdentity(sample, region);
-    const bufferIdentity = getDrumRackWaveformBufferIdentity(buffer);
-    const nextRequestKey = `${regionAssetKey}\n${bufferIdentity}`;
+  createEffect(
+    () => {
+      const sample = props.sample;
+      const buffer = props.buffer;
+      const region = sampledInstrumentRegion(sample.source, props.sourceStartSec, props.sourceEndSec);
+      const regionAssetKey = sampledInstrumentRegionIdentity(sample, region);
+      const bufferIdentity = getDrumRackWaveformBufferIdentity(buffer);
 
-    if (waveformRequestKey === nextRequestKey) return;
-    waveformRequestKey = nextRequestKey;
-    let cancelled = false;
-    setData(null);
+      return { buffer, regionAssetKey, bufferIdentity, nextRequestKey: `${regionAssetKey}\n${bufferIdentity}` };
+    },
+    ({ buffer, regionAssetKey, bufferIdentity, nextRequestKey }) => {
+      if (waveformRequestKey === nextRequestKey) return;
+      waveformRequestKey = nextRequestKey;
+      let cancelled = false;
+      setData(null);
 
-    if (!buffer) {
-      onCleanup(() => {
+      const cancel = () => {
         cancelled = true;
+      };
+
+      if (!buffer) return cancel;
+
+      void loadWaveformSourceData({
+        assetKey: regionAssetKey,
+        sourceIdentity: {
+          assetKey: regionAssetKey,
+          identity: bufferIdentity,
+          durationSec: buffer.duration,
+          frameCount: buffer.length,
+          sampleRate: buffer.sampleRate,
+          channelCount: buffer.numberOfChannels,
+        },
+        buffer,
+        sourceStartFrame: 0,
+        sourceEndFrame: buffer.length,
+        framesPerInterval: sampleWaveformFramesPerInterval(buffer.length),
+      }).then((nextPeaks) => {
+        if (!cancelled) setData(nextPeaks);
+      }, () => {
+        if (!cancelled) setData(null);
       });
 
-      return;
-    }
+      return cancel;
+    },
+  );
 
-    void loadWaveformSourceData({
-      assetKey: regionAssetKey,
-      sourceIdentity: {
-        assetKey: regionAssetKey,
-        identity: bufferIdentity,
-        durationSec: buffer.duration,
-        frameCount: buffer.length,
-        sampleRate: buffer.sampleRate,
-        channelCount: buffer.numberOfChannels,
-      },
-      buffer,
-      sourceStartFrame: 0,
-      sourceEndFrame: buffer.length,
-      framesPerInterval: sampleWaveformFramesPerInterval(buffer.length),
-    }).then((nextPeaks) => {
-      if (!cancelled) setData(nextPeaks);
-    }, () => {
-      if (!cancelled) setData(null);
-    });
-    onCleanup(() => {
-      cancelled = true;
-    });
-  });
-
-  createEffect(() => {
+  onSettled(() => {
     const canvas = canvasRef;
 
     if (!canvas) return;
@@ -151,67 +152,73 @@ const SampleWaveform: Component<{
     updateSize();
     const resizeObserver = new ResizeObserver(updateSize);
     resizeObserver.observe(canvas);
-    onCleanup(() => resizeObserver.disconnect());
+
+    return () => resizeObserver.disconnect();
   });
 
-  createEffect(() => {
-    const canvas = canvasRef;
+  createEffect(
+    () => ({
+      size: canvasSize(),
+      dpr: props.devicePixelRatio,
+      themeTokens: appPreferences.appearance.themeTokens(),
+      nextData: data(),
+    }),
+    ({ size, dpr, themeTokens, nextData }) => {
+      const canvas = canvasRef;
 
-    if (!canvas) return;
-    const { width: cssW, height: cssH } = canvasSize();
-    const dpr = props.devicePixelRatio;
-    const pxW = Math.floor(cssW * dpr);
-    const pxH = Math.floor(cssH * dpr);
+      if (!canvas) return;
+      const { width: cssW, height: cssH } = size;
+      const pxW = Math.floor(cssW * dpr);
+      const pxH = Math.floor(cssH * dpr);
 
-    if (canvas.width !== pxW || canvas.height !== pxH) {
-      canvas.width = pxW;
-      canvas.height = pxH;
-    }
-
-    const ctx = canvas.getContext("2d");
-
-    if (!ctx) return;
-    const contextScaleX = pxW / cssW;
-    const contextScaleY = pxH / cssH;
-    ctx.setTransform(contextScaleX, 0, 0, contextScaleY, 0, 0);
-    ctx.imageSmoothingEnabled = false;
-    ctx.clearRect(0, 0, cssW, cssH);
-
-    const themeTokens = appPreferences.appearance.themeTokens();
-    const gridColor = themeTokens["device-graph-grid"];
-    const waveformColor = themeTokens["clip-audio"];
-    const nextData = data();
-
-    if (!nextData) {
-      ctx.strokeStyle = gridColor;
-
-      for (let x = 0; x < cssW; x += 7) {
-        ctx.beginPath();
-        ctx.moveTo(x, cssH);
-        ctx.lineTo(Math.min(cssW, x + 7), 0);
-        ctx.stroke();
+      if (canvas.width !== pxW || canvas.height !== pxH) {
+        canvas.width = pxW;
+        canvas.height = pxH;
       }
 
-      return;
-    }
+      const ctx = canvas.getContext("2d");
 
-    drawWaveformSignal(ctx, {
-      data: nextData,
-      sourceStartFrame: nextData.firstFrame,
-      sourceEndFrame: nextData.kind === 'samples'
-        ? nextData.firstFrame + (nextData.channels[0]?.length ?? 0)
-        : nextData.firstFrame + nextData.intervalCount * nextData.framesPerInterval,
-      startPx: 0,
-      endPx: cssW,
-      topY: 0,
-      contentH: cssH,
-      channelCount: nextData.channels.length,
-      style: resolveWaveformPaintStyle({
-        color: waveformColor,
-        backingScaleY: contextScaleY,
-      }),
-    });
-  });
+      if (!ctx) return;
+      const contextScaleX = pxW / cssW;
+      const contextScaleY = pxH / cssH;
+      ctx.setTransform(contextScaleX, 0, 0, contextScaleY, 0, 0);
+      ctx.imageSmoothingEnabled = false;
+      ctx.clearRect(0, 0, cssW, cssH);
+
+      const gridColor = themeTokens["device-graph-grid"];
+      const waveformColor = themeTokens["clip-audio"];
+
+      if (!nextData) {
+        ctx.strokeStyle = gridColor;
+
+        for (let x = 0; x < cssW; x += 7) {
+          ctx.beginPath();
+          ctx.moveTo(x, cssH);
+          ctx.lineTo(Math.min(cssW, x + 7), 0);
+          ctx.stroke();
+        }
+
+        return;
+      }
+
+      drawWaveformSignal(ctx, {
+        data: nextData,
+        sourceStartFrame: nextData.firstFrame,
+        sourceEndFrame: nextData.kind === 'samples'
+          ? nextData.firstFrame + (nextData.channels[0]?.length ?? 0)
+          : nextData.firstFrame + nextData.intervalCount * nextData.framesPerInterval,
+        startPx: 0,
+        endPx: cssW,
+        topY: 0,
+        contentH: cssH,
+        channelCount: nextData.channels.length,
+        style: resolveWaveformPaintStyle({
+          color: waveformColor,
+          backingScaleY: contextScaleY,
+        }),
+      });
+    },
+  );
 
   return (
     <canvas
@@ -229,14 +236,21 @@ const DrumRack: Component<DrumRackProps> = (props) => {
   const [selectedPadId, setSelectedPadId] = createSignal(untrack(() => props.params.selectedPadId ?? props.params.pads[0]?.id));
   const [buffersVersion, setBuffersVersion] = createSignal(0);
 
-  createEffect(() => {
-    const unsubscribe = props.subscribeBuffers(() => setBuffersVersion((version) => version + 1));
-    onCleanup(unsubscribe);
-  });
+  createEffect(
+    () => props.subscribeBuffers,
+    (subscribeBuffers) => {
+      const unsubscribe = subscribeBuffers(() => setBuffersVersion((version) => version + 1));
 
-  createEffect(() => {
-    setSelectedPadId(props.params.selectedPadId ?? props.params.pads[0]?.id);
-  });
+      return unsubscribe;
+    },
+  );
+
+  createEffect(
+    () => props.params.selectedPadId ?? props.params.pads[0]?.id,
+    (padId) => {
+      setSelectedPadId(padId);
+    },
+  );
 
   const selectedPad = () => props.params.pads.find((pad) => pad.id === selectedPadId()) ?? props.params.pads[0];
 
@@ -305,7 +319,7 @@ const DrumRack: Component<DrumRackProps> = (props) => {
             {(status) => (
               <div class="mb-2 text-2xs">
                 <button
-                  classList={{ "text-destructive": status().state === 'error' }}
+                  class={{ "text-destructive": status().state === 'error' }}
                   title={status().error}
                   disabled={status().state !== 'error'}
                   onClick={() => props.onRetry()}
@@ -329,24 +343,22 @@ const DrumRack: Component<DrumRackProps> = (props) => {
             <For each={props.params.pads}>
               {(pad) => (
                 <button
-                  class="relative flex h-14 flex-col justify-between border p-1.5 text-left text-2xs transition-colors"
-                  classList={{
+                  class={["relative flex h-14 flex-col justify-between border p-1.5 text-left text-2xs transition-colors", {
                     "border-cyan-500/70 bg-cyan-950/30 text-cyan-100": pad.id === selectedPadId(),
                     "border-border bg-muted/80 text-muted-foreground hover:border-border": pad.id !== selectedPadId() && !!pad.sample,
                     "border-border/60 bg-app-surface/40 text-muted-foreground hover:border-border": pad.id !== selectedPadId() && !pad.sample,
                     "opacity-40": pad.mute,
-                  }}
+                  }]}
                   onClick={() => setSelectedPadId(pad.id)}
                   onDblClick={() => previewPad(pad)}
                   onDragOver={handleSampleDragOver}
                   onDrop={(event) => handleSampleDrop(event, pad)}
                 >
                   <span
-                    class="truncate"
-                    classList={{
+                    class={["truncate", {
                       "text-foreground": !!pad.sample,
                       "text-muted-foreground": !pad.sample,
-                    }}
+                    }]}
                   >
                     {padDisplayName(pad)}
                   </span>

@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, untrack, type Accessor, createTrackedEffect } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
@@ -313,13 +313,28 @@ const replaceAutomationEnvelope = (
 };
 
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
-  const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
+  // Engine sync and the persist/override paths read these rows and override keys right after writing them, so the
+  // controller owns them as plain variables; the signals only publish them to the UI and memos.
+  let currentEnvelopes: AutomationEnvelope[] = [];
+  let currentOverriddenKeys: Set<string> = new Set();
+  const [automationEnvelopes, publishAutomationEnvelopes] = createSignal(currentEnvelopes);
+  const [overriddenAutomationTargetKeys, publishOverriddenKeys] = createSignal(currentOverriddenKeys);
+
+  const setAutomationEnvelopes = (next: AutomationEnvelope[]) => {
+    currentEnvelopes = next;
+    publishAutomationEnvelopes(next);
+  };
+
+  const setOverriddenAutomationTargetKeys = (next: Set<string>) => {
+    currentOverriddenKeys = next;
+    publishOverriddenKeys(next);
+  };
   // Every project change reloads these from storage; an unchanged result must not rebuild the lanes workspace.
+
   const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({}, { equals: sameData });
   const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map(), { equals: sameData });
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
-  const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
   // The newest re-enable of a lane owns its outcome, so an older request answered later cannot undo it.
   const reEnableOwners = new Map<string, number>();
   let lastReEnable = 0;
@@ -490,17 +505,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   });
 
   const applyAutomationEnvelopeState = (envelope: AutomationEnvelope | undefined, targetKey: string) => {
-    setAutomationEnvelopes((current) => {
-      const rows = replaceAutomationEnvelope(current, targetKey, envelope);
-      options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
-      options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(rows, overriddenAutomationTargetKeys()));
+    const current = currentEnvelopes;
+    const rows = replaceAutomationEnvelope(current, targetKey, envelope);
+    setAutomationEnvelopes(rows);
+    options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), current);
+    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(rows, currentOverriddenKeys));
 
-      if (options.isPlaying() && !overriddenAutomationTargetKeys().has(targetKey)) {
-        options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: new Set([targetKey]) });
-      }
-
-      return rows;
-    });
+    if (options.isPlaying() && !currentOverriddenKeys.has(targetKey)) {
+      options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: new Set([targetKey]) });
+    }
   };
 
   const applyAutomationRowsToEngine = (
@@ -519,7 +532,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       options.audioEngine.restoreAutomationTargets(removedTargetKeys, previous);
     }
 
-    const overrides = overriddenAutomationTargetKeys();
+    const overrides = currentOverriddenKeys;
     options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(next, overrides));
 
     if (options.isPlaying()) {
@@ -536,20 +549,17 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     const envelope = automationEnvelopesByTargetKey().get(targetKey);
 
     if (!envelope?.enabled) return;
-    setOverriddenAutomationTargetKeys((current) => {
-      const next = automationTargetKeysForManualOverride(current, targetKey);
+    const next = automationTargetKeysForManualOverride(currentOverriddenKeys, targetKey);
 
-      if (next.size === current.size) return current;
-      options.acceptance?.ui("ui-automation-override", () => targetKey);
-      options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
-      options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
-
-      return next;
-    });
+    if (next.size === currentOverriddenKeys.size) return;
+    setOverriddenAutomationTargetKeys(next);
+    options.acceptance?.ui("ui-automation-override", () => targetKey);
+    options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), currentEnvelopes);
+    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(currentEnvelopes, next));
   };
 
   const reEnableAutomation = async () => {
-    const current = overriddenAutomationTargetKeys();
+    const current = currentOverriddenKeys;
 
     if (current.size === 0) return;
     options.acceptance?.ui("ui-automation-reenable", () => [...current].join(","));
@@ -557,7 +567,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     const operation = ++lastReEnable;
 
     for (const targetKey of reEnabledTargetKeys) reEnableOwners.set(targetKey, operation);
-    const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
+    const envelopes = currentEnvelopes.filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
     const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
 
     for (const envelope of envelopes) {
@@ -587,16 +597,16 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
 
       if (playbackControlAttempted && results.some((result) => !result.accepted)) {
-        setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...owned]));
+        setOverriddenAutomationTargetKeys(new Set([...currentOverriddenKeys, ...owned]));
 
         return;
       }
     }
 
-    options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
+    options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, currentEnvelopes);
     // Overrides placed while the backend answered stay out of the schedule.
-    const overrides = overriddenAutomationTargetKeys();
-    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), overrides));
+    const overrides = currentOverriddenKeys;
+    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(currentEnvelopes, overrides));
     const scheduledTargetKeys = new Set([...reEnabledTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
 
     if (!options.isPlaying()) options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
@@ -614,7 +624,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
       if (isLocalId("project", rid)) {
         const persisted = await setLocalAutomationEnvelope(rid, envelope);
-        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, persisted));
+        setAutomationEnvelopes(replaceAutomationEnvelope(currentEnvelopes, envelope.targetKey, persisted));
 
         return;
       }
@@ -638,17 +648,17 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           },
         },
       });
-      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, envelope.targetKey, envelope));
+      setAutomationEnvelopes(replaceAutomationEnvelope(currentEnvelopes, envelope.targetKey, envelope));
     },
     deleteEnvelope: async (targetKey) => {
       const rid = options.projectId();
 
       if (!rid) return;
-      const envelope = automationEnvelopes().find((entry) => entry.targetKey === targetKey);
+      const envelope = currentEnvelopes.find((entry) => entry.targetKey === targetKey);
 
       if (isLocalId("project", rid)) {
         await deleteLocalAutomationEnvelope(rid, targetKey);
-        setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
+        setAutomationEnvelopes(replaceAutomationEnvelope(currentEnvelopes, targetKey, undefined));
 
         return;
       }
@@ -670,7 +680,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           },
         },
       });
-      setAutomationEnvelopes((current) => replaceAutomationEnvelope(current, targetKey, undefined));
+      setAutomationEnvelopes(replaceAutomationEnvelope(currentEnvelopes, targetKey, undefined));
     },
     onEnvelopeCommitted: (previous, next) => {
       const rid = options.projectId();
@@ -754,7 +764,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }
   };
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     const rid = options.projectId();
 
     if (!rid) {
@@ -774,12 +784,12 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
         if (options.projectId() !== rid) return;
         setAutomationEnvelopes(rows);
         setAutomationDataReady(true);
-        untrack(persistedAutomation.syncRemote);
+        untrack(() => persistedAutomation.syncRemote(rows));
       }).catch(() => {
         if (options.projectId() !== rid) return;
         setAutomationEnvelopes([]);
         setAutomationDataReady(true);
-        untrack(persistedAutomation.syncRemote);
+        untrack(() => persistedAutomation.syncRemote([]));
       });
 
       return;
@@ -801,9 +811,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
 
     setAutomationEnvelopes(next);
     setAutomationDataReady(true);
-    untrack(persistedAutomation.syncRemote);
+    untrack(() => persistedAutomation.syncRemote(next));
   });
-  createEffect(() => {
+  createTrackedEffect(() => {
     const rid = options.projectId();
 
     if (!rid) {
@@ -978,8 +988,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       };
 
       reload();
-      const unsubscribe = subscribeToLocalProjectChanges(rid, reload);
-      onCleanup(unsubscribe);
+
+      return subscribeToLocalProjectChanges(rid, reload);
     }
 
     if (!isLocalId("project", rid)) {
@@ -1031,7 +1041,8 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     visibleAutomationLanes.value();
     selectedAutomationParameters.value();
     persistedAutomation.envelopes();
-    seedVisibleAutomationLanes();
+  }, () => {
+    untrack(seedVisibleAutomationLanes);
   });
 
   const targetKeyForTrackSelection = (trackId: Track["id"], selection: AutomationParameterSelection) => (

@@ -1,8 +1,9 @@
 import '~/index.css'
-import { render } from 'solid-js/web'
+import { flush } from 'solid-js'
+import { render } from '@solidjs/web'
 import { createMemoryHistory, createRootRoute, createRouter, RouterProvider } from '@tanstack/solid-router'
 import { QueryClient, QueryClientProvider } from '@tanstack/solid-query'
-import { ColorModeProvider } from '@kobalte/core'
+import { ColorModeProvider } from '@kobalte/core/color-mode'
 import Timeline from '~/components/Timeline'
 import { AppPreferencesProvider } from '~/context/app-preferences'
 import { MidiAccessProvider } from '~/context/midi-access'
@@ -272,6 +273,8 @@ export const mountTimeline = async () => {
   Object.assign(window, {
     timelineJourney: {
       snapshot: timelineState,
+      // Page-side drivers that chain DOM events in one task settle between them, as separate input tasks would.
+      settle: () => flush(),
       instrumentTrackId,
       remoteTrackId,
       remoteClipId,

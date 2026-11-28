@@ -1,4 +1,4 @@
-import { createEffect, on, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, onCleanup, type Accessor } from 'solid-js'
 import { assertDefined } from '@daw-browser/shared'
 
 import type { convexApi, convexClient } from '~/lib/convex'
@@ -252,11 +252,15 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
     dragCursorClass: 'cursor-grabbing',
   })
 
-  createEffect(on([projectId, userId], () => {
-    if (!gesture) return
-    cancelPointerDrag()
-    resetDragState()
-  }, { defer: true }))
+  createEffect(
+    () => [projectId(), userId()],
+    () => {
+      if (!gesture) return
+      cancelPointerDrag()
+      resetDragState()
+    },
+    { defer: true },
+  )
 
   const onClipPointerDown = (trackId: Track['id'], clipId: string, event: PointerEvent) => {
     if (event.button !== 0) return

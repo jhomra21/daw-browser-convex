@@ -1,4 +1,4 @@
-import { createEffect, createResource, createSignal, For, Show, type Accessor } from "solid-js";
+import { createEffect, createMemo, createSignal, Errored, For, Loading, Show, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
 import { Button } from "~/components/ui/button";
 import ProjectDeleteDialog from "~/components/project-delete-dialog";
@@ -43,20 +43,11 @@ const getNextUntitledProjectName = (projects: LocalProjectEntry[]) => {
 
 type LocalProjectsDashboardViewProps = {
   projects: Accessor<LocalProjectEntry[] | undefined>;
-  error: Accessor<unknown>;
   reloadProjects: () => void;
   onOpenProject: (projectId: string) => void;
 };
 
 function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
-  const listingErrorMessage = () => {
-    const error = props.error();
-
-    return error instanceof Error && isLocalProjectCatalogOpenError(error)
-      ? error.message
-      : "Local projects could not be loaded.";
-  };
-
   const [busy, setBusy] = createSignal(false);
   const [operationError, setOperationError] = createSignal<string | null>(null);
   const [renamingProject, setRenamingProject] = createSignal<LocalProjectEntry | null>(null);
@@ -130,17 +121,28 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
       </Show>
 
       <div class="space-y-3">
-        <Show
-          when={!props.error()}
-          fallback={
-            <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
-              {listingErrorMessage()}
-              <Button variant="outline" size="sm" class="ml-2" onClick={props.reloadProjects}>
-                Retry
-              </Button>
-            </div>
-          }
+        {/* Loading shows its fallback only on first load; a reload holds the previous list while the projects memo is pending. */}
+        <Errored
+          fallback={(error) => {
+            const failure = error();
+
+            return (
+              <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                {failure instanceof Error && isLocalProjectCatalogOpenError(failure) ? failure.message : "Local projects could not be loaded."}
+                <Button variant="outline" size="sm" class="ml-2" onClick={() => props.reloadProjects()}>
+                  Retry
+                </Button>
+              </div>
+            );
+          }}
         >
+          <Loading
+            fallback={
+              <div class="border border-border bg-app-surface/80 p-4 text-sm text-muted-foreground">
+                Loading local projects...
+              </div>
+            }
+          >
           <Show
             when={props.projects()}
             fallback={
@@ -186,7 +188,8 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
               </Show>
             )}
           </Show>
-        </Show>
+          </Loading>
+        </Errored>
       </div>
 
       <ProjectRenameDialog
@@ -259,18 +262,22 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
     setShareCopied(await shareMenu.copy());
   };
 
-  createEffect(() => {
-    const projectId = projectMenu().currentProjectId;
-    const membersProjectId = canShareCurrentProject() ? projectId : "";
+  createEffect(
+    () => {
+      const projectId = projectMenu().currentProjectId;
 
-    if (loadedMembersProjectId === membersProjectId) return;
-    loadedMembersProjectId = membersProjectId;
-    setShareCopied(false);
-    shareMenu.reset();
+      return canShareCurrentProject() ? projectId : "";
+    },
+    (membersProjectId) => {
+      if (loadedMembersProjectId === membersProjectId) return;
+      loadedMembersProjectId = membersProjectId;
+      setShareCopied(false);
+      shareMenu.reset();
 
-    if (!membersProjectId) return;
-    void shareMenu.loadMembers();
-  });
+      if (!membersProjectId) return;
+      void shareMenu.loadMembers();
+    },
+  );
 
   return (
     <DashboardSection title="Project settings" description="Backup, sharing, storage, and sync controls for the current project.">
@@ -390,18 +397,19 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
   const [cloudOperationError, setCloudOperationError] = createSignal<string | null>(null);
   const menu = () => props.model?.projectMenu;
 
-  const [localProjects] = createResource(
-    () => props.onOpenProject && !menu() ? localProjectsReloadToken() : null,
-    listLocalProjects,
-  );
+  const localProjects = createMemo(() => {
+    if (!props.onOpenProject || menu()) return undefined;
+    localProjectsReloadToken();
+
+    return listLocalProjects();
+  });
 
   const current = () => menu()?.projects.find((project) => project.projectId === menu()?.currentProjectId);
 
   const localProjectsView = () => props.onOpenProject
     ? (
       <LocalProjectsDashboardView
-        projects={() => localProjects.latest ?? localProjects()}
-        error={() => localProjects.error}
+        projects={localProjects}
         reloadProjects={() => setLocalProjectsReloadToken((currentToken) => currentToken + 1)}
         onOpenProject={props.onOpenProject}
       />

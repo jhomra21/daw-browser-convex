@@ -1,4 +1,4 @@
-import type { JSX } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type { ProjectSaveStatusInput } from "~/lib/project-save-status";
 import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
 import { cn } from "~/lib/utils";

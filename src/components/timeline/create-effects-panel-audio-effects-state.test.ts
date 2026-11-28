@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { createComponent, createRenderEffect, createRoot, createSignal, Show, type Accessor, type JSX } from "solid-js";
+import { createComponent, createRenderEffect, createRoot, createSignal, flush, Show, type Accessor } from "solid-js";
+import type { JSX } from "@solidjs/web";
+import { flushChain } from "~/test-support/create-flushed-root";
 import { AudioEngine, type AudioEffectRuntimeInstance, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import { AUDIO_EFFECT_CONTRACTS, type AudioEffectInstance, type AudioEffectKind, type JsonValue } from "@daw-browser/shared";
 import type { ExternalSidechainRoute } from "@daw-browser/timeline-core/types";
@@ -167,7 +169,12 @@ describe("effects panel instance engine synchronization", () => {
     void terminal.promise.then(() => { answered = true; });
 
     try {
+      // The view starts reading its project from an effect, which now runs at the first flush rather than at creation.
+      flush();
       await fixture.view.reload();
+      // The published rows reach the owner at the next flush and are delivered in order before the edit.
+      flushChain();
+      await fixture.device.flushPending();
       fixture.device.spectral.changeInstance(instanceId, params => ({
         ...params, state: { ...params.state, fftSize: 4096 },
       }));
@@ -314,7 +321,12 @@ describe("effects panel instance engine synchronization", () => {
                 targetId: () => "track-show",
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
-              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id, "track-show"));
+              createRenderEffect(
+                () => shownEffect().id,
+                (id) => {
+                  audioEffects.beginInteraction(id, "track-show");
+                },
+              );
 
               return "";
             };
@@ -322,8 +334,10 @@ describe("effects panel instance engine synchronization", () => {
         });
       });
 
+      flush();
       expect(activeEffectId).toBe("effect-show");
       expect(() => setEffect(undefined)).not.toThrow();
+      flush();
       expect(canceled).toEqual([{ effectId: "effect-show", targetId: "track-show" }]);
       dispose();
     },
@@ -363,7 +377,12 @@ describe("effects panel instance engine synchronization", () => {
                 targetId: () => "track-current",
                 ownerKey: () => `project:1:${shownEffect().id}`,
               });
-              createRenderEffect(() => audioEffects.beginInteraction(shownEffect().id));
+              createRenderEffect(
+                () => shownEffect().id,
+                (id) => {
+                  audioEffects.beginInteraction(id);
+                },
+              );
 
               return "";
             };
@@ -371,7 +390,9 @@ describe("effects panel instance engine synchronization", () => {
         });
       });
 
+      flush();
       setEffect({ id: "effect-new" });
+      flush();
       expect(events).toEqual([
         "begin:effect-old",
         "begin:effect-new",
@@ -518,9 +539,12 @@ describe("effects panel instance engine synchronization", () => {
 
       // Wait for the real persisted row, not an optimistic insertion with an empty query.
       await new Promise<void>((resolve) => {
-        createRenderEffect(() => {
-          if (device.snapshotExportRows(["track-1"]).some((row) => row.instanceId === instance.id)) resolve();
-        });
+        createRenderEffect(
+          () => device.snapshotExportRows(["track-1"]).some((row) => row.instanceId === instance.id),
+          (found) => {
+            if (found) resolve();
+          },
+        );
       });
 
       const gesture = device.gestureOwner(instance.id, "utility");
@@ -578,6 +602,7 @@ describe("effects panel instance engine synchronization", () => {
 
       if (!instanceId) throw new Error("Expected an inserted delay instance.");
       setCanWriteCurrentTargetEffects(false);
+      flush();
       const before = engine.trackFxCalls.length;
       device.delay.changeInstance(instanceId, (params) => ({ ...params, feedback: 0.8 }));
       await addPromise;
@@ -620,8 +645,10 @@ describe("effects panel instance engine synchronization", () => {
       if (!delay || !eq) throw new Error("Expected target instances.");
 
       setCurrentTargetId("track-a");
+      flush();
       device.reorder({ id: delay.id, kind: "delay" } satisfies AudioEffectInstance, 1);
       setCurrentTargetId("track-b");
+      flush();
       device.reorder({ id: eq.id, kind: "eq" } satisfies AudioEffectInstance, 1);
       await Promise.resolve();
       await Promise.resolve();
@@ -661,8 +688,10 @@ describe("effects panel instance engine synchronization", () => {
       if (!delay || !eq) throw new Error("Expected target instances.");
 
       setCurrentTargetId("track-a");
+      flush();
       device.reorder({ id: delay.id, kind: "delay" } satisfies AudioEffectInstance, 1);
       setCurrentTargetId("track-b");
+      flush();
       device.reorder({ id: eq.id, kind: "eq" } satisfies AudioEffectInstance, 1);
 
       expect(engine.trackFxCalls.filter((call) => call.trackId === "track-a").at(-1)?.instances.map((instance) => instance.kind)).toEqual(["chorus", "delay"]);

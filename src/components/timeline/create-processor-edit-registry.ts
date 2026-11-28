@@ -38,7 +38,8 @@ const targetOf = (payload: NativeBuiltInParameterPayload) => {
 // before any async work, so the order is complete when a compile reads it.
 export const createProcessorEditRegistry = (readBpm: () => number) => {
   const members = new Map<string, Member>();
-  const [structure, setStructure] = createSignal(0);
+  // observe() advances it from the render effect's first run, which executes inside the Timeline component body. The counter is private to the registry.
+  const [structure, setStructure] = createSignal(0, { ownedWrite: true });
   let signature: string | undefined;
   let observing = false;
   let changed = false;

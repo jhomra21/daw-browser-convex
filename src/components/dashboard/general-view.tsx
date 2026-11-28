@@ -1,6 +1,7 @@
 import { For, Match, Show, Switch } from "solid-js";
 import { DashboardRow, DashboardScrollView, DashboardSection } from "./dashboard-shared";
 import { Button } from "~/components/ui/button";
+import { cn } from "~/lib/utils";
 import { useAppPreferences } from "~/context/app-preferences";
 import { useMidiAccess } from "~/context/midi-access";
 import type { AppTheme } from "~/lib/preferences/app-preferences";
@@ -44,9 +45,8 @@ function PreviewButtonGroup(props: PreviewButtonGroupProps) {
             type="button"
             variant="outline"
             size="sm"
-            class="h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground"
-            classList={{ "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground": props.selectedId === option.id }}
-            aria-pressed={props.selectedId === option.id}
+            class={cn("h-auto rounded-none px-2 py-1 text-xs focus:bg-accent focus:text-accent-foreground", props.selectedId === option.id && "bg-primary text-primary-foreground hover:bg-primary/90 hover:text-primary-foreground")}
+            aria-pressed={props.selectedId === option.id ? "true" : "false"}
             onMouseEnter={() => props.preview(option.id)}
             onFocus={() => props.preview(option.id)}
             onClick={() => props.commit(option.id)}

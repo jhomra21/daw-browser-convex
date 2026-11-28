@@ -122,8 +122,7 @@ const TrackLane: Component<TrackLaneProps> = (props) => {
   const laneContainer = () => (
     <div
       data-timeline-track-lane={props.track.id}
-      class="absolute left-0 right-0 overflow-hidden bg-timeline-background"
-      classList={{ 'bg-green-500/10': props.isDropTarget?.() }}
+      class={["absolute left-0 right-0 overflow-hidden bg-timeline-background", { 'bg-green-500/10': props.isDropTarget?.() }]}
       style={{ top: `${props.layout.topPx}px`, height: `${props.layout.heightPx}px` }}
       onContextMenu={(event) => {
         if (

@@ -1,16 +1,17 @@
-import { createContext, createEffect, on, onCleanup, untrack, useContext, type JSX } from 'solid-js'
+import { createContext, createEffect, onCleanup, untrack, useContext } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import { ParameterGestureHolder, type ParameterGestureHandle } from '~/components/timeline/parameter-gesture-owner'
 
 // One interaction model for every device control: a control opens a gesture on its owner, ticks values while it
 // lasts and ends it. The owner is the only holder of "open", so a control asks it and never keeps its own copy.
-const ParameterGestureContext = createContext<ParameterGestureHandle>()
+const ParameterGestureContext = createContext<ParameterGestureHandle | null>(null)
 
 export function ParameterGestureProvider(props: { owner: ParameterGestureHandle, children: JSX.Element }) {
   return (
     // A context value is read once when the provider mounts.
-    <ParameterGestureContext.Provider value={untrack(() => props.owner)}>
+    <ParameterGestureContext value={untrack(() => props.owner)}>
       {props.children}
-    </ParameterGestureContext.Provider>
+    </ParameterGestureContext>
   )
 }
 
@@ -55,10 +56,10 @@ export function useParameterGesture(options: { idleMs?: number, onClosed?: () =>
   if (owner) {
     const { closed } = owner
     // An owner-side close ends this holder's wheel deadline through the same transition as end and cancel.
-    createEffect(on(closed, () => {
+    createEffect(closed, () => {
       stopIdle()
       options.onClosed?.()
-    }, { defer: true }))
+    }, { defer: true })
   }
 
   onCleanup(end)

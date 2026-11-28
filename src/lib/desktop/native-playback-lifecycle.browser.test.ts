@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { mkdir, rm } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
@@ -918,6 +918,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       const viewport=document.querySelector('[data-timeline-scroll-viewport="1"]');
       viewport.scrollLeft=(viewport.scrollWidth-viewport.clientWidth)/2+1000;
       viewport.dispatchEvent(new Event('scroll'));
+      timelineJourney.settle();
       const ruler=document.querySelector('[data-timeline-ruler="1"]');
       const rect=ruler.getBoundingClientRect();
       ruler.dispatchEvent(new PointerEvent('pointerdown',{bubbles:true,cancelable:true,button:0,clientX:rect.left+500,clientY:rect.bottom-2,pointerId:11}));
@@ -963,6 +964,7 @@ test('real Chromium owns late Commit cancellation, Stop settlement, and the next
       const rows=timelineJourney.roomRows();
       rows.push({_id:'fixture:remote',_creationTime:1,targetType:'track',trackId:timelineJourney.remoteTrackId,type:'instrument',params:{kind:'synth',instanceId:'remote:first',params:{...timelineJourney.instrumentEvidence(timelineJourney.instrumentTrackId).instrument.params,filter:{...timelineJourney.instrumentEvidence(timelineJourney.instrumentTrackId).instrument.params.filter,frequencyHz:823}}}});
       window.setFixtureRoomEffects(rows);
+      timelineJourney.settle();
       // Same turn as the room rows: any local-view publication in between syncs this track to its absent local row and drops the room observation.
       return timelineJourney.mirrorRoomInstrument("${remoteTrackId}");
     })()`)

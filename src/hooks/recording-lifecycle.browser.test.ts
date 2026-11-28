@@ -2,13 +2,13 @@ import { expect, test } from 'bun:test'
 import { mkdir, rm } from 'node:fs/promises'
 import { z } from 'zod'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import tailwindcss from '@tailwindcss/vite'
 import { agentBrowser } from '~/test-support/agent-browser'
 
 const fixture = `
-import { createComponent, createEffect, createRoot, createSignal, onCleanup } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createComponent, createEffect, createRoot, createSignal, flush, onCleanup, untrack } from 'solid-js'
+import { render } from '@solidjs/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createRecordingTransportPolicy, dispatchRecordingToggle, dispatchTransportSpace, retryPendingRecordingCleanup } from './recording-dispatch'
@@ -20,6 +20,13 @@ import * as recordingTarget from '../lib/track-recording-target'
 import TrackLane from '../components/timeline/TrackLane'
 import TrackSidebarRow from '../components/timeline/TrackSidebarRow'
 import '~/index.css'
+
+// Effects first run at the next flush; a 1.x root ran them as it was created.
+const createFlushedRoot = (setup) => {
+  const result = createRoot(setup)
+  flush()
+  return result
+}
 
 const deferred = () => {
   let resolve
@@ -83,7 +90,7 @@ window.recordingScenarios = async () => {
     setSelectedFXTarget: () => {},
   }
   const [projectId, setProjectId] = createSignal('project:test')
-  const hook = createRoot(cleanup => {
+  const hook = createFlushedRoot(cleanup => {
     dispose = cleanup
     return useTrackRecording({
       audioEngine, tracks: () => window.audioTracksUnavailable ? [] : [track], setTrackLock: () => {}, clearTrackLock: () => {},
@@ -131,6 +138,7 @@ window.recordingScenarios = async () => {
   const second = hook.toggleRecording()
   const firstResult = first
   const secondResult = second
+  flush()
   results['double-record-busy'] = hook.isStarting()
   await micRequested.promise
   results['one-mic-request'] = calls.filter(call => call === 'mic').length === 1
@@ -148,7 +156,9 @@ window.recordingScenarios = async () => {
 
   activeUserId = 'user-audio'
   setProjectId('cloud-project-audio')
+  flush()
   hook.toggleRecordArm(track.id)
+  flush()
   const refusedLockStart = hook.toggleRecording()
   await lockRequested.promise
   const refusedLockStop = hook.stopRecording()
@@ -181,7 +191,8 @@ window.recordingScenarios = async () => {
   window.audioNoticeCount = () => audioNotices.length
   window.audioNotices = audioNotices
   window.recordingStream = stream
-  if (hook.recordArmTrackId() !== 'track-audio') hook.toggleRecordArm('track-audio')
+  flush()
+  if (hook.recordArmTrackId() !== 'track-audio') { hook.toggleRecordArm('track-audio'); flush() }
 
   // Stop during capture configuration cancels transport/capture and releases
   // the acquired stream before the deferred setup promise settles.
@@ -198,7 +209,7 @@ window.recordingScenarios = async () => {
     isActive: () => true,
   }
   let setupDispose
-  const setupHook = createRoot(cleanup => {
+  const setupHook = createFlushedRoot(cleanup => {
     setupDispose = cleanup
     return useTrackRecording({
       audioEngine, tracks: () => [track], setTrackLock: () => {}, clearTrackLock: () => {},
@@ -264,7 +275,7 @@ window.recordingScenarios = async () => {
   const nativeStartEntered = deferred()
   const nativeCalls = []
   let nativeDispose
-  const nativeHook = createRoot(cleanup => {
+  const nativeHook = createFlushedRoot(cleanup => {
     nativeDispose = cleanup
     return useTrackRecording({
       requiresNativeAudio: true,
@@ -385,7 +396,7 @@ window.recordingScenarios = async () => {
     panic: () => {},
   }
   const instrumentTrack = { ...track, id: 'track-midi', kind: 'instrument' }
-  createRoot(cleanup => {
+  createFlushedRoot(cleanup => {
     midiDispose = cleanup
     const [recording, setRecording] = createSignal(false)
     const [recordingTrackId, setRecordingTrackId] = createSignal(null)
@@ -645,7 +656,7 @@ window.recordingScenarios = async () => {
   }
   let checkpointController
   let disposeCheckpoint
-  createRoot(cleanup => {
+  createFlushedRoot(cleanup => {
     disposeCheckpoint = cleanup
     checkpointController = createMidiTrackRecordingController({
       audioEngine: { midiEventTimes: () => null },
@@ -718,7 +729,7 @@ window.recordingScenarios = async () => {
   }
   let unmountController
   let disposeUnmount
-  createRoot(cleanup => {
+  createFlushedRoot(cleanup => {
     disposeUnmount = cleanup
     unmountController = createMidiTrackRecordingController({
       audioEngine: { midiEventTimes: () => null },
@@ -773,7 +784,7 @@ window.playScenarios = async () => {
   const navigations = []
   const noticeTotal = () => policyNotices.length + window.liveMidiNotices.length
   let disposePolicy
-  const policy = createRoot(cleanup => {
+  const policy = createFlushedRoot(cleanup => {
     disposePolicy = cleanup
     return createRecordingTransportPolicy({
       audio: window.liveAudioRecording,
@@ -798,8 +809,8 @@ window.playScenarios = async () => {
   })
   const transportHost = document.createElement('div')
   document.body.append(transportHost)
-  const transportRoot = createRoot(cleanup => {
-    const node = createComponent(TransportBar, {
+  // Delegated clicks only reach handlers inside a rendered container.
+  const transportRoot = render(() => createComponent(TransportBar, {
       transport: {
         get isRecording() {
           return window.liveAudioRecording.isRecording() || window.liveMidiRecording.isRecording()
@@ -847,15 +858,14 @@ window.playScenarios = async () => {
         onChangeGridDenominator: () => {},
         bpm: 120,
       },
-    })
-    transportHost.append(node)
-    return cleanup
-  })
+    }), transportHost)
+  flush()
   window.transportBarUnmount = () => {
     transportRoot()
     transportHost.remove()
   }
   const clickTransport = label => {
+    flush()
     const button = transportHost.querySelector('[aria-label="' + label + '"]')
     if (!button) throw new Error('Transport button missing: ' + label + '; found ' + [...transportHost.querySelectorAll('button')].map(item => item.getAttribute('aria-label')).join(', ')
       + '; audio=' + window.liveAudioRecording.isRecording() + '/' + window.liveAudioRecording.isStarting()
@@ -887,7 +897,7 @@ window.playScenarios = async () => {
   document.body.append(button)
   const [label, setLabel] = createSignal('Play')
   let dispose
-  const playback = createRoot(cleanup => {
+  const playback = createFlushedRoot(cleanup => {
     dispose = cleanup
     const controller = useTimelinePlayback(engine, {
       getTracks: () => [track],
@@ -897,11 +907,9 @@ window.playScenarios = async () => {
         return preflightGate.promise
       },
     })
-    createEffect(() => {
-      const playing = controller.isPlaying()
-      const pending = controller.isPlayPending()
+    createEffect(() => ({ playing: controller.isPlaying(), pending: controller.isPlayPending() }), ({ playing, pending }) => {
       setLabel(playing ? 'Pause' : 'Play')
-      button.setAttribute('aria-label', label())
+      button.setAttribute('aria-label', untrack(label))
       button.setAttribute('aria-busy', String(pending))
     })
     return controller
@@ -992,7 +1000,7 @@ window.playScenarios = async () => {
   const unmountedStarts = playCalls.filter(call => call === 'start').length
   const unmountedGate = deferred()
   const unmountedEntered = deferred()
-  const unmounted = createRoot(cleanup => {
+  const unmounted = createFlushedRoot(cleanup => {
     const controller = useTimelinePlayback({
       ...engine,
       resume: () => {
@@ -1015,7 +1023,7 @@ window.playScenarios = async () => {
   const rebuildEntered = deferred()
   const rebuildStarts = []
   let rebuildDispose
-  const duringRebuild = createRoot(cleanup => {
+  const duringRebuild = createFlushedRoot(cleanup => {
     rebuildDispose = cleanup
     return useTimelinePlayback({
       ...engine,
@@ -1056,7 +1064,7 @@ window.playScenarios = async () => {
   const stopRebuildEntered = deferred()
   const stopRebuildStarts = []
   let stopRebuildDispose
-  const stopDuringRebuild = createRoot(cleanup => {
+  const stopDuringRebuild = createFlushedRoot(cleanup => {
     stopRebuildDispose = cleanup
     return useTimelinePlayback({
       ...engine,
@@ -1217,7 +1225,7 @@ window.playScenarios = async () => {
     },
   } })
   let disposeAudioPolicy
-  const audioPolicy = createRoot(cleanup => {
+  const audioPolicy = createFlushedRoot(cleanup => {
     disposeAudioPolicy = cleanup
     return createRecordingTransportPolicy({
       audio: window.liveAudioRecording,
@@ -1266,7 +1274,7 @@ window.playScenarios = async () => {
     return midiUnmountPermission.promise
   }
   let disposeMidiPolicy
-  const midiPolicy = createRoot(cleanup => {
+  const midiPolicy = createFlushedRoot(cleanup => {
     disposeMidiPolicy = cleanup
     return createRecordingTransportPolicy({
       audio: window.liveAudioRecording,
@@ -1550,7 +1558,7 @@ window.playScenarios = async () => {
   // A failed audio finalize reports only the audio failure while MIDI cleanup is retained.
   let fakeAudioLive = true
   let disposeFakeAudio = () => {}
-  const fakeAudioPolicy = createRoot(cleanup => {
+  const fakeAudioPolicy = createFlushedRoot(cleanup => {
     disposeFakeAudio = cleanup
     return createRecordingTransportPolicy({
       audio: {
@@ -1598,7 +1606,7 @@ window.playScenarios = async () => {
   const takeSaved = deferred()
   let takeSaving = true
   let disposeSaveAudio = () => {}
-  const saveAudioPolicy = createRoot(cleanup => {
+  const saveAudioPolicy = createFlushedRoot(cleanup => {
     disposeSaveAudio = cleanup
     return createRecordingTransportPolicy({
       audio: {
@@ -1639,7 +1647,7 @@ window.playScenarios = async () => {
   // Unmounting the real MIDI hook with a retained cleanup must not leak an unhandled rejection.
   const hookTrack = { id: 'track-hook-midi', kind: 'instrument', name: 'Hook MIDI', volume: 1, clips: [] }
   let disposeHookMidi = () => {}
-  const hookMidi = createRoot(cleanup => {
+  const hookMidi = createFlushedRoot(cleanup => {
     disposeHookMidi = cleanup
     return useMidiTrackRecording({
       audioEngine: { midiEventTimes: () => null },
@@ -1920,7 +1928,7 @@ window.lockScenarios = async () => {
       sampleRate: () => 48000,
     }
     let dispose = () => {}
-    const hook = createRoot(cleanup => {
+    const hook = createFlushedRoot(cleanup => {
       dispose = cleanup
       return useTrackRecording({
         requiresNativeAudio: native,
@@ -1959,6 +1967,7 @@ window.lockScenarios = async () => {
       })
     })
     hook.toggleRecordArm('track-audio')
+    flush()
     return { hook, lock, calls, states, startGate, startEntered, stopEntered, stopGate, dispose }
   }
   const entry = (type, data) => ({ type, projectId: 'project:test', data })
@@ -2074,7 +2083,7 @@ window.lockScenarios = async () => {
     const [recordingTrackId, setRecordingTrackId] = createSignal(null)
     let dispose = () => {}
     let controller
-    createRoot(cleanup => {
+    createFlushedRoot(cleanup => {
       dispose = cleanup
       controller = createMidiTrackRecordingController({
         audioEngine: { midiEventTimes: () => null },
@@ -2319,7 +2328,7 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
       resolve: {
         alias: [
           { find: /^solid-js$/, replacement: `${new URL('../../node_modules/solid-js/dist/solid.js', import.meta.url).pathname}` },
-          { find: /^solid-js\/web$/, replacement: `${new URL('../../node_modules/solid-js/web/dist/web.js', import.meta.url).pathname}` },
+          { find: /^@solidjs\/web$/, replacement: `${new URL('../../node_modules/@solidjs/web/dist/web.js', import.meta.url).pathname}` },
           { find: '~', replacement: `${new URL('../../src/', import.meta.url).pathname}` },
         ],
       },

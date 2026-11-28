@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack, type Component, createTrackedEffect } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import {
@@ -14,6 +14,7 @@ import { resolveClipColor } from "~/lib/clip-color";
 import SampleDetailWaveformOverview from "~/components/timeline/SampleDetailWaveformOverview";
 import { useClipWaveformViewModel } from "~/hooks/useClipWaveformViewModel";
 import { buildNextAudioWarp } from "~/lib/audio-warp-patch";
+import { nativeListener } from "~/lib/native-listener";
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 import {
   fitSampleDetailWaveformViewport,
@@ -96,24 +97,21 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }).contextScaleX,
   });
 
-  createEffect(on(
-    () => [
-      props.clip.id,
-      props.clip.duration,
-      sourceSampleRate(),
-    ].join("|"),
-    () => {
+  createEffect(
+    () => ({
+      clipId: props.clip.id,
+      clipDurationSec: props.clip.duration,
+      sampleRate: sourceSampleRate(),
+    }),
+    ({ clipId, clipDurationSec, sampleRate }) => {
       setViewportState((state) => ({
-        clipId: props.clip.id,
-        viewport: state.clipId === props.clip.id
-          ? clampSampleDetailWaveformViewport(state.viewport, {
-            clipDurationSec: props.clip.duration,
-            sampleRate: sourceSampleRate(),
-          })
-          : fitSampleDetailWaveformViewport(props.clip.duration),
+        clipId,
+        viewport: state.clipId === clipId
+          ? clampSampleDetailWaveformViewport(state.viewport, { clipDurationSec, sampleRate })
+          : fitSampleDetailWaveformViewport(clipDurationSec),
       }));
     },
-  ));
+  );
   const [dragPreviewOffset, setDragPreviewOffset] = createSignal<number | undefined>();
   const [isDraggingMarker, setIsDraggingMarker] = createSignal(false);
   const clipAudioStartSec = createMemo(() => Math.max(0, props.clip.leftPadSec ?? 0));
@@ -131,7 +129,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     widthPx: waveformWidthPx(),
   }));
 
-  onMount(() => {
+  onSettled(() => {
     const commitSize = (widthPx: number, heightPx: number) => {
       const nextWidthPx = Math.max(1, Math.floor(widthPx));
       const nextHeightPx = Math.max(WAVEFORM_MIN_HEIGHT_PX, Math.floor(heightPx));
@@ -154,7 +152,8 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     });
 
     if (canvasWrapRef) resizeObserver.observe(canvasWrapRef);
-    onCleanup(() => resizeObserver.disconnect());
+
+    return () => resizeObserver.disconnect();
   });
 
   const onMarkerDragStateChange = untrack(() => props.onMarkerDragStateChange);
@@ -361,7 +360,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     }
   };
 
-  createEffect(() => {
+  createTrackedEffect(() => {
     incrementPerformanceBenchmarkCounter("sample-detail.raster-calls");
     measurePerformanceBenchmark("sample-detail.raster", draw);
   });
@@ -395,18 +394,17 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
         class="relative min-h-0 min-w-0 flex-1 overflow-hidden"
       >
         <canvas
-          ref={(el) => {
+          ref={[(el) => {
             canvasRef = el || undefined;
-          }}
+          }, nativeListener('wheel', handleWheel)]}
           class="h-full w-full"
-          on:wheel={handleWheel}
           onDblClick={addMarker}
           onKeyDown={(event) => {
             if (event.key !== "Delete" && event.key !== "Backspace") return;
             event.preventDefault();
             deleteSelectedMarker();
           }}
-          tabIndex={0}
+          tabindex={0}
         />
         <For each={warpMarkers()}>
           {(marker, index) => {
@@ -423,8 +421,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
                 type="button"
                 aria-label="Warp marker"
                 disabled={!props.canWrite || props.clip.audioWarp?.enabled !== true}
-                class="absolute top-0 h-full w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50"
-                classList={{ "bg-amber-300/30": selectedMarkerId() === marker.id }}
+                class={["absolute top-0 h-full w-3 -translate-x-1/2 border-x border-amber-300/80 bg-amber-400/10 disabled:opacity-50", { "bg-amber-300/30": selectedMarkerId() === marker.id }]}
                 style={{ left: `${markerLeft()}px` }}
                 onClick={() => setSelectedMarkerId(marker.id)}
                 onKeyDown={(event) => {
@@ -503,8 +500,7 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
               }}
               type="button"
               aria-label="Drag beat offset marker"
-              class="pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-timeline-background hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50"
-              classList={{ "bg-sky-400": isDraggingMarker() }}
+              class={["pointer-events-auto absolute -left-2 top-0 h-4 w-4 border border-sky-300 bg-timeline-background hover:bg-sky-500 disabled:cursor-not-allowed disabled:opacity-50", { "bg-sky-400": isDraggingMarker() }]}
               disabled={!props.canWrite}
               onPointerDown={(event) => {
                 if (!props.canWrite) return;

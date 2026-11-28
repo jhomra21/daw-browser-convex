@@ -1,11 +1,17 @@
-import { createMemo, createRoot, createSignal, untrack } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createMemo, createRoot, createSignal, flush, untrack } from 'solid-js'
+import { render } from '@solidjs/web'
 
 import { buildGroupClipOverviews } from '~/lib/timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 import TimelineRuler from './TimelineRuler'
 
 const scenarios: Record<string, boolean> = {}
+
+// The fixture drives the ruler from the page, like input does: each event settles before the next read.
+const send = (target: EventTarget, event: Event) => {
+  target.dispatchEvent(event)
+  flush()
+}
 
 const rulerOf = (host: Element) => {
   const ruler = host.firstElementChild
@@ -24,19 +30,17 @@ const runGesture = (
   const host = document.createElement('div')
   host.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:24px'
   document.body.append(host)
-  let dispose = () => {}
 
-  createRoot((cleanup) => {
-    dispose = cleanup
+  const [loop, setLoop] = createSignal({
+    startSec: absentBaseline ? undefined : 1,
+    endSec: absentBaseline ? undefined : 3,
+  })
 
-    const [loop, setLoop] = createSignal({
-      startSec: absentBaseline ? undefined : 1,
-      endSec: absentBaseline ? undefined : 3,
-    })
+  let commits = 0
+  let disposeRuler = () => {}
 
-    let commits = 0
-
-    const disposeRuler = render(() => (
+  const dispose = createRoot((cleanup) => {
+    disposeRuler = render(() => (
       <TimelineRuler
         durationSec={20}
         bpm={120}
@@ -55,6 +59,12 @@ const runGesture = (
       />
     ), host)
 
+    return cleanup
+  })
+
+  flush()
+
+  {
     const ruler = rulerOf(host)
 
     const x = mode === 'create' ? 500
@@ -62,7 +72,7 @@ const runGesture = (
       : mode === 'resize-end' ? 300
       : 200
 
-    ruler.dispatchEvent(new PointerEvent('pointerdown', {
+    send(ruler, new PointerEvent('pointerdown', {
       bubbles: true,
       cancelable: true,
       button: 0,
@@ -70,7 +80,7 @@ const runGesture = (
       clientY: 5,
       pointerId: 1,
     }))
-    window.dispatchEvent(new PointerEvent('pointermove', {
+    send(window, new PointerEvent('pointermove', {
       clientX: mode === 'create' ? 700
         : mode === 'resize-start' ? 200
         : mode === 'resize-end' ? 400
@@ -80,11 +90,11 @@ const runGesture = (
     scenarios[`${endType}-${mode}-preview-only`] = commits === 0
 
     if (endType === 'pointercancel') {
-      window.dispatchEvent(new PointerEvent('pointercancel', { pointerId: 1 }))
+      send(window, new PointerEvent('pointercancel', { pointerId: 1 }))
     } else if (endType === 'escape') {
-      window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
+      send(window, new KeyboardEvent('keydown', { key: 'Escape', cancelable: true }))
     } else if (endType === 'blur') {
-      window.dispatchEvent(new Event('blur'))
+      send(window, new Event('blur'))
     } else {
       if (escapeOwner) {
         const dialog = document.createElement('div')
@@ -99,14 +109,14 @@ const runGesture = (
           cancelable: true,
         })
 
-        target.dispatchEvent(escape)
+        send(target, escape)
         scenarios[`${escapeOwner}-escape-not-consumed`] = !escape.defaultPrevented
-        window.dispatchEvent(new PointerEvent('pointermove', { clientX: 800, pointerId: 1 }))
+        send(window, new PointerEvent('pointermove', { clientX: 800, pointerId: 1 }))
         dialog.remove()
       }
 
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 1 }))
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 300, pointerId: 1 }))
+      send(window, new PointerEvent('pointerup', { pointerId: 1 }))
+      send(window, new PointerEvent('pointermove', { clientX: 300, pointerId: 1 }))
     }
 
     const current = untrack(loop)
@@ -128,7 +138,7 @@ const runGesture = (
       : current.startSec === 1 && current.endSec === 3
 
     if (endType === 'escape') {
-      ruler.dispatchEvent(new PointerEvent('pointerdown', {
+      send(ruler, new PointerEvent('pointerdown', {
         bubbles: true,
         cancelable: true,
         button: 0,
@@ -136,8 +146,8 @@ const runGesture = (
         clientY: 5,
         pointerId: 2,
       }))
-      window.dispatchEvent(new PointerEvent('pointermove', { clientX: 700, pointerId: 2 }))
-      window.dispatchEvent(new PointerEvent('pointerup', { pointerId: 2 }))
+      send(window, new PointerEvent('pointermove', { clientX: 700, pointerId: 2 }))
+      send(window, new PointerEvent('pointerup', { pointerId: 2 }))
       const afterNextGesture = untrack(loop)
       scenarios['subsequent-gesture-after-escape'] =
         afterNextGesture.startSec === 5 && afterNextGesture.endSec === 7
@@ -146,7 +156,7 @@ const runGesture = (
     disposeRuler()
     dispose()
     host.remove()
-  })
+  }
 }
 
 const runUnmountCancellation = () => {
@@ -154,9 +164,9 @@ const runUnmountCancellation = () => {
   host.style.cssText = 'position:fixed;left:0;top:0;width:1000px;height:24px'
   document.body.append(host)
   let disposeRuler = () => {}
+  const [loop, setLoop] = createSignal({ startSec: 1, endSec: 3 })
 
-  createRoot((dispose) => {
-    const [loop, setLoop] = createSignal({ startSec: 1, endSec: 3 })
+  const dispose = createRoot((cleanup) => {
     disposeRuler = render(() => (
       <TimelineRuler
         durationSec={20}
@@ -175,21 +185,26 @@ const runUnmountCancellation = () => {
         onSetLoopRegion={(startSec, endSec) => setLoop({ startSec, endSec })}
       />
     ), host)
-    const ruler = rulerOf(host)
-    ruler.dispatchEvent(new PointerEvent('pointerdown', {
-      bubbles: true,
-      cancelable: true,
-      button: 0,
-      clientX: 500,
-      clientY: 5,
-      pointerId: 3,
-    }))
-    window.dispatchEvent(new PointerEvent('pointermove', { clientX: 700, pointerId: 3 }))
-    disposeRuler()
-    dispose()
-    const current = untrack(loop)
-    scenarios['unmount-cancel'] = current.startSec === 1 && current.endSec === 3
+
+    return cleanup
   })
+
+  flush()
+  const ruler = rulerOf(host)
+  send(ruler, new PointerEvent('pointerdown', {
+    bubbles: true,
+    cancelable: true,
+    button: 0,
+    clientX: 500,
+    clientY: 5,
+    pointerId: 3,
+  }))
+  send(window, new PointerEvent('pointermove', { clientX: 700, pointerId: 3 }))
+  disposeRuler()
+  dispose()
+  flush()
+  const current = untrack(loop)
+  scenarios['unmount-cancel'] = current.startSec === 1 && current.endSec === 3
   host.remove()
 }
 
@@ -260,10 +275,17 @@ scenarios['nested-group-output'] =
 scenarios['expanded-group-not-aggregated'] =
   buildGroupClipOverviews(overviewTracks, new Set(['outer'])).has('inner') === false
 
-createRoot((dispose) => {
+{
   const [tracks, setTracks] = createSignal(overviewTracks)
   const [collapsedGroupIds, setCollapsedGroupIds] = createSignal(new Set<Track['id']>(['outer']))
-  const mountedOverviews = createMemo(() => buildGroupClipOverviews(tracks(), collapsedGroupIds()))
+
+  const { dispose, mountedOverviews } = createRoot((cleanup) => {
+    const overviews = createMemo(() => buildGroupClipOverviews(tracks(), collapsedGroupIds()))
+
+    return { dispose: cleanup, mountedOverviews: overviews }
+  })
+
+  flush()
   const beforeUpdate = untrack(() => mountedOverviews().get('outer')?.length ?? 0)
   const currentTracks = untrack(tracks)
 
@@ -272,14 +294,16 @@ createRoot((dispose) => {
     : track)
 
   setTracks(nextTracks)
+  flush()
   const afterCollapsedUpdate = untrack(() => mountedOverviews().get('outer'))
   setCollapsedGroupIds(new Set<string>())
+  flush()
   const afterExpand = untrack(mountedOverviews)
   scenarios['mounted-collapsed-group-updates'] =
     beforeUpdate === 2
     && afterCollapsedUpdate?.some((segment) => segment.startSec === 8) === true
     && afterExpand.size === 0
   dispose()
-})
+}
 
 Object.defineProperty(window, '__timelineRulerCancelResults', { value: scenarios })

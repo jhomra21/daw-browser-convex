@@ -1,4 +1,5 @@
-import { type Component, createEffect, createMemo, createSignal, For, on, onCleanup, Show, type JSX, untrack } from 'solid-js'
+import { type Component, createEffect, createMemo, createSignal, For, Show, untrack } from 'solid-js'
+import type { JSX } from '@solidjs/web'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '~/components/ui/dialog'
 import { Button } from '~/components/ui/button'
@@ -100,8 +101,7 @@ const ExportFormatOption: Component<{
 
   return (
     <label
-      class="flex h-7 min-w-0 items-center gap-2 whitespace-nowrap text-xs"
-      classList={{ "text-muted-foreground": !props.supported }}
+      class={["flex h-7 min-w-0 items-center gap-2 whitespace-nowrap text-xs", { "text-muted-foreground": !props.supported }]}
     >
       <input
         type="checkbox"
@@ -155,21 +155,23 @@ const ExportDialog: Component<Props> = (props) => {
   const exportContext = useExportContext()
   let wasOpen = false
 
-  createEffect(on(
+  createEffect(
     () => props.isOpen,
     (isOpen) => {
       if (isOpen && !wasOpen) {
-        const mode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
-        setRangeMode(mode)
-        setRenderStartSec(props.loopEnabled ? props.loopStartSec : 0)
-        setRenderLengthSec(props.loopEnabled
-          ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
-          : initialDuration())
+        untrack(() => {
+          const mode: ExportRangeMode = props.loopEnabled ? 'loop' : 'whole'
+          setRangeMode(mode)
+          setRenderStartSec(props.loopEnabled ? props.loopStartSec : 0)
+          setRenderLengthSec(props.loopEnabled
+            ? Math.max(0.001, props.loopEndSec - props.loopStartSec)
+            : initialDuration())
+        })
       }
 
       wasOpen = isOpen
     },
-  ))
+  )
 
   const renderSettings = () => ({
     sampleRate: sampleRate(),
@@ -210,36 +212,39 @@ const ExportDialog: Component<Props> = (props) => {
     ...encodingSettings(),
   }))
 
-  createEffect(() => {
-    const request = supportRequest()
-    let canceled = false
+  createEffect(
+    () => supportRequest(),
+    (request) => {
+      let canceled = false
 
-    const applySupportedFormats = (formats: ExportAudioFormat[]) => {
-      if (canceled) return
-      setSupportedFormats(formats)
-      setSelectedFormats((selected) => {
-        const supportedSelected = selected.filter((format) => formats.includes(format))
+      const applySupportedFormats = (formats: ExportAudioFormat[]) => {
+        if (canceled) return
+        setSupportedFormats(formats)
+        setSelectedFormats((selected) => {
+          const supportedSelected = selected.filter((format) => formats.includes(format))
 
-        if (supportedSelected.length === selected.length) return selected
+          if (supportedSelected.length === selected.length) return selected
 
-        if (supportedSelected.length > 0) return supportedSelected
+          if (supportedSelected.length > 0) return supportedSelected
 
-        return ['wav']
-      })
-    }
+          return ['wav']
+        })
+      }
 
-    const cached = getCachedSupportedExportAudioFormats(request)
+      const cached = getCachedSupportedExportAudioFormats(request)
 
-    if (cached) {
-      applySupportedFormats(cached)
+      if (cached) {
+        applySupportedFormats(cached)
 
-      return
-    }
+        return
+      }
 
-    setSupportedFormats(null)
-    void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
-    onCleanup(() => { canceled = true })
-  })
+      setSupportedFormats(null)
+      void probeSupportedExportAudioFormats(request).then(applySupportedFormats)
+
+      return () => { canceled = true }
+    },
+  )
 
   const formatSupported = (format: ExportAudioFormat) => supportedFormats()?.includes(format) ?? format === 'wav'
 
@@ -412,7 +417,7 @@ const ExportDialog: Component<Props> = (props) => {
                   variant="outline"
                   size="sm"
                   class="h-7 px-2"
-                  aria-pressed={rangeMode() === 'whole'}
+                  aria-pressed={rangeMode() === 'whole' ? "true" : "false"}
                   onClick={setWholeTimeline}
                 >
                   Whole Timeline
@@ -422,7 +427,7 @@ const ExportDialog: Component<Props> = (props) => {
                   variant="outline"
                   size="sm"
                   class="h-7 px-2"
-                  aria-pressed={rangeMode() === 'loop'}
+                  aria-pressed={rangeMode() === 'loop' ? "true" : "false"}
                   disabled={!props.loopEnabled}
                   onClick={setLoopRegion}
                 >

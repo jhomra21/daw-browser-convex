@@ -1,4 +1,4 @@
-import { onMount, onCleanup, type Accessor } from "solid-js";
+import { onSettled, onCleanup, type Accessor } from "solid-js";
 
 import {
   isLocalTimelineKeyboardTarget,
@@ -229,7 +229,7 @@ export const createTimelineKeyboardHandler = (handlers: KeyboardHandlers) => (
 export function useTimelineKeyboard(handlers: KeyboardHandlers) {
   const captureOptions: AddEventListenerOptions = { capture: true };
   const onKeyDown = createTimelineKeyboardHandler(handlers);
-  onMount(() => {
+  onSettled(() => {
     window.addEventListener("keydown", onKeyDown, captureOptions);
   });
 

@@ -1,14 +1,14 @@
 import {
   type Accessor,
   type Component,
-  type JSX,
-  createComputed,
   createEffect,
   createMemo,
   createSignal,
   onCleanup,
   untrack,
-} from "solid-js";
+  createRenderEffect,
+} from "solid-js"
+import type { JSX } from "@solidjs/web";
 import type {
   Clip,
   ExternalSidechainRoute,
@@ -446,18 +446,19 @@ const Timeline: Component<TimelineProps> = (props) => {
   // new mounted project or generation clears membership before its projection
   // is adopted.
   let observedScope: string | undefined;
-  createComputed(() => {
-    const scope = `${projectId()}:${mountedProjectGeneration()}`;
-    const fx = desiredFx();
-    untrack(() => {
-      if (scope !== observedScope) {
-        processorEdits.reset();
-        observedScope = scope;
-      }
+  createRenderEffect(
+    () => ({ scope: `${projectId()}:${mountedProjectGeneration()}`, fx: desiredFx() }),
+    ({ scope, fx }) => {
+      untrack(() => {
+        if (scope !== observedScope) {
+          processorEdits.reset();
+          observedScope = scope;
+        }
 
-      processorEdits.observe(fx);
-    });
-  });
+        processorEdits.observe(fx);
+      });
+    },
+  );
 
   const nativePlaybackInputs = createMemo(() => pickNativePlaybackInputs({
     timeSignature: {
@@ -469,7 +470,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     automation: getPlaybackAutomationPatches(),
     sidechains: effectsExportSnapshot()?.snapshotSidechainRoutes() ?? sidechainRoutes(),
     processorStructure: processorEdits.structure(),
-  }), undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
+  }), { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
 
   let nativePlaybackRevision = 1;
   const localExternalProcessors = createLocalExternalProcessorCache();
@@ -761,17 +762,22 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  createEffect(() => {
-    loopEnabled();
-    loopStartSec();
-    loopEndSec();
+  createEffect(
+    () => {
+      loopEnabled();
+      loopStartSec();
+      loopEndSec();
 
-    if (isNativePlaybackPrepared()) {
-      void updateNativeLoop().catch((cause: unknown) => {
-        console.error("[Timeline] failed to reconcile native loop settings", cause);
-      });
-    }
-  });
+      return isNativePlaybackPrepared();
+    },
+    (nativePrepared) => {
+      if (nativePrepared) {
+        void updateNativeLoop().catch((cause: unknown) => {
+          console.error("[Timeline] failed to reconcile native loop settings", cause);
+        });
+      }
+    },
+  );
 
   const captureStructuralPlaybackIntent = (): TimelineEditIntent => ({
     projectId: projectId(),
@@ -952,9 +958,12 @@ const Timeline: Component<TimelineProps> = (props) => {
     bufferVersion,
   });
 
-  createEffect(() => {
-    setRenderTracks(resolvedRenderTracks());
-  });
+  createEffect(
+    () => resolvedRenderTracks(),
+    (tracks) => {
+      setRenderTracks(tracks);
+    },
+  );
 
   // Cloud clips update from the subscription. An overlay here would wait for the next server snapshot to clear.
   const handleLocalMidiSaved = (clipId: string, midi: Clip["midi"]) => {
@@ -1093,10 +1102,12 @@ const Timeline: Component<TimelineProps> = (props) => {
   const [deviceInsertActions, setDeviceInsertActions] =
     createSignal<TimelineDeviceInsertActions>();
 
-  createEffect(() => {
-    sidebarWidth();
-    leftBrowser.clampWidthToLayout();
-  });
+  createEffect(
+    () => sidebarWidth(),
+    () => {
+      untrack(leftBrowser.clampWidthToLayout);
+    },
+  );
 
   const {
     auditionNote,
@@ -2222,10 +2233,17 @@ const Timeline: Component<TimelineProps> = (props) => {
     onCleanup(unregisterHostController);
   }
 
-  createEffect(() => {
-    const nextTracks = resolvedTracks();
-    reconcileRecordArm(nextTracks);
-  });
+  createEffect(
+    () => {
+      recordArmTrackId();
+      userId();
+
+      return resolvedTracks();
+    },
+    (nextTracks) => {
+      untrack(() => reconcileRecordArm(nextTracks));
+    },
+  );
 
   // Mirrors the actions: selected clips must be writable, and delete reaches the track only when no clips are selected.
   const canDuplicateSelection = createMemo(() =>

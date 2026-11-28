@@ -4,11 +4,11 @@ import {
   For,
   Show,
   onCleanup,
-  onMount,
+  onSettled,
   type Accessor,
   type Component,
-  type JSX,
 } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import GridOverlay from "~/components/timeline/GridOverlay";
 import TimelineRuler from "~/components/timeline/TimelineRuler";
 import ArrangementOverview from "~/components/timeline/ArrangementOverview";
@@ -61,7 +61,7 @@ const createViewportRedrawState = () => {
   const [devicePixelRatio, setDevicePixelRatio] = createSignal(1);
   const requestRedraw = () => setVersion((value) => value + 1);
 
-  onMount(() => {
+  onSettled(() => {
     requestRedraw();
     window.addEventListener("resize", requestRedraw);
     window.visualViewport?.addEventListener("resize", requestRedraw);
@@ -84,13 +84,13 @@ const createViewportRedrawState = () => {
 
     bindDprListener();
 
-    onCleanup(() => {
+    return () => {
       window.removeEventListener("resize", requestRedraw);
       window.visualViewport?.removeEventListener("resize", requestRedraw);
 
       if (dprQuery && dprListener)
         dprQuery.removeEventListener("change", dprListener);
-    });
+    };
   });
 
   return { version, devicePixelRatio };
@@ -234,18 +234,20 @@ export default function TimelineWorkspace(props: Props) {
     onCanonicalScrollTop: setVerticalScrollTop,
   });
 
+  let viewportResizeObserver: ResizeObserver | undefined;
+  onCleanup(() => viewportResizeObserver?.disconnect());
+
   const observeScrollViewport = (element: HTMLDivElement) => {
     timelineScrollElement = element;
     props.scrollRef(element);
     verticalScrollSync.bindTimeline(element);
     setVerticalClientHeight(element.clientHeight);
 
-    const resizeObserver = new ResizeObserver(() => {
+    viewportResizeObserver = new ResizeObserver(() => {
       setVerticalClientHeight(element.clientHeight);
     });
 
-    resizeObserver.observe(element);
-    onCleanup(() => resizeObserver.disconnect());
+    viewportResizeObserver.observe(element);
   };
 
   const verticalWaveformTrackIds = createMemo(() => new Set(trackIdsInYRange(

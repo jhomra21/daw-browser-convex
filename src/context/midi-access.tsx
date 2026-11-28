@@ -20,11 +20,14 @@ export const MidiAccessProvider: ParentComponent = (props) => {
     return browserNavigator !== undefined && "requestMIDIAccess" in browserNavigator
   }
 
+  // The controller publishes its initial status and inputs while it is constructed here, inside the component body.
+  // Those writes repeat each signal's initial value; both signals are private to this provider.
   const [status, setStatus] = createSignal<MidiAccessStatus>(
-    isMidiSupported() ? "idle" : "unsupported"
+    isMidiSupported() ? "idle" : "unsupported",
+    { ownedWrite: true },
   )
 
-  const [inputs, setInputs] = createSignal<MidiInputDescriptor[]>([])
+  const [inputs, setInputs] = createSignal<MidiInputDescriptor[]>([], { ownedWrite: true })
 
   const controller = createMidiAccessController({
     isSupported: isMidiSupported,
@@ -43,14 +46,17 @@ export const MidiAccessProvider: ParentComponent = (props) => {
     onInputsChange: setInputs,
   })
 
-  createEffect(() => {
-    controller.setSelectedInputIds(appPreferences.midi.selectedInputIds())
-  })
+  createEffect(
+    () => appPreferences.midi.selectedInputIds(),
+    (selectedInputIds) => {
+      controller.setSelectedInputIds(selectedInputIds)
+    },
+  )
 
   onCleanup(controller.dispose)
 
   return (
-    <MidiAccessContext.Provider value={{
+    <MidiAccessContext value={{
       status,
       inputs,
       requestAccess: controller.requestAccess,
@@ -60,7 +66,7 @@ export const MidiAccessProvider: ParentComponent = (props) => {
       panic: controller.panic,
     }}>
       {props.children}
-    </MidiAccessContext.Provider>
+    </MidiAccessContext>
   )
 }
 

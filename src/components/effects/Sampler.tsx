@@ -57,7 +57,7 @@ const Sampler: Component<SamplerProps> = (props) => {
           <span>{props.params.zones.length} zones</span>
           <span>{Math.round((props.status?.totalBytes ?? 0) / 1048576)} / {Math.round((props.status?.maxBytes ?? props.params.maxDecodedBytes) / 1048576)} MB</span>
           <span>{props.status?.misses ?? 0} misses</span>
-          <span classList={{ "text-destructive": props.status?.overBudgetPinned }}> {props.status?.overBudgetPinned ? "Over budget" : ""}</span>
+          <span class={{ "text-destructive": props.status?.overBudgetPinned }}> {props.status?.overBudgetPinned ? "Over budget" : ""}</span>
         </div>
         <div class="min-h-14 border border-dashed border-border p-2" onDragOver={(event) => { if (props.canWrite && event.dataTransfer?.types.includes(SAMPLE_DRAG_DATA_TYPE)) event.preventDefault(); }} onDrop={drop}>
           Drop samples to add zones
@@ -85,7 +85,7 @@ const Sampler: Component<SamplerProps> = (props) => {
  if (rootNote !== undefined) props.onUpdateZone(zone.id, { rootNote }); }} />
                   <select value={zone.playbackMode} onChange={(event) => props.onUpdateZone(zone.id, { playbackMode: event.currentTarget.value === "forward-loop" ? "forward-loop" : event.currentTarget.value === "crossfade-loop" ? "crossfade-loop" : "one-shot" })}><option value="one-shot">One shot</option><option value="forward-loop">Loop</option><option value="crossfade-loop">Xfade</option></select>
                   <button
-                    classList={{ "text-destructive": props.status?.zones.get(zone.id) === "error" }}
+                    class={{ "text-destructive": props.status?.zones.get(zone.id) === "error" }}
                     title={props.status?.errors.get(zone.id)}
                     disabled={props.status?.zones.get(zone.id) !== "error" && props.status?.zones.get(zone.id) !== "missing"}
                     onClick={() => props.onRetryZone(zone.id)}

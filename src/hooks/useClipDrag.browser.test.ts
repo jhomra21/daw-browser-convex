@@ -7,7 +7,7 @@ import { agentBrowser } from '~/test-support/agent-browser'
 // actual window events, Solid cleanup, placement, draft teardown, and move
 // history run in Chromium.
 const fixture = `
-import { createRoot, createSignal } from 'solid-js'
+import { createRoot, createSignal, flush } from 'solid-js'
 import { useClipDrag } from './useClipDrag'
 import { useTimelineSelectionState } from './useTimelineSelectionState'
 window.clipDragResults = async () => {
@@ -98,7 +98,7 @@ window.clipDragResults = async () => {
       start()
       window.dispatchEvent(pointer('pointermove'))
     }
-    if (scenario === 'project') setProjectId('project:second')
+    if (scenario === 'project') { setProjectId('project:second'); flush() }
     if (scenario === 'unmount') dispose()
     if (scenario.startsWith('reject') && scenario !== 'reject-commit') requests[0].reject(new Error('Creation failed'))
     else requests[0].resolve()
@@ -118,7 +118,7 @@ window.clipDragResults = async () => {
       tracks = tracks.map(track => track.id === 'track:auto-0' ? { ...track, clips: [{ id: 'clip:remote', name: 'Remote', startSec: 4, duration: 1, offsetSec: 0, color: '#ffffff' }] } : track)
     }
     if (scenario === 'cancel-after-create' || scenario === 'populated-after-create') window.dispatchEvent(pointer('pointercancel'))
-    if (scenario === 'project-after-create') setProjectId('project:second')
+    if (scenario === 'project-after-create') { setProjectId('project:second'); flush() }
     await settle()
     if (scenario !== 'success') results[scenario + ':no-draft'] = drafts.length === 0 && previews.size === 0
     if (scenario === 'success') {

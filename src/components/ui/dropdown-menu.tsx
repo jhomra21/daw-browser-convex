@@ -1,5 +1,6 @@
-import type { Component, JSX, ValidComponent } from "solid-js"
-import { splitProps } from "solid-js"
+import type { Component } from "solid-js"
+import type { JSX, ValidComponent } from "@solidjs/web"
+import { omit } from "solid-js"
 
 import * as DropdownMenuPrimitive from "@kobalte/core/dropdown-menu"
 import type { PolymorphicProps } from "@kobalte/core/polymorphic"
@@ -23,7 +24,7 @@ function DropdownMenuContent<T extends ValidComponent = "div">(
 function DropdownMenuContent(
   props: PolymorphicProps<ValidComponent, DropdownMenuContentProps<ValidComponent>>,
 ): JSX.Element {
-  const [, rest] = splitProps(props, ["class"])
+  const rest = omit(props, "class")
 
   return (
     <DropdownMenuPrimitive.Portal>
@@ -50,14 +51,14 @@ function DropdownMenuItem<T extends ValidComponent = "div">(
 function DropdownMenuItem(
   props: PolymorphicProps<ValidComponent, DropdownMenuItemProps<ValidComponent>>,
 ): JSX.Element {
-  const [local, rest] = splitProps(props, ["class", "inset"])
+  const rest = omit(props, "class", "inset")
 
   return (
     <DropdownMenuPrimitive.Item
       class={cn(
         "relative flex cursor-default select-none items-center gap-2 px-2 py-1.5 text-sm outline-none transition-colors focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50 [&>svg]:size-4 [&>svg]:shrink-0",
-        local.inset && "pl-8",
-        local.class
+        props.inset && "pl-8",
+        props.class
       )}
       {...rest}
     />

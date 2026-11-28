@@ -1,6 +1,7 @@
 import { afterEach, beforeAll, expect, test } from "bun:test";
 import "fake-indexeddb/auto";
-import { batch, createComponent, createRoot, createSignal, untrack } from "solid-js";
+import { createComponent, createSignal, flush, untrack } from "solid-js";
+import { createFlushedRoot as createRoot, mountElement } from "~/test-support/create-flushed-root";
 import { onlineManager, QueryClient, QueryClientProvider } from "@tanstack/solid-query";
 import { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import { createDefaultArpeggiatorParams, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultSamplerParams, createDefaultSynthParams, createDefaultUtilityParams, normalizeTrackInstrumentParams, type ArpeggiatorParams, type DecodedAudioPage, type DrumRackParams, type GranularParams, type SamplerParams, type TrackInstrumentParams } from "@daw-browser/shared";
@@ -287,7 +288,7 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: () => "selected-elsewhere",
         tracks: () => [track], sidechainRoutes: () => [], audioEngine: () => engine,
@@ -299,7 +300,7 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
       });
 
       return null;
-    } });
+    } }));
   });
 
   try {
@@ -607,7 +608,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = untrack(() => createEffectsPanelController({
         isOpen: () => false, selectedFXTarget: selectedTarget, tracks, sidechainRoutes: () => [],
         audioEngine: currentEngine, projectId, userId: () => subscribed ? "collaborator" : undefined, playheadSec: () => 0,
@@ -623,7 +624,7 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       }));
 
       return null;
-    } });
+    } }));
   });
   mounted = true;
 
@@ -717,8 +718,9 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
       const nextProject = `${initialProject}-next`;
 
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
-      batch(() => { setTracks([]); setProjectId(nextProject); });
+      setTracks([]); setProjectId(nextProject);
       // Publish after the observer has changed keys, not to its old cache entry.
+      flush();
       await Promise.resolve();
 
       if (!local) client.setQueryData(["convex", "effects", "room", nextProject, undefined], []);
@@ -857,6 +859,7 @@ for (const spec of step5ArpWitnesses) for (const transport of ["playing", "pause
         // The panel remains closed. A real own control needs its selected
         // target while held; deselection otherwise cancels on lost permission.
         f.selectTarget(f.track.id);
+        flush();
         const holder = new ParameterGestureHolder();
         f.device.arp.gestureOwner.open(holder);
         expect(f.device.arp.gestureOwner.tick(holder, () => f.device.arp.change({ octaves: 2 }))).toBe(true);
@@ -1017,10 +1020,8 @@ for (const local of [true, false]) {
       await f.effects.flushPending();
       const before = f.granularInstalls.length;
       const next: TrackInstrumentParams = { ...instrument, params: { ...instrument.params, position: 0.7 } };
-      batch(() => {
-        f.setLegacyMode(true);
-        f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
-      });
+      f.setLegacyMode(true);
+      f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
       await f.effects.flushPending();
       expect(f.granularInstalls.length - before).toBe(1);
     } finally { f.close(); }
@@ -1036,10 +1037,8 @@ for (const local of [true, false]) {
       await f.start();
       const before = f.granularInstalls.length;
       const next: TrackInstrumentParams = { ...instrument, params: { ...instrument.params, position: 0.7 } };
-      batch(() => {
-        f.replaceEngine(f.makeEngine());
-        f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
-      });
+      f.replaceEngine(f.makeEngine());
+      f.device.syncRemoteInstrumentForTarget(f.track.id, next, 1_000_000);
       await f.effects.flushPending();
       expect(f.granularInstalls.length - before).toBe(1);
     } finally { f.close(); }
@@ -1062,7 +1061,7 @@ for (const local of [true, false]) {
       await f.start();
       f.removeTrack(); await f.effects.flushPending();
       const joins = f.joins.length;
-      batch(() => { f.restoreTrack(); f.replaceEngine(new Replacement()); });
+      f.restoreTrack(); f.replaceEngine(new Replacement());
       await f.effects.flushPending();
       expect(f.joins.length - joins).toBe(1);
     } finally { f.close(); }
@@ -1632,8 +1631,11 @@ for (const local of [true, false]) {
 
           if (scenario === "track removal") fixture.removeTrack();
           else await fixture.switchProject();
+          console.log("DBG switched");
           await fixture.effects.flushPending();
+          console.log("DBG flushPending");
           await fixture.readiness();
+          console.log("DBG readiness");
           fixture.assertRetired(initial);
           console.log("B5c3 matrix", JSON.stringify({ group: "teardown", scenario, family: kind, local, target: "track",
             calls: fixture.calls.slice(before), remainingBytes: fixture.remainingBytes(), runtimeKind: fixture.runtimeKind() }));
@@ -1991,7 +1993,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, {
+    return mountElement(() => createComponent(QueryClientProvider, {
       client,
       get children() {
         panel = createEffectsPanelController({
@@ -2004,7 +2006,7 @@ test.each(["sampler-row", "granular-row", "sampler-draft"])("3B1 r2b compile wai
 
         return null;
       },
-    });
+    }));
   });
 
   try {
@@ -2119,7 +2121,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track],
         sidechainRoutes: () => [], audioEngine: () => engine, projectId: () => projectId,
@@ -2129,7 +2131,7 @@ test.each(["sampler", "granular", "sampler-change"])("3B1 r3 queued %s successor
       });
 
       return null;
-    } });
+    } }));
   });
 
   try {
@@ -2219,7 +2221,7 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2228,7 +2230,7 @@ test.each(["utility", "sampler", "granular"])("3B1 r4 missing sample readiness i
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");
@@ -2372,7 +2374,7 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2381,7 +2383,7 @@ test.each(["readiness", "runtime"])("3B1 r4 Drum Rack Retry preserves %s during 
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");
@@ -2474,7 +2476,7 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
   createRoot(end => {
     dispose = end;
 
-    return createComponent(QueryClientProvider, { client, get children() {
+    return mountElement(() => createComponent(QueryClientProvider, { client, get children() {
       panel = createEffectsPanelController({
         isOpen: () => true, selectedFXTarget: () => track.id, tracks: () => [track], sidechainRoutes: () => [],
         audioEngine: () => engine, projectId: () => projectId, userId: () => undefined, playheadSec: () => 0,
@@ -2483,7 +2485,7 @@ test.each(["unchanged", "changed"])("3B1 r4 decode error retries only for %s hyd
       });
 
       return null;
-    } });
+    } }));
   });
 
   if (!panel || !snapshot) throw new Error("Missing controller");

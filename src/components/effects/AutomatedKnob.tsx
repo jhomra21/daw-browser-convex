@@ -1,4 +1,5 @@
-import { splitProps, type ComponentProps } from 'solid-js'
+import { omit } from 'solid-js'
+import type { ComponentProps } from '@solidjs/web'
 import Knob from '~/components/ui/knob'
 
 type AutomatedKnobProps = Omit<ComponentProps<typeof Knob>, 'automationRange' | 'automated' | 'onAutomationSelect'> & {
@@ -11,17 +12,17 @@ type AutomatedKnobProps = Omit<ComponentProps<typeof Knob>, 'automationRange' | 
 }
 
 export default function AutomatedKnob(props: AutomatedKnobProps) {
-  const [local, knob] = splitProps(props, ['parameterId', 'automation', 'onValueChange'])
+  const knob = omit(props, 'parameterId', 'automation', 'onValueChange')
 
   return (
     <Knob
       {...knob}
-      automationRange={local.automation.automationRangesByParameterId?.get(local.parameterId)}
-      automated={local.automation.automationRangesByParameterId?.has(local.parameterId)}
-      onAutomationSelect={() => local.automation.onAutomationParameterTouch?.(local.parameterId)}
+      automationRange={props.automation.automationRangesByParameterId?.get(props.parameterId)}
+      automated={props.automation.automationRangesByParameterId?.has(props.parameterId)}
+      onAutomationSelect={() => props.automation.onAutomationParameterTouch?.(props.parameterId)}
       onValueChange={(value) => {
-        local.automation.onManualAutomationOverride?.(local.parameterId)
-        local.onValueChange(value)
+        props.automation.onManualAutomationOverride?.(props.parameterId)
+        props.onValueChange(value)
       }}
     />
   )

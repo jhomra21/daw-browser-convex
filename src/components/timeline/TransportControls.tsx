@@ -1,4 +1,5 @@
-import { type Accessor, type Component, For, Show, type JSX } from "solid-js";
+import { type Accessor, type Component, For, Show } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import Icon from "~/components/ui/Icon";
 import { Button } from "~/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "~/components/ui/tooltip";
@@ -68,8 +69,8 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
         variant="ghost"
         size="icon"
         onClick={transport().onToggleRecord}
-        aria-busy={transport().isRecordingPending}
-        aria-pressed={transport().isRecording}
+        aria-busy={transport().isRecordingPending === undefined ? undefined : transport().isRecordingPending ? "true" : "false"}
+        aria-pressed={transport().isRecording ? "true" : "false"}
         aria-label={
           transport().isRecording ? "Stop recording" : "Start recording"
         }
@@ -98,7 +99,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           if (transport().isPlayPending) return;
           transport().onPlay();
         }}
-        aria-busy={transport().isPlayPending}
+        aria-busy={transport().isPlayPending === undefined ? undefined : transport().isPlayPending ? "true" : "false"}
         aria-label={transport().isPlaying ? "Pause" : "Play"}
         class={centerIconButtonClass}
       >
@@ -165,7 +166,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           variant="ghost"
           size="icon"
           onClick={transport().onToggleMetronome}
-          aria-pressed={transport().metronomeEnabled}
+          aria-pressed={transport().metronomeEnabled ? "true" : "false"}
           aria-label="Toggle metronome"
           class={centerIconButtonClass}
         >
@@ -175,7 +176,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           variant="ghost"
           size="icon"
           onClick={transport().onToggleLoop}
-          aria-pressed={transport().loopEnabled}
+          aria-pressed={transport().loopEnabled ? "true" : "false"}
           aria-label="Toggle loop region"
           class={cn(
             centerIconButtonClass,
@@ -188,7 +189,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
           variant="ghost"
           size="icon"
           onClick={transport().onToggleGrid}
-          aria-pressed={transport().gridEnabled}
+          aria-pressed={transport().gridEnabled ? "true" : "false"}
           aria-label="Toggle snap to grid"
           class={cn(
             centerIconButtonClass,
@@ -201,7 +202,7 @@ export const TransportBar: Component<{ transport: TransportBarController }> = (
         variant="ghost"
         size="sm"
         onClick={transport().onToggleFollow}
-        aria-pressed={transport().followEnabled}
+        aria-pressed={transport().followEnabled ? "true" : "false"}
         aria-label="Toggle Follow"
         title="Follow playback (Option+Shift+F on Mac, Ctrl+Shift+F on Windows)"
         class={cn(
@@ -291,7 +292,7 @@ const TopRightIconButton: Component<TopRightIconButtonProps> = (props) => (
       variant="ghost"
       size="icon"
       onClick={props.onClick}
-      aria-pressed={props.ariaPressed}
+      aria-pressed={props.ariaPressed === undefined ? undefined : props.ariaPressed ? "true" : "false"}
       aria-label={props.tooltip}
       class={cn(
         nativeMenuTriggerClass,
@@ -375,7 +376,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <Button
           variant="ghost"
           size="sm"
-          aria-pressed={props.browser.open}
+          aria-pressed={props.browser.open ? "true" : "false"}
           aria-label={props.browser.open ? "Hide browser sidebar" : "Show browser sidebar"}
           class={cn(
             nativeMenuTriggerClass,

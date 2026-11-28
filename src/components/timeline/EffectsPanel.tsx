@@ -1,5 +1,6 @@
 import type { DeliveryRegistration, LiveProcessorEditIdentity, ProcessorDelivery, PublicationJoin } from "~/lib/live-processor-control";
-import { type Component, Show, Match, Switch, For, type JSX, createEffect, createMemo, createSignal, onCleanup, onMount, untrack } from "solid-js";
+import { type Component, Show, Match, Switch, For, createEffect, createMemo, createSignal, onCleanup, onSettled, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type { ExternalProcessor } from "@daw-browser/external-plugins";
 import { automationEnvelopeValueRange, isLocalId, type AudioEffectInstance, type AutomationEnvelope, type SynthParams, type TrackInstrumentParams } from "@daw-browser/shared";
 import Arpeggiator from "~/components/effects/Arpeggiator";
@@ -456,10 +457,13 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     return props.audioEffects.orderedEffects().find((effect) => effect.id === current.effectId);
   });
 
-  createEffect(() => {
-    if (selection() && !selectedEffect()) setSelection();
-  });
-  onMount(() => {
+  createEffect(
+    () => Boolean(selection()) && !selectedEffect(),
+    (stale) => {
+      if (stale) setSelection();
+    },
+  );
+  onSettled(() => {
     const handlePointerDown = (event: PointerEvent) => {
       if (!effectCardsElement?.contains(event.target instanceof Node ? event.target : null)) {
         setSelection();
@@ -467,7 +471,8 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
     };
 
     window.addEventListener("pointerdown", handlePointerDown, { capture: true });
-    onCleanup(() => window.removeEventListener("pointerdown", handlePointerDown, { capture: true }));
+
+    return () => window.removeEventListener("pointerdown", handlePointerDown, { capture: true });
   });
   onCleanup(() => props.onElementChange?.(undefined));
 
@@ -547,8 +552,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
         }}
       </Show>
       <div
-        class="flex h-full min-w-16 shrink-0 items-stretch gap-3"
-        classList={{ "opacity-60": !props.canWrite }}
+        class={["flex h-full min-w-16 shrink-0 items-stretch gap-3", { "opacity-60": !props.canWrite }]}
         data-timeline-keyboard-local="true"
         onKeyDown={handleKeyDown}
         ref={(element) => {
@@ -598,7 +602,7 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                               if (!isDeviceInteractiveTarget(event.target)) element?.focus({ preventScroll: true });
                               drag.onPointerDown(event);
                             }}
-                            tabIndex={-1}
+                            tabindex={-1}
                           >
                             <EffectsPanelDeviceBoundary
                               identity={deviceCollapseIdentity.external(processor().instanceId)}
@@ -637,13 +641,12 @@ const EffectsPanelEffectCards: Component<EffectsPanelEffectCardsProps> = (props)
                           <div
                             data-effect-kind={effect().kind}
                             data-reorder-key={key}
-                            class="touch-none transition-opacity focus:outline-none"
-                            classList={{
+                            class={["touch-none transition-opacity focus:outline-none", {
                               "opacity-30": reorderPreview()?.key === key,
                               "[&_.effect-shell]:bg-timeline-surface-muted": selectedEffect()?.id === effect().id,
-                            }}
+                            }]}
                             ref={(node) => { element = node; }}
-                            tabIndex={-1}
+                            tabindex={-1}
                             onPointerDown={(event) => {
                               setSelection({ targetId: props.targetId, effectId: effect().id });
 
@@ -898,29 +901,31 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
   const { instrument, audioEffects } = devices;
   const deviceCollapse = createEffectsPanelDeviceCollapse(() => props.projectId);
   const [externalProcessors, setExternalProcessors] = createSignal<ExternalProcessor[]>([]);
-  createEffect(() => {
-    const projectId = props.projectId;
+  createEffect(
+    () => props.projectId,
+    (projectId) => {
+      if (!projectId || !isLocalId("project", projectId)) {
+        setExternalProcessors([]);
 
-    if (!projectId || !isLocalId("project", projectId)) {
-      setExternalProcessors([]);
+        return;
+      }
 
-      return;
-    }
+      const isCurrentProject = () => untrack(() => props.projectId) === projectId;
 
-    const isCurrentProject = () => untrack(() => props.projectId) === projectId;
+      const reload = () => listLocalExternalProcessors(projectId)
+        .then((processors) => {
+          if (isCurrentProject()) setExternalProcessors(processors);
+        })
+        .catch(() => {
+          if (isCurrentProject()) setExternalProcessors([]);
+        });
 
-    const reload = () => listLocalExternalProcessors(projectId)
-      .then((processors) => {
-        if (isCurrentProject()) setExternalProcessors(processors);
-      })
-      .catch(() => {
-        if (isCurrentProject()) setExternalProcessors([]);
-      });
+      void reload();
+      const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
 
-    void reload();
-    const unsubscribe = subscribeToLocalProjectChanges(projectId, () => void reload());
-    onCleanup(unsubscribe);
-  });
+      return unsubscribe;
+    },
+  );
 
   const externalProcessorsForTarget = createMemo(() => (
     selectExternalProcessorsForTarget(externalProcessors(), props.selectedFXTarget)
@@ -1039,10 +1044,12 @@ const EffectsPanel: Component<EffectsPanelProps> = (props) => {
       : undefined;
   });
 
-  createEffect(() => {
-    if (props.isOpen) return;
-    props.onEffectChainElementChange?.(undefined);
-  });
+  createEffect(
+    () => props.isOpen ? undefined : props.onEffectChainElementChange,
+    (onEffectChainElementChange) => {
+      onEffectChainElementChange?.(undefined);
+    },
+  );
 
   return (
     <>

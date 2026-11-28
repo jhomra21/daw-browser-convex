@@ -1,0 +1,44 @@
+diff --git a/dist/menu-sub-trigger/AffBpP9S.jsx b/dist/menu-sub-trigger/AffBpP9S.jsx
+index 35f91f564d15a8061db8aeba9086ccb30f78b467..759b8b1dd291a55573557beee2927d657a6031f2 100644
+--- a/dist/menu-sub-trigger/AffBpP9S.jsx
++++ b/dist/menu-sub-trigger/AffBpP9S.jsx
+@@ -218,7 +218,7 @@ function Menu(props) {
+ 		if (!state) return;
+ 		if (state.menubarValue === state.rootValue) {
+ 			state.trigger?.focus();
+-			if (state.autoFocus) open("first");
++			if (state.autoFocus && !disclosureState.isOpen()) open(true);
+ 		} else close();
+ 	});
+ 	createEffect(() => {
+@@ -444,7 +444,7 @@ function MenuTrigger(props) {
+ 		if (optionalMenubarContext !== void 0) {
+ 			if (!context.isOpen()) {
+ 				if (!optionalMenubarContext.autoFocusMenu()) optionalMenubarContext.setAutoFocusMenu(true);
+-				context.open(false);
++				context.open(optionalMenubarContext.value() === key() ? "first" : true);
+ 			} else if (optionalMenubarContext.value() === key()) optionalMenubarContext.closeMenu();
+ 		} else context.toggle(true);
+ 	};
+diff --git a/dist/menu-sub-trigger/DSkM6ieC.js b/dist/menu-sub-trigger/DSkM6ieC.js
+index 8fbb5f073db9552c347c9e8b0b4a3b945ffdd62b..d34e3983e0337a7a1ae499e08d93583258a5fcb6 100644
+--- a/dist/menu-sub-trigger/DSkM6ieC.js
++++ b/dist/menu-sub-trigger/DSkM6ieC.js
+@@ -218,7 +218,7 @@ function Menu(props) {
+ 		if (!state) return;
+ 		if (state.menubarValue === state.rootValue) {
+ 			state.trigger?.focus();
+-			if (state.autoFocus) open("first");
++			if (state.autoFocus && !disclosureState.isOpen()) open(true);
+ 		} else close();
+ 	});
+ 	createEffect(() => {
+@@ -503,7 +503,7 @@ function MenuTrigger(props) {
+ 		if (optionalMenubarContext !== void 0) {
+ 			if (!context.isOpen()) {
+ 				if (!optionalMenubarContext.autoFocusMenu()) optionalMenubarContext.setAutoFocusMenu(true);
+-				context.open(false);
++				context.open(optionalMenubarContext.value() === key() ? "first" : true);
+ 			} else if (optionalMenubarContext.value() === key()) optionalMenubarContext.closeMenu();
+ 		} else context.toggle(true);
+ 	};

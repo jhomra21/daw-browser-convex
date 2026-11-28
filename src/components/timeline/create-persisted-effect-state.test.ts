@@ -10,7 +10,7 @@ import "fake-indexeddb/auto";
 import { createDefaultUtilityParams } from "@daw-browser/shared";
 import * as outbox from "~/lib/shared-outbox";
 import { publishDurableEffectsOperation } from "~/lib/shared-outbox-publishers";
-import { batch, createRoot, createSignal } from "solid-js";
+import { createRoot, createSignal, flush } from "solid-js";
 import { createPersistedEffectState } from "./create-persisted-effect-state";
 import { effectAdmission, type ParameterSaveResult } from "./effect-publication-result";
 import { flushRegisteredLocalProjectWrites } from "~/lib/local-project-write-flushers";
@@ -50,7 +50,7 @@ test("INDEPENDENT native row reconcile and reinstall publish once", async () => 
     state.syncRemoteForTarget("t", 1);
     await state.flushPending();
     applies.length = 0; joins.length = 0;
-    batch(() => { setEngine(new AudioEngine()); state.syncRemoteForTarget("t", 2); });
+    setEngine(new AudioEngine()); state.syncRemoteForTarget("t", 2);
     await state.flushPending();
     expect(applies).toEqual([2]);
     expect(joins).toEqual([2]);
@@ -190,6 +190,7 @@ test("a scope replacement drops the queued installation of an observation from t
   try {
     owner.external("t", 1, 1);
     setScope({ projectId: "q", generation: 0 });
+    flush();
     await owner.flushPending();
     expect(applies).toEqual([]);
     expect(rows).toEqual([]);

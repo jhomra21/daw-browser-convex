@@ -1,5 +1,5 @@
 import { expect, mock } from "bun:test";
-import { createComputed, createMemo, createRoot, untrack } from "solid-js";
+import { createMemo, createRoot, untrack, createRenderEffect } from "solid-js";
 import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeHostTransport, NativeScheduleProgress } from "@daw-browser/audio-engine/native-host-wire";
@@ -286,8 +286,7 @@ export const mountStep5Playback = async <Inputs extends {
   const playback = createRoot(cleanup => {
     dispose = cleanup;
     const capturedInputs = createMemo(input.playbackInputs);
-    createComputed(() => {
-      const fx = input.desiredFx(capturedInputs());
+    createRenderEffect(() => input.desiredFx(capturedInputs()), (fx) => {
       untrack(() => processorEdits.observe(fx));
     });
 
@@ -300,7 +299,7 @@ export const mountStep5Playback = async <Inputs extends {
         masterVolume: captured.masterVolume, automation: captured.automation, sidechains: captured.sidechains,
         processorStructure: processorEdits.structure(),
       });
-    }, undefined, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
+    }, { equals: (previous, next) => replaceEqualDeep(previous, next) === previous });
 
     return useTimelinePlayback(engine, { getTracks: input.tracks, bpm: () => 120 }, {
       requiresNativeAudio: true, enabled: () => true, projectId: () => input.projectId,

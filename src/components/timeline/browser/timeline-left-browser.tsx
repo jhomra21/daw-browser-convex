@@ -1,4 +1,5 @@
-import { createEffect, createMemo, For, on, onMount, Show, type Component, type JSX } from "solid-js";
+import { createEffect, createMemo, For, onSettled, Show, type Component, untrack } from "solid-js";
+import type { JSX } from "@solidjs/web";
 import type { BrowserAssetsModel, BrowserFolderRow, BrowserItem, BrowserSection, BrowserTreeExpansionState, BrowserTreeRow, TimelineBrowserTab, TimelineLeftBrowserModel } from "~/lib/timeline-browser/browser-types";
 import { timelineBrowserTabLabels, timelineBrowserTabs } from "~/lib/timeline-left-browser-preferences";
 import TimelineContextMenu, { type TimelineContextMenuItem } from "../context-menu/timeline-context-menu";
@@ -22,7 +23,7 @@ const BrowserFolderRenameInput: Component<{
 }> = (props) => {
   let inputRef: HTMLInputElement | undefined;
 
-  onMount(() => {
+  onSettled(() => {
     inputRef?.focus();
     inputRef?.select();
   });
@@ -87,7 +88,7 @@ const BrowserTreeRows: Component<{
                 <button
                   type="button"
                   class="flex h-6 w-full items-center gap-1 px-3 text-left text-xs text-muted-foreground hover:bg-app-surface hover:text-foreground"
-                  aria-expanded={visible()}
+                  aria-expanded={visible() ? "true" : "false"}
                   onClick={toggle}
                 >
                   <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
@@ -175,7 +176,7 @@ const BrowserTree: Component<{
               <button
                 type="button"
                 class="flex h-6 w-full items-center gap-1 px-1.5 text-left text-xs font-semibold uppercase tracking-widest text-muted-foreground hover:bg-app-surface hover:text-muted-foreground"
-                aria-expanded={visible()}
+                aria-expanded={visible() ? "true" : "false"}
                 onClick={toggle}
               >
                 <span class="w-3 text-center text-xs text-muted-foreground">{visible() ? "▾" : "▸"}</span>
@@ -242,7 +243,7 @@ const BrowserItemRow: Component<{
   const row = (
     <button
       type="button"
-      draggable={props.draggable}
+      draggable={props.draggable === undefined ? undefined : props.draggable ? "true" : "false"}
       disabled={props.item.disabled}
       title={props.item.subtitle}
       aria-description={props.item.subtitle}
@@ -387,8 +388,8 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
     scrollRef.scrollTop = props.browser.scrollTopByTab[props.browser.activeTab] ?? 0;
   };
 
-  onMount(restoreScrollTop);
-  createEffect(on(() => props.browser.activeTab, restoreScrollTop));
+  onSettled(restoreScrollTop);
+  createEffect(() => props.browser.activeTab, () => untrack(restoreScrollTop));
   const activeTreeExpansion = () => props.browser.treeExpansionByTab[props.browser.activeTab];
   const searchActive = () => props.browser.searchQueryByTab[props.browser.activeTab].trim().length > 0;
 
@@ -410,12 +411,11 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
             {(tab) => (
               <button
                 type="button"
-                class="px-2 py-1 text-left text-xs hover:bg-app-surface hover:text-foreground"
-                classList={{
+                class={["px-2 py-1 text-left text-xs hover:bg-app-surface hover:text-foreground", {
                   "bg-app-surface text-foreground": props.browser.activeTab === tab,
                   "text-muted-foreground": props.browser.activeTab !== tab,
-                }}
-                aria-pressed={props.browser.activeTab === tab}
+                }]}
+                aria-pressed={props.browser.activeTab === tab ? "true" : "false"}
                 onClick={() => props.browser.onSelectTab(tab)}
               >
                 {timelineBrowserTabLabels[tab]}

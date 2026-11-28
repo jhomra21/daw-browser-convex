@@ -2,7 +2,7 @@ import tailwindcss from '@tailwindcss/vite'
 import { expect, test } from 'bun:test'
 import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
-import solidPlugin from 'vite-plugin-solid'
+import solidPlugin from '@solidjs/vite-plugin'
 import { z } from 'zod'
 import { agentBrowser } from '~/test-support/agent-browser'
 
@@ -99,8 +99,8 @@ export const BUILTIN_INSTRUMENT_PRESETS = [
 }
 
 const fixture = `
-import { createComponent, createSignal } from 'solid-js'
-import { render } from 'solid-js/web'
+import { createComponent, createSignal, flush } from 'solid-js'
+import { render } from '@solidjs/web'
 import { useTimelineBrowserController } from '~/hooks/useTimelineBrowserController'
 import { TimelineLeftBrowser } from '~/components/timeline/browser/timeline-left-browser'
 import '~/index.css'
@@ -217,6 +217,7 @@ window.browserFixture = {
   },
   deviceRows: (tab, query) => {
     state.leftBrowser.setSearchQuery(tab, query)
+    flush()
     const controller = state.controller()
     const sections = tab === 'effects' ? controller.devices.effectSections() : controller.devices.instrumentSections()
     return sections.map((section) => ({ id: section.id, leafCount: section.leafCount, rows: flattenRows(section.rows) }))

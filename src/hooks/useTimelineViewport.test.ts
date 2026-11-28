@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { createRoot, createSignal } from 'solid-js'
+import { createSignal } from 'solid-js';
+import { createFlushedRoot as createRoot, flushChain } from '~/test-support/create-flushed-root';
 
 import { useTimelineViewport } from './useTimelineViewport'
 
@@ -99,6 +100,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
 
         void (async () => {
           viewport.zoomIn()
+          flushChain()
           const rangeAfterImmediateZoom = viewport.visibleRange()
           expect(rangeAfterImmediateZoom.startSec).toBeCloseTo(3)
           expect(rangeAfterImmediateZoom.endSec).toBeCloseTo(27)
@@ -107,6 +109,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
           expect(viewport.visibleRange()).toEqual(rangeAfterImmediateZoom)
 
           setScope('project-2')
+          flushChain()
           expect(viewport.visibleRange().startSec).toBe(0)
           expect(viewport.visibleRange().endSec).toBeCloseTo(24)
 
@@ -132,6 +135,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
 
           element.clientWidth = 800
           TestResizeObserver.current?.dispatchResize()
+          flushChain()
           expect(viewport.usableWidth()).toBe(800)
           expect(element.scrollWrites).toBeGreaterThan(writesAfterBind)
           const writesAfterResize = element.scrollWrites
@@ -139,6 +143,7 @@ describe('useTimelineViewport physical anchor maintenance', () => {
           const rangeBeforeScroll = viewport.visibleRange()
           element.scrollLeft += 100
           element.dispatchScroll()
+          flushChain()
           expect(viewport.visibleRange()).not.toEqual(rangeBeforeScroll)
           expect(element.scrollWrites).toBeGreaterThan(writesAfterResize)
 

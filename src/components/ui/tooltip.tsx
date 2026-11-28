@@ -1,5 +1,5 @@
-import type { ComponentProps, JSX } from "solid-js";
-import { mergeProps, splitProps } from "solid-js";
+import type { ComponentProps, JSX } from "@solidjs/web";
+import { merge, omit } from "solid-js";
 import {
   Tooltip as TooltipPrimitive,
   type TooltipContentProps as KobalteTooltipContentProps,
@@ -10,12 +10,14 @@ import { cn } from "~/lib/utils";
 
 type TooltipProps = TooltipRootProps;
 
+const defaultPlacement: TooltipProps["placement"] = "top";
+
 const Tooltip = (props: TooltipProps) => {
-  const merged = mergeProps<TooltipProps[]>(
+  const merged = merge(
     {
       closeDelay: 0,
       openDelay: 250,
-      placement: "top",
+      placement: defaultPlacement,
       gutter: 6,
     },
     props,
@@ -32,18 +34,18 @@ type TooltipContentProps = KobalteTooltipContentProps<"div"> & ComponentProps<"d
 };
 
 const TooltipContent = (props: TooltipContentProps) => {
-  const [local, rest] = splitProps(props, ["class", "children"]);
+  const rest = omit(props, "class", "children");
 
   return (
     <TooltipPrimitive.Portal>
       <TooltipPrimitive.Content
         class={cn(
           "z-50 flex w-fit items-center rounded border border-border bg-background px-2 py-1 text-xs text-foreground shadow-md",
-          local.class,
+          props.class,
         )}
         {...rest}
       >
-        {local.children}
+        {props.children}
       </TooltipPrimitive.Content>
     </TooltipPrimitive.Portal>
   );

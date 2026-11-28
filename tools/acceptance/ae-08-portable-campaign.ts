@@ -10,7 +10,7 @@
 import { mkdir, writeFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import { build } from "vite"
-import solidPlugin from "vite-plugin-solid"
+import solidPlugin from "@solidjs/vite-plugin"
 import { z } from "zod"
 import { agentBrowser } from "../../src/test-support/agent-browser"
 import { portableCampaignRows, type PortableCampaignRow } from "./ae-08-phase-9-rows"

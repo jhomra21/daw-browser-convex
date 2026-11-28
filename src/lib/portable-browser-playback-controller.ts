@@ -239,7 +239,7 @@ export const createPortableBrowserPlaybackController = (input: {
   let activePreparations: readonly PortablePagedPreparation[] = []
 
   // The preparations, registered assets and Stretch artifacts (with their leases) a failed adoption attempt made stay for
-  // the resubmit of the same desired state (UD 8), so a slow preparation converges instead of starting over. They go when
+  // the resubmit of the same desired state, so a slow preparation converges instead of starting over. They go when
   // the desired state changes, when the resubmits run out, and with the session.
   type AdoptionCache = {
     fingerprint: string
@@ -264,7 +264,7 @@ export const createPortableBrowserPlaybackController = (input: {
   let seamRoundTripsMs: readonly number[] = []
   // Synth sends past the adoption barrier and not yet answered; an adoption folds the values they carry once they settle.
   const liveInstrumentSends = new Set<Promise<unknown>>()
-  // Failed operations waiting for rendered-frame reports to run again (UD 8): `wait` more reports, `resubmits` made so far.
+  // Failed operations waiting for rendered-frame reports to run again: `wait` more reports, `resubmits` made so far.
   const retries = new Map<"adoption" | "seek", { resubmits: number; wait: number; run: (resubmits: number) => Promise<void> }>()
   // Locates run one after the other; the newest wins through `transportIntent`.
   let seekTail: Promise<unknown> = Promise.resolve()
@@ -1148,7 +1148,7 @@ export const createPortableBrowserPlaybackController = (input: {
       const owned: AdoptionCache = { fingerprint: desired, preparations: adoptionCache?.preparations ?? [], assets: adoptionCache?.assets ?? [], stretch: adoptionCache?.stretch }
       adoptionCache = undefined
       attempt = owned
-      // The candidate's Stretch artifacts are prepared at its tempo and placement, as native prepares them (C:3289-3305). The
+      // The candidate's Stretch artifacts are prepared at its tempo and placement, as native prepares them. The
       // seam is chosen after this, so a slow preparation spends none of its lead.
       owned.stretch ??= await prepareCandidateStretch(next, projectGeneration)
 
@@ -1161,7 +1161,7 @@ export const createPortableBrowserPlaybackController = (input: {
       }
 
       if (!current()) return "unavailable"
-      // From here live sends wait for the publish (R2) and so reach the revision that carries them; sends already in
+      // From here live sends wait for the publish and so reach the revision that carries them; sends already in
       // flight settle first, so the candidate holds every live value the session accepted while the compile ran.
       adoptionPublish = publishing.promise
       await Promise.all(liveInstrumentSends)
@@ -1377,7 +1377,7 @@ export const createPortableBrowserPlaybackController = (input: {
     return run
   }
 
-  // UD 8: a failed instrument staging keeps the playing graph and is resubmitted after min(2^r, 16(r+1)) rendered-frame
+  // A failed instrument staging keeps the playing graph and is resubmitted after min(2^r, 16(r+1)) rendered-frame
   // reports (the worklet's transport-position messages are the block boundary; no timer), up to 8 times. Exhaustion is a
   // defect: the edit stays in the project and the next adoption publishes it.
   const retryWaitReports = (resubmits: number) => Math.min(2 ** resubmits, 16 * (resubmits + 1))

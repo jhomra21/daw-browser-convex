@@ -27,7 +27,7 @@ const unmoved = move(0, 0)
 const spectralFrames = (fftSize: 512 | 4096) => getSpectralLatencyFrames(fftSize, createDefaultSpectralParams().overlap)
 const silentTrack = "Silent publication target"
 
-// An out-of-process plug-in adds one transport block of latency to what it declares (audio-host.cpp: transport_latency_frames equals
+// An out-of-process plug-in adds one transport block of latency to what it declares (transport_latency_frames equals
 // the attachment's transport.maximum_frames); the packaged runs use the 512-frame device block.
 const vstTransportFrames = 512
 

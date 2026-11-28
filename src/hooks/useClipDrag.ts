@@ -59,18 +59,15 @@ type ClipDragOptions = {
   convexClient: typeof convexClient
   convexApi: typeof convexApi
   getScrollElement: () => HTMLDivElement | undefined
-  // snapping
   bpm: Accessor<number>
   gridEnabled: Accessor<boolean>
   gridDenominator: Accessor<number>
   pixelsPerSecond: Accessor<number>
   visibleStartSec?: Accessor<number>
-  // buffer cache to prime newly created duplicates
   audioBufferCache: ClipBuffers
   // Notify timeline that a set of clip moves has been committed (drop finished)
   onCommitMoves?: (clipIds: string[]) => void
   notify?: (title: string, message: string) => void
-  // optional history push
   historyPush?: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   grantWrite?: (trackId: Track['id'], scope?: OptimisticGrantScope | null) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
@@ -124,7 +121,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
   let addedTrackDuringDrag: Track['id'] | null = null
   let prePositions = new Map<string, { clipId: string; trackId: Track['id']; startSec: number }>()
   let multiDragging: MultiDragSnapshot | null = null
-  // Ctrl-drag duplication state
   let duplicationActive = false
   let pendingAddedTrack: Promise<Track['id'] | null> | null = null
   let lastDraftMoves: Array<{ clipId: string; trackId: Track['id']; startSec: number }> | null = null
@@ -369,11 +365,11 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
       visibleStartSec: options.visibleStartSec?.(),
     })
 
-    // If duplicating and Ctrl released, cancel
     if (duplicationActive && !event.ctrlKey) {
       cancelDuplicationDrag()
 
       return
+    // If duplicating and Ctrl released, cancel
     }
 
     if (laneIdx >= snapshot.length) {
@@ -519,7 +515,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
     // If we are in duplication mode, handle commit or cancel here and exit.
     if (duplicationActive) {
-      // Work against a base without previews
       let base = visiblePlacementTracks()
 
       // If dropping beyond last lane and no track was created during move, create one now
@@ -530,7 +525,6 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
         base = visiblePlacementTracks()
       }
 
-      // Determine target track id
       let targetId: Track['id'] | undefined
 
       if (laneIdx >= base.length && addedTrackDuringDrag) {
@@ -552,13 +546,13 @@ export function useClipDrag(options: ClipDragOptions): ClipDragHandlers {
 
  return }
 
-      // If Ctrl is not held anymore at drop, treat as cancel
       if (!event.ctrlKey) { cancelDuplicationDrag();
 
  return }
 
       const placements = planDuplicatedClipPlacements({
         tracks: base,
+      // If Ctrl is not held anymore at drop, treat as cancel
         lookup,
         draggingIds: activeDraggingIds,
         multiDragging,

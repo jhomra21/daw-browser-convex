@@ -808,7 +808,6 @@ const removeAudioEffectForUser = async (
   }
 }
 
-// Return the EQ effect row for a track if it exists (we use a single EQ per track for now)
 export const listByRoom = query({
   args: { projectId: v.string() },
   handler: async (ctx, { projectId }) => {
@@ -849,23 +848,13 @@ export const listByTrack = query({
   },
 });
 
-// Synth: get synth row for a track
 
-// Arpeggiator: get arpeggiator row for a track
 
-// Synth: set or create synth params for a track
 
-// Arpeggiator: set or create arpeggiator params for a track
-// Set or create the Reverb params for a given track
-// Master-level EQ (per room)
 
-// Reverb: get first reverb row for a track
 
-// Reverb: get first master reverb row for room
 
-// Set or create the EQ params for a given track. We enforce ownership based on the track owner.
 
-// Set or create the EQ params for the room master bus. We enforce that the user owns the project for this room.
 
 export const serverSetSynthParams = mutation({
   args: {
@@ -874,7 +863,9 @@ export const serverSetSynthParams = mutation({
     instanceId: v.string(),
     params: v.union(synthParamsValidator, legacySynthParamsValidator),
   },
+// Set or create the EQ params for a given track. We enforce ownership based on the track owner.
   handler: async (ctx, { projectId, trackId, instanceId, params }) => {
+// Set or create the EQ params for the room master bus. We enforce that the user owns the project for this room.
     const userId = await requireAuthenticatedUserId(ctx)
     const normalizedTrackId = ctx.db.normalizeId('tracks', trackId)
 

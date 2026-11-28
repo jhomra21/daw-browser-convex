@@ -307,7 +307,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         return !changedSample && JSON.stringify(old) === JSON.stringify(node.instrument) ? [] : [{ nodeId: node.id, state: node.instrument }]
       })
 
-      // Native refuses a prepare while a patch claim is unreported (design 2.4.6): none is sent until the fence opens.
+      // Native refuses a prepare while a patch claim is unreported: none is sent until the fence opens.
       await quietPublicationLane()
       host.input.observer?.adoption?.(attempt?.intent.key)?.("fence-open")
 
@@ -671,7 +671,7 @@ export const createSchedulePublication = (tx: PublicationTransaction, facts: Sch
         host.scheduleCandidates.delete(candidate)
         const synthInstances = new Map([...synthNodes(snapshot)].map(([instanceId, nodeId]) => [nodeId, instanceId]))
         // A configured-again instrument starts its synth from the graph's values. Its processors keep their
-        // history slot, and so their applied overrides, unless their own structure changed (audio_core.cpp:8044-8072).
+        // history slot, and so their applied overrides, unless their own structure changed (compatible_processor_history).
         const configuredNodes = new Set(addedInstruments.map(({ nodeId }) => nodeId))
 
         const reconfiguredTargets = new Set(graph.nodes.flatMap((node) => {

@@ -11,7 +11,7 @@ import { movedSynthLiveFields } from "~/lib/processor-edit-semantics"
 
 type PortableSchedule = Extract<PreparedPortableSession, { supported: true }>["schedule"]
 
-// The eight synth fields the live events carry. A compile reads the project, which a knob drag only reaches on release,
+// A compile reads the project, which a knob drag only reaches on release,
 // so the values the session accepted since `since` are laid over it; a field the accepted instrument did not move
 // keeps what the compile read.
 export const withAcceptedLiveSynthValues = (
@@ -34,7 +34,7 @@ export const withAcceptedLiveSynthValues = (
   return { ...snapshot, mixer: { ...snapshot.mixer, fx: { ...fx, trackFx } } }
 }
 
-// What a playing portable session adopts live (D5): track volume, mute, solo, sends and output, the mixer graph and
+// What a playing portable session adopts live: track volume, mute, solo, sends and output, the mixer graph and
 // its automation, master volume, and processor or instrument edits the parameter mapper takes live. `next` with all of
 // that taken from `previous` fingerprints as `previous` exactly when nothing else changed.
 export const withLiveContentOf = (next: LivePlaybackSnapshot, previous: LivePlaybackSnapshot): LivePlaybackSnapshot => {
@@ -104,7 +104,7 @@ const withSeamClips = (next: readonly SnapshotClip[], installed: readonly Snapsh
 // The instances of `next` as `installed` has them where an edit leaves the same effect (the id and kind), whatever else of
 // its parameters moved: the core reconfigures it under continuity, keeping its history when its structure allows and
 // starting it again otherwise, and moves the read heads where its delay changed, as native does through the same calls
-// (CORE:7542-7609, 8689-8717). A Spectral fftSize change is replaced instead: the old stage fades out as a ghost and a
+// (the core's graph publication). A Spectral fftSize change is replaced instead: the old stage fades out as a ghost and a
 // fresh stage of the new size starts (`replaced_by_spectral_size_change`).
 const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], installed: readonly AudioEffectRuntimeInstance[] = []): AudioEffectRuntimeInstance[] => {
   const installedByKey = new Map(installed.map((instance) => [runtimeInstanceKey(instance), instance]))
@@ -115,7 +115,7 @@ const withInstalledEffectParams = (next: readonly AudioEffectRuntimeInstance[], 
 // What a playing session adopts at a seam, beyond what it takes live: the tempo, the loop fields, the clips of tracks it
 // already plays (`withSeamClips`, the warp and the asset a clip plays included), the assets the instruments and clips it
 // plays name, the instrument of each track it plays (an edit, another kind or another instance: the core crossfades the
-// replaced one out, CORE:8162-8194, and the held notes follow `keepsInstrumentVoices`), and the parameters of the effects
+// replaced one out, and the held notes follow `keepsInstrumentVoices`), and the parameters of the effects
 // it plays that the live path does not take (`withInstalledEffectParams`). `next` with that taken from `previous`
 // fingerprints as `previous` when nothing else changed. The tracks added or deleted are no part of the comparison
 // (`onSharedTracks`), nor are the effects those tracks have inserted, removed or moved (`onKeptEffects`). Still refused: a
@@ -204,8 +204,8 @@ export const inSessionOrder = (next: LivePlaybackSnapshot, previous: LivePlaybac
 // An adopted schedule starts at `seamFrame` while the session keeps sounding what the old schedule started before it.
 // A note that sounds at the seam and is not the same note in `next` gets a note-off at the seam; one that survives keeps
 // its voice, because a repeated note-on would stick a Synth (it then needs two note-offs) and double a Sampler.
-// Whether an edit leaves an instrument its voices, as native's retained rule does (NS:1227-1231) and the core's
-// `same_instrument_configuration` does (CORE:7510): the same instance with the same configuration and the same samples.
+// Whether an edit leaves an instrument its voices, as native's retained-instruments rule (`retainedInstruments` in native-schedule-coordinator.ts) and the core's
+// `same_instrument_configuration` do: the same instance with the same configuration and the same samples.
 // A Synth moves the eight fields its live events carry without replacing its slot.
 export const keepsInstrumentVoices = (before: TrackInstrumentParams | undefined, after: TrackInstrumentParams | undefined) =>
   before !== undefined && after !== undefined && before.instanceId === after.instanceId && before.kind === after.kind

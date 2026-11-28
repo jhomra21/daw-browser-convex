@@ -13,7 +13,6 @@ const isExportMimeTypeAllowed = (format: ExportAudioFormat, mimeType: string) =>
 }
 
 export function registerExportRoutes(app: App) {
-// Upload an export to R2 (protected route)
   app.post('/api/exports', async (c) => {
   try {
     const form = await c.req.formData()
@@ -143,7 +142,6 @@ export function registerExportRoutes(app: App) {
   }
 })
 
-// Stream an export from R2 by project-scoped key
   app.get('/api/export/:projectId', async (c) => {
   try {
     const key = c.req.query('key')

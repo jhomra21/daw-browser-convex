@@ -63,7 +63,6 @@ const TimelineRuler: Component<TimelineRulerProps> = (props) => {
   const loopWidthPx = () => Math.max(0, loopEndPx() - loopStartPx())
   const showLoop = () => props.loopEnabled && loopWidthPx() > 1
 
-  // --- Loop editing ---
   let rootEl: HTMLDivElement | null = null
   let dragging = false
   let dragMode: 'none' | 'resize-start' | 'resize-end' | 'create' | 'move' = 'none'

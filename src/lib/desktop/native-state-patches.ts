@@ -136,7 +136,7 @@ export const createNativeStatePatches = (host: NativeStatePatchHost) => {
     host.executeReconcile(processorState.patchReplied(execution, patchReplyOf(reply)))
   }
 
-  // Native refuses a patch while a core is prepared (audio-host.cpp:3150). The lane serializes this controller's own
+  // Native refuses a patch while a core is prepared (QueueProcessorStatePatch). The lane serializes this controller's own
   // prepare, publish and adoption with patches, so the one prepared core a patch can meet is a rolled-back
   // publication native still holds as publish-pending; every patch waits for its owner's terminal. One
   // that changes latency also waits while an adoption attempt runs: it folds the latest desired content into its own

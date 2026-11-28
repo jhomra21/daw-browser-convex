@@ -1089,7 +1089,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
       },
       rollback: async () => {
         if (failed && scenario === "publish-error") throw new Error("Rollback reply lost")
-        // audio-host.cpp:3123–3162 releases an unclaimed prepared bank.
+        // Native releases an unclaimed prepared bank on rollback (RollbackGraphRevision).
         status = activeRevision === revision ? "stale-revision" : "rolled-back"
 
         return reply()
@@ -7972,7 +7972,7 @@ test('serializes play behind capture and disposal of the previous native session
 
 // B6f: the browser build keeps its paused portable session live on every paused or stopped route, as native keeps its
 // paused preview: one prepared, paused session at the transport playhead, carrying the newest edit, and no running
-// transport after a Stop or Pause. The shape is the browser build's (Timeline.tsx:167, :763-781, :855-859): no desktop
+// transport after a Stop or Pause. The shape is the browser build's (Timeline's playback wiring): no desktop
 // bridge, native `enabled` (default true), portable options, and no AudioContext until a Play gesture creates one.
 type B6fLiveSession = { createdSeq: number; closed: boolean; graph: string; positions: { seq: number; sec: number; running: boolean }[] }
 
@@ -8082,7 +8082,7 @@ const mountB6fLive = (world: B6fLiveWorld, nativeEnabled: boolean) => {
     await expectLive(false, sec, mark, 'none')
   }
 
-  // Timeline.tsx:923-929: a structural edit rebuilds the backend the Timeline sees prepared, with the captured intent.
+  // A structural edit rebuilds the backend the Timeline sees prepared, with the captured intent.
   const timelineReschedule = () => {
     if (!playback.isNativePlaybackPrepared() && !playback.isPortableBrowserPlaybackPrepared()) return Promise.resolve()
 
@@ -8267,7 +8267,7 @@ test('B6f a project switch leaves a live paused portable session of the new proj
     await live.pausedAt(1)
     const previous = live.liveSession()
     const mark = live.mark()
-    // useTimelineProjectRoute.ts:79-81 moves the generation, then the project id; the new project's tracks load once
+    // The project route moves the generation, then the project id; the new project's tracks load once
     // the previous project's session is gone.
     live.setGeneration(2)
     live.setProjectId('project-b')
@@ -8439,7 +8439,7 @@ test('B6f2 two paused locates while the first seek is pending end at the second'
 })
 
 // B6f3: a browser restored from preferences saved at versions 5 to 8 can run with native playback off
-// (app-preferences-core.ts:254-257). A worklet fault while playing then reaches only the paused-preview effect's disabled
+// (the preferences migration). A worklet fault while playing then reaches only the paused-preview effect's disabled
 // branch, which must bring the paused session back as the enabled branch's tail does.
 test('B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on', async () => {
   for (const nativeEnabled of [false, true]) await runB6fLive(async (live) => {
@@ -8467,7 +8467,7 @@ test('B6f3 a portable session fault while playing leaves a live paused portable 
   }, nativeEnabled)
 })
 
-// B6f4: with native playback off (app-preferences-core.ts:254-257) a paused mixer edit reaches only the paused-preview
+// B6f4: with native playback off (the preferences migration) a paused mixer edit reaches only the paused-preview
 // effect's disabled branch, and ensurePrepared keeps a paused session that already stands at the playhead: the branch must
 // replace the session compiled before the edit, and keep the replacement while nothing changes.
 test('B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it', async () => {
@@ -8522,7 +8522,7 @@ test('B6f4 a paused-preview re-run with native playback off and no edit keeps th
 // B6f5: a playing portable session follows every edit as native adoption does. What the session carries live (mixer,
 // master, automation) is adopted on the same core; anything else rebuilds it where the transport stands. A pending Play,
 // rebuild or re-prepare ends carrying the newest edit (AE-08). The fixture is the browser build's, as B6f's, with the
-// Timeline's processor and instrument bindings (Timeline.tsx:447-468) and a worklet that records what each session holds.
+// Timeline's processor and instrument bindings and a worklet that records what each session holds.
 type B6f5Session = { createdSeq: number; closed: boolean; graph: AudioCoreGraphSnapshot | undefined; publishedRevision: number | undefined
   parameters: string; adoptions: number; installedBpm: number[]; installedNoteOns: number[]
   // The worklet's transport-position report at a raw frame, on the epoch of the last transport it took.
@@ -8539,7 +8539,7 @@ type B6f5Kind = 'mixer' | 'master' | 'automation' | 'structural' | 'proc-live' |
 
 const b6f5LiveKinds = new Set<B6f5Kind>(['proc-live', 'synth-live'])
 
-// What a playing session adopts on its own core (D5); elsewhere these reach the session as any edit does.
+// What a playing session adopts on its own core; elsewhere these reach the session as any edit does.
 const b6f5AdoptedKinds = new Set<B6f5Kind>(['mixer', 'master', 'automation', 'synth-nonlive', 'sampled'])
 const b6f5TrackS: Track = { ...track, id: 'track-s', name: 'Sampled' }
 const b6f5Utility0: UtilityParamsEnvelope = { version: 1, state: createDefaultUtilityParams() }
@@ -8585,7 +8585,7 @@ const mountB6f5 = (world: B6f5World, nativeEnabled: boolean) => {
     },
   })
 
-  // Timeline.tsx:447-468: the registry observes the effective projection; the playback inputs carry master volume,
+  // The registry observes the effective projection; the playback inputs carry master volume,
   // automation and the processor structure.
   const registry = createProcessorEditRegistry(() => 120)
   createComputed(() => { const fx = fxOf(); untrack(() => registry.observe(fx)) })

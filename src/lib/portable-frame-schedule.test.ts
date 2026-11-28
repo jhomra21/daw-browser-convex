@@ -329,7 +329,7 @@ test('releases active voices at a loop boundary before retriggering the next ite
   expect(events[1]?.noteId).not.toBe(events[2]?.noteId)
 })
 
-// R5: a note's id names its loop pass by the raw frame the pass began at, so a compile from a later seam (its loop shifted
+// A note's id names its loop pass by the raw frame the pass began at, so a compile from a later seam (its loop shifted
 // by the passes already played) gives the same note in the same pass the same id.
 test('W-R5 a loop pass keeps its note ids in a compile from a later seam with the loop shifted', () => {
   const shortTrack: RuntimeTrack = {

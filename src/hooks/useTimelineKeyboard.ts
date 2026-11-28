@@ -160,7 +160,6 @@ const timelineShortcuts: readonly TimelineShortcut[] = [
     },
   },
   {
-    // Undo: Ctrl/Cmd + Z; redo: Ctrl/Cmd + Shift + Z
     id: "undo-redo",
     matches: (e) => mod(e) && keyIs(e, "z"),
     run: ({ e, handlers, menuOwnsCommandKey }) => {

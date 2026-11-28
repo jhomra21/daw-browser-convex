@@ -16,7 +16,6 @@ if (import.meta.env.PROD && !isDesktopRenderer()) {
   registerSW({ immediate: true })
 }
 
-// QueryClient is provided from a shared module so routes/components share cache
 const router = createRouter({
   routeTree,
   defaultPreload: 'intent',

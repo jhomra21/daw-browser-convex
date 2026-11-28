@@ -2105,7 +2105,7 @@ test('B6f ensurePrepared moves a live paused session to a newer playhead instead
   controller.dispose()
 })
 
-// B6f5: a playing portable session adopts mixer and automation edits on the same core, as native does.
+// A playing portable session adopts mixer and automation edits on the same core, as native does.
 const noLoop: Pick<LivePlaybackTransport, 'loopEnabled' | 'loopStartSec' | 'loopEndSec'> = { loopEnabled: false, loopStartSec: 0, loopEndSec: 0 }
 
 const b6f5Fingerprint = (snapshot: { revision: number; transport: LivePlaybackTransport }) =>
@@ -2256,7 +2256,7 @@ test('B6f5 a refused adoption answers failed and keeps the session revision; a M
   } finally { controller.dispose(); now.mockRestore() }
 })
 
-// R2: the worklet faults a live send whose revision is not the one it plays (WK processor-events). A send that crosses
+// The worklet faults a live send whose revision is not the one it plays (WK processor-events). A send that crosses
 // an adoption publish waits for it, accepted or refused.
 test('B6f5 R2 a live send crossing an adoption publish never faults the session', async () => {
   for (const accept of [true, false]) {
@@ -2406,7 +2406,7 @@ test('B6f5 adoptions coalesce to one in flight and one queued that carries the n
   } finally { controller.dispose() }
 })
 
-// R6: the session owns its revision once it adopts one; a schedule refresh compiled at the Timeline's revision still
+// The session owns its revision once it adopts one; a schedule refresh compiled at the Timeline's revision still
 // continues the adopted graph.
 test('B6f5 R6 a schedule refresh after an adoption continues the adopted revision', async () => {
   const calls: string[] = []
@@ -2441,7 +2441,7 @@ test('B6f5 R6 a schedule refresh after an adoption continues the adopted revisio
   } finally { controller.dispose() }
 })
 
-// B6f5 step 5b, R6: a compile the session cannot continue (a structural edit since its start) is never installed on it.
+// A compile the session cannot continue (a structural edit since its start) is never installed on it.
 // The refresh skips it without a fault, as it did before adoption; the follow adopts it at a seam.
 // The structural edit is a Spectral fftSize change, which the core carries as a ghost of the old stage plus a fresh one.
 const b6f5Spectral = (fftSize: 512 | 1024): AudioEffectRuntimeInstance => ({ id: 'spectral-b6f5-structure', kind: 'spectral', params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize } } })
@@ -2542,7 +2542,7 @@ test('B6f5 step5b R6 a normal refresh after a structural edit skips without a fa
   } finally { controller.dispose() }
 })
 
-// D6: an adoption publishes on the session that captures the take, at the same epoch, so the take never notices it.
+// An adoption publishes on the session that captures the take, at the same epoch, so the take never notices it.
 test('B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous', async () => {
   const calls: string[] = []
   const graphs: AudioCoreGraphSnapshot[] = []
@@ -2729,7 +2729,7 @@ const w8Fixture = async (initial: { bpm?: number; notes?: readonly W8Note[]; loo
 const w8ShippedStarts = (f: { publishes: readonly B6f5Publish[] }) =>
   (f.publishes.at(-1)?.options?.sources?.ordinary ?? []).map((source) => source.startFrame)
 
-// W-F20a: a loop-bound edit while playing is adopted. Today the compile receives the old loop, both snapshots match,
+// A loop-bound edit while playing is adopted. Today the compile receives the old loop, both snapshots match,
 // and the follow marks the edit applied without installing anything.
 test('W-F20a a loop edit while playing installs and publishes a schedule for the new loop', async () => {
   const f = await w8Fixture({ loop: { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 } })
@@ -2746,7 +2746,7 @@ test('W-F20a a loop edit while playing installs and publishes a schedule for the
   } finally { f.controller.dispose() }
 })
 
-// W-F20c: after the transport wrapped, raw frames are ahead of the arrangement. A loop edit installs its loop shifted by
+// After the transport wrapped, raw frames are ahead of the arrangement. A loop edit installs its loop shifted by
 // that difference: the schedule is the one a start at the seam's arrangement position would compile, moved by the
 // difference; positions before the seam read the old loop and positions from it on the new one, with no jump; a refresh
 // then starts from the arrangement position.
@@ -2784,7 +2784,7 @@ test('W-F20c a loop edit after a wrap maps positions across the seam, compiles t
   } finally { f.controller.dispose(); reference.controller.dispose() }
 })
 
-// W-F20d: a loop repeats audio clips, so the sources an adoption ships are those compiled for the new loop at the seam:
+// A loop repeats audio clips, so the sources an adoption ships are those compiled for the new loop at the seam:
 // the 1 s clip starts at the seam (12000) and again once per 2 s iteration (96000), where the old 1 s loop restarted it
 // every 48000 frames.
 test('W-F20d a loop edit with an audio clip present is adopted with the sources compiled for the new loop', async () => {
@@ -2798,7 +2798,7 @@ test('W-F20d a loop edit with an audio clip present is adopted with the sources 
   } finally { f.controller.dispose() }
 })
 
-// W-F20e: loop off and on while playing stay on one session. Off after a wrap continues linearly from the arrangement
+// Loop off and on while playing stay on one session. Off after a wrap continues linearly from the arrangement
 // position; a loop whose end the playhead has passed stays off for the run, as a start would (its adoption installs a
 // linear schedule); a wider loop turns on.
 test('W-F20e toggling the loop while playing keeps the session, continues linearly and keeps a passed loop off', async () => {
@@ -2827,7 +2827,7 @@ test('W-F20e toggling the loop while playing keeps the session, continues linear
   } finally { f.controller.dispose() }
 })
 
-// W-E5-1: a tempo edit while playing is adopted on the same session at a seam; the playhead keeps its time (UD 18).
+// A tempo edit while playing is adopted on the same session at a seam; the playhead keeps its time (UD 18).
 test('W-E5-1 a tempo edit while playing is adopted on the same session with the playhead time kept', async () => {
   const f = await w8Fixture()
 
@@ -2843,7 +2843,7 @@ test('W-E5-1 a tempo edit while playing is adopted on the same session with the 
   } finally { f.controller.dispose() }
 })
 
-// W-E5-3: a note deleted while it sounds is released once, at the seam, and never started again.
+// A note deleted while it sounds is released once, at the seam, and never started again.
 test('W-E5-3 a note removed while held gets one note-off at the seam and no note-on', async () => {
   const f = await w8Fixture()
 
@@ -2858,7 +2858,7 @@ test('W-E5-3 a note removed while held gets one note-off at the seam and no note
   } finally { f.controller.dispose() }
 })
 
-// W-E5-4: a note that spans the seam and survives the edit keeps its voice: its note-on is not repeated, because a
+// A note that spans the seam and survives the edit keeps its voice: its note-on is not repeated, because a
 // repeated Synth note-on needs two note-offs and a Sampler layers a second voice.
 test('W-E5-4 a note kept while held is not re-triggered at the seam', async () => {
   const f = await w8Fixture()
@@ -2876,7 +2876,7 @@ test('W-E5-4 a note kept while held is not re-triggered at the seam', async () =
   } finally { f.controller.dispose() }
 })
 
-// W-E5-5: a note whose pitch changes while it sounds is released at the seam and the new pitch starts there.
+// A note whose pitch changes while it sounds is released at the seam and the new pitch starts there.
 test('W-E5-5 a pitch change while held releases the old note at the seam and starts the new one', async () => {
   const f = await w8Fixture()
 
@@ -2893,7 +2893,7 @@ test('W-E5-5 a pitch change while held releases the old note at the seam and sta
   } finally { f.controller.dispose() }
 })
 
-// W-E5-11: a window that holds more events than the worklet installs shrinks until it fits.
+// A window that holds more events than the worklet installs shrinks until it fits.
 test('W-E5-11 a tempo edit that makes the window exceed the install limit shrinks the window and is adopted', async () => {
   const f = await w8Fixture({ clipSec: 16, notes: Array.from({ length: 150 }, (_, index) => w8Note(`n${index}`, 0.5 + 0.2 * index, 0.1)) })
 
@@ -3040,7 +3040,7 @@ test('W-M3 an audio clip move answers adopted with its sources replaced, not a r
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-1: an edit while paused is adopted in place; Play then resumes on the edited schedule with no re-prepare.
+// An edit while paused is adopted in place; Play then resumes on the edited schedule with no re-prepare.
 test('W-UD7p-1 a note edit on a paused prepared session is adopted in place', async () => {
   const f = await w8Fixture({ clipSec: 4 })
 
@@ -3055,7 +3055,7 @@ test('W-UD7p-1 a note edit on a paused prepared session is adopted in place', as
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-3: a pause leaves its voices sounding, so the edit that deletes the note releases it once, at the paused frame.
+// A pause leaves its voices sounding, so the edit that deletes the note releases it once, at the paused frame.
 test('W-UD7p-3 deleting a note that a pause left sounding releases it once at the paused frame', async () => {
   const f = await w8Fixture({ clipSec: 4, notes: [w8Note('held', 0, 4)] })
 
@@ -3072,7 +3072,7 @@ test('W-UD7p-3 deleting a note that a pause left sounding releases it once at th
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-4: a tempo edit and a loop edit while paused are adopted at the paused frame; a locate after the tempo edit
+// A tempo edit and a loop edit while paused are adopted at the paused frame; a locate after the tempo edit
 // seeks the same session and compiles the edited tempo.
 test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place and a locate seeks the edited schedule', async () => {
   const f = await w8Fixture()
@@ -3093,7 +3093,7 @@ test('W-UD7p-4 a paused tempo edit and a paused loop edit are adopted in place a
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-5: Play after a paused edit locates the session that adopted it and runs it: no prepare, no publish, no dispose.
+// Play after a paused edit locates the session that adopted it and runs it: no prepare, no publish, no dispose.
 test('W-UD7p-5 Play after a paused structural edit resumes the same session with no prepare or publish', async () => {
   const f = await w8Fixture({ clipSec: 4 })
 
@@ -3109,7 +3109,7 @@ test('W-UD7p-5 Play after a paused structural edit resumes the same session with
   } finally { f.controller.dispose() }
 })
 
-// W-R11: a kept paused session resumes in place whether its loop is on or off, from where it stands, and plays the edit.
+// A kept paused session resumes in place whether its loop is on or off, from where it stands, and plays the edit.
 test('W-R11 Play on a paused session with its loop on resumes the same session and plays the paused edit', async () => {
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 2 }
   const f = await w8Fixture({ clipSec: 4, loop })
@@ -3127,7 +3127,7 @@ test('W-R11 Play on a paused session with its loop on resumes the same session a
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-6: a locate right after a paused edit seeks the session that adopted it.
+// A locate right after a paused edit seeks the session that adopted it.
 test('W-UD7p-6 a seek after a paused edit compiles the edited notes on the same session', async () => {
   const f = await w8Fixture({ clipSec: 4 })
 
@@ -3142,7 +3142,7 @@ test('W-UD7p-6 a seek after a paused edit compiles the edited notes on the same 
   } finally { f.controller.dispose() }
 })
 
-// W-UD7p-7: a paused edit whose publish is refused leaves the session as it was. A paused session reports no rendered
+// A paused edit whose publish is refused leaves the session as it was. A paused session reports no rendered
 // frames, so the UD 8 resubmit runs once Play makes them flow, and Play itself resumes the same session.
 test('W-UD7p-7 a refused paused edit answers failed, keeps the session and is resubmitted once Play reports frames', async () => {
   let refuse = true
@@ -3189,7 +3189,7 @@ test('W-E3-4 positions are reported again after a backward seek at the new epoch
   } finally { f.controller.dispose() }
 })
 
-// W-E3-2: past the installed range the seek compiles its own window at the target: one session, a schedule at the new
+// Past the installed range the seek compiles its own window at the target: one session, a schedule at the new
 // origin, sources replaced at the new epoch, and a loop around the target repeats from it.
 test('W-E3-2 a seek outside the installed range compiles at the target on the same session, loop off and on', async () => {
   const far = [w8Note('far', 200, 1)]
@@ -3225,7 +3225,7 @@ test('W-E3-3 a seek starts a note that spans the target once and none that ended
   } finally { f.controller.dispose() }
 })
 
-// W-E3-5: a seek waits for what is in flight and the newest one wins.
+// A seek waits for what is in flight and the newest one wins.
 test('W-E3-5 a seek supersedes an adoption in flight, the older of two seeks, and waits for a refresh', async () => {
   const adoption = await w8Fixture({ clipSec: 4 })
 
@@ -3286,7 +3286,7 @@ test('W-E3-5 a seek during a take throws and leaves the transport alone', async 
   } finally { controller.dispose() }
 })
 
-// W-E3-7: the seek plays the snapshot the session holds; the edit that landed is adopted after it.
+// The seek plays the snapshot the session holds; the edit that landed is adopted after it.
 test('W-E3-7 a seek with an edit pending plays the active snapshot and the next adoption carries the edit', async () => {
   const f = await w8Fixture({ clipSec: 4 })
 
@@ -3301,7 +3301,7 @@ test('W-E3-7 a seek with an edit pending plays the active snapshot and the next 
   } finally { f.controller.dispose() }
 })
 
-// W-E3-8: a seek after a loop edit that moved the position map starts a fresh map at the target.
+// A seek after a loop edit that moved the position map starts a fresh map at the target.
 test('W-E3-8 a seek with the loop on after a wrap and a loop adoption resets the position map to the target', async () => {
   const notes = [0, 1, 2, 3].map((beat) => w8Note(`n${beat}`, beat, 0.25))
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
@@ -3376,7 +3376,7 @@ test('W-E3-D5 a seek stops, prepares the target pages, installs, schedules sourc
   } finally { controller.dispose() }
 })
 
-// D6: a seek that fails inside its burst keeps the transport running and is resubmitted after rendered-frame reports, up
+// A seek that fails inside its burst keeps the transport running and is resubmitted after rendered-frame reports, up
 // to the adoption retry limit; exhaustion is a logged defect and the transport-fault notice.
 test('W-E3-D6 a seek failing inside the burst resubmits after a position report from where the transport stands', async () => {
   let failures = 0
@@ -3468,7 +3468,7 @@ test('W-E3-pos a seek restarts the position map: the resubmit starts where the n
   } finally { warn.mockRestore(); f.controller.dispose() }
 })
 
-// R1: the pages a seek prepared are released when the seek fails after preparing them, not left pinned in the worklet.
+// The pages a seek prepared are released when the seek fails after preparing them, not left pinned in the worklet.
 test('W-R1 a seek that fails after preparing the target pages releases them, however often it is tried', async () => {
   let failing = false
   const calls: string[] = []
@@ -3498,7 +3498,7 @@ test('W-R1 a seek that fails after preparing the target pages releases them, how
   } finally { warn.mockRestore(); controller.dispose() }
 })
 
-// R2: a stop the worklet rejected changed nothing, so the old position keeps playing and the retry goes to the target.
+// A stop the worklet rejected changed nothing, so the old position keeps playing and the retry goes to the target.
 test('W-R2 a seek whose first stop is rejected leaves the transport playing and retries the target, not the position', async () => {
   let failures = 0
   const f = await w8Fixture({}, { failTransport: () => failures-- > 0 })
@@ -3519,7 +3519,7 @@ test('W-R2 a seek whose first stop is rejected leaves the transport playing and 
   } finally { warn.mockRestore(); f.controller.dispose() }
 })
 
-// R9: a seek the session refuses without having failed (nothing was touched) is the caller's to rebuild.
+// A seek the session refuses without having failed (nothing was touched) is the caller's to rebuild.
 test('W-R9 a seek on a session of another project generation answers rebuild and touches nothing', async () => {
   const f = await w8Fixture()
 
@@ -3532,7 +3532,7 @@ test('W-R9 a seek on a session of another project generation answers rebuild and
   } finally { f.controller.dispose() }
 })
 
-// R5: with the loop on, a note held across the seam of a later pass keeps its voice, and a note that restarts at a wrap
+// With the loop on, a note held across the seam of a later pass keeps its voice, and a note that restarts at a wrap
 // seam is attacked again.
 test('W-R5 a note held across an adoption seam in a later loop pass is neither released nor re-attacked', async () => {
   const loop: W8Loop = { loopEnabled: true, loopStartSec: 0, loopEndSec: 1 }
@@ -3567,7 +3567,7 @@ test('W-R5 a note that restarts at the seam on a loop wrap keeps its attack', as
   } finally { f.controller.dispose() }
 })
 
-// W-R7: dense MIDI shrinks an adoption's window below the one the start scheduled sources for; the recording refresh
+// Dense MIDI shrinks an adoption's window below the one the start scheduled sources for; the recording refresh
 // then extends from the shortened end, and an audio clip in the gap must not be scheduled a second time.
 test('W-R7 an adoption that shortens the window while recording does not make the refresh schedule a source twice', async () => {
   const calls: string[] = []
@@ -3589,7 +3589,7 @@ test('W-R7 an adoption that shortens the window while recording does not make th
   } finally { f.controller.dispose() }
 })
 
-// W-R8a: a loop edit made during a take is not adopted, the take's refresh reads raw frames as arrangement frames and
+// A loop edit made during a take is not adopted, the take's refresh reads raw frames as arrangement frames and
 // stops at a loop. The follow adopts it once the take has ended.
 test('W-R8a a loop edit during a take is held, and adopted once the take has ended', async () => {
   const { stream, recordingContext } = createRecordingFixture([])
@@ -4106,7 +4106,7 @@ test('W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers
   } finally { f.controller.dispose() }
 })
 
-// M-D and D-5: the core replaces an instrument whose samples changed, so a note held across the seam is released on the old
+// The core replaces an instrument whose samples changed, so a note held across the seam is released on the old
 // voice and its note-on starts the new one; an instrument that is the same keeps its voice, as native does.
 test('W-C9-keeps-1 a held note of an instrument whose sample changed is released at the seam and started again there', async () => {
   const f = await d9Fixture()
@@ -4173,7 +4173,7 @@ test('W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the 
 })
 
 // The seam is chosen after the preparation, so a slow Stretch does not spend the lead; what a late publish costs is the
-// attempt after it. Its candidate keeps the artifact, so the resubmit leases and registers nothing again (D-4).
+// attempt after it. Its candidate keeps the artifact, so the resubmit leases and registers nothing again.
 test('W-C9-warp-2 a publish that answers late is retried on the Stretch artifact the first attempt prepared, which nothing prepares again', async () => {
   const f = await c9WarpFixture({ clip1Warp: c9Stretch, refusals: 1 })
   const warn = spyOn(console, 'warn').mockImplementation(() => undefined)
@@ -4296,7 +4296,7 @@ test('W-C9-warp-6 the Stretch artifact a failed attempt kept is released when th
 
 // AE-08 phase 8 step 9e: a track added or deleted is carried at a seam (class 3). A track's place among the others sounds
 // like nothing, so a reorder is the session's own graph again. A deleted track's held notes and sources end with the
-// core's 5 ms ghost fade (D-3): a note-off for its node would reject the whole staged schedule. A track that moves
+// core's 5 ms ghost fade: a note-off for its node would reject the whole staged schedule. A track that moves
 // another route's delay is carried too (9h): the core moves the read heads.
 const e9Source = { durationSec: pagedAssetFrameCount / 48_000, sampleRate: 48_000, channelCount: 1 }
 
@@ -4497,7 +4497,7 @@ test('W-C9-track-6 a track added and then deleted on a paused session is adopted
   } finally { f.controller.dispose() }
 })
 
-// A track whose add or delete moves another route's delay is adopted like any other: the core moves the read heads (9h, D-1).
+// A track whose add or delete moves another route's delay is adopted like any other: the core moves the read heads.
 test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives routes a delay is adopted with one publish', async () => {
   const added = await e9Fixture({ compressed: true })
   const deletedPlain = await e9Fixture({ compressed: true, tracks: [e9Midi('midi-a'), e9Audio('audio-a', 'asset-a'), e9Audio('audio-b', 'asset-b')] })
@@ -4517,7 +4517,7 @@ test('W-C9-track-7 a track added or deleted where a latency-bearing effect gives
 })
 
 // AE-08 phase 8 step 9f: effects inserted, removed, replaced and reordered on a track the session plays are carried at a
-// seam (class 4a). The core keeps a survivor's history by instance id, fades a removed effect over its 5 ms ghost (D-3),
+// seam (class 4a). The core keeps a survivor's history by instance id, fades a removed effect over its 5 ms ghost,
 // dips a node whose stages were reordered and, as 9h adds, moves the read heads where an effect changes the node's delay.
 const f9Utility = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'utility', params: { version: 1, state: createDefaultUtilityParams() } })
 const f9Delay = (id: string): AudioEffectRuntimeInstance => ({ id, kind: 'delay', params: createDefaultDelayParams() })
@@ -4558,7 +4558,7 @@ test.each(f9Edits)('W-C9-fx-1p an effect %s on a paused session is adopted in pl
   } finally { f.controller.dispose() }
 })
 
-// An effect that delays the signal is carried like any other (9h, D-1): the core moves the node's read heads.
+// An effect that delays the signal is carried like any other: the core moves the node's read heads.
 test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or moved is adopted with one publish', async () => {
   const cases: ReadonlyArray<readonly [readonly AudioEffectRuntimeInstance[], readonly AudioEffectRuntimeInstance[]]> = [
     [[], [f9Limiter('limiter-a')]],
@@ -4584,9 +4584,9 @@ test('W-C9-fx-4 an effect that delays the signal inserted, removed, replaced or 
   expect(results).toEqual(Array.from({ length: 2 * cases.length }, () => ({ result: 'adopted', published: 1 })))
 })
 
-// A removal the core cannot ghost because earlier ghosts are still fading is refused at its prepare (CORE:7958-7960).
-// The retry waits one rendered-frame report, which is at least 2400 frames at 48 kHz against a 240 frame ghost
-// (WK:2462, CORE:7806), so it meets free ghosts and converges: WHT W-C9-fx-7 pins the core side.
+// A removal the core cannot ghost because earlier ghosts are still fading is refused at its prepare.
+// The retry waits one rendered-frame report, which is at least 2400 frames at 48 kHz against a 240 frame ghost,
+// so it meets free ghosts and converges: WHT W-C9-fx-7 pins the core side.
 test('W-C9-fx-6 a removal refused by ghost capacity is retried after one position report and adopted', async () => {
   const f = await e9Fixture({ effects: [f9Utility('util-a'), f9Delay('delay-a')] })
 
@@ -4607,7 +4607,7 @@ test('W-C9-fx-6 a removal refused by ghost capacity is retried after one positio
 // AE-08 phase 8 step 9g: an instrument replaced (another kind or another instance), a processor parameter the live path
 // does not take, and a Granular sample are carried at a seam (class 5). The core keeps the replaced node's slot rendering
 // while it crossfades out; the held note is released on it by the note-off at the seam and the spanning note-on starts the
-// new instrument (D-5, NS:1227-1235). A parameter that changes an effect's latency (a spectral fftSize) is carried the same way.
+// new instrument (native keeps the retained-instruments rule). A parameter that changes an effect's latency (a spectral fftSize) is carried the same way.
 const g9Replacements: ReadonlyArray<readonly [string, TrackInstrumentParams, string[]]> = [
   ['kind', e9Sampler('sampler:midi-a', 'smp-a'), ['register:smp-a', 'publish']],
   ['instance', { kind: 'synth', instanceId: 'synth:replacement', params: createDefaultSynthParams() }, ['publish']],
@@ -4644,8 +4644,8 @@ test.each(g9Replacements)('W-C9-inst-1p a %s replacement of the instrument on a 
   } finally { f.controller.dispose() }
 })
 
-// The core rejects the publish of a replacement when the node already carries 8 unfinished ones (CORE:8297-8305, at the
-// instrument configuration the publish runs, WK:1177). Native configures through the same core call, so this is a limit at
+// The core rejects the publish of a replacement when the node already carries 8 unfinished ones, at the
+// instrument configuration the publish runs. Native configures through the same core call, so this is a limit at
 // parity; the retry waits one position report, which is longer than the 5 ms blend (WHT W-C9-inst-5).
 test('W-C9-inst-6 a replacement refused by blend capacity is retried after one position report and adopted', async () => {
   const f = await e9Fixture()
@@ -4732,8 +4732,8 @@ test('W-C9-asset-7 a Granular sample changed, and a Granular track added and del
 })
 
 // Recording decision: native has no controller-level rule (its adoption path only refuses a seek during a take,
-// native-playback-controller.ts:2698). A take's own track, its group and its routes cannot be deleted or rerouted at all:
-// the Timeline's recording target lock refuses it before the edit exists (track-recording-target.ts:57-72, 96). Any other
+// the native controller's pause and seek guards). A take's own track, its group and its routes cannot be deleted or rerouted at all:
+// the Timeline's recording target lock refuses it before the edit exists (createRecordingTargetLock). Any other
 // track add or delete is adopted like any edit, and the take goes on.
 test('W-C9-track-R a track added and deleted during a take is adopted and the take goes on', async () => {
   const calls: string[] = []

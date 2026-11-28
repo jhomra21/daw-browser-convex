@@ -52,8 +52,8 @@ inline std::uint64_t InstrumentResidentBudget() {
   const auto test_budget = daw_audio_host_test_resident_budget();
   if (test_budget != UINT64_MAX) return test_budget;
 #endif
-  // Reserve at most 1/8 of physical RAM for this host's native copy. Phase 3
-  // also charges renderer PCM and live/export overlap against its shared policy.
+  // Reserve at most 1/8 of physical RAM for this host's native copy; renderer PCM and
+  // live/export overlap are charged against a shared policy elsewhere.
   std::uint64_t bytes = 0;
   std::size_t size = sizeof(bytes);
   return sysctlbyname("hw.memsize", &bytes, &size, nullptr, 0) == 0 ? bytes / 8 : 0;
@@ -1407,8 +1407,8 @@ struct AudioHost::Impl {
   std::uint64_t processor_patch_sequence = 0;
 #endif
   ClaimedRequest<std::uint64_t> claimed_processor_patch;
-  // processor_patch_acknowledged and processor_patch_result are the resolved record. The callback is
-  // their only writer; the drainer reads the result only for the recorded claim and only until that
+  // The callback is the only writer of the resolved record (acknowledged flag and result);
+  // the drainer reads the result only for the recorded claim and only until that
   // claim is reported. See ApplyRequestedProcessorPatch.
   std::atomic<std::uint64_t> processor_patch_reported_token = 0;  // drainer; ends the claim
   struct ReportedPatch {

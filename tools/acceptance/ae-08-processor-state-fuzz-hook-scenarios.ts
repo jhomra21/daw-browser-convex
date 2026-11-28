@@ -157,7 +157,7 @@ export default async function runHookScenario(name: string, driver: Driver) {
     }
 
     if (fixture.state().pendingControl?.name !== "window") throw new Error("Starvation missed queued refill")
-    // Coordinator lookahead=2s, refill threshold=1s (:100–101,1021–1032).
+    // Coordinator lookahead=2s, refill threshold=1s.
     // 24 callbacks at 512/48000 = 256ms, below the one-second refill slack.
     // No progress, command wake, reply or rAF is delivered inside this window.
     const blocks = name === "underfill" ? 220 : 24

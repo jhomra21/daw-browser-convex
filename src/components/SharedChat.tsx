@@ -12,7 +12,6 @@ export type SharedChatProps = {
   bottomOffsetPx?: number
 }
 
-// One row per message from Convex
 type MessageRow = FunctionReturnType<typeof convexApi.sharedChat.listLatest>[number]
 
 const RATE_LIMIT_MAX = 5
@@ -42,14 +41,12 @@ const SharedChat: Component<SharedChatProps> = (props) => {
     return Array.isArray(messagesQ.data) ? messagesQ.data : []
   }
 
-  // Focus input when opened
   createEffect(() => {
     if (props.isOpen) {
       queueMicrotask(() => { try { textareaRef?.focus() } catch {} })
     }
   })
 
-  // Auto-scroll to bottom on open and when new messages arrive
   function scrollToBottom() {
     const el = bottomAnchorRef
 
@@ -70,7 +67,6 @@ const SharedChat: Component<SharedChatProps> = (props) => {
 
   function canSendNow(): { ok: true } | { ok: false; waitMs: number } {
     const now = Date.now()
-    // prune old timestamps
     recentSends = recentSends.filter(t => now - t < RATE_LIMIT_WINDOW_MS)
 
     if (recentSends.length >= RATE_LIMIT_MAX) {

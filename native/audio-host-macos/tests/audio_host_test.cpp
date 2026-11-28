@@ -2567,7 +2567,7 @@ void TestPermanentInstrumentRejectionRecovers() {
   TestMixedInstrumentSequenceDomains(false, true);
 }
 
-// R24: a full live burst must not stall unrelated source audio or a release.
+// A full live burst must not stall unrelated source audio or a release.
 void TestInstrumentRejectionBurstRendersValidSubset() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
@@ -2716,7 +2716,7 @@ void TestScheduledInstrumentAdmission() {
   host.Stop();
 }
 
-// R23: malformed graph controls must never enter either instrument lane.
+// Malformed graph controls must never enter either instrument lane.
 void TestInstrumentAdmissionAndVoiceStealing() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
@@ -3026,7 +3026,7 @@ void TestPublicationOwnershipSurvivesRollbackAndCommit() {
   assert(std::equal(expected_progress.begin(), expected_progress.end(), progress_wire.begin()));
   AppendBeU64(expected_progress, 0x0102030405060708ULL);
   AppendBeU64(expected_progress, 0x1112131415161718ULL);
-  // T5: protocol 29 appends the resolved patch token @96, its result @104 and a reserved word @108.
+  // Protocol 29 appends the resolved patch token @96, its result @104 and a reserved word @108.
   AppendBeU64(expected_progress, 0x2122232425262728ULL);
   AppendBeU32(expected_progress, 12);
   AppendBeU32(expected_progress, 0);
@@ -5391,7 +5391,7 @@ ScheduleProgress AwaitResolution(daw::audio_host_macos::AudioHost& host, const s
   return {};
 }
 
-// T1: a claimed reply, then the ack while paused and quiet, reports the resolution in the
+// A claimed reply, then the ack while paused and quiet, reports the resolution in the
 // first frame after the resolving block. That block signals the bridge twice, for the ack
 // and for its progress, and the bridge wakes once or twice, so it yields one or two frames;
 // the reported resolution stays on every frame after it.
@@ -5415,7 +5415,7 @@ void TestPatchClaimResolvesWhilePausedAndQuiet() {
   assert(rig.host.diagnostics().transport_frame == 0);
 }
 
-// T2 + T4: the claim ends at the report. Until then another patch is refused with the
+// The claim ends at the report. Until then another patch is refused with the
 // blocking token and a prepare is refused; afterwards the next claim gets a new token.
 void TestPatchClaimsAreSerializedUntilReported() {
   using daw::audio_host_macos::GraphRevisionStatusCode;
@@ -5453,7 +5453,7 @@ void AckBeforeRecordHook() {
   frame_drained_before_record = hook_rig->host.DrainScheduleProgress();
 }
 
-// T3: an ack that beats Record is skipped by the drainer, and a later frame still carries it.
+// An ack that beats Record is skipped by the drainer, and a later frame still carries it.
 void TestPatchClaimAckBeforeRecordStillReports() {
   PatchRig rig;
   DrainProgressFor(rig.host, 50);
@@ -5473,7 +5473,7 @@ void RecordAckPairHook(const std::uint64_t token, const std::uint32_t result) {
   ack_hook_result = result;
 }
 
-// T6: alternating success and failure results over 16 claims; every reported pair is that claim's own,
+// Alternating success and failure results over 16 claims; every reported pair is that claim's own,
 // and the result is already stored when the ack becomes visible (the callback runs on this thread).
 void TestPatchClaimResultsStayCoherentWhenAlternating() {
   PatchRig rig;
@@ -5509,7 +5509,7 @@ std::vector<std::uint8_t> ParameterBatch(const std::uint64_t sequence,
   return payload;
 }
 
-// T7: a valid prefix with an invalid suffix enqueues nothing and consumes no sequence.
+// A valid prefix with an invalid suffix enqueues nothing and consumes no sequence.
 void TestParameterBatchIsAllOrNothing() {
   daw::audio_host_macos::AudioHost host;
   assert(host.Configure({.device_uid = "diagnostic", .sample_rate_hz = 48000,
@@ -5593,7 +5593,7 @@ void TestManualParameterWriteWritesAnApplyLine() {
     && EvidenceLog::Field(lines[1], "appliedProcessorSequence") == 10);
 }
 
-// T8: every QueueProcessorStatePatch branch returns a valid outcome/refusal/token combination.
+// Every QueueProcessorStatePatch branch returns a valid outcome/refusal/token combination.
 void TestPatchStatusBranchesAreValid() {
   const auto expect = [](const ProcessorPatchStatus& status, const ProcessorPatchOutcome outcome,
     const ProcessorPatchRefusal refusal) {

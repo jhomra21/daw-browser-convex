@@ -28,7 +28,7 @@
 // - completion: `latency-move-complete` frame - publication frame. Frames, not time, so no margin is added. Allowed:
 //   ceil((move + 2 * fade) / BLOCK) * BLOCK plus the capped blocks before the bind; see headMoveFrames for `move`. Evidence with no
 //   pinned/graph latency on its graph-publish lines keeps COMPLETE_BASE_FRAMES for the first term, and so does a
-//   publication whose graph-publish line reports spectralPredecessors above 0 (their stages hold completion, audio_core.cpp:9141-9145).
+//   publication whose graph-publish line reports spectralPredecessors above 0 (their stages hold completion).
 // - uploaded bytes: the `asset-page-write` lines of the publication's pid between prepare and publish, summed (`bytes` is the page's
 //   planar PCM). A first swap uploads its sample in that window, so an asset publication's prepare-to-publish limit is
 //   max(the asset class's limit, ASSET_UPLOAD.fixedMs + bytes / ASSET_UPLOAD.bytesPerMs). A resident swap writes none and keeps
@@ -51,7 +51,7 @@ const LEAD_MAX_BLOCKS = 3
 const COMPLETE_BASE_FRAMES = 2048
 const COMPLETE_MAX_BLOCKS_BEFORE_BIND = 3
 
-// native deletion_fade_frames (audio_core.cpp:7775-7777): (sampleRate * 5 + 500) / 1000.
+// native deletion_fade_frames: (sampleRate * 5 + 500) / 1000.
 const FADE_FRAMES = Math.round(SAMPLE_RATE * 5 / 1000)
 
 // A class with no frozen prepare-to-publish limit makes its row INCOMPLETE until the parent freezes one here.
@@ -144,9 +144,9 @@ const findLast = (events: readonly HostEvent[], before: number, match: (event: H
 }
 
 // The host's graph-publish lines carry the pinned budget and the graph's own latency. A head's delay is their difference, so a
-// publication that does not grow the budget moves heads by max(previous delay, delay) when that delay changed (audio_core.cpp:7074-7081).
-// One that grows it moves none: its heads wait the 2 fades alone (:7000-7004). A graph with spectral predecessors is not judged by
-// this: their stages hold the completion (:9141-9145), so it keeps COMPLETE_BASE_FRAMES.
+// publication that does not grow the budget moves heads by max(previous delay, delay) when that delay changed.
+// One that grows it moves none: its heads wait the 2 fades alone. A graph with spectral predecessors is not judged by
+// this: their stages hold the completion, so it keeps COMPLETE_BASE_FRAMES.
 const headMoveFrames = (previous: HostEvent, current: HostEvent) => {
   if ((current.spectralPredecessors ?? 0) > 0) return undefined
 
@@ -554,7 +554,7 @@ const selfTest = async (c1Runs: readonly string[]) => {
       rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 5632 }], { startLatency: { pinned: 4608, graph: 512 } }]] },
     { name: "budget raise completing 1536 frames", status: "FAIL", fails: ["completion"],
       rows: [["vst-latency-switch", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, completeFrames: 1536 }], { startLatency: { pinned: 512, graph: 512 } }]] },
-    // A spectral graph's stages hold completion (audio_core.cpp:9141-9145), so it keeps COMPLETE_BASE_FRAMES (2048) + bind slack.
+    // A spectral graph's stages hold completion, so it keeps COMPLETE_BASE_FRAMES (2048) + bind slack.
     { name: "spectral raise completing 2048 passes", status: "PASS", fails: [],
       rows: [["spectral-raise", [{ raise: true, latency: { pinned: 4608, graph: 4608 }, spectral: 1, completeFrames: 2048 }], { startLatency: { pinned: 512, graph: 512 } }]] },
     { name: "spectral raise completing past 2048 + the bind slack fails", status: "FAIL", fails: ["completion"],

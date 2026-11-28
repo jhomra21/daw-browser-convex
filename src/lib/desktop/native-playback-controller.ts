@@ -2060,7 +2060,7 @@ export const createNativePlaybackController = (input: {
 
         if (!wasCancelled) await disposeNativeSession(undefined, "native-start-transaction-failure")
         else if (instrumentStateAdmitted) {
-          // Rollback retires the bank but Phase 2 deliberately retains locks.
+          // Rollback retires the bank but deliberately retains the instrument memory locks.
           // The successor is serialized behind this attempt; retire its host
           // resources without invalidating the successor's renderer generation.
           const teardown = await bridge.session.teardown("native-instrument-start-cancelled").catch(() => undefined)
@@ -2107,7 +2107,7 @@ export const createNativePlaybackController = (input: {
 
       releasePageStaging?.()
 
-      // Phase 2 retains successful locks even after bank cancellation. A failed
+      // Successful locks are retained even after bank cancellation. A failed
       // or pending teardown must retain its charge until teardown or host loss.
       if (!instrumentStateAdmitted) releaseAttemptedInstrumentMemory()
     }
@@ -2665,7 +2665,7 @@ export const createNativePlaybackController = (input: {
     values: [...execution.values].map(([parameterId, value]) => ({ parameterId, value })),
   })
 
-  // The completion of a refused send acts on the ledger's answer in the same turn (design 1.6): no timer, no frame.
+  // The completion of a refused send acts on the ledger's answer in the same turn: no timer, no frame.
   const parameterFailed = (execution: DispatchExecution, failure: ParameterFailure, reconciling: boolean) => {
     if (failure.kind === "refused" || failure.kind === "unconfirmed") {
       const kind = failure.kind === "unconfirmed" ? "uncertain" : outstandingOperation() ? "transient" : "definite"
@@ -2747,7 +2747,7 @@ export const createNativePlaybackController = (input: {
     return execution?.sequence ?? sequence
   }
 
-  // The content of one delivery, whole: what native is asked to hold for a target (design 1.1).
+  // The content of one delivery, whole: what native is asked to hold for a target.
   type ContentDelivery = {
     instanceId: string
     editId: string
@@ -2786,7 +2786,7 @@ export const createNativePlaybackController = (input: {
       : undefined
   }
 
-  // Registration is synchronous (A8.3): the receipt, rule 0, the carrier choice and the carrier's queueing all happen
+  // Registration is synchronous: the receipt, the join-or-proven coverage check, the carrier choice and the carrier's queueing all happen
   // before this returns. The caller follows `settled`; it never decides what to resend.
   const deliverContent = (content: ContentDelivery): Delivered => {
     if (!input.bridge || !prepared || !preparedGraph) return unregistered(content.instanceId, { state: "unavailable" })
@@ -3447,7 +3447,7 @@ export const createNativePlaybackController = (input: {
 
       if (preparation.status === "failed") return { outcome: { status: "failed", reason: preparation.reason } }
 
-      // A limitation settles the intent without the refusal the UD 8 retry reopens.
+      // A limitation settles the intent without the refusal the failed-staging resubmit reopens.
       if (preparation.status === "unsupported") {
         console.warn("[native-live-edit] adoption not carried by the native graph yet; the playing graph is unchanged", { reason: preparation.reason })
 

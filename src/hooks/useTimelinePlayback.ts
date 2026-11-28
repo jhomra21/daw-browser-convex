@@ -437,7 +437,6 @@ export function useTimelinePlayback(
 
     if (candidateSec < end - LOOP_EPS) return { sec: candidateSec, looped: false }
 
-    // Wrap cleanly to the start of the loop; schedule immediately with slight ahead offset
     const wrapped = start
     const tracks = resolveTracks()
     audioEngine.stopAllSources()

@@ -22,21 +22,18 @@ const Login: Component = () => {
       await authClient.signIn.social({
         provider: 'google',
         callbackURL: redirectTarget(),
-        // errorCallbackURL: '/login', // optional: land back here on error
       });
-      // Note: The above triggers a redirect flow. No further action required here.
     } catch (err) {
-      // Better Auth client usually surfaces errors via returned object or callbacks.
-      // This is a safety net in case something throws.
       console.error('Google sign-in error:', err);
       setSignInError('Failed to start Google sign-in. Please try again.');
+      // Better Auth client usually surfaces errors via returned object or callbacks.
+      // This is a safety net in case something throws.
       setLoadingGoogle(false);
     }
   }
 
   async function signOut() {
     await authClient.signOut();
-    // Immediately reflect logout in the cache to avoid stale session usage
     queryClient.setQueryData(['session'], null);
   }
 

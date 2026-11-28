@@ -221,15 +221,12 @@ const Timeline: Component<TimelineProps> = (props) => {
   let recordingKeepLatencyNodeIds: () => ReadonlySet<string> = () => new Set();
   let isTakeInProgress: () => boolean = () => false;
   const [masterCollapsed, setMasterCollapsed] = createSignal(true);
-  // Transport tempo & metronome
   const [metronomeEnabled, setMetronomeEnabled] = createSignal(false);
   const [exportOpen, setExportOpen] = createSignal(false);
   const [followPaused, setFollowPaused] = createSignal(false);
-  // Audio engine
   const audioEngine = getAudioEngine();
   const appPreferences = useAppPreferences();
 
-  // Collaboration: projectId from ?projectId=; ownership tied to Better Auth userId
   const notify = (title: string, message: string) => {
     setAppMessage({ title, message });
   };
@@ -574,7 +571,6 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
-  // Playback & playhead controls
   const {
     isPlaying,
     isPlayPending,
@@ -1049,7 +1045,6 @@ const Timeline: Component<TimelineProps> = (props) => {
 
   const effectCommit = createTimelineEffectCommit({ projectId, tracks: renderTracks, pushHistory });
 
-  // DOM refs
   let scrollRef: HTMLDivElement | undefined;
   let fileInputRef: HTMLInputElement | undefined;
   let archiveInputRef: HTMLInputElement | undefined;

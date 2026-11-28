@@ -1116,7 +1116,6 @@ export class AudioEngine {
   }
 
   private stopSourcesForClip(clipId: string) {
-    // Stop audio buffer sources for this clip
     this.sources.stopClip(clipId)
     this.stopActiveNotesForClip(clipId)
   }
@@ -1139,8 +1138,8 @@ export class AudioEngine {
     return this.clock.ctxTimeToTimeline(this.audioCtx?.currentTime ?? 0)
   }
 
-  // Sum of output and base latency (seconds) if available; used for A/V visual alignment
   get outputLatencySec() {
+  // Sum of output and base latency (seconds) if available; used for A/V visual alignment
     return getOutputLatencySec(this.runtime)
   }
 
@@ -1221,7 +1220,6 @@ export class AudioEngine {
     this.publishRuntimeSnapshot()
   }
 
-  // --- Live spectrum sampling (Ableton-like) ---
   getTrackSpectrum(trackId: string): SpectrumFrame | null {
     const output = this.mixer.getTrackOutput(trackId)
 

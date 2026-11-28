@@ -53,7 +53,8 @@ const delay = z.object({
 const compressor = z.object({
   enabled: z.boolean(), thresholdDb: finiteNumber, ratio: finiteNumber, attackMs: finiteNumber,
   releaseMs: finiteNumber, autoRelease: z.boolean(), makeupDb: finiteNumber, outputDb: finiteNumber,
-  dryWet: finiteNumber, kneeDb: finiteNumber, lookaheadMs: finiteNumber,
+  dryWet: finiteNumber, kneeDb: finiteNumber,
+  lookaheadMs: z.union([z.literal(0), z.literal(1), z.literal(10)]), autoMakeup: z.boolean(),
   detectorMode: z.enum(['peak', 'rms']), dynamicsMode: z.enum(['compress', 'expand']),
   envelopeCurve: z.enum(['log', 'linear']),
   sidechain: z.object({

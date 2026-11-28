@@ -512,6 +512,15 @@ export type CompressorSidechainParams = {
   q: number
 }
 
+export const COMPRESSOR_LOOKAHEAD_STEPS_MS = [0, 1, 10] as const
+
+export type CompressorLookaheadMs = (typeof COMPRESSOR_LOOKAHEAD_STEPS_MS)[number]
+
+// The nearest step; a value between two steps goes to the longer one.
+export const snapCompressorLookaheadMs = (lookaheadMs: number): CompressorLookaheadMs => (
+  COMPRESSOR_LOOKAHEAD_STEPS_MS.reduce((best, step) => Math.abs(step - lookaheadMs) <= Math.abs(best - lookaheadMs) ? step : best)
+)
+
 export type CompressorParams = {
   enabled: boolean
   thresholdDb: number
@@ -523,7 +532,10 @@ export type CompressorParams = {
   outputDb: number
   dryWet: number
   kneeDb: number
-  lookaheadMs: number
+  lookaheadMs: CompressorLookaheadMs
+  // Makes up the gain the curve takes at 0 dB in, so the level stays put as Threshold and Ratio move. Off while a key
+  // from another track drives the detector, as in Ableton's Compressor.
+  autoMakeup: boolean
   detectorMode: CompressorDetectorMode
   dynamicsMode: CompressorDynamicsMode
   envelopeCurve: CompressorEnvelopeCurve
@@ -534,7 +546,8 @@ export type CompressorParamsLite = CompressorParams
 
 export type CompressorSidechainParamsInput = Partial<Omit<CompressorSidechainParams, 'filterType'>> & { filterType?: JsonValue }
 
-export type CompressorParamsInput = Partial<Omit<CompressorParams, 'detectorMode' | 'dynamicsMode' | 'envelopeCurve' | 'sidechain'>> & {
+export type CompressorParamsInput = Partial<Omit<CompressorParams, 'lookaheadMs' | 'detectorMode' | 'dynamicsMode' | 'envelopeCurve' | 'sidechain'>> & {
+  lookaheadMs?: number
   detectorMode?: JsonValue
   dynamicsMode?: JsonValue
   envelopeCurve?: JsonValue
@@ -555,8 +568,6 @@ export const COMPRESSOR_DRY_WET_MIN = 0
 export const COMPRESSOR_DRY_WET_MAX = 1
 export const COMPRESSOR_KNEE_DB_MIN = 0
 export const COMPRESSOR_KNEE_DB_MAX = 24
-export const COMPRESSOR_LOOKAHEAD_MS_MIN = 0
-export const COMPRESSOR_LOOKAHEAD_MS_MAX = 10
 const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MIN = 20
 const COMPRESSOR_SIDECHAIN_FREQUENCY_HZ_MAX = 20000
 const COMPRESSOR_SIDECHAIN_Q_MIN = 0.1
@@ -581,6 +592,7 @@ const DEFAULT_COMPRESSOR_PARAMS: CompressorParams = {
   dryWet: 1,
   kneeDb: 6,
   lookaheadMs: 0,
+  autoMakeup: false,
   detectorMode: 'rms',
   dynamicsMode: 'compress',
   envelopeCurve: 'log',
@@ -646,7 +658,8 @@ export function normalizeCompressorParams(input: CompressorParamsInput = {}): Co
     outputDb: outputDb === undefined ? defaults.outputDb : clamp(outputDb, COMPRESSOR_GAIN_DB_MIN, COMPRESSOR_GAIN_DB_MAX),
     dryWet: dryWet === undefined ? defaults.dryWet : clamp(dryWet, COMPRESSOR_DRY_WET_MIN, COMPRESSOR_DRY_WET_MAX),
     kneeDb: kneeDb === undefined ? defaults.kneeDb : clamp(kneeDb, COMPRESSOR_KNEE_DB_MIN, COMPRESSOR_KNEE_DB_MAX),
-    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : clamp(lookaheadMs, COMPRESSOR_LOOKAHEAD_MS_MIN, COMPRESSOR_LOOKAHEAD_MS_MAX),
+    lookaheadMs: lookaheadMs === undefined ? defaults.lookaheadMs : snapCompressorLookaheadMs(lookaheadMs),
+    autoMakeup: isJsonBoolean(input.autoMakeup) ? input.autoMakeup : defaults.autoMakeup,
     detectorMode: isCompressorDetectorMode(input.detectorMode) ? input.detectorMode : defaults.detectorMode,
     dynamicsMode: isCompressorDynamicsMode(input.dynamicsMode) ? input.dynamicsMode : defaults.dynamicsMode,
     envelopeCurve: isCompressorEnvelopeCurve(input.envelopeCurve) ? input.envelopeCurve : defaults.envelopeCurve,
@@ -664,7 +677,7 @@ export function serializeCompressorParams(params: CompressorParams): string {
   const normalized = normalizeCompressorParams(params)
   const sidechain = normalized.sidechain
 
-  return `${normalized.enabled ? 1 : 0}|${normalized.thresholdDb}|${normalized.ratio}|${normalized.attackMs}|${normalized.releaseMs}|${normalized.autoRelease ? 1 : 0}|${normalized.makeupDb}|${normalized.outputDb}|${normalized.dryWet}|${normalized.kneeDb}|${normalized.lookaheadMs}|${normalized.detectorMode}|${normalized.dynamicsMode}|${normalized.envelopeCurve}|${sidechain.enabled ? 1 : 0}|${sidechain.filterType}|${sidechain.frequencyHz}|${sidechain.q}`
+  return `${normalized.enabled ? 1 : 0}|${normalized.thresholdDb}|${normalized.ratio}|${normalized.attackMs}|${normalized.releaseMs}|${normalized.autoRelease ? 1 : 0}|${normalized.makeupDb}|${normalized.outputDb}|${normalized.dryWet}|${normalized.kneeDb}|${normalized.lookaheadMs}|${normalized.autoMakeup ? 1 : 0}|${normalized.detectorMode}|${normalized.dynamicsMode}|${normalized.envelopeCurve}|${sidechain.enabled ? 1 : 0}|${sidechain.filterType}|${sidechain.frequencyHz}|${sidechain.q}`
 }
 
 export function computeCompressorStaticCurveDb(inputDb: number, params: CompressorParamsInput = {}): number {

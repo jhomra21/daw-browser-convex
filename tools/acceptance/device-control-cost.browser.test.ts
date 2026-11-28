@@ -205,15 +205,15 @@ class TestAudioBuffer implements AudioBuffer {
 
 // The capture carries the final live value into later structural work, a cold
 // rebuild and the export read. No independent param() compiler shortcut.
-for (const scenario of ["B15-lookahead", "B26a-cutoff", "B27b-automated-live", "B29a-clip", "B29b-cold", "B29c-export"]) {
+for (const scenario of ["B15-threshold", "B26a-cutoff", "B27b-automated-live", "B29a-clip", "B29b-cold", "B29c-export"]) {
   // A playing session is never rebuilt by an edit (fb679615), so the cold rebuild is a paused preview's.
   for (const transport of scenario === "B29b-cold" ? ["paused"] : scenario.startsWith("B29") ? ["playing"] : ["playing", "paused"]) {
     test(`STEP5 ${scenario} ${transport} captured live boundary`, async () => {
       const synth: TrackInstrumentParams = { kind: "synth", instanceId: "synth-live", params: createDefaultSynthParams() };
       const compressor = createDefaultCompressorParams();
 
-      const payload: NativeBuiltInParameterPayload = scenario === "B15-lookahead"
-        ? { targetId: "track-audio", instanceId: "fx-compressor", effect: "compressor", from: compressor, to: { ...compressor, lookaheadMs: 5 } }
+      const payload: NativeBuiltInParameterPayload = scenario === "B15-threshold"
+        ? { targetId: "track-audio", instanceId: "fx-compressor", effect: "compressor", from: compressor, to: { ...compressor, thresholdDb: -12 } }
         : scenario === "B26a-cutoff"
           ? { targetId: "track-audio", effect: "instrument", from: synth,
             to: { ...synth, params: { ...synth.params, filter: { ...synth.params.filter, frequencyHz: 1000 } } } }

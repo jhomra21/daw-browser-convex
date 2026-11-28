@@ -455,7 +455,7 @@ describe('mixer routing plan', () => {
         { id: 'gate.sidechain.frequencyHz', target: 114 },
         { id: 'gate.sidechain.q', target: 115 },
       ]],
-      ['compressor', 11, 72, 480, [
+      ['compressor', 11, 76, 0, [
         { id: 'compressor.thresholdDb', target: 116 },
         { id: 'compressor.ratio', target: 117 },
         { id: 'compressor.attackMs', target: 118 },
@@ -464,7 +464,6 @@ describe('mixer routing plan', () => {
         { id: 'compressor.outputDb', target: 121 },
         { id: 'compressor.dryWet', target: 122 },
         { id: 'compressor.kneeDb', target: 123 },
-        { id: 'compressor.lookaheadMs', target: 124 },
         { id: 'compressor.sidechain.frequencyHz', target: 125 },
         { id: 'compressor.sidechain.q', target: 126 },
       ]],

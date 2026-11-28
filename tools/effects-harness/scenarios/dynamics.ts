@@ -1,13 +1,13 @@
 // Acceptance tests from dynamics.md section 3: T1 (parity), L1 (smooth attack), L2 (true peak, EBU Tech 3341), L5 (lookahead
 // latency), C1 (low-frequency THD+N), C2 (non-finite, shared), C3 (smoothing), C5 (zero latency), G1 (chatter), G3 (timing).
-import { lowpass, peakAbs, peakDb, rmsDb, truePeakDb } from '../dsp'
+import { countNonFinite, lowpass, peakAbs, peakDb, rmsDb, toneGainDb, truePeakDb } from '../dsp'
 import { measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { ebuTruePeakCases } from '../ebu3341'
 import { fx } from '../effects'
 import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
-import { clickTrain, coherentFrequency, concat, dbToLinear, linearToDb, noise, scale, silence, sine, sineWithPeakAt, square } from '../signals'
+import { clickTrain, coherentFrequency, concat, constant, dbToLinear, linearToDb, noise, ramp, scale, silence, sine, sineWithPeakAt, square } from '../signals'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const normalizePeak = (signal: Float32Array, db: number) => scale(signal, dbToLinear(db) / peakAbs(signal))
@@ -202,6 +202,8 @@ const limiterCpu: Scenario = {
   },
 }
 
+const compressorSpec = fx.compressor({ thresholdDb: -30, ratio: 4 })
+
 const compressorThd = (name: string, detectorMode: 'peak' | 'rms', attackMs: number, releaseMs: number, limit: number): Scenario => ({
   effect: 'compressor',
   name,
@@ -230,9 +232,137 @@ const compressorLatency: Scenario = {
   effect: 'compressor',
   name: 'c5-lookahead-latency',
   run: async (h) => {
-    for (const lookaheadMs of [0, 1, 10]) {
+    for (const lookaheadMs of [0, 1, 10] as const) {
       h.within(`impulse delay, lookahead ${lookaheadMs} ms`, await h.latencyFrames(fx.compressor({ ratio: 1, thresholdDb: 0, lookaheadMs })), msFrames(lookaheadMs, h.rate), 1, 'frames')
     }
+  },
+}
+
+const compressorPeakSteady: Scenario = {
+  effect: 'compressor',
+  name: 'c1-peak-steady-level',
+  run: async (h) => {
+    const spec = fx.compressor({ thresholdDb: -24, ratio: 4, kneeDb: 0, attackMs: 10, releaseMs: 120, autoRelease: false, detectorMode: 'peak' })
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const { output } = await h.render(spec, { input: [sine(3 * h.rate, f, h.rate, 0.5)] })
+    h.within('steady output peak, 1 kHz at -6 dBFS, threshold -24, ratio 4 (expected -19.50)', peakDb(output[0].slice(2 * h.rate)), -19.5, 0.1, 'dBFS')
+  },
+}
+
+// A DC step into a hard-knee compressor with instant attack: the gain follows the detector, so the time its dB value is 3 dB
+// under the final one is the detector's own time constant times ln 2 (a one-pole mean square).
+const compressorRmsConstant: Scenario = {
+  effect: 'compressor',
+  name: 'c1-rms-time-constant',
+  run: async (h) => {
+    const start = Math.round(0.5 * h.rate)
+    const input = concat(silence(start), constant(Math.round(0.5 * h.rate), 0.25))
+    const spec = fx.compressor({ thresholdDb: -60, ratio: 100, kneeDb: 0, attackMs: 0.1, releaseMs: 5, autoRelease: false, detectorMode: 'rms' })
+    const { output } = await h.render(spec, { input: [input] })
+    const final = linearToDb(output[0][input.length - 1] / 0.25)
+    const slope = 1 - 1 / 100
+    let crossing = -1
+
+    for (let n = start; n < input.length; n += 1) {
+      if (linearToDb(output[0][n] / 0.25) - final <= slope * 10 * Math.log10(2)) { crossing = n; break }
+    }
+
+    h.within('RMS time constant measured from a level step', (crossing - start) / h.rate * 1000 / Math.LN2, 10, 0.2, 'ms')
+  },
+}
+
+const compressorKeyFilter: Scenario = {
+  effect: 'compressor',
+  name: 'c4-sidechain-filter-response',
+  run: async (h) => {
+    const gainDb = async (frequency: number, q: number) => {
+      const f = coherentFrequency(frequency, h.rate, h.rate)
+      const spec = fx.compressor({ thresholdDb: -60, ratio: 4, kneeDb: 0, attackMs: 100, releaseMs: 100, autoRelease: false, detectorMode: 'rms', sidechain: { enabled: true, filterType: 'highpass', frequencyHz: 120, q } })
+      const input = sine(4 * h.rate, f, h.rate, 0.1)
+      const { output } = await h.render(spec, { input: [input] }, { parity: false })
+
+      return toneGainDb(input, output[0], f, h.rate, 3 * h.rate, 4 * h.rate)
+    }
+    // Gain reduction is 0.75 of the detector level over the threshold, so differences in output gain read as detector gain.
+
+    const detector = async (frequency: number, q: number) => (await gainDb(1000, q) - await gainDb(frequency, q)) / 0.75
+    h.within('detector gain at 60 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(60, 0.707), -12, 0.5, 'dB')
+    h.within('detector gain at 120 Hz, high-pass 120 Hz Q 0.707, vs 1 kHz', await detector(120, 0.707), -3, 0.3, 'dB')
+    h.atLeast('detector gain at the corner, Q 4 minus Q 0.707', await detector(120, 4) - await detector(120, 0.707), 6, 'dB')
+  },
+}
+
+const compressorGuards: Scenario = {
+  effect: 'compressor',
+  name: 'c2-non-finite-sidechain',
+  run: async (h) => {
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const tone = sine(4 * h.rate, f, h.rate, 0.5)
+    const clean = concat(silence(h.rate), tone.subarray(h.rate))
+    const dirty = clean.slice()
+    const tiny = ramp(Math.round(0.5 * h.rate), 0, 1e-40)
+    dirty.set(tiny, 0)
+    clean.set(silence(tiny.length), 0)
+    ;[NaN, Infinity, -Infinity].forEach((value, index) => { dirty[Math.round(h.rate * (1.2 + index * 0.2))] = value })
+
+    for (const sidechain of [false, true]) {
+      const spec = fx.compressor({ thresholdDb: -24, ratio: 4, kneeDb: 0, autoRelease: false, sidechain: { enabled: sidechain, filterType: 'highpass', frequencyHz: 120, q: 0.707 } })
+      const [poisoned, reference] = await Promise.all([h.render(spec, { input: [dirty] }, { parity: false }), h.render(spec, { input: [clean] }, { parity: false })])
+      const label = `sidechain filter ${sidechain ? 'on' : 'off'}`
+      h.atMost(`non-finite output samples, ${label}`, countNonFinite(poisoned.output[0]) + countNonFinite(poisoned.output[1]), 0, 'samples')
+      h.atMost(`steady-state level difference from the clean run after 3 s, ${label}`, Math.abs(rmsDb(poisoned.output[0], 3 * h.rate) - rmsDb(reference.output[0], 3 * h.rate)), 0.1, 'dB')
+    }
+  },
+}
+
+// Time for the gain to return 63.2 % of the way to unity after a loud burst of DC, relative to the same render with a fixed release.
+const compressorAutoRelease: Scenario = {
+  effect: 'compressor',
+  name: 'c6-auto-release',
+  run: async (h) => {
+    const recoveryMs = async (burstSeconds: number, autoRelease: boolean) => {
+      const burst = Math.round(burstSeconds * h.rate)
+      const input = concat(constant(burst, 0.5), constant(Math.round(1.5 * h.rate), 0.01))
+      const spec = fx.compressor({ thresholdDb: -24, ratio: 4, kneeDb: 0, attackMs: 10, releaseMs: 120, autoRelease, detectorMode: 'peak' })
+      const { output } = await h.render(spec, { input: [input] }, { parity: false })
+      const gain = Array.from(output[0], (value, n) => linearToDb(value / input[n]))
+      let low = burst
+      // The deepest gain reduction after the burst ends: inside a long burst the gain only wobbles in the last float digit.
+
+      for (let n = burst; n < burst + Math.round(0.1 * h.rate); n += 1) if (gain[n] < gain[low]) low = n
+      const target = gain[low] * (1 - 0.632)
+      let at = gain.length
+
+      for (let n = low; n < gain.length; n += 1) if (gain[n] >= target) { at = n; break }
+
+      return (at - low) / h.rate * 1000
+    }
+
+    for (const [name, seconds, low, high] of [['20 ms burst', 0.02, 0, 0.5], ['2 s burst', 2, 1.5, 3]] as const) {
+      const ratio = await recoveryMs(seconds, true) / await recoveryMs(seconds, false)
+      h.between(`recovery time with auto release over fixed release, ${name}`, ratio, low, high, 'x')
+    }
+  },
+}
+
+// Before the kernel, on the machine that measured this phase: 79.7 / 76.9 / 64.4 ns/frame at 44.1 / 48 / 96 kHz. A timing on
+// another machine is not comparable, so the row reports and does not judge.
+const compressorCpu: Scenario = {
+  effect: 'compressor',
+  name: 'c7-cpu',
+  run: async (h) => {
+    h.info('CPU at defaults, threshold -30, ratio 4', await h.cpuNsPerFrame(compressorSpec), 'ns/frame')
+  },
+}
+
+const compressorAutoMakeup: Scenario = {
+  effect: 'compressor',
+  name: 'c8-auto-makeup',
+  run: async (h) => {
+    const spec = fx.compressor({ thresholdDb: -24, ratio: 4, kneeDb: 0, autoRelease: false, detectorMode: 'peak', autoMakeup: true })
+    const f = coherentFrequency(1000, h.rate, h.rate)
+    const { output } = await h.render(spec, { input: [sine(3 * h.rate, f, h.rate, 1)] })
+    h.within('steady output peak, 1 kHz at 0 dBFS, auto makeup (expected 0)', peakDb(output[0].slice(2 * h.rate)), 0, 0.1, 'dBFS')
   },
 }
 
@@ -286,7 +416,6 @@ const gateTiming: Scenario = {
 }
 
 const limiterSpec = fx.limiter({ ceilingDbtp: -6 })
-const compressorSpec = fx.compressor({ thresholdDb: -30, ratio: 4 })
 const gateSpec = fx.gate({ thresholdDb: -20 })
 
 const familyOf = (effect: string, spec: EffectSpec, latency: (rate: number) => number): Scenario[] => [
@@ -300,14 +429,16 @@ export const dynamics: Family = {
     compressorThd('c1-thd-peak', 'peak', 10, 120, -55),
     compressorThd('c1-thd-rms', 'rms', 10, 120, -55),
     compressorThd('c1-thd-rms-fast', 'rms', 1, 50, -45),
+    compressorPeakSteady, compressorRmsConstant, compressorKeyFilter, compressorGuards, compressorAutoRelease, compressorCpu, compressorAutoMakeup,
     makeupStep, compressorLatency, gateChatter, gateTiming,
     ...familyOf('limiter', limiterSpec, (rate) => msFrames(3, rate)),
-    ...familyOf('compressor', compressorSpec, (rate) => msFrames(10, rate)),
+    ...familyOf('compressor', compressorSpec, () => 0),
+    { ...parityScenario('compressor', fx.compressor({ thresholdDb: -30, ratio: 4, lookaheadMs: 10, detectorMode: 'peak', envelopeCurve: 'linear', autoMakeup: true, sidechain: { enabled: true, filterType: 'bandpass', frequencyHz: 800, q: 2 } })), name: 'parity-fixtures-peak-linear-lookahead' },
     ...familyOf('gate', gateSpec, (rate) => msFrames(2, rate)),
   ],
   notEncoded: [
     'L2: the limiter\'s own detector reading on EBU 3341 cases 15 to 23 is internal; the harness instead validates its own true-peak meter against those cases and limits the signals above 0 dBTP.',
-    'L6 (Mode) and L8 (routing) are not part of this phase; C4 (sidechain filter response), C6, C7, G4 need parameters or taps the core does not expose yet.',
-    'C1 RMS time-constant identity across rates and C2 10-minute silence CPU: covered by the shared denormal CPU ratio on 4 s renders.',
+    'L6 (Mode) and L8 (routing) are not part of this phase; G4 needs parameters or taps the core does not expose yet.',
+    'C2 10-minute silence CPU: covered by the shared denormal CPU ratio on 4 s renders.',
   ],
 }

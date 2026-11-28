@@ -260,7 +260,10 @@ describe('automation helpers', () => {
     expect(options.filter((option) => option.parameterId === 'volume')).toHaveLength(1)
     expect(firstDelay?.device).toBe('Delay 1')
     expect(secondDelay?.device).toBe('Delay 2')
-    expect(options.some((option) => option.effectInstanceId === 'compressor-only')).toBe(false)
+    expect(options.filter((option) => option.effectInstanceId === 'compressor-only').map((option) => option.parameterId)).toEqual([
+      'compressor.thresholdDb', 'compressor.ratio', 'compressor.attackMs', 'compressor.releaseMs', 'compressor.kneeDb',
+      'compressor.makeupDb', 'compressor.outputDb', 'compressor.dryWet', 'compressor.sidechain.frequencyHz', 'compressor.sidechain.q',
+    ])
 
     const reordered = getAutomationParameterOptionsForTarget([...effects].reverse())
     expect(reordered.some((option) => (
@@ -340,7 +343,7 @@ describe('automation helpers', () => {
       expect(getAutomationParameterDescriptor(parameterId)?.targetKinds).toEqual(['track', 'master'])
     }
 
-    expect(getAutomationParameterDescriptor('compressor.thresholdDb')).toBeUndefined()
+    expect(getAutomationParameterDescriptor('compressor.lookaheadMs')).toBeUndefined()
     expect(getAutomationParameterDescriptor('reverb.decaySec')).toBeUndefined()
   })
 

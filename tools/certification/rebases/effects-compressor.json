@@ -1,0 +1,178 @@
+{
+ "name": "effects-compressor",
+ "sequence": 127,
+ "createdAt": "2026-11-25T15:39:48.312Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-core/include/daw/audio_core.h",
+   "from": "a816dcc8c097cc31a899f30a0bcbf8b6dd1d75c037bec33d951b345cffa4f574",
+   "to": "d067a26d4576597fff9484d3b888b7e570e34b0ebdc177fc0c29a856f1ccd5bb"
+  },
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "a0000940c625b39ce98ba96555b075d777bc7c4ce27f8ae7fa7d56decf450044",
+   "to": "69b53625a6e4efe9e067b69b683e49f4f6933716528fbcebe061a2dc915ab546"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "d148a974f3e6f5b11849c98d51308edc2ae8d7269f0bc3857b7241a64177baec",
+   "to": "a11ded9de82d30eb8339a6112515f8fb9e0fc3158c90d7aa9b2e55b05dfdae9f"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "426d5acede7e4fdce06bb3cb2d5ac710e4c0c7e19bcd68ffc042c94448ea083a",
+   "to": "1b5017f668722f507776f8edd90468a68398bf60149b1b2b29f41f819ea38d57"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "1032cb289fb1f86b41bc3f808748702dc22d80760026130432bdf969cd616f39",
+   "to": "5045900881758bd5b4452eb3ded47af4b20cafed3043c072af24404d04eb583e"
+  },
+  {
+   "file": "src/lib/desktop/native-built-in-parameter-mapper.ts",
+   "from": "a8bf47ce2d09d1f05c40e0183147c2a60be2450e47f20c18b8590c431b5d6f77",
+   "to": "0d4ecef4610a604be38bc6ddbf31cce6b7ad24280d3f5d23dfdd4aed085421b0"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "6596a1bb52d2838f6e6fbed1017658dbaac8e256b0f20e458dc21df2332bffa1",
+   "to": "6ee6446d6cd8bedd5715e791f14b46ebb56a54c11222fab751325cfeed214938"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "5ecfd63ca95ea7235ca60f09888bb30fb01aa2058c4362099ce34d574725c3a8",
+   "new": "41b7db76546fcdc13b8436be58933abe7c6d5190b746ee6794f2630f67cbf741"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "c249762db720570fbab1e163430c72ffc3b611102b20fb9a2d259dd803a77770",
+   "new": "f723bd83ff4f8fed274da08c87d837aeb5a8aa17c9161f27853b812f80fac8b7"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "71ea48b5f851e1c2a0c8d309d7297ba63fc5ff171dfeba64d4263e183c89d1b6",
+   "new": "9bb4a3c3a5aada0da0217df9d3b7b34e786d359652dd05171cb0444e2cbd47fd"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "426d5acede7e4fdce06bb3cb2d5ac710e4c0c7e19bcd68ffc042c94448ea083a",
+   "new": "1b5017f668722f507776f8edd90468a68398bf60149b1b2b29f41f819ea38d57"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "426d5acede7e4fdce06bb3cb2d5ac710e4c0c7e19bcd68ffc042c94448ea083a",
+   "new": "1b5017f668722f507776f8edd90468a68398bf60149b1b2b29f41f819ea38d57"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "d148a974f3e6f5b11849c98d51308edc2ae8d7269f0bc3857b7241a64177baec",
+   "new": "a11ded9de82d30eb8339a6112515f8fb9e0fc3158c90d7aa9b2e55b05dfdae9f"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-contract-hash",
+    "judge",
+    "value"
+   ],
+   "old": "fff5ee55cf2daee99a9fdc1733504f76d724c187ea692e521bd2b35376f6cc29",
+   "new": "b143e5b10071c4c20b8c236011bad5c3254ea6bab5fe947603b8f68f6c2e8e53"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-test-native",
+    "judge",
+    "total"
+   ],
+   "old": 44,
+   "new": 52
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c45b45ac2257604e97bcd51cbbbccf1e4c1b6fa1a52b815a9dc60db5cd7d915d",
+   "new": "d3352cab8e59397d743d59ad2b1a901a64b6617da83499b508ba6daa6b4ba53b"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "c45b45ac2257604e97bcd51cbbbccf1e4c1b6fa1a52b815a9dc60db5cd7d915d",
+   "new": "d3352cab8e59397d743d59ad2b1a901a64b6617da83499b508ba6daa6b4ba53b"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "d1c55536045d5abd5c5ad40bf7ef7aa1f7237cc7",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "6dad46641f2c468f658c210d2cc73481713e01b67e9d4044fd16f9b82b41906e",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "6dad46641f2c468f658c210d2cc73481713e01b67e9d4044fd16f9b82b41906e",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/comp-bless/live",
+   "resultSha256": "da0c596f8050e533b60ccdde5e83fa7eea8bbb97017028259a030ddb755453f6",
+   "seconds": 1804.068395792,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

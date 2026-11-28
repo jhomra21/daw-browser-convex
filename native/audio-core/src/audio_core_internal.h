@@ -28,6 +28,7 @@
 #include <tuple>
 
 #include "autofilter_kernel.h"
+#include "compressor_kernel.h"
 #include "limiter_kernel.h"
 
 #if defined(DAW_AUDIO_CORE_TEST_INSTRUMENT_REJECTION)
@@ -66,6 +67,7 @@ constexpr uint32_t kMaximumDynamicsDelayFrames = 1024;
 constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumLimiterProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
+constexpr uint32_t kMaximumCompressorProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 // A published plan and the plan being prepared may each reference every node,
 // so node runtime (instrument voices, fade progress) has two plans' worth of
 // slots. Processor slots equal one plan's capacity, live and transition entries
@@ -316,6 +318,7 @@ struct GraphRevision {
     uint32_t delay_slot = kMaximumDelayProcessors;
     uint32_t reverb_slot = kMaximumReverbProcessors;
     uint32_t limiter_slot = kMaximumLimiterProcessors;
+    uint32_t compressor_slot = kMaximumCompressorProcessors;
     uint32_t spectral_slot = kMaximumSpectralProcessors;
     uint32_t generation = 0;
     // A ghost keeps rendering a deleted processor while it fades out. One on a
@@ -428,10 +431,6 @@ struct DynamicsHistory {
   std::array<uint32_t, 2> open{1, 1};
   std::array<uint32_t, 2> started{};
   std::array<BiquadHistory, 2> sidechain{};
-  float compressor_envelope_db = 0.0F;
-  float compressor_rms = 0.0F;
-  float compressor_sc_low = 0.0F;
-  float compressor_sc_band = 0.0F;
   float bypass = 0.0F;
 };
 
@@ -690,6 +689,16 @@ struct SpectralHistory {
   uint32_t analysis_frames = 0;
 };
 
+struct CompressorHistory {
+  daw::audio_core::CompressorKernel kernel;
+  uint32_t prepared_rate_hz = 0;
+  float filter_frequency_hz = 0.0F;
+  float filter_q = 0.0F;
+  float bypass = 0.0F;
+  // A key from another track drives the detector; Auto Makeup is off then, as it only means something for the own signal.
+  bool external_key = false;
+};
+
 struct LimiterHistory {
   daw::audio_core::LimiterKernel kernel;
   uint32_t prepared_rate_hz = 0;
@@ -806,6 +815,7 @@ struct Core {
   std::array<DelayHistory, kMaximumDelayProcessors> delay_histories{};
   std::array<ReverbHistory, kMaximumReverbProcessors> reverb_histories{};
   std::array<LimiterHistory, kMaximumLimiterProcessors> limiter_histories{};
+  std::array<CompressorHistory, kMaximumCompressorProcessors> compressor_histories{};
   std::array<SpectralHistory, kMaximumSpectralProcessors> spectral_histories{};
   SpectralHistory spectral_state_snapshot{};
   // Callback-owned stage-input histories, including detector input. Separate
@@ -881,12 +891,13 @@ struct Core {
   std::array<AutoFilterHistory, kMaximumGraphProcessors> autofilter_histories{};
   std::array<LoFiHistory, kMaximumGraphProcessors> lofi_histories{};
   // Ownership ledgers. Processor slot i guards every history array at index i
-  // plus the delay/reverb/limiter/spectral history named by the owner tables below
+  // plus the delay/reverb/limiter/compressor/spectral history named by the owner tables below
   // (index + 1 of the owning processor slot, 0 when free; control-owned).
   std::array<RuntimeSlot, kProcessorRuntimeSlots> processor_slots{};
   std::array<uint32_t, kMaximumDelayProcessors> delay_slot_owners{};
   std::array<uint32_t, kMaximumReverbProcessors> reverb_slot_owners{};
   std::array<uint32_t, kMaximumLimiterProcessors> limiter_slot_owners{};
+  std::array<uint32_t, kMaximumCompressorProcessors> compressor_slot_owners{};
   std::array<uint32_t, kMaximumSpectralProcessors> spectral_slot_owners{};
   std::array<RuntimeSlot, kNodeRuntimeSlots> node_slots{};
   // Manual parameter values the callback latched from events and parameter
@@ -1149,6 +1160,9 @@ void render_saturator_processor(
 void render_eq_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);
+void render_compressor_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float sidechain_left, float sidechain_right, float *output_left, float *output_right);
 void render_limiter_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);

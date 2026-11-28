@@ -504,7 +504,6 @@ typedef enum daw_audio_processor_parameter {
   DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_OUTPUT_DB = 121,
   DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_DRY_WET = 122,
   DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_KNEE_DB = 123,
-  DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_LOOKAHEAD_MS = 124,
   DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_FREQUENCY_HZ = 125,
   DAW_AUDIO_PROCESSOR_PARAMETER_COMPRESSOR_SIDECHAIN_Q = 126,
   DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING = 127,
@@ -835,6 +834,7 @@ typedef struct daw_audio_compressor_state {
   uint32_t sidechain_filter_type;
   float sidechain_frequency_hz;
   float sidechain_q;
+  uint32_t auto_makeup;
 } daw_audio_compressor_state;
 
 typedef struct daw_audio_limiter_state {

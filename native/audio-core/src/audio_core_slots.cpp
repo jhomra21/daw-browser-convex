@@ -207,12 +207,13 @@ void initialize_node_slot(Core &core, uint32_t slot) {
   core.mixer_ramps[slot] = {};
 }
 
-// Delay, reverb, limiter and spectral histories live in small pools that follow the
+// Delay, reverb, limiter, compressor and spectral histories live in small pools that follow the
 // lifecycle of the processor slot that owns them.
 void free_processor_slot_histories(Core &core, uint32_t slot) {
   for (uint32_t &owner : core.delay_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.reverb_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.limiter_slot_owners) if (owner == slot + 1) owner = 0;
+  for (uint32_t &owner : core.compressor_slot_owners) if (owner == slot + 1) owner = 0;
   for (uint32_t &owner : core.spectral_slot_owners) if (owner == slot + 1) owner = 0;
 }
 }  // namespace

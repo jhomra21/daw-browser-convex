@@ -28,8 +28,6 @@ export type EffectTimingInput =
   | { kind: 'delay'; params: DelayParamsLite }
   | { kind: 'reverb'; params: ReverbParamsLite }
 
-const COMPRESSOR_MAX_LOOKAHEAD_MS = 10
-
 const finite = (frames: number): EffectTiming['tail'] => ({
   kind: 'finite',
   frames: Math.max(0, Math.ceil(frames)),
@@ -71,7 +69,7 @@ export const getEffectTiming = (
 
   if (input.kind === 'compressor') {
     return {
-      latencyFrames: Math.ceil(COMPRESSOR_MAX_LOOKAHEAD_MS * rate / 1000),
+      latencyFrames: Math.ceil(input.params.lookaheadMs * rate / 1000),
       tail: finite(0),
     }
   }

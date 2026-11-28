@@ -300,16 +300,16 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 11 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 72 }, "tombstone": { "const": false },
+            "id": { "const": 11 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 76 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "thresholdDb", "ratio", "attackMs", "releaseMs", "autoRelease", "makeupDb", "outputDb", "dryWet", "kneeDb", "lookaheadMs", "detectorMode", "dynamicsMode", "envelopeCurve", "sidechain"],
+              "required": ["enabled", "thresholdDb", "ratio", "attackMs", "releaseMs", "autoRelease", "makeupDb", "outputDb", "dryWet", "kneeDb", "lookaheadMs", "detectorMode", "dynamicsMode", "envelopeCurve", "sidechain", "autoMakeup"],
               "properties": {
                 "enabled": { "type": "boolean" }, "thresholdDb": { "type": "number", "default": -24, "minimum": -60, "maximum": 0, "portableParameter": true}, "ratio": { "type": "number", "default": 4, "minimum": 1, "maximum": 100, "portableParameter": true},
                 "attackMs": { "type": "number", "default": 10, "minimum": 0.1, "maximum": 100, "portableParameter": true}, "releaseMs": { "type": "number", "default": 120, "minimum": 5, "maximum": 1000, "portableParameter": true},
                 "autoRelease": { "type": "boolean" }, "makeupDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true}, "outputDb": { "type": "number", "default": 0, "minimum": -36, "maximum": 36, "portableParameter": true},
                 "dryWet": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "kneeDb": { "type": "number", "default": 6, "minimum": 0, "maximum": 24, "portableParameter": true},
-                "lookaheadMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 10, "portableParameter": true}, "detectorMode": { "enum": ["peak", "rms"] }, "dynamicsMode": { "enum": ["compress", "expand"] }, "envelopeCurve": { "enum": ["log", "linear"] },
+                "lookaheadMs": { "enum": [0, 1, 10] }, "autoMakeup": { "type": "boolean" }, "detectorMode": { "enum": ["peak", "rms"] }, "dynamicsMode": { "enum": ["compress", "expand"] }, "envelopeCurve": { "enum": ["log", "linear"] },
                 "sidechain": { "type": "object", "additionalProperties": false, "required": ["enabled", "filterType", "frequencyHz", "q"], "properties": {
                   "enabled": { "type": "boolean" }, "filterType": { "enum": ["lowpass", "highpass", "bandpass"] }, "frequencyHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 20000, "portableParameter": true}, "q": { "type": "number", "default": 0.707, "minimum": 0.1, "maximum": 18, "portableParameter": true}
                 }}

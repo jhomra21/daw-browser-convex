@@ -90,8 +90,8 @@ float *bypass_level(Core &core, const GraphRevision::Processor &processor) {
     case DAW_AUDIO_PROCESSOR_KIND_UTILITY: return &core.utility_histories[processor.history_slot].bypass;
     case DAW_AUDIO_PROCESSOR_KIND_SATURATOR: return &core.saturator_histories[processor.history_slot].bypass;
     case DAW_AUDIO_PROCESSOR_KIND_EQ: return &core.eq_histories[processor.history_slot].bypass;
-    case DAW_AUDIO_PROCESSOR_KIND_GATE:
-    case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR: return &core.dynamics_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_GATE: return &core.dynamics_histories[processor.history_slot].bypass;
+    case DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR: return &core.compressor_histories[processor.compressor_slot].bypass;
     case DAW_AUDIO_PROCESSOR_KIND_LIMITER: return &core.limiter_histories[processor.limiter_slot].bypass;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOFILTER: return &core.autofilter_histories[processor.history_slot].bypass;
     case DAW_AUDIO_PROCESSOR_KIND_LOFI: return &core.lofi_histories[processor.history_slot].bypass;
@@ -553,6 +553,7 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       processor.delay_slot = kept.delay_slot;
       processor.reverb_slot = kept.reverb_slot;
       processor.limiter_slot = kept.limiter_slot;
+      processor.compressor_slot = kept.compressor_slot;
       processor.spectral_slot = kept.spectral_slot;
 #if defined(DAW_AUDIO_CORE_ENABLE_NATIVE_GRAPH_HOOKS)
       processor.spectral_compensation = core.transport_running.load(std::memory_order_acquire)
@@ -593,6 +594,12 @@ daw_audio_core_result prepare_runtime_ownership(Core &core) {
       processor.limiter_slot = static_cast<uint32_t>(owned);
       std::destroy_at(&core.limiter_histories[owned]);
       std::construct_at(&core.limiter_histories[owned]);
+    } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR) {
+      const int32_t owned = acquire_history_owner(core.compressor_slot_owners, processor.history_slot);
+      if (owned < 0) return DAW_AUDIO_CORE_CAPACITY_EXCEEDED;
+      processor.compressor_slot = static_cast<uint32_t>(owned);
+      std::destroy_at(&core.compressor_histories[owned]);
+      std::construct_at(&core.compressor_histories[owned]);
     } else if (processor.kind == DAW_AUDIO_PROCESSOR_KIND_SPECTRAL) {
       PrepareScope setup_scope(core, "spectral-setup");
       const int32_t owned = acquire_history_owner(core.spectral_slot_owners, processor.history_slot);

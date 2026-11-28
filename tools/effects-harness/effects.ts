@@ -95,7 +95,11 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   autopan: range(96, amplitudeKeys),
   ensemble: range(100, ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix']),
   gate: range(105, ['thresholdDb', 'ratio', 'attackMs', 'holdMs', 'releaseMs', 'hysteresisDb', 'rangeDb', 'lookaheadMs', 'link', 'sidechain.frequencyHz', 'sidechain.q']),
-  compressor: range(116, ['thresholdDb', 'ratio', 'attackMs', 'releaseMs', 'makeupDb', 'outputDb', 'dryWet', 'kneeDb', 'lookaheadMs', 'sidechain.frequencyHz', 'sidechain.q']),
+  // 124 was the lookahead target; the lookahead is a 0/1/10 ms chooser held in the state now.
+  compressor: {
+    ...range(116, ['thresholdDb', 'ratio', 'attackMs', 'releaseMs', 'makeupDb', 'outputDb', 'dryWet', 'kneeDb']),
+    'sidechain.frequencyHz': 125, 'sidechain.q': 126,
+  },
   limiter: { ceilingDbtp: 127, releaseMs: 128, link: 130, gainDb: 170 },
   delay: range(5, ['delayMs', 'feedback', 'dryWet', 'lowCutHz', 'highCutHz']),
   reverb: {
@@ -168,7 +172,7 @@ export const fx = {
     kind: 'compressor',
     state: {
       enabled: true, thresholdDb: -24, ratio: 4, attackMs: 10, releaseMs: 120, autoRelease: true, makeupDb: 0, outputDb: 0, dryWet: 1,
-      kneeDb: 6, lookaheadMs: 0, detectorMode: 'rms', dynamicsMode: 'compress', envelopeCurve: 'log',
+      kneeDb: 6, lookaheadMs: 0, autoMakeup: false, detectorMode: 'rms', dynamicsMode: 'compress', envelopeCurve: 'log',
       sidechain: { enabled: false, filterType: 'highpass', frequencyHz: 120, q: 0.707 }, ...state,
     },
   }),

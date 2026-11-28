@@ -1,4 +1,4 @@
-import type { PreparedStretchArtifactLockManager } from './prepared-stretch-store'
+import type { PreparedStretchArtifactLockManager } from '../src/prepared-stretch-store'
 
 type LockMode = 'shared' | 'exclusive'
 

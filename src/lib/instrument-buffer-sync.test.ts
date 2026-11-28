@@ -3907,7 +3907,7 @@ test("records a granular retry failure without an unhandled rejection", async ()
   process.on("unhandledRejection", onUnhandledRejection);
 
   try {
-    await expect(sync.syncGranularTrack(engine, "granular-retry-error", params, "granular-instance")).rejects.toBeDefined();
+    await expect(sync.syncGranularTrack(engine, "granular-retry-error", params, "granular-instance")).rejects.toThrow("decode failed");
 
     const failed = new Promise<void>((resolve) => {
       const unsubscribe = sync.subscribe(() => {

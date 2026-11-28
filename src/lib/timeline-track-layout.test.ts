@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, reuseTimelineTrackLayout, wouldCreateCycle } from './timeline-track-layout'
+import { buildTimelineTrackLayout, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, reuseTimelineTrackLayout, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { COLLAPSED_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -11,6 +11,9 @@ const track = (id: string, groupId?: string, collapsed?: boolean): Track => ({
   groupId,
   collapsed,
 })
+
+const scrollingRows = (input: Omit<Parameters<typeof buildTimelineTrackLayout>[0], 'visibleTrackIds'> & { visibleTrackIds?: string[] }) =>
+  buildTimelineTrackLayout({ ...input, visibleTrackIds: input.visibleTrackIds ?? input.tracks.map((entry) => entry.id) }).scrollingRows
 
 describe('timeline track layout grouping', () => {
   test('buildTrackTree preserves flat order', () => {
@@ -36,8 +39,8 @@ describe('timeline track layout grouping', () => {
     expect(wouldCreateCycle([track('g'), track('a')], 'a', 'g')).toBe(false)
   })
 
-  test('buildTimelineTrackLayoutRows emits only visible rows', () => {
-    const rows = buildTimelineTrackLayoutRows({
+  test('layout emits only visible rows', () => {
+    const rows = scrollingRows({
       tracks: [track('g'), track('a', 'g'), track('b')],
       visibleTrackIds: ['g', 'b'],
       visibleByTrackId: {},
@@ -50,12 +53,12 @@ describe('timeline track layout grouping', () => {
     expect(trackIdsInYRange(rows, 0, 160)).toEqual(['g', 'b'])
   })
 
-  test('buildTimelineTrackLayoutRows preserves reordered visible row order and excludes collapsed descendants from hit testing', () => {
+  test('layout preserves reordered visible row order and excludes collapsed descendants from hit testing', () => {
     const tracks = [track('b'), track('g', undefined, true), track('a', 'g'), track('c')]
     const tree = buildTrackTree(tracks)
     const visibleTrackIds = flattenVisibleTracks(tree, { g: true })
 
-    const rows = buildTimelineTrackLayoutRows({
+    const rows = scrollingRows({
       tracks,
       visibleTrackIds,
       depthByTrackId: computeDepthMap(tree),
@@ -72,7 +75,7 @@ describe('timeline track layout grouping', () => {
   })
 
   test('collapsed track uses slim row and suppresses automation height', () => {
-    const rows = buildTimelineTrackLayoutRows({
+    const rows = scrollingRows({
       tracks: [track('a', undefined, true), track('b')],
       visibleByTrackId: { a: true, b: true },
       heightsByLaneOwnerKey: { a: 48, b: 48 },
@@ -147,7 +150,7 @@ describe('timeline track layout grouping', () => {
   })
 
   test('trackLayoutRowAtY finds rows by y position', () => {
-    const rows = buildTimelineTrackLayoutRows({
+    const rows = scrollingRows({
       tracks: [track('a'), track('b'), track('c')],
       visibleByTrackId: { b: true },
       heightsByLaneOwnerKey: { b: 48 },

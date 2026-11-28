@@ -1,0 +1,49 @@
+{
+ "name": "untangle-tests-2",
+ "sequence": 107,
+ "createdAt": "2026-11-21T20:07:33.572Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "35a12695b75913ef78fc3d62d51018bb88ddcd0fe6952bdbe5b59b464a245e3a",
+   "to": "f836bf6844691545b29b530869eb8c5c255f1c1c47a6cfab161c25e84b392e8e"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "cd41fa32b65a2c200963937e2c48827113a03e3a82f62a578c8107a5dfd5cb12",
+   "to": "c5389cd660075728a0cc8b524a4ef18566e860e59118e1f7a63ed8f903f9e6b3"
+  }
+ ],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "7634edbeaef62b8f3386557e9502ed2d5fdca3cb",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "b47d5c463d3c41ccdb6cbd8f67c4d660662396cb115cd6ebfccde4f3fc97142d",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "b47d5c463d3c41ccdb6cbd8f67c4d660662396cb115cd6ebfccde4f3fc97142d",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b14b-bless/live",
+   "resultSha256": "b7d19651d9bcb8323a79222e97c987fab48a848008e2e9b8f01f1d7f314ccfe6",
+   "seconds": 1262.844970083,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

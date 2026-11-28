@@ -7,7 +7,7 @@ import {
   type PreparedStretchArtifactManifest,
   type PreparedStretchArtifactLockManager,
 } from './prepared-stretch-store'
-import { preparedStretchTestLockManager } from './prepared-stretch-test-lock-manager'
+import { preparedStretchTestLockManager } from '../test-support/prepared-stretch-test-lock-manager'
 import { createAudioStretchReadPlan } from './audio-stretch-read-plan'
 import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 

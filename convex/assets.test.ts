@@ -139,7 +139,7 @@ test("accepts a logical upload above 4 GiB without allocating its bytes", async 
     transport: "resumable",
   });
 
-  expect(begun.sessionId).toBeDefined();
+  expect(begun.sessionId).toMatch(/\S/);
   expect(await t.run(async (ctx) => {
     const session = await ctx.db.query("assetUploadSessions")
       .withIndex("by_session", (query) => query.eq("sessionId", begun.sessionId ?? "")).unique();
@@ -181,7 +181,7 @@ test("resumable sessions own part geometry, leases, and completion parts", async
     transport: "resumable",
   });
 
-  expect(begun.sessionId).toBeDefined();
+  expect(begun.sessionId).toMatch(/\S/);
 
   const attached = await t.withIdentity(controlIdentity).mutation(api.resumableAssetUploads.attachMultipartUpload, {
     projectId,

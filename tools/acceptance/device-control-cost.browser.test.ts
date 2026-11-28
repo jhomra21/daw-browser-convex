@@ -25,6 +25,7 @@ import { observeCalls } from "./device-control-cost-spy";
 import { createProcessorEditRegistry } from "~/components/timeline/create-processor-edit-registry";
 import { pickNativePlaybackInputs } from "~/components/timeline/native-playback-inputs";
 import type { NativeProcessorPatchReply } from "~/types/desktop-bridge";
+import { agentBrowser } from "~/test-support/agent-browser";
 import { mountStep5Playback, settleStep5Playback } from "./b5c-playback-witness-support";
 import { resolveDesiredPlaybackFx } from "~/lib/desired-playback-state";
 import { createParameterGestureOwner } from "~/components/timeline/parameter-gesture-owner";
@@ -113,17 +114,7 @@ test.skipIf(!measuring)("device-control-cost part A: real EffectsPanel in Chromi
   await mkdir(rawDir, { recursive: true });
   await Bun.write(`${directory}/index.html`, await fixtureHtml());
   const session = `device-control-cost-${crypto.randomUUID()}`;
-  const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...inherited } = process.env;
-  const env = { ...inherited, AGENT_BROWSER_ALLOW_FILE_ACCESS: "1" };
-
-  const browser = async (...args: string[]) => {
-    const child = Bun.spawn(["perl", "-e", "alarm shift; exec @ARGV", "240", "agent-browser", "--session", session, ...args], { env, stdout: "pipe", stderr: "pipe" });
-    const [out, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-
-    if (exit !== 0) throw new Error(`agent-browser ${args.join(" ")}: ${error || out}`);
-
-    return out.trim();
-  };
+  const browser = agentBrowser(session, { env: { AGENT_BROWSER_ALLOW_FILE_ACCESS: "1" }, timeoutMs: 240_000 });
 
   const evalJson = async (expression: string) => JSON.parse(JSON.parse(
     await browser("eval", `Promise.resolve(${expression}).then(value => JSON.stringify(value ?? null))`),

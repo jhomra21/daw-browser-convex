@@ -8,6 +8,7 @@ import { createHash } from "node:crypto";
 import { build } from "vite";
 import solidPlugin from "vite-plugin-solid";
 import { z } from "zod";
+import { agentBrowser } from "../../src/test-support/agent-browser";
 
 const root = resolve(import.meta.dir, "../..");
 const defaultOutput = `${root}/acceptance-reports/device-control-cost-2026-10-31/dv01-parent/boundary/witnesses/stepE-r2-engine-rows.json`;
@@ -80,25 +81,7 @@ await mkdir(directory);
 await Bun.write(`${directory}/index.html`, await fixtureHtml());
 
 const session = `dv01-engine-witnesses-${crypto.randomUUID()}`;
-const { AGENT_BROWSER_CDP: _cdp, AGENT_BROWSER_SESSION: _session, ...inherited } = process.env;
-const env = { ...inherited, AGENT_BROWSER_ALLOW_FILE_ACCESS: "1" };
-
-const browser = async (...args: string[]) => {
-  const child = Bun.spawn(["agent-browser", "--session", session, ...args], { env, stdout: "pipe", stderr: "pipe" });
-  // One bounded deadline per command, not a poll: a hung agent-browser child (a row that never settles) must fail the gate
-  // instead of hanging it. It is cleared on every exit, a rejected stream or process promise included.
-  const timer = setTimeout(() => child.kill(), 120_000);
-
-  try {
-    const [out, error, exit] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
-
-    if (exit !== 0) throw new Error(`agent-browser ${args.join(" ")}: ${error || out}`);
-
-    return out.trim();
-  } finally {
-    clearTimeout(timer);
-  }
-};
+const browser = agentBrowser(session, { env: { AGENT_BROWSER_ALLOW_FILE_ACCESS: "1" }, timeoutMs: 120_000 });
 
 // The page promise resolves when the row has finished, so there is nothing to poll.
 const evalJson = async (expression: string) => JSON.parse(JSON.parse(

@@ -694,7 +694,7 @@ test("disabled ordering evidence makes no writes; stdout errors are isolated for
     expect(writes).toBe(6)
     const startup = await initializeRecordingSpoolRegistry({ userData: f.userData, observeRelease: enabled.observeRelease })
     expect(startup.error).toBeUndefined()
-    expect(startup.registry).toBeDefined()
+    expect(startup.registry).toBeObject()
     expect(writes).toBe(6) // Discovery/recovery never emits operation facts.
   } finally { await rm(f.userData, { recursive: true, force: true }) }
 })

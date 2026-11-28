@@ -4,6 +4,7 @@ import type {
   DesktopPluginCatalogEntry,
 } from "~/lib/desktop/attached-host-controller"
 import type { NativeVst3CatalogSelection } from "~/lib/desktop/native-vst3-insertion"
+import { installGlobals } from "~/test-support/install-globals"
 import { nativeVst3InsertionAvailability } from "~/lib/desktop/native-vst3-insertion"
 import {
   filterNativeVst3CatalogSelections,
@@ -173,10 +174,9 @@ test("does not rescan a persistent stale catalog when a read changes discovery t
   } }
 
   let readTriggered: ReturnType<typeof autoHealStaleVst3Catalog> | undefined
-  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window")
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
+
+  const restoreGlobals = installGlobals({
+    window: {
       dispatchEvent: (event: Event) => {
         if (event.type === "daw-plugin-catalog-changed") {
           readTriggered = autoHealStaleVst3Catalog({
@@ -198,11 +198,7 @@ test("does not rescan a persistent stale catalog when a read changes discovery t
     await readTriggered
     expect(scans).toBe(1)
   } finally {
-    if (originalWindow) {
-      Object.defineProperty(globalThis, "window", originalWindow)
-    } else {
-      Reflect.deleteProperty(globalThis, "window")
-    }
+    restoreGlobals()
   }
 })
 

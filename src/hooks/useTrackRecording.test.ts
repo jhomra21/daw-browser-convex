@@ -8,6 +8,7 @@ import { createRecordingTempStorage } from "~/lib/recording/recording-temp-stora
 import type { NativeRecordingScope, NativeRecordingRelease, NativeRecordingImportedTake } from "~/types/desktop-bridge"
 
 import { convexApi, convexClient } from "~/lib/convex"
+import { installGlobals } from "~/test-support/install-globals"
 import { useTrackRecording } from "./useTrackRecording"
 import type { DesktopAudioLifecycle } from "~/lib/desktop-audio-lifecycle"
 import type { Track } from "@daw-browser/timeline-core/types"
@@ -75,9 +76,6 @@ const createHarness = (
     audioPreferences?: typeof audioPreferences
   },
 ) => {
-  // Bun has no global window; redefining it by value would leave a non-writable `undefined` behind for later files.
-  const previousWindowDescriptor = Object.getOwnPropertyDescriptor(globalThis, "window")
-  const previousNavigator = globalThis.navigator
   const lifecycleListeners: Array<(lifecycle: DesktopAudioLifecycle) => void> = []
   const calls: string[] = []
   const startedInputDeviceIds: Array<string | undefined> = []
@@ -178,9 +176,9 @@ const createHarness = (
     locks: locksAvailable ? recordingLocks : undefined,
   }
 
-  Object.defineProperty(globalThis, "window", {
-    configurable: true,
-    value: {
+  const restoreGlobals = installGlobals({
+    navigator: navigatorValue,
+    window: {
       setInterval: () => 1,
       clearInterval: () => undefined,
       MediaRecorder: Object.assign(() => undefined, {
@@ -197,10 +195,6 @@ const createHarness = (
         },
       },
     },
-  })
-  Object.defineProperty(globalThis, "navigator", {
-    configurable: true,
-    value: navigatorValue,
   })
 
   const selection = {
@@ -274,11 +268,7 @@ const createHarness = (
     emit: (lifecycle: DesktopAudioLifecycle) => {
       for (const listener of lifecycleListeners) listener(lifecycle)
     },
-    restore: () => {
-      if (previousWindowDescriptor) Object.defineProperty(globalThis, "window", previousWindowDescriptor)
-      else Reflect.deleteProperty(globalThis, "window")
-      Object.defineProperty(globalThis, "navigator", { configurable: true, value: previousNavigator })
-    },
+    restore: restoreGlobals,
   }
 }
 
@@ -458,7 +448,7 @@ test("M1 WAV/asset/clip/queued/scope failures retain native source until confirm
 
     harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
     const host = globalThis.window?.dawDesktop?.audioHost
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+    installGlobals({ window: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => { calls.push("release"); await rm(source) } },
     } } } })
 
@@ -516,7 +506,7 @@ test("M4 concurrent stop calls share one native Finish and one save; cleanup dur
  return { capturedFrames: 1, nativeTake: nativeProof } }
 
     const host = globalThis.window?.dawDesktop?.audioHost
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+    installGlobals({ window: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => {
         expect(await readFile(`${directory}/asset.wav`)).toEqual(Buffer.from([4, 5, 6]))
         expect(JSON.parse(await readFile(`${directory}/clip.json`, "utf8"))).toEqual({ asset: "asset:saved" })
@@ -575,7 +565,7 @@ test("M1 exact zero native source releases without asset/clip creation or false 
 
   harness.nativeController.stop = async () => ({ capturedFrames: 0, nativeTake: proof })
   const host = globalThis.window?.dawDesktop?.audioHost
-  Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+  installGlobals({ window: { ...globalThis.window, dawDesktop: { audioHost: {
     ...host, recordingSpool: { release: async (_scope: NativeRecordingScope, _take: string, receipt: NativeRecordingRelease) => {
       expect(receipt).toEqual({ ...proof.acknowledgment, savedClip: undefined })
       expect(await readFile(source)).toEqual(Buffer.alloc(0)); releases++; await rm(source)
@@ -631,7 +621,7 @@ test("a take whose target was removed is kept on a new track as one undoable ent
 
     harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
     const host = globalThis.window?.dawDesktop?.audioHost
-    Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+    installGlobals({ window: { ...globalThis.window, dawDesktop: { audioHost: {
       ...host, recordingSpool: { release: async () => undefined },
     } } } })
 
@@ -674,7 +664,7 @@ test("a take whose kept track cannot be created reports the real cause and logs 
 
   harness.nativeController.stop = async () => ({ capturedFrames: 1, nativeTake: nativeProof })
   const host = globalThis.window?.dawDesktop?.audioHost
-  Object.defineProperty(globalThis, "window", { configurable: true, value: { ...globalThis.window, dawDesktop: { audioHost: {
+  installGlobals({ window: { ...globalThis.window, dawDesktop: { audioHost: {
     ...host, recordingSpool: { release: async () => undefined },
   } } } })
   const errors: unknown[][] = []

@@ -241,7 +241,7 @@ test('cancels before source access', async () => {
         return '/sample.wav'
       },
     },
-  )).rejects.toBeDefined()
+  )).rejects.toMatchObject({ name: 'AbortError' })
   expect(reads).toBe(0)
 })
 

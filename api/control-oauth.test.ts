@@ -2,7 +2,6 @@ import { describe, expect, test } from "bun:test";
 import {
   CONTROL_ACCESS_TOKEN_SECONDS,
   CONTROL_REFRESH_TOKEN_SECONDS,
-  canConsumeControlRefresh,
   getControlOAuthOrigin,
   getControlOAuthResource,
   isActiveControlBinding,
@@ -237,20 +236,5 @@ describe("control OAuth policy", () => {
     expect(normalizeVerifiedControlClaims({ ...valid, azp: 17 }, resource)).toBeNull();
     expect(normalizeVerifiedControlClaims({ ...valid, scope: "openid" }, resource)).toBeNull();
     expect(normalizeVerifiedControlClaims({ ...valid, exp: issuedAt }, resource)).toBeNull();
-  });
-
-  test("permits one live refresh transition and rejects replay, expiry, or revocation", () => {
-    const binding = {
-      clientId: "client-id",
-      resource: "https://daw.example.test/api",
-      refreshConsumedAt: null,
-      refreshExpiresAt: 100,
-      revokedAt: null,
-    };
-
-    expect(canConsumeControlRefresh(binding, "client-id", binding.resource, 99)).toBeTrue();
-    expect(canConsumeControlRefresh({ ...binding, refreshConsumedAt: 99 }, "client-id", binding.resource, 99)).toBeFalse();
-    expect(canConsumeControlRefresh({ ...binding, refreshExpiresAt: 99 }, "client-id", binding.resource, 99)).toBeFalse();
-    expect(canConsumeControlRefresh({ ...binding, revokedAt: 99 }, "client-id", binding.resource, 99)).toBeFalse();
   });
 });

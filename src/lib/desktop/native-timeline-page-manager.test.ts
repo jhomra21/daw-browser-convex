@@ -598,7 +598,7 @@ test("detaches one canceled caller from shared page hydration", async () => {
   firstController.abort()
   releaseWrite?.()
 
-  await expect(first).rejects.toBeDefined()
+  await expect(first).rejects.toMatchObject({ name: "AbortError" })
   await expect(second).resolves.toBeUndefined()
   expect(writes).toBe(1)
   manager.dispose()

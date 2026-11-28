@@ -119,7 +119,7 @@ test("preview is write-free and commit replays persisted client refs", async () 
 
   const track = first.resolvedRefs[0];
   expect(track?.persisted).toBe(true);
-  expect(track?.id).toBeTruthy();
+  expect(track?.id).toMatch(/\S/);
 
   const replay = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {
     request: request([{ kind: "track.create", clientRef: "new-track", trackKind: "audio", name: "Created" }]),
@@ -273,7 +273,7 @@ test("restores a deleted clip through an opaque single-use recovery descriptor",
   });
 
   const descriptor = deletion.recoveries[0];
-  expect(descriptor?.id).toBeTruthy();
+  expect(descriptor?.id).toMatch(/\S/);
   expect(JSON.stringify(deletion)).not.toContain("r2Key");
 
   const restored = await t.withIdentity({ subject: owner }).mutation(api.control.commitV1, {

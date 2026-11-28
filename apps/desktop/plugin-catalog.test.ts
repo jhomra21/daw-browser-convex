@@ -248,8 +248,8 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
       scannerCatalogVersion: 2 as const,
     }
 
-    expect(scanned.entries[0]?.launchEligibility).toBeDefined()
-    expect(resolveVst3Attachment(scanned, reference)).toBeDefined()
+    expect(scanned.entries[0]?.launchEligibility).toMatchObject({ architecture: 'arm64', quarantinePresent: false, scannerProtocolVersion: 2 })
+    expect(resolveVst3Attachment(scanned, reference)).toMatchObject({ classId: reference.classId, vendorId: reference.vendorId, scannerProtocolVersion: 2 })
 
     const freshStore = createPluginCatalogStore({ filePath })
     const persisted = await freshStore.load()
@@ -257,7 +257,7 @@ test('keeps scanned eligibility in-session but strips it from a fresh persisted 
     expect(resolveVst3Attachment(persisted, reference)).toBeUndefined()
 
     const rescanned = await freshStore.scan(scanBundle)
-    expect(resolveVst3Attachment(rescanned, reference)).toBeDefined()
+    expect(resolveVst3Attachment(rescanned, reference)).toMatchObject({ classId: reference.classId, vendorId: reference.vendorId, scannerProtocolVersion: 2 })
   } finally {
     await rm(directory, { recursive: true, force: true })
   }
@@ -322,7 +322,7 @@ test('seeds standard directories and revalidates trusted entries during initiali
 
     expect(result.directories).toContain(await realpath(directory))
     expect(result.entries[0]?.hostingStatus).toBe('ready')
-    expect(result.entries[0]?.launchEligibility).toBeDefined()
+    expect(result.entries[0]?.launchEligibility).toMatchObject({ architecture: 'arm64', quarantinePresent: false, scannerProtocolVersion: 2 })
   } finally {
     await rm(directory, { recursive: true, force: true })
   }

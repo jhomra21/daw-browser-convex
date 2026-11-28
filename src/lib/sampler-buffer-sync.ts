@@ -575,12 +575,6 @@ export function createSamplerBufferSync(options: SamplerBufferSyncOptions = {}) 
     engine.instruments.setTrackSampler(trackId, params, new Map(), instanceId)
     installSamplerBuffers(trackId)
 
-    if (params.cachePolicy !== 'preload' && !options.nativeAudio?.()) {
-      notify()
-
-      return 'applied'
-    }
-
     let unique: RegionSpec[]
 
     try {

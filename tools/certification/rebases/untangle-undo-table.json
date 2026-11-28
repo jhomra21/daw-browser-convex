@@ -1,0 +1,50 @@
+{
+ "name": "untangle-undo-table",
+ "sequence": 95,
+ "createdAt": "2026-11-20T23:25:47.983Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 432,
+   "new": 435
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "6ea3eb35a977f7f056ee7bcc198832ea3eae101b",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "d16c97bedffe20af0c0f0dc78128d5d8abe63f29f415098d67527ae896dc31f3",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "d16c97bedffe20af0c0f0dc78128d5d8abe63f29f415098d67527ae896dc31f3",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b8-bless/live",
+   "resultSha256": "626e99d31693852f5e73bade1196788f54135d1d403d89460b6638b533a82fb9",
+   "seconds": 1475.727059833,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

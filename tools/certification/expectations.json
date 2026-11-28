@@ -1615,7 +1615,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 281,
+     "pass": 262,
      "skip": 1,
      "fail": 0
     },
@@ -2196,7 +2196,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 221,
+     "pass": 209,
      "skip": 0,
      "fail": 0
     },
@@ -2270,16 +2270,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-core.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/sampler-core.test.ts": {
-      "pass": 11,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/dsp-characterization.test.ts": {
       "pass": 12,
       "skip": 0,
@@ -2305,11 +2295,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-voice-allocation.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
       "pass": 13,
       "skip": 0,
@@ -2317,11 +2302,6 @@
      },
      "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
       "pass": 1,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/drum-rack-runtime.test.ts": {
-      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -2347,11 +2327,6 @@
      },
      "packages/audio-engine/src/reliability-characterization.test.ts": {
       "pass": 7,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/synth-voice.test.ts": {
-      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -2395,11 +2370,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-runtime.test.ts": {
-      "pass": 47,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-clock.test.ts": {
       "pass": 5,
       "skip": 0,
@@ -2412,11 +2382,6 @@
      },
      "packages/audio-engine/src/live-native-projection.test.ts": {
       "pass": 25,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/clip-scheduler.test.ts": {
-      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -2462,11 +2427,6 @@
      },
      "packages/audio-engine/src/media-pages.test.ts": {
       "pass": 10,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/granular-runtime.test.ts": {
-      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -2535,11 +2495,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-worklet.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-stretching.test.ts": {
       "pass": 48,
       "skip": 0,
@@ -2551,7 +2506,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-scheduling.test.ts": {
-      "pass": 14,
+      "pass": 11,
       "skip": 0,
       "fail": 0
      },
@@ -2803,7 +2758,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 281,
+     "pass": 262,
      "skip": 1,
      "fail": 0
     },
@@ -3174,16 +3129,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-core.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/sampler-core.test.ts": {
-      "pass": 11,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/dsp-characterization.test.ts": {
       "pass": 12,
       "skip": 0,
@@ -3209,11 +3154,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-voice-allocation.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/portable-export-snapshot.test.ts": {
       "pass": 13,
       "skip": 0,
@@ -3221,11 +3161,6 @@
      },
      "packages/audio-engine/src/portable-frame-scheduling.test.ts": {
       "pass": 1,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/drum-rack-runtime.test.ts": {
-      "pass": 15,
       "skip": 0,
       "fail": 0
      },
@@ -3251,11 +3186,6 @@
      },
      "packages/audio-engine/src/reliability-characterization.test.ts": {
       "pass": 7,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/synth-voice.test.ts": {
-      "pass": 8,
       "skip": 0,
       "fail": 0
      },
@@ -3299,11 +3229,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/synth-runtime.test.ts": {
-      "pass": 47,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-clock.test.ts": {
       "pass": 5,
       "skip": 0,
@@ -3316,11 +3241,6 @@
      },
      "packages/audio-engine/src/live-native-projection.test.ts": {
       "pass": 25,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/clip-scheduler.test.ts": {
-      "pass": 13,
       "skip": 0,
       "fail": 0
      },
@@ -3366,11 +3286,6 @@
      },
      "packages/audio-engine/src/media-pages.test.ts": {
       "pass": 10,
-      "skip": 0,
-      "fail": 0
-     },
-     "packages/audio-engine/src/granular-runtime.test.ts": {
-      "pass": 5,
       "skip": 0,
       "fail": 0
      },
@@ -3439,11 +3354,6 @@
       "skip": 0,
       "fail": 0
      },
-     "packages/audio-engine/src/granular-worklet.test.ts": {
-      "pass": 3,
-      "skip": 0,
-      "fail": 0
-     },
      "packages/audio-engine/src/audio-stretching.test.ts": {
       "pass": 48,
       "skip": 0,
@@ -3455,7 +3365,7 @@
       "fail": 0
      },
      "packages/audio-engine/src/audio-scheduling.test.ts": {
-      "pass": 14,
+      "pass": 11,
       "skip": 0,
       "fail": 0
      },
@@ -3640,7 +3550,7 @@
     "kind": "tests",
     "exit": 0,
     "counts": {
-     "pass": 221,
+     "pass": 209,
      "skip": 0,
      "fail": 0
     },
@@ -22402,7 +22312,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -22463,7 +22373,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 268,
+      "pass": 249,
       "skip": 1,
       "fail": 13
      },
@@ -22907,7 +22817,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -22968,7 +22878,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -23156,7 +23066,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -23223,7 +23133,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -23401,7 +23311,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -23462,7 +23372,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -24008,7 +23918,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -24069,7 +23979,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 257,
       "skip": 1,
       "fail": 5
      },
@@ -24757,7 +24667,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -24818,7 +24728,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -24999,7 +24909,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -25060,7 +24970,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -25243,7 +25153,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -25304,7 +25214,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 276,
+      "pass": 257,
       "skip": 1,
       "fail": 5
      },
@@ -25637,7 +25547,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -25710,7 +25620,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -25908,7 +25818,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -25981,7 +25891,7 @@
      "exit": 1,
      "applied": 3,
      "counts": {
-      "pass": 273,
+      "pass": 254,
       "skip": 1,
       "fail": 8
      },
@@ -26167,7 +26077,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -26228,7 +26138,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -27508,7 +27418,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -27569,7 +27479,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -27873,7 +27783,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -27934,7 +27844,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -28128,7 +28038,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -28189,7 +28099,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -28368,7 +28278,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -28426,16 +28336,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -28968,7 +28876,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -29029,7 +28937,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -29208,7 +29116,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -29269,7 +29177,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -29572,7 +29480,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -29633,7 +29541,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -29935,7 +29843,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -29996,7 +29904,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -30417,7 +30325,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -30478,7 +30386,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -30643,7 +30551,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -30830,7 +30738,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 274,
+      "pass": 255,
       "skip": 1,
       "fail": 7
      },
@@ -31001,7 +30909,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -31185,7 +31093,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -32675,7 +32583,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -32860,7 +32768,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -33027,7 +32935,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -33212,7 +33120,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -33379,7 +33287,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -33569,7 +33477,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 266,
+      "pass": 247,
       "skip": 1,
       "fail": 15
      },
@@ -33750,7 +33658,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -33936,7 +33844,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -34104,7 +34012,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -34289,7 +34197,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -34457,7 +34365,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -34642,7 +34550,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -34812,7 +34720,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -34997,7 +34905,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -35163,7 +35071,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -35351,7 +35259,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -35521,7 +35429,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -35708,7 +35616,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -35876,7 +35784,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -36061,7 +35969,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -36228,7 +36136,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -36413,7 +36321,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -36580,7 +36488,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -36765,7 +36673,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -36932,7 +36840,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -37117,7 +37025,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -37284,7 +37192,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -37469,7 +37377,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -37691,7 +37599,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -37937,7 +37845,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -38161,7 +38069,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -38409,7 +38317,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -38632,7 +38540,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -38878,7 +38786,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -39155,7 +39063,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -39463,7 +39371,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -39743,7 +39651,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -40054,7 +39962,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -40348,7 +40256,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -40655,7 +40563,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -40932,7 +40840,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -41239,7 +41147,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -47877,7 +47785,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -48063,7 +47971,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -48742,7 +48650,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -48928,7 +48836,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -49336,7 +49244,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -49522,7 +49430,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -50732,7 +50640,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -50855,7 +50763,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 277,
+      "pass": 258,
       "skip": 1,
       "fail": 4
      },
@@ -50968,7 +50876,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -51090,7 +50998,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -51200,7 +51108,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -51320,7 +51228,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -51430,7 +51338,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -51608,7 +51516,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -51780,7 +51688,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -51958,7 +51866,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -52130,7 +52038,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -52308,7 +52216,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -52480,7 +52388,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -52658,7 +52566,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -52830,7 +52738,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -52952,7 +52860,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -63574,7 +63482,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -63641,7 +63549,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 261,
+      "pass": 242,
       "skip": 1,
       "fail": 20
      },
@@ -63723,7 +63631,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -63803,7 +63711,7 @@
      "exit": 0,
      "applied": 1,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -63870,7 +63778,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -63940,7 +63848,7 @@
      "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -64007,7 +63915,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -64077,7 +63985,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -64146,7 +64054,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -64226,7 +64134,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 263,
+      "pass": 244,
       "skip": 1,
       "fail": 18
      },
@@ -64312,7 +64220,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -64380,16 +64288,14 @@
     "materialize": [],
     "rejectionGate": false,
     "expect": {
-     "exit": 1,
+     "exit": 0,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 262,
       "skip": 1,
-      "fail": 1
+      "fail": 0
      },
-     "fails": [
-      "a Pause that cancels a pending legacy Play requests no native preview while native playback is disabled"
-     ],
+     "fails": [],
      "fuzz": null,
      "rejection": null,
      "tsErrors": null,
@@ -64521,7 +64427,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -64590,7 +64496,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -64659,7 +64565,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -64729,7 +64635,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -64798,7 +64704,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -64862,7 +64768,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -64917,7 +64823,7 @@
      "exit": 0,
      "applied": 0,
      "counts": {
-      "pass": 281,
+      "pass": 262,
       "skip": 1,
       "fail": 0
      },
@@ -64978,7 +64884,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -65510,7 +65416,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -65579,7 +65485,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -65644,7 +65550,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -65714,7 +65620,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 279,
+      "pass": 260,
       "skip": 1,
       "fail": 2
      },
@@ -65778,7 +65684,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },
@@ -65847,7 +65753,7 @@
      "exit": 1,
      "applied": 2,
      "counts": {
-      "pass": 278,
+      "pass": 259,
       "skip": 1,
       "fail": 3
      },
@@ -65912,7 +65818,7 @@
      "exit": 1,
      "applied": 1,
      "counts": {
-      "pass": 280,
+      "pass": 261,
       "skip": 1,
       "fail": 1
      },

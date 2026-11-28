@@ -1,6 +1,6 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor, onSettled, createTrackedEffect } from 'solid-js'
 
-import type { AudioEngine, LiveMidiNoteHandle } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { createStoredValue } from '~/lib/stored-value'
 import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
@@ -17,6 +17,7 @@ import { createAuditionReleaseTimerOwnership } from '~/lib/audition-release-time
 
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
+import type { PortableLiveNoteHandle } from '~/lib/portable-browser-playback-controller'
 import { desktopBridge } from '~/lib/runtime'
 
 type UseTimelineMidiOverlayOptions = {
@@ -37,6 +38,10 @@ type UseTimelineMidiOverlayOptions = {
     stop: (handle: NativeLiveMidiNoteHandle, force?: boolean) => void
     subscribeReset?: (listener: () => void) => () => boolean
   }
+  portableLiveMidi?: {
+    start: (note: { trackId: string; pitch: number; velocity: number }) => PortableLiveNoteHandle | undefined
+    stop: (handle: PortableLiveNoteHandle, force?: boolean) => void
+  }
 }
 
 type UseTimelineMidiOverlayReturn = {
@@ -52,9 +57,7 @@ type UseTimelineMidiOverlayReturn = {
   }
 }
 
-type LiveBackendHandle =
-  | { backend: 'native'; handle: NativeLiveMidiNoteHandle }
-  | { backend: 'browser'; handle: LiveMidiNoteHandle }
+type LiveBackendHandle = NativeLiveMidiNoteHandle | PortableLiveNoteHandle
 
 type LiveNote =
   | { handle: number; arpeggiator: ReturnType<typeof createLiveMidiArpeggiator<LiveBackendHandle>> }
@@ -186,7 +189,36 @@ export function useTimelineMidiOverlay(
     }
   }
 
+  // Every note, played or arpeggiated, goes to the native host or to the portable session; neither is timed from here.
+  const liveNoteBackend = {
+    start: (note: { trackId: string; pitch: number; velocity: number }): LiveBackendHandle | undefined => {
+      if (
+        options.nativeLiveMidi
+        && !midiSuspended
+        && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
+      ) {
+        const handle = options.nativeLiveMidi.start(note)
+
+        if (handle) return handle
+      }
+
+      if (requiresNativeAudio) return undefined
+
+      options.audioEngine.ensureAudio()
+      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
+
+      return options.portableLiveMidi?.start(note)
+    },
+    stop: (handle: LiveBackendHandle, release: LiveMidiArpeggiatorRelease = {}) => {
+      const force = release.force === true
+
+      if (handle.backend === 'native') options.nativeLiveMidi?.stop(handle, force)
+      else options.portableLiveMidi?.stop(handle, force)
+    },
+  }
+
   const liveArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
+    ...liveNoteBackend,
     getConfig: () => {
       const trackId = resolveTargetTrackId()
 
@@ -195,47 +227,6 @@ export function useTimelineMidiOverlay(
         params: trackId ? options.audioEngine.instruments.getTrackArpeggiator(trackId) : undefined,
         bpm: options.bpm(),
       }
-    },
-    start: (note) => {
-      if (
-        options.nativeLiveMidi
-        && !midiSuspended
-        && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
-      ) {
-        const handle = options.nativeLiveMidi.start(note)
-
-        if (handle) return { backend: 'native', handle }
-      }
-
-      if (requiresNativeAudio) {
-        return undefined
-      }
-
-      options.audioEngine.ensureAudio()
-      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
-
-      const handle = options.audioEngine.startLiveMidiNote({
-        ...note,
-        when: note.when ?? options.audioEngine.currentTime,
-      })
-
-      return handle ? { backend: 'browser', handle } : undefined
-    },
-    stop: (handle, release: LiveMidiArpeggiatorRelease = {}) => {
-      const force = release.force === true
-
-      if (handle.backend === 'native') {
-        options.nativeLiveMidi?.stop(handle.handle, force)
-
-        return
-      }
-
-      if (!requiresNativeAudio) options.audioEngine.releaseLiveMidiNote(
-        handle.handle,
-        release.when ?? options.audioEngine.currentTime,
-        force,
-        release.reason === 'gate',
-      )
     },
   })
 
@@ -264,103 +255,28 @@ export function useTimelineMidiOverlay(
     forceStopAllLiveNotes()
   }
 
-  const previewInstrumentNote = (trackId: string, pitch: number, velocity: number) => {
-    const instrumentKind = options.audioEngine.getTrackInstrumentKind(trackId)
-
-    if (instrumentKind === 'drum-rack') return options.audioEngine.instruments.previewDrumRackNote(trackId, pitch, velocity)
-
-    if (instrumentKind === 'sampler') return options.audioEngine.instruments.previewSamplerNote(trackId, pitch, velocity)
-
-    if (instrumentKind === 'synth') return options.audioEngine.instruments.previewSynthNote(trackId, pitch, velocity) !== undefined
-
-    return false
-  }
-
   const auditionNote = (trackId: string, pitch: number, velocity = DEFAULT_NOTE_VELOCITY, durSec = 0.35) => {
     try {
       if (!isPlayableMidiTrack(trackIndex().trackById.get(trackId))) return
 
       const auditionArpeggiator = createLiveMidiArpeggiator<LiveBackendHandle>({
+        ...liveNoteBackend,
         getConfig: () => ({
           trackId,
           params: options.audioEngine.instruments.getTrackArpeggiator(trackId),
           bpm: options.bpm(),
         }),
-        start: (note) => {
-          if (
-            options.nativeLiveMidi
-            && !midiSuspended
-            && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
-          ) {
-            const handle = options.nativeLiveMidi.start(note)
-
-            if (handle) return { backend: 'native', handle }
-          }
-
-          if (requiresNativeAudio) {
-            return undefined
-          }
-
-          options.audioEngine.ensureAudio()
-          bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
-
-          const handle = options.audioEngine.startLiveMidiNote({
-            ...note,
-            when: note.when ?? options.audioEngine.currentTime,
-          })
-
-          return handle ? { backend: 'browser', handle } : undefined
-        },
-        stop: (handle, release: LiveMidiArpeggiatorRelease = {}) => {
-          const force = release.force === true
-
-          if (handle.backend === 'native') {
-            options.nativeLiveMidi?.stop(handle.handle, force)
-
-            return
-          }
-
-          if (!requiresNativeAudio) options.audioEngine.releaseLiveMidiNote(
-            handle.handle,
-            release.when ?? options.audioEngine.currentTime,
-            force,
-            release.reason === 'gate',
-          )
-        },
       })
 
       stopLiveNote(pitch, true)
 
-      if (requiresNativeAudio) {
-        const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
-
-        if (sourceId === undefined) return
-        activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
-        // UI audition notes have no sustained pointer lifecycle; this bounded
-        // one-shot note-off prevents a successful native preview from hanging.
-        auditionReleaseTimers.schedule(pitch, Math.max(0, durSec * 1000), () => stopLiveNote(pitch, true))
-
-        return
-      }
-
-      options.audioEngine.ensureAudio()
-      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
       const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
 
-      if (sourceId !== undefined) {
-        activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
-        auditionReleaseTimers.schedule(pitch, Math.max(0, durSec * 1000), () => stopLiveNote(pitch, true))
-
-        return
-      }
-
-      if (options.audioEngine.getTrackInstrumentKind(trackId) === 'synth') {
-        options.audioEngine.instruments.previewSynthNote(trackId, pitch, velocity, durSec)
-
-        return
-      }
-
-      previewInstrumentNote(trackId, pitch, velocity)
+      if (sourceId === undefined) return
+      activeLiveNotes.set(pitch, { handle: sourceId, arpeggiator: auditionArpeggiator })
+      // UI audition notes have no sustained pointer lifecycle; this bounded
+      // one-shot note-off prevents a successful preview from hanging.
+      auditionReleaseTimers.schedule(pitch, Math.max(0, durSec * 1000), () => stopLiveNote(pitch, true))
     } catch {}
   }
 
@@ -582,8 +498,6 @@ export function useTimelineMidiOverlay(
           nativeMidiReady = false
           forceStopAllLiveNotes()
           restoreLiveMappings()
-
-          if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
         } else {
           midiSuspended = false
           nativeMidiReady = lifecycle.state === "ready"
@@ -602,8 +516,6 @@ export function useTimelineMidiOverlay(
       removeAudioLifecycle?.()
       forceStopAllLiveNotes()
       restoreLiveMappings()
-
-      if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
     }
   })
 
@@ -612,8 +524,6 @@ export function useTimelineMidiOverlay(
     forceStopAllLiveNotes()
     auditionReleaseTimers.clear()
     restoreLiveMappings()
-
-    if (!requiresNativeAudio) options.audioEngine.panicLiveMidi()
   })
 
   return {

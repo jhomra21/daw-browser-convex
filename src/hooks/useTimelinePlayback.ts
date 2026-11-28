@@ -2299,6 +2299,21 @@ export function useTimelinePlayback(
       stop: nativePlayback.releaseLiveMidiNote,
       subscribeReset: nativePlayback.subscribeNativeLiveMidiReset,
     },
+    portableLiveMidi: {
+      // The transport prepares the paused session at the playhead when no session exists yet; the note waits for it.
+      start: (note: { trackId: string; pitch: number; velocity: number }) => {
+        if (requiresNativeAudio || !portableBrowserOptions) return undefined
+        const { isActive, start, end } = getLoopParams()
+
+        return portableBrowserPlayback.startLiveNote({
+          trackId: note.trackId,
+          pitch: note.pitch,
+          velocity: note.velocity,
+          transport: { state: "paused", playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end },
+        })
+      },
+      stop: portableBrowserPlayback.releaseLiveNote,
+    },
     subscribeTrackLevels,
     subscribeMasterLevels,
     subscribeSpectrum,

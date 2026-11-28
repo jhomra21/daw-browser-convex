@@ -6,7 +6,11 @@ test('live MIDI follows the docked clip and lifecycle, and lane clicks seek only
   const results = await runBrowserFixture(new URL('./timeline-input.browser-runtime.tsx', import.meta.url))
   expect(Object.keys(results).sort()).toEqual([
     'bpm-change-keeps-held-notes',
+    'browser-audition-sends-note-off-after-its-duration',
+    'browser-audition-sends-note-on-to-the-portable-session',
+    'browser-audition-unmount-force-releases-the-portable-note',
     'browser-engine-plays-when-no-native-backend-exists',
+    'browser-keyboard-note-off-reaches-the-portable-session',
     'click-does-not-seek-while-playing',
     'click-seeks-without-listening-while-stopped',
     'click-selects-the-clicked-track-while-playing',

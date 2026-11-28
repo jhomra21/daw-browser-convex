@@ -7,6 +7,7 @@ import type { Track } from '@daw-browser/timeline-core/types'
 import { AppPreferencesProvider } from '~/context/app-preferences'
 import { MidiAccessProvider } from '~/context/midi-access'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
+import type { PortableLiveNoteHandle } from '~/lib/portable-browser-playback-controller'
 import { defaultAppPreferences } from '~/lib/preferences/app-preferences'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
 import type { DesktopAudioLifecycle } from '~/types/desktop-bridge'
@@ -60,6 +61,29 @@ const createNative = (state: { available: boolean }) => {
   }
 }
 
+type PortableCall = { kind: 'start' | 'stop'; trackId: string; pitch: number; velocity?: number; force?: boolean }
+
+// Stands in for the portable session's live-note API: what the hook sends there is what the core would receive.
+const createPortable = () => {
+  const calls: PortableCall[] = []
+  let nextNoteId = 1
+
+  return {
+    calls,
+    starts: () => calls.flatMap((call) => call.kind === 'start' ? [call.pitch] : []),
+    port: {
+      start: (note: { trackId: string; pitch: number; velocity: number }): PortableLiveNoteHandle => {
+        calls.push({ kind: 'start', trackId: note.trackId, pitch: note.pitch, velocity: note.velocity })
+
+        return { backend: 'portable', trackId: note.trackId, pitch: note.pitch, noteId: nextNoteId++ }
+      },
+      stop: (handle: PortableLiveNoteHandle, force?: boolean) => {
+        calls.push({ kind: 'stop', trackId: handle.trackId, pitch: handle.pitch, force })
+      },
+    },
+  }
+}
+
 const mountOverlay = (config: {
   tracks: Track[]
   requiresNativeAudio?: boolean
@@ -68,11 +92,7 @@ const mountOverlay = (config: {
 }) => {
   const projectId = `project:${crypto.randomUUID()}`
   const engine = new AudioEngine()
-  const browserStarts: number[] = []
-  const startLiveMidiNote = engine.startLiveMidiNote.bind(engine)
-  engine.startLiveMidiNote = (note) => { browserStarts.push(note.pitch);
-
- return startLiveMidiNote(note) }
+  const portable = createPortable()
 
   const [bpm, setBpm] = createSignal(120)
   const [docked, setDocked] = createSignal<string | null>(config.dockedClipId ?? null)
@@ -98,6 +118,7 @@ const mountOverlay = (config: {
             selection,
             dockedMidiClipId: docked,
             nativeLiveMidi: config.native?.port,
+            portableLiveMidi: portable.port,
           })
 
           return null
@@ -116,7 +137,7 @@ const mountOverlay = (config: {
   return {
     overlay,
     selection,
-    browserStarts,
+    portable,
     setBpm,
     setDocked,
     unmount: () => { dispose(); host.remove() },
@@ -158,7 +179,7 @@ const runMidiScenarios = async () => {
     press('KeyA')
     release('KeyA')
     scenarios['native-required-stays-off-the-browser-engine-while-native-is-pending'] =
-      mounted.browserStarts.length === 0 && native.calls.every((call) => call.kind === 'start')
+      mounted.portable.calls.length === 0 && native.calls.every((call) => call.kind === 'start')
     mounted.unmount()
   }
 
@@ -171,16 +192,38 @@ const runMidiScenarios = async () => {
     const stopped = native.calls.at(-1)
     scenarios['keyboard-note-routes-to-the-docked-clip-track-on-native'] =
       started?.kind === 'start' && started.trackId === 'a' && started.pitch === 60
-      && stopped?.kind === 'stop' && stopped.pitch === 60 && mounted.browserStarts.length === 0
+      && stopped?.kind === 'stop' && stopped.pitch === 60 && mounted.portable.calls.length === 0
     mounted.unmount()
   }
 
   {
     const mounted = mountOverlay({ tracks: instrument, dockedClipId: 'clip:a' })
     press('KeyA')
-    scenarios['browser-engine-plays-when-no-native-backend-exists'] = mounted.browserStarts.includes(60)
+    scenarios['browser-engine-plays-when-no-native-backend-exists'] = mounted.portable.starts().includes(60)
     release('KeyA')
+    const stopped = mounted.portable.calls.at(-1)
+    scenarios['browser-keyboard-note-off-reaches-the-portable-session'] =
+      stopped?.kind === 'stop' && stopped.trackId === 'a' && stopped.pitch === 60
     mounted.unmount()
+  }
+
+  {
+    const mounted = mountOverlay({ tracks: instrument, dockedClipId: 'clip:a' })
+    mounted.overlay.auditionNote('b', 64, 0.5, 0.01)
+    const [started] = mounted.portable.calls
+    scenarios['browser-audition-sends-note-on-to-the-portable-session'] =
+      mounted.portable.calls.length === 1 && started?.kind === 'start'
+      && started.trackId === 'b' && started.pitch === 64 && started.velocity === 0.5
+    // The audition's bounded release timer is the only thing that can end the note.
+    await new Promise<void>((resolve) => setTimeout(resolve, 50))
+    const stopped = mounted.portable.calls.at(-1)
+    scenarios['browser-audition-sends-note-off-after-its-duration'] =
+      mounted.portable.calls.length === 2 && stopped?.kind === 'stop' && stopped.trackId === 'b' && stopped.pitch === 64
+    mounted.overlay.auditionNote('b', 65, 1, 5)
+    mounted.unmount()
+    const forced = mounted.portable.calls.at(-1)
+    scenarios['browser-audition-unmount-force-releases-the-portable-note'] =
+      forced?.kind === 'stop' && forced.pitch === 65 && forced.force === true
   }
 
   {
@@ -249,7 +292,7 @@ const runMidiScenarios = async () => {
     press('KeyA')
     release('KeyA')
     scenarios['native-waits-for-ready-lifecycle'] =
-      native.calls.length === 0 && mounted.browserStarts.includes(60)
+      native.calls.length === 0 && mounted.portable.starts().includes(60)
     emit({ state: 'ready', powerGeneration: 2 })
     press('KeyS')
     scenarios['ready-lifecycle-routes-to-native'] =
@@ -259,10 +302,10 @@ const runMidiScenarios = async () => {
     scenarios['suspended-lifecycle-force-releases-held-notes'] =
       suspended?.kind === 'stop' && suspended.pitch === 62 && suspended.force === true
     const before = native.calls.length
-    const browserBefore = mounted.browserStarts.length
+    const browserBefore = mounted.portable.calls.length
     press('KeyD')
     scenarios['suspended-lifecycle-blocks-new-notes'] =
-      native.calls.length === before && mounted.browserStarts.length === browserBefore
+      native.calls.length === before && mounted.portable.calls.length === browserBefore
     mounted.unmount()
   })
 }

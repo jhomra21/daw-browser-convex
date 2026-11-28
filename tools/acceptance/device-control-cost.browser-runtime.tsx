@@ -850,6 +850,7 @@ const mount = async (device: Device, engineMode: EngineMode) => {
       sidechainRoutes={[]}
       onClose={() => undefined}
       onOpen={() => undefined}
+      onPreviewNote={() => undefined}
       clipTab={{ canOpen: false, onOpen: () => undefined }}
       audioEngine={engine}
       projectId={activeProject()}

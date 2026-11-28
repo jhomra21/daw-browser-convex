@@ -632,6 +632,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     portableRecording,
     nativeRecording,
     nativeLiveMidi,
+    portableLiveMidi,
     subscribeTrackLevels,
     subscribeMasterLevels,
     subscribeSpectrum,
@@ -1126,6 +1127,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     selection,
     activeRecordingTargetId: activeMidiRecordingTargetId,
     nativeLiveMidi,
+    portableLiveMidi,
     dockedMidiClipId: () =>
       bottomPanel.open() && bottomPanel.mode() === "clip-detail"
         ? (sampleDetail.selectedMidiClip()?.id ?? null)

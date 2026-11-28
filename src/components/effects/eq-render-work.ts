@@ -1,36 +1,3 @@
-type EqFrameScheduler = {
-  request: (callback: (time: number) => void) => number
-  cancel: (id: number) => void
-}
-
-export const createOneShotEqFrameScheduler = (
-  scheduler: EqFrameScheduler,
-  draw: (time: number) => void,
-) => {
-  let pending: number | null = null
-
-  const invalidate = () => {
-    if (pending !== null) return
-    pending = scheduler.request((time) => {
-      pending = null
-      draw(time)
-    })
-  }
-
-  const dispose = () => {
-    if (pending === null) return
-    scheduler.cancel(pending)
-    pending = null
-  }
-
-  return { invalidate, dispose }
-}
-
-/**
- * A fixed-radius moving average keeps spectrum smoothing bounded and linear.
- * The caller owns the reusable output buffer so pointer and display frames do
- * not allocate. The injected scheduler is likewise cancelled by the owner.
- */
 export const smoothSpectrumLinear = (
   values: Float32Array,
   output: Float32Array,

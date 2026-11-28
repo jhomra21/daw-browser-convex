@@ -1,5 +1,4 @@
 import { expect, test } from 'bun:test'
-import { sha256 } from '@noble/hashes/sha2.js'
 import { hashFile } from './hash-file'
 
 test('hashes a file incrementally without reading the whole file', async () => {
@@ -19,7 +18,5 @@ test('hashes a file incrementally without reading the whole file', async () => {
     }),
   })
 
-  await expect(hashFile(file)).resolves.toBe(
-    Array.from(sha256(Uint8Array.from([1, 2, 3, 4, 5])), (byte) => byte.toString(16).padStart(2, '0')).join(''),
-  )
+  await expect(hashFile(file)).resolves.toBe('74f81fe167d99b4cb41d6d0ccda82278caee9f3e2f25d5e5a3936ff3dcec60d0')
 })

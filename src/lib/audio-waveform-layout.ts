@@ -1,7 +1,6 @@
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
-import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
 import type {
   WaveformByteIntervals,
   WaveformFloatIntervals,
@@ -48,13 +47,6 @@ export type ProjectedWaveformData = CroppedWaveformData & {
 }
 
 const roundSeconds = (value: number) => Math.round(value * 1_000_000_000) / 1_000_000_000
-const SOURCE_BEAT_OFFSET_SNAP = 0.25
-
-const normalizeSourceBeatOffsetForDrag = (value: number, snap: boolean) => {
-  const snapped = snap ? Math.round(value / SOURCE_BEAT_OFFSET_SNAP) * SOURCE_BEAT_OFFSET_SNAP : value
-
-  return normalizeSourceBeatOffsetValue(snapped)
-}
 
 const clampSource = (value: number, start: number, end: number) => (
   Math.max(start, Math.min(end, value))
@@ -158,36 +150,6 @@ export const cropWaveformDataToSourceRange = (input: {
     sourceStartFrame: exactStartFrame,
     sourceEndFrame: exactEndFrame,
   }
-}
-
-export const getSourceBeatOffsetAnchorX = (input: {
-  sourceBeatOffset: number
-  clipDurationSec: number
-  cssWidthPx: number
-  projectBpm: number
-  leftPadSec?: number
-}) => {
-  const secondsPerBeat = 60 / Math.max(1, input.projectBpm)
-  const timelineOffsetSec = Math.max(0, input.leftPadSec ?? 0) + input.sourceBeatOffset * secondsPerBeat
-
-  return (timelineOffsetSec / Math.max(1e-6, input.clipDurationSec)) * input.cssWidthPx
-}
-
-export const getSourceBeatOffsetFromAnchorX = (input: {
-  anchorX: number
-  clipDurationSec: number
-  cssWidthPx: number
-  projectBpm: number
-  leftPadSec?: number
-  snap: boolean
-}) => {
-  const timelineOffsetSec = (input.anchorX / Math.max(1, input.cssWidthPx)) * Math.max(1e-6, input.clipDurationSec)
-  const secondsPerBeat = 60 / Math.max(1, input.projectBpm)
-
-  return normalizeSourceBeatOffsetForDrag(
-    (timelineOffsetSec - Math.max(0, input.leftPadSec ?? 0)) / secondsPerBeat,
-    input.snap,
-  )
 }
 
 export function getAudioWaveformLayout(

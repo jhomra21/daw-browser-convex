@@ -1566,7 +1566,7 @@ test("serializes suspend-resume-suspend without reviving the old child", async (
     await Promise.all([firstSuspend, firstResume, secondSuspend])
     await expect(fixture.supervisor.start()).rejects.toThrow("suspended")
     await fixture.supervisor.resume()
-    await expect(fixture.supervisor.start()).resolves.toBeDefined()
+    await expect(fixture.supervisor.start()).resolves.toMatchObject({ abiVersion: expect.any(Number), artifactId: expect.any(String) })
   } finally {
     await fixture.supervisor.teardown()
     await fixture.dispose()
@@ -2633,7 +2633,7 @@ test("queues the device inventory behind a control request that is awaiting its 
     await fixture.supervisor.start()
     const diagnostics = fixture.supervisor.diagnostics()
     const inventory = fixture.supervisor.listDevices()
-    await expect(diagnostics).resolves.toBeDefined()
+    await expect(diagnostics).resolves.toMatchObject({ transportFrame: expect.any(BigInt) })
     expect((await inventory).map((device) => device.deviceId)).toEqual(["coreaudio:fixture-input", "coreaudio:fixture"])
   } finally {
     await fixture.supervisor.teardown()

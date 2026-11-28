@@ -1,10 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import {
-  getAudioWaveformLayout,
-  getSourceBeatOffsetAnchorX,
-  getSourceBeatOffsetFromAnchorX,
-} from '~/lib/audio-waveform-layout'
+import { getAudioWaveformLayout } from '~/lib/audio-waveform-layout'
 import { DEFAULT_PIXELS_PER_SECOND } from '~/lib/timeline-view'
 import { getAudioBufferPlaybackParams } from '@daw-browser/audio-engine/audio-scheduling'
 import { getAudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
@@ -20,68 +16,6 @@ const createClip = (input) => ({
 })
 
 describe('source beat offset marker helpers', () => {
-  test('maps beat offsets to the sample detail beat grid pixels', () => {
-    expect(getSourceBeatOffsetAnchorX({
-      sourceBeatOffset: 1,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-    })).toBe(120)
-  })
-
-  test('inverts sample detail beat grid pixels back to beat offsets', () => {
-    expect(getSourceBeatOffsetFromAnchorX({
-      anchorX: 120,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-      snap: true,
-    })).toBe(1)
-  })
-
-  test('accounts for left padding when mapping marker position', () => {
-    const x = getSourceBeatOffsetAnchorX({
-      sourceBeatOffset: 1,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-      leftPadSec: 0.5,
-    })
-
-    expect(x).toBe(240)
-    expect(getSourceBeatOffsetFromAnchorX({
-      anchorX: x,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-      leftPadSec: 0.5,
-      snap: true,
-    })).toBe(1)
-  })
-
-  test('snaps before clamping and rounds drag offsets', () => {
-    const readOffset = (beatOffset, snap) => getSourceBeatOffsetFromAnchorX({
-      anchorX: beatOffset * 120,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-      snap,
-    })
-
-    expect(readOffset(1.13, true)).toBe(1.25)
-    expect(readOffset(1.2345, false)).toBe(1.235)
-    expect(readOffset(18.2, true)).toBe(16)
-    expect(readOffset(-18.2, true)).toBe(-16)
-  })
-
-  test('uses project BPM for source beat offsets to match playback timing', () => {
-    expect(getSourceBeatOffsetAnchorX({
-      sourceBeatOffset: 1,
-      clipDurationSec: 4,
-      cssWidthPx: 960,
-      projectBpm: 120,
-    })).toBe(120)
-  })
 })
 
 describe('canonical clip timing integration', () => {

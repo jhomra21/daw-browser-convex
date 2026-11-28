@@ -3,31 +3,13 @@ import { mkdir, rm } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 test('dense-track resize keeps its bounds and does not rescan clips per move', async () => {
   const directory = `/tmp/daw-clip-resize-${crypto.randomUUID()}`
   const session = `daw-clip-resize-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], {
-      env,
-      stdout: 'pipe',
-      stderr: 'pipe',
-    })
-
-    const [stdout, stderr] = await Promise.all([
-      new Response(child.stdout).text(),
-      new Response(child.stderr).text(),
-    ])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
 

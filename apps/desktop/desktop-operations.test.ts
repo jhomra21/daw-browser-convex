@@ -2,8 +2,6 @@ import { expect, test } from "bun:test"
 import { desktopOperations } from "./desktop-operations"
 
 test("advertises static local control operations independently of native media", () => {
-  expect(desktopOperations(false)).toHaveLength(15)
-  expect(desktopOperations(true)).toHaveLength(23)
   expect(desktopOperations(false)).toEqual([
     "host.status",
     "transport.status", "transport.play", "transport.pause", "transport.stop", "transport.seek",

@@ -10,6 +10,7 @@ import { saveHistory } from '~/lib/timeline-storage'
 
 import { execRedo, execUndo } from './exec'
 import type { HistoryEntry } from './types'
+import { installGlobals } from '~/test-support/install-globals'
 
 class MemoryStorage {
   private values = new Map<string, string>()
@@ -176,19 +177,21 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
     },
   }
 
-  const previousWindow = globalThis.window
-  const previousLocalStorage = globalThis.localStorage
   const storage = new MemoryStorage()
   const originalMutation = convexClient.mutation
   const mutationCalls: JsonValue[] = []
-  Reflect.set(globalThis, 'window', {
+
+  const restoreGlobals = installGlobals({
+    window: {
+      localStorage: storage,
+      addEventListener: () => undefined,
+      removeEventListener: () => undefined,
+      setTimeout: globalThis.setTimeout,
+      clearTimeout: globalThis.clearTimeout,
+    },
     localStorage: storage,
-    addEventListener: () => undefined,
-    removeEventListener: () => undefined,
-    setTimeout: globalThis.setTimeout,
-    clearTimeout: globalThis.clearTimeout,
   })
-  Reflect.set(globalThis, 'localStorage', storage)
+
   Reflect.set(convexClient, 'mutation', async (...arguments_: Parameters<typeof convexClient.mutation>) => {
     const [, args] = arguments_
     const persistedArgs: JsonValue = JSON.parse(JSON.stringify(args))
@@ -204,8 +207,7 @@ test('merges persisted queued deletion recoveries before reporting an in-memory 
     await execUndo(inMemoryEntry, deps(projectId, [inMemoryEntry], inserted))
   } finally {
     Reflect.set(convexClient, 'mutation', originalMutation)
-    Reflect.set(globalThis, 'window', previousWindow)
-    Reflect.set(globalThis, 'localStorage', previousLocalStorage)
+    restoreGlobals()
   }
 
   expect(inMemoryEntry.data.items[0]?.clip.recoveryId).toBe(recoveryId)

@@ -3,7 +3,12 @@ import {
   OWNED_PROCESSOR_KINDS,
   OWNED_PROCESSOR_PARAMETER_IDS,
 } from '@daw-browser/shared'
-import { ownedProcessorAudioParamValues } from './owned-processor-audio-descriptors'
+import { normalizeOwnedProcessorAudioState, ownedProcessorAudioParamValuesFromState } from './owned-processor-audio-descriptors'
+
+const ownedProcessorAudioParamValues = (
+  kind: Parameters<typeof normalizeOwnedProcessorAudioState>[0],
+  params: Parameters<typeof normalizeOwnedProcessorAudioState>[1],
+) => ownedProcessorAudioParamValuesFromState(kind, normalizeOwnedProcessorAudioState(kind, params))
 
 describe('owned processor audio descriptors', () => {
   test('binds every declared AudioParam for every owned processor kind', () => {

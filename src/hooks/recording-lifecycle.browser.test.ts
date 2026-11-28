@@ -4,6 +4,7 @@ import { z } from 'zod'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 const fixture = `
 import { createComponent, createEffect, createRoot, createSignal, onCleanup } from 'solid-js'
@@ -2264,17 +2265,7 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
   const directory = `/tmp/daw-recording-lifecycle-${crypto.randomUUID()}`
   const session = `daw-recording-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
 

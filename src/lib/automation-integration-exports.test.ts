@@ -1,7 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { AutomationEnvelope } from '@daw-browser/shared'
 import { buildAutomationEnvelopeHistoryEntry } from '~/lib/undo/builders'
-import { loadLocalAutomationEnvelopes, replaceLocalAutomationEnvelopes } from '~/lib/local-automation'
 
 const envelope: AutomationEnvelope = {
   id: 'automation-1',
@@ -30,8 +29,4 @@ describe('automation integration exports', () => {
     })
   })
 
-  test('keeps local automation persistence API available', () => {
-    expect(loadLocalAutomationEnvelopes).toBeFunction()
-    expect(replaceLocalAutomationEnvelopes).toBeFunction()
-  })
 })

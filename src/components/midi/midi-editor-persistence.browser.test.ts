@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 // Chromium drives the real MIDI editor component. Projects, clips, and writes
 // use the production IndexedDB repository and local-control persistence path.
@@ -405,18 +406,7 @@ test('MIDI editor pointer-created notes persist in local IndexedDB and survive r
   await mkdir(retainedEvidenceDirectory, { recursive: true })
   await Bun.write(`${directory}/index.html`, await buildFixture())
   const session = `midi-persistence-${crypto.randomUUID()}`
-  const env = { ...process.env }
-  delete env.AGENT_BROWSER_CDP
-  delete env.AGENT_BROWSER_SESSION
-
-  const run = async (...args: string[]) => {
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const run = agentBrowser(session)
 
   const read = async <Schema extends z.ZodType>(schema: Schema, expression: string): Promise<z.infer<Schema>> => (
     schema.parse(JSON.parse(await run('eval', `(async () => JSON.stringify(await ${expression}))()`).then(JSON.parse)))

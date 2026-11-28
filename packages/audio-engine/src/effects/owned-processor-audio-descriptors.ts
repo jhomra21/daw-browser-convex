@@ -61,12 +61,3 @@ const audioParamValuesFromState = <State extends object>(kind: OwnedProcessorKin
 
 export const ownedProcessorAudioParamValuesFromState = <State extends object>(kind: OwnedProcessorKind, state: State) =>
   audioParamValuesFromState(kind, state)
-
-export const ownedProcessorAudioParamValues = (
-  kind: OwnedProcessorKind,
-  params: Parameters<typeof normalizeOwnedProcessorParams>[1],
-) => {
-  const state = normalizeOwnedProcessorAudioState(kind, params)
-
-  return audioParamValuesFromState(kind, state)
-}

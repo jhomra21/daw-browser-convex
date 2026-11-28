@@ -182,29 +182,3 @@ export const deleteLocalAutomationEnvelope = async (
   await db.delete('entities', [AUTOMATION_ROW_KIND, targetKey])
   notifyLocalProjectChanged(projectId)
 }
-
-export const replaceLocalAutomationEnvelopes = async (
-  projectId: string,
-  envelopes: AutomationEnvelope[],
-): Promise<void> => {
-  const db = await openLocalProjectDb(projectId)
-  const tx = db.transaction('entities', 'readwrite')
-  const rows = await tx.store.index('by-kind').getAll(AUTOMATION_ROW_KIND)
-
-  for (const row of rows) {
-    if (recognizeLocalAutomationEnvelope(row.value)) {
-      await tx.store.delete([AUTOMATION_ROW_KIND, row.id])
-    }
-  }
-
-  for (const envelope of normalizeLocalAutomationEnvelopes(envelopes)) {
-    const recognized = recognizeLocalAutomationEnvelope(envelope)
-
-    if (recognized) {
-      await tx.store.put(createLocalProjectEntityRow(AUTOMATION_ROW_KIND, recognized.logicalKey, recognized.envelope, recognized.envelope.updatedAt))
-    }
-  }
-
-  await tx.done
-  notifyLocalProjectChanged(projectId)
-}

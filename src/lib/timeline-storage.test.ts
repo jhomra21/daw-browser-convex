@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 
 import { DEFAULT_PIXELS_PER_SECOND, MAX_PIXELS_PER_SECOND, MIN_PIXELS_PER_SECOND } from './timeline-view'
 import { loadTimelineScale, saveTimelineScale } from './timeline-storage'
+import { installGlobals } from '~/test-support/install-globals'
 
 class MemoryStorage {
   private values = new Map<string, string>()
@@ -16,18 +17,15 @@ class MemoryStorage {
 }
 
 describe('timeline scale storage', () => {
-  const previousWindow = globalThis.window
-  const previousLocalStorage = globalThis.localStorage
   const storage = new MemoryStorage()
+  let restoreGlobals = () => {}
 
   beforeEach(() => {
-    Reflect.set(globalThis, 'window', { localStorage: storage })
-    Reflect.set(globalThis, 'localStorage', storage)
+    restoreGlobals = installGlobals({ window: { localStorage: storage }, localStorage: storage })
   })
 
   afterEach(() => {
-    Reflect.set(globalThis, 'window', previousWindow)
-    Reflect.set(globalThis, 'localStorage', previousLocalStorage)
+    restoreGlobals()
   })
 
   test('uses the default scale when no value is stored', () => {

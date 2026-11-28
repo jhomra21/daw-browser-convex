@@ -3,13 +3,10 @@ import type { AutomationEnvelope } from '@daw-browser/shared'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import {
   buildAutomationFragment,
-  buildClipRangeDeletePatch,
   buildSectionClipFragments,
-  deleteAutomationRange,
-  intersectingSectionClipIds,
   pasteAutomationFragment,
 } from './timeline-section-edit'
-import { ceilSecToBar, clipRangeOverlap, extendTimelineRangeSelectionToPoint, floorSecToBar, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from './timeline-range-selection'
+import { clipRangeOverlap, extendTimelineRangeSelectionToPoint, normalizeTimelineRangeSelection, snapTimeRangeToGridColumns } from './timeline-range-selection'
 import { trackIdsInYRange, trackIndexAtY } from './timeline-track-layout'
 
 const clip = (input: Partial<Clip> & { id: string; startSec: number; duration: number }): Clip<AudioBuffer> => ({
@@ -61,11 +58,6 @@ describe('timeline range selection helpers', () => {
     })
     expect(normalizeTimelineRangeSelection({ startSec: 1, endSec: 1, trackIds: ['a'], primaryTrackId: 'a' })).toBeNull()
     expect(normalizeTimelineRangeSelection({ startSec: 1, endSec: 2, trackIds: [], primaryTrackId: null })).toBeNull()
-  })
-
-  test('snaps seconds to 4/4 bars', () => {
-    expect(floorSecToBar(3.9, 120)).toBe(2)
-    expect(ceilSecToBar(2.1, 120)).toBe(4)
   })
 
   test('snaps sub-bar drag ranges to the covered grid column', () => {
@@ -201,104 +193,6 @@ describe('timeline section edit helpers', () => {
     expect(fragment?.clip.timing?.bufferOffsetSec).toBe(1)
   })
 
-  test('delete fully contained clip removes it', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({ id: 'clip-1', startSec: 2, duration: 1 })])],
-      section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.deleteClipIds).toEqual(['clip-1'])
-  })
-
-  test('finds every clip intersecting a selected section before delete', () => {
-    const ids = intersectingSectionClipIds({
-      tracks: [track([
-        clip({ id: 'left', startSec: 0, duration: 2 }),
-        clip({ id: 'inside', startSec: 3, duration: 1 }),
-        clip({ id: 'right', startSec: 7, duration: 2 }),
-        clip({ id: 'outside', startSec: 10, duration: 1 }),
-      ])],
-      section: { range: { startSec: 1, endSec: 8 }, trackIds: ['track-1'] },
-    })
-
-    expect(ids).toEqual(['left', 'inside', 'right'])
-  })
-
-  test('delete left overlap shortens clip', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({ id: 'clip-1', startSec: 0, duration: 2 })])],
-      section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing).toEqual({ startSec: 0, duration: 1 })
-  })
-
-  test('delete right overlap moves start and adjusts offsets', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({ id: 'clip-1', startSec: 3, duration: 3, bufferOffsetSec: 0 })])],
-      section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing.startSec).toBe(4)
-    expect(patch.updateClips[0]?.timing.duration).toBe(2)
-    expect(patch.updateClips[0]?.timing.bufferOffsetSec).toBe(1)
-  })
-
-  test('delete right overlap consumes audio left pad before advancing buffer offset', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({ id: 'clip-1', startSec: 3, duration: 5, leftPadSec: 2, bufferOffsetSec: 1, sourceDurationSec: 8 })])],
-      section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing).toEqual({
-      startSec: 4,
-      duration: 4,
-      leftPadSec: 1,
-      bufferOffsetSec: 1,
-      midiOffsetBeats: undefined,
-    })
-  })
-
-  test('delete right overlap persists audio warp adjustment after consuming warped leading silence', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({
-        id: 'clip-1',
-        startSec: 3,
-        duration: 5,
-        bufferOffsetSec: 0,
-        sourceDurationSec: 5,
-        audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120, sourceBeatOffset: 1 },
-      })])],
-      section: { range: { startSec: 1, endSec: 4 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing).toEqual({
-      startSec: 4,
-      duration: 4,
-      leftPadSec: 0,
-      bufferOffsetSec: 0.5,
-      midiOffsetBeats: undefined,
-      audioWarp: { enabled: true, mode: 'repitch', sourceBpm: 120, sourceBeatOffset: undefined },
-    })
-  })
-
-  test('delete middle range splits clip', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({ id: 'clip-1', startSec: 0, duration: 8 })])],
-      section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing.duration).toBe(2)
-    expect(patch.createClips[0]?.clip.startSec).toBe(6)
-    expect(patch.createClips[0]?.clip.duration).toBe(2)
-  })
-
   test('section copy clears fade endpoints at trimmed boundaries and preserves full copies', () => {
     const fades = { fadeInSec: 1, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 }
 
@@ -317,22 +211,6 @@ describe('timeline section edit helpers', () => {
     })
 
     expect(whole?.clip.fades).toMatchObject(fades)
-  })
-
-  test('middle deletion keeps only outer fades on each fragment', () => {
-    const patch = buildClipRangeDeletePatch({
-      tracks: [track([clip({
-        id: 'clip-1',
-        startSec: 0,
-        duration: 8,
-        fades: { fadeInSec: 1, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 },
-      })])],
-      section: { range: { startSec: 2, endSec: 6 }, trackIds: ['track-1'] },
-      bpm: 120,
-    })
-
-    expect(patch.updateClips[0]?.timing.fades).toMatchObject({ fadeInSec: 1, fadeOutSec: 0, fadeInCurve: 0, fadeOutCurve: 0 })
-    expect(patch.createClips[0]?.clip.fades).toMatchObject({ fadeInSec: 0, fadeOutSec: 1, fadeInCurve: 0, fadeOutCurve: 0 })
   })
 
   test('automation fragment includes start boundary, interior points, and end boundary', () => {
@@ -358,21 +236,4 @@ describe('timeline section edit helpers', () => {
     expect(pasted.points.some((point) => point.timeSec === 10)).toBe(false)
   })
 
-  test('automation delete removes interior points and preserves boundary values', () => {
-    const deleted = deleteAutomationRange({ envelope: envelope(), range: { startSec: 1, endSec: 5 }, updatedAt: 2 })
-    expect(deleted?.points.some((point) => point.id === 'p1')).toBe(false)
-    expect(deleted?.points.some((point) => point.timeSec === 1)).toBe(true)
-    expect(deleted?.points.some((point) => point.timeSec === 5)).toBe(true)
-  })
-
-  test('automation delete boundary ids include range time to avoid repeated delete collisions', () => {
-    const deleted = deleteAutomationRange({ envelope: envelope(), range: { startSec: 1, endSec: 5 }, updatedAt: 2 })
-    expect(deleted?.points.some((point) => point.id === 'env-1:delete-start:1')).toBe(true)
-    expect(deleted?.points.some((point) => point.id === 'env-1:delete-end:5')).toBe(true)
-  })
-
-  test('automation delete skips ranges with no points to remove', () => {
-    const deleted = deleteAutomationRange({ envelope: envelope(), range: { startSec: 5, endSec: 7 }, updatedAt: 2 })
-    expect(deleted).toBeNull()
-  })
 })

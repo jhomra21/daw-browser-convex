@@ -2,6 +2,7 @@ import { mkdir, rm } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 // Bundles a browser-runtime fixture, opens it in an isolated Chromium session and returns the scenario results the
 // fixture publishes as window.__browserFixtureResults (or fails with the error it published).
@@ -9,17 +10,7 @@ export const runBrowserFixture = async (runtime: URL, options: { screenshot?: st
   const directory = `/tmp/daw-fixture-${crypto.randomUUID()}`
   const session = `daw-fixture-${crypto.randomUUID()}`
 
-  const browser = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const browser = agentBrowser(session)
 
   await mkdir(directory, { recursive: true })
 

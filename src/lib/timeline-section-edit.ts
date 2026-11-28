@@ -1,8 +1,8 @@
 import { automationTargetKey, valueAtAutomationTime, type AutomationEnvelope, type AutomationInterpolation, type AutomationTarget, type ClipCreateSnapshot } from '@daw-browser/shared'
-import type { AudioWarp, Clip, Track } from '@daw-browser/timeline-core/types'
-import { clipFadesForFragment, transformClipFadesForDuration, type ClipFades } from '@daw-browser/timeline-core/clip-fades'
+import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import { clipFadesForFragment } from '@daw-browser/timeline-core/clip-fades'
 import { calculateAudioTimelineTrimOffsets } from '~/lib/audio-left-resize-timing'
-import { buildClipCreateSnapshot, type BatchClipCreateItem } from '~/lib/clip-create'
+import { buildClipCreateSnapshot } from '~/lib/clip-create'
 import { secondsToBeats, type TimelineTimeRange } from '~/lib/timeline-range-selection'
 
 type TimelineSection = {
@@ -31,23 +31,6 @@ export type SectionAutomationFragment = {
     value: number
     interpolation: AutomationInterpolation
   }>
-}
-
-type ClipRangeDeletePatch = {
-  deleteClipIds: string[]
-  updateClips: Array<{
-    clipId: string
-    timing: {
-      startSec: number
-      duration: number
-      leftPadSec?: number
-      bufferOffsetSec?: number
-      midiOffsetBeats?: number
-      audioWarp?: AudioWarp
-      fades?: ClipFades
-    }
-  }>
-  createClips: BatchClipCreateItem[]
 }
 
 const clipEndSec = (clip: Pick<Clip, 'startSec' | 'duration'>) => clip.startSec + clip.duration
@@ -159,127 +142,6 @@ export const buildSectionClipFragments = (input: {
     }))
 }
 
-export const buildClipRangeDeletePatch = (input: {
-  tracks: Track<AudioBuffer>[]
-  section: TimelineSection
-  bpm: number
-}): ClipRangeDeletePatch => {
-  const selectedTrackIds = new Set(input.section.trackIds)
-  const deleteClipIds: string[] = []
-  const updateClips: ClipRangeDeletePatch['updateClips'] = []
-  const createClips: BatchClipCreateItem[] = []
-
-  for (const track of input.tracks) {
-    if (!selectedTrackIds.has(track.id)) continue
-
-    for (const clip of track.clips) {
-      const endSec = clipEndSec(clip)
-
-      if (!intersectsRange({ startSec: clip.startSec, endSec }, input.section.range)) continue
-
-      if (clip.startSec >= input.section.range.startSec && endSec <= input.section.range.endSec) {
-        deleteClipIds.push(clip.id)
-        continue
-      }
-
-      if (clip.startSec < input.section.range.startSec && endSec > input.section.range.endSec) {
-        const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
-          startSec: clip.startSec,
-          duration: input.section.range.startSec - clip.startSec,
-        }
-
-        if (clip.fades) {
-          timing.fades = clipFadesForFragment(
-            clip.fades,
-            clip.duration,
-            input.section.range.startSec - clip.startSec,
-            false,
-            true,
-          )
-        }
-
-        updateClips.push({
-          clipId: clip.id,
-          timing,
-        })
-        createClips.push({
-          trackId: track.id,
-          buffer: clip.buffer ?? null,
-          clip: buildTrimmedClipCreateSnapshot(clip, { startSec: input.section.range.endSec, endSec, bpm: input.bpm }),
-        })
-        continue
-      }
-
-      if (clip.startSec < input.section.range.startSec) {
-        const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
-          startSec: clip.startSec,
-          duration: input.section.range.startSec - clip.startSec,
-        }
-
-        if (clip.fades) {
-          timing.fades = clipFadesForFragment(
-            clip.fades,
-            clip.duration,
-            input.section.range.startSec - clip.startSec,
-            false,
-            true,
-          )
-        }
-
-        updateClips.push({
-          clipId: clip.id,
-          timing,
-        })
-        continue
-      }
-
-      const offsets = shiftClipOffsets(clip, input.section.range.endSec - clip.startSec, input.bpm)
-
-      const timing: ClipRangeDeletePatch['updateClips'][number]['timing'] = {
-        startSec: input.section.range.endSec,
-        duration: endSec - input.section.range.endSec,
-        leftPadSec: offsets.leftPadSec,
-        bufferOffsetSec: offsets.bufferOffsetSec,
-        midiOffsetBeats: offsets.midiOffsetBeats,
-        audioWarp: offsets.audioWarp,
-      }
-
-      if (clip.fades) {
-        timing.fades = transformClipFadesForDuration(
-          clip.fades,
-          clip.duration,
-          endSec - input.section.range.endSec,
-          input.section.range.endSec - clip.startSec,
-        )
-      }
-
-      updateClips.push({
-        clipId: clip.id,
-        timing,
-      })
-    }
-  }
-
-  return { deleteClipIds, updateClips, createClips }
-}
-
-export const intersectingSectionClipIds = (input: {
-  tracks: Track<AudioBuffer>[]
-  section: TimelineSection
-}): string[] => {
-  const selectedTrackIds = new Set(input.section.trackIds)
-
-  return input.tracks.flatMap((track) => {
-    if (!selectedTrackIds.has(track.id)) return []
-
-    return track.clips.flatMap((clip) => (
-      intersectsRange({ startSec: clip.startSec, endSec: clipEndSec(clip) }, input.section.range)
-        ? [clip.id]
-        : []
-    ))
-  })
-}
-
 const valueAtTime = (envelope: AutomationEnvelope, timeSec: number) => (
   valueAtAutomationTime(envelope.points, timeSec, envelope.points[0]?.value ?? 0)
 )
@@ -344,43 +206,4 @@ export const pasteAutomationFragment = (input: {
     ].sort((left, right) => left.timeSec - right.timeSec),
     updatedAt: input.updatedAt,
   }
-}
-
-export const deleteAutomationRange = (input: {
-  envelope: AutomationEnvelope
-  range: TimelineTimeRange
-  updatedAt: number
-}): AutomationEnvelope | null => {
-  if (!input.envelope.points.some((point) => point.timeSec >= input.range.startSec && point.timeSec <= input.range.endSec)) {
-    return null
-  }
-
-  const startValue = valueAtTime(input.envelope, input.range.startSec)
-  const endValue = valueAtTime(input.envelope, input.range.endSec)
-
-  const kept = input.envelope.points.filter((point) => (
-    point.timeSec < input.range.startSec || point.timeSec > input.range.endSec
-  ))
-
-  const startBoundary: AutomationEnvelope['points'][number] = {
-    id: `${input.envelope.id}:delete-start:${input.range.startSec}`,
-    timeSec: input.range.startSec,
-    value: startValue,
-    interpolation: 'linear',
-  }
-
-  const endBoundary: AutomationEnvelope['points'][number] = {
-    id: `${input.envelope.id}:delete-end:${input.range.endSec}`,
-    timeSec: input.range.endSec,
-    value: endValue,
-    interpolation: 'linear',
-  }
-
-  const points: AutomationEnvelope['points'] = [
-    ...kept,
-    startBoundary,
-    endBoundary,
-  ].sort((left, right) => left.timeSec - right.timeSec)
-
-  return { ...input.envelope, points, updatedAt: input.updatedAt }
 }

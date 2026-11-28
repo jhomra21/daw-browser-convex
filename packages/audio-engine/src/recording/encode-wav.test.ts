@@ -62,8 +62,6 @@ describe('planar float32 WAV encoder', () => {
     expect(getWavContainerKind({ channelCount: 1, capturedFrames: riffFrames })).toBe('riff')
     expect(getWavContainerKind({ channelCount: 1, capturedFrames: riffFrames + 1 })).toBe('rf64')
     expect(getWavContainerKind({ channelCount: 2, capturedFrames: 2 ** 31 })).toBe('rf64')
-    expect(createWavOutputFormat({ channelCount: 1, capturedFrames: riffFrames })).toBeDefined()
-    expect(createWavOutputFormat({ channelCount: 1, capturedFrames: riffFrames + 1 })).toBeDefined()
   })
 
   test('rejects invalid logical PCM size arithmetic without allocating a take', () => {

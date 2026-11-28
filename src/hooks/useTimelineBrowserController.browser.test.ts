@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 // The real controller and left browser run in Chromium with real mouse and
 // keyboard input. Only the persistence boundaries are stubbed: local folder
@@ -267,17 +268,7 @@ const openFixture = async (name: string) => {
   await Bun.write(`${directory}/index.html`, await buildFixture())
   const session = `browser-controller-${name}-${crypto.randomUUID()}`
 
-  const run = async (...args: string[]) => {
-    const env = { ...process.env }
-    delete env.AGENT_BROWSER_CDP
-    delete env.AGENT_BROWSER_SESSION
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const run = agentBrowser(session)
 
   await run('open', `file://${directory}/index.html`)
 

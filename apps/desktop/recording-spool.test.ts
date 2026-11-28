@@ -403,7 +403,7 @@ test("M6 receipt precedes unlink and restart converges only matching identity", 
       registry.bind(scope); await registry.discover()
       const takeId = (await registry.list(scope)).takes[0]!.takeId
       await expect(registry.release(scope, takeId, { reason: "discard" })).rejects.toThrow("scope changed")
-      expect(await lstat(receiptPath)).toBeDefined()
+      expect((await lstat(receiptPath)).isFile()).toBe(true)
       expect(await readFile(f.source)).toEqual(f.bytes)
       registry.bind(scope)
 

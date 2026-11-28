@@ -4,6 +4,7 @@ import { mkdir } from 'node:fs/promises'
 import { build } from 'vite'
 import solidPlugin from 'vite-plugin-solid'
 import { z } from 'zod'
+import { agentBrowser } from '~/test-support/agent-browser'
 
 const repositoryRoot = new URL('../../../', import.meta.url).pathname
 const evidenceDirectory = `/tmp/daw-project-dashboard-${crypto.randomUUID()}`
@@ -193,18 +194,7 @@ test('dashboard project mutations stay busy and only close on success', async ()
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/index.html`, await buildFixture())
   const session = `project-dashboard-${crypto.randomUUID()}`
-  const env = { ...process.env }
-  delete env.AGENT_BROWSER_CDP
-  delete env.AGENT_BROWSER_SESSION
-
-  const run = async (...args: string[]) => {
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const run = agentBrowser(session)
 
   const read = async <Schema extends z.ZodType>(schema: Schema, script: string) => (
     schema.parse(JSON.parse(await run('eval', `(async () => JSON.stringify(await ${script}))()`).then((text) => JSON.parse(text))))
@@ -270,18 +260,7 @@ test('local project listing exposes loading, retry, populated, and empty states'
   await mkdir(directory, { recursive: true })
   await Bun.write(`${directory}/index.html`, await buildFixture())
   const session = `project-local-list-${crypto.randomUUID()}`
-  const env = { ...process.env }
-  delete env.AGENT_BROWSER_CDP
-  delete env.AGENT_BROWSER_SESSION
-
-  const run = async (...args: string[]) => {
-    const child = Bun.spawn(['agent-browser', '--session', session, ...args], { env, stdout: 'pipe', stderr: 'pipe' })
-    const [stdout, stderr] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text()])
-
-    if (await child.exited !== 0) throw new Error(stderr || stdout)
-
-    return stdout.trim()
-  }
+  const run = agentBrowser(session)
 
   const read = async (script: string) => localListStateSchema.parse(
     JSON.parse(await run('eval', `(async () => JSON.stringify(await ${script}))()`).then((text) => JSON.parse(text))),

@@ -12,8 +12,6 @@ export const getSourceChannelLayout = (channelCounts: readonly number[] | undefi
 
 export const convertStereoToMonoSample = (left: number, right: number) => (0.5 * left) + (0.5 * right)
 
-export const duplicateMonoSample = (sample: number): readonly [number, number] => [sample, sample]
-
 const expandsLayout = (kind: 'delay' | 'reverb', params: { enabled?: boolean; pingPong?: boolean; stereoWidth?: number }) =>
   params.enabled === true && (
     (kind === 'delay' && params.pingPong === true) ||

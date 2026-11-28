@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { applyArpeggiatorToNotes } from './effects/dsp'
 import { normalizeClipGain, type ArpParams } from '@daw-browser/shared'
 import type { AudioClipTimeMap } from '@daw-browser/timeline-core/audio-clip-time-map'
@@ -87,7 +88,7 @@ export function getScheduledMidiEvents(input: {
   rangeEndSec?: number
   arp?: ArpParams
 }): ScheduledMidiEvent[] {
-  const secondsPerBeat = 60 / Math.max(1, input.bpm || 120)
+  const secondsPerBeat = 60 / Math.max(1, input.bpm || DEFAULT_BPM)
   const clipStart = input.clip.startSec
   const clipEndRaw = input.clip.startSec + input.clip.duration
   const clipEnd = input.rangeEndSec === undefined ? clipEndRaw : Math.min(clipEndRaw, input.rangeEndSec)

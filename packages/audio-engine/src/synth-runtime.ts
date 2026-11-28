@@ -15,6 +15,7 @@ import type { AutomationAudioBinding } from './automation'
 import type { SourceRegistry } from './source-registry'
 import type { EngineDisposition } from './engine-disposition'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
+import { safeDisconnect } from './safe-disconnect'
 
 type RuntimeClip = Clip<AudioBuffer>
 
@@ -263,9 +264,8 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
     if (state) {
       for (const voice of state.voices) stopVoice(voice, 0)
 
-      try { state.output.disconnect() } catch {}
-
-      try { state.outputPan.disconnect() } catch {}
+      safeDisconnect(state.output)
+      safeDisconnect(state.outputPan)
     }
 
     states.delete(trackId)

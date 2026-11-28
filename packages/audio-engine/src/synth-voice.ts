@@ -9,6 +9,7 @@ import {
   clamp,
 } from '@daw-browser/shared'
 import { scheduleAutomationEnvelope } from './automation'
+import { safeDisconnect } from './safe-disconnect'
 
 const EPSILON = 1e-4
 const STEAL_FADE_SEC = 0.006
@@ -516,7 +517,7 @@ export function scheduleSynthVoice(ctx: BaseAudioContext, options: SynthVoiceSch
     finalized = true
 
     for (const node of nodes) {
-      try { node.disconnect() } catch {}
+      safeDisconnect(node)
     }
 
     options.onEnded?.(handle)

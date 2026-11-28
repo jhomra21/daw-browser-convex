@@ -3,6 +3,7 @@ import { disconnectAudioNodes } from './effects/chain'
 import { loadWorkletModule } from './worklet-loader'
 import { resolveWorkletModuleUrl, trackMeterWorklet } from './worklet-manifest'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
+import { safeDisconnect } from './safe-disconnect'
 
 export type SpectrumFrame = {
   data: Float32Array
@@ -202,7 +203,7 @@ export function createMeteringRuntime(options: {
     if (!node || (expected && node !== expected)) return
     const gain = workletGains.get(trackId)
 
-    try { gain?.disconnect(node) } catch {}
+    safeDisconnect(gain, node)
 
     node.port.onmessage = null
     node.onprocessorerror = null

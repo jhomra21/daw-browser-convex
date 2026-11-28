@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { assertDefined, getAutomationParameterDescriptor, isOwnedProcessorKind, isSidechainCapableKind, normalizeCompressorParams, normalizeDelayParams, normalizeEqParams, normalizeSaturatorParams, type CompressorParamsLite } from '@daw-browser/shared'
 import { createEqNodes } from '../effects/dsp'
 import { connectFxChain, createCompressorNodeChain, createDelayNodeChain, createReverbNodeChain, createSaturatorNodeChain, disconnectCompressorChain, type CompressorNodeChain, type DelayNodeChain, type ReverbNodeChain, type SaturatorNodeChain } from '../effects/chain'
@@ -113,7 +114,7 @@ async function buildOfflineFxChain(
     }
 
     if (instance.kind === 'delay') {
-      const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? 120)
+      const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? DEFAULT_BPM)
       delayByInstanceId.set(instance.id, delay)
       stages.push({ id: instance.id, kind: instance.kind, delayChain: delay })
       continue
@@ -181,7 +182,7 @@ const resolveFxAutomationBindings = (
 export async function createOfflineMixerNodes(
   ctx: OfflineAudioContext,
   graph: ResolvedMixerGraph,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
   sidechainRoutes: readonly ExternalSidechainRoute[] = [],
   detectorOnlyTrackIds: ReadonlySet<string> = new Set(),
 ): Promise<OfflineMixerNodes> {

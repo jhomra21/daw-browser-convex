@@ -18,6 +18,7 @@ import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from "~/components/ti
 import EffectShell from "~/components/effects/EffectShell";
 import { compileNativeExternalEditorPlan } from "~/lib/desktop/native-external-attachment-plan";
 import { readLocalExternalProcessorState, persistLocalExternalProcessorState } from "~/lib/external-plugins";
+import { desktopBridge } from "~/lib/runtime";
 
 type ExternalPluginParametersProps = {
   processor: ExternalProcessor;
@@ -168,7 +169,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   let autoOpenFailed = false;
   let editorInstanceId: string | undefined;
   const failed = () => vstInstanceFailed(props.processor.instanceId);
-  const editorBridgeAvailable = () => Boolean(window.dawDesktop?.audioHost?.session.editor);
+  const editorBridgeAvailable = () => Boolean(desktopBridge()?.audioHost?.session.editor);
 
   const editorAvailable = () => nativeEditorCommandAvailable(
     editorBridgeAvailable(),
@@ -190,7 +191,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   createEffect(() => {
     const instanceId = props.processor.instanceId;
     const projectId = props.projectId;
-    const subscribe = window.dawDesktop?.audioHost?.onVstEditorState;
+    const subscribe = desktopBridge()?.audioHost?.onVstEditorState;
 
     if (!subscribe || !projectId) return;
 
@@ -207,7 +208,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   };
 
   const editor = async (command: "open" | "close" | "focus"): Promise<boolean> => {
-    const bridge = window.dawDesktop?.audioHost;
+    const bridge = desktopBridge()?.audioHost;
 
     if (!bridge || !editorAvailable() || !props.projectId) return false;
 

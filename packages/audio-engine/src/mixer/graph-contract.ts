@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import {
   audioCoreContractVersion,
   encodeAutoPanProcessorState,
@@ -544,7 +545,7 @@ export const createPortableGraphSnapshot = ({
   graph,
   revision,
   sampleRate,
-  bpm = 120,
+  bpm = DEFAULT_BPM,
   assets = [],
   sidechainRoutes = [],
   includeInstruments = false,

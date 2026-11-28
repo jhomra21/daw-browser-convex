@@ -22,6 +22,7 @@ import { SettingsMenu } from "./menus/settings-menu";
 import { TracksMenu } from "./menus/tracks-menu";
 import { ViewMenu } from "./menus/view-menu";
 import { gridDenominators } from "./grid-options";
+import { isDesktopRenderer } from "~/lib/runtime";
 
 type TransportBarController = {
   isRecording: boolean;
@@ -388,7 +389,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
             class="h-4 w-4"
           />
         </Button>
-        <Show when={import.meta.env.VITE_DESKTOP !== "true"}>
+        <Show when={!isDesktopRenderer()}>
           <Menubar class="flex items-center gap-1">
             <FileMenu toolbar={props} />
             <EditMenu toolbar={props} />

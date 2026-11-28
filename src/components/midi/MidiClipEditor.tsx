@@ -19,8 +19,10 @@ import {
   normalizeLegacyMidiClip,
   type AutomationTargetDeviceInstance,
   type MidiMapping,
+  bestEffort,
 } from '@daw-browser/shared'
 import type { Clip } from '@daw-browser/timeline-core/types'
+import { isMacDesktop } from '~/lib/runtime'
 
 type MidiClipEditorProps = {
   clipId: string
@@ -219,7 +221,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
       && !event.altKey
       && !event.shiftKey
       && event.key.toLowerCase() === 'd'
-      && !(event.metaKey && window.dawDesktop && /Macintosh/.test(navigator.userAgent))
+      && !(event.metaKey && isMacDesktop())
     ) {
       event.preventDefault()
       event.stopPropagation()
@@ -572,7 +574,7 @@ const MidiClipEditor: Component<MidiClipEditorProps> = (props) => {
             class="text-amber-400 hover:text-amber-300 text-xs"
             onClick={() => {
               if (persistence.error()?.retryable) {
-                void persistence.flush().catch(() => undefined)
+                bestEffort(persistence.flush(), 'a failed save is reported through the persistence error signal')
               } else {
                 persistence.dismissError()
               }

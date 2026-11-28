@@ -13,6 +13,7 @@ import {
   type ProjectManifest,
 } from '@daw-browser/shared'
 import { z } from 'zod'
+import { abortableSleep } from '~/lib/abortable-sleep'
 
 type BackupResult = {
   ok: boolean
@@ -144,7 +145,6 @@ const readCloudBackupSnapshot = (value: JsonValue): CloudBackupSnapshot | null =
   }
 }
 
-const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms))
 const LAST_BACKED_UP_PROJECT_UPDATED_AT_KEY = CLOUD_BACKUP_LAST_PROJECT_UPDATED_AT_KEY
 const LAST_BACKED_UP_MANIFEST_VERSION_KEY = CLOUD_BACKUP_LAST_MANIFEST_VERSION_KEY
 
@@ -401,7 +401,7 @@ export const runProjectBackup = async (
           return { ok: false, error: error instanceof Error ? error.message : 'Backup failed.' }
         }
 
-        await sleep(Math.min(8000, 500 * 2 ** attempt))
+        await abortableSleep(Math.min(8000, 500 * 2 ** attempt))
       }
     }
 

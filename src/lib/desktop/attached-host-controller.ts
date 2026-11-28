@@ -60,6 +60,7 @@ import { CapabilityFile } from "~/lib/capability-file"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { collectStemTracks } from "~/lib/export/run-export-job"
 import type { PreparedStemExport, PreparedTimelineExport, TimelineExportInput, TimelineExportService } from "~/lib/export/timeline-export-service"
+import { desktopBridge } from "~/lib/runtime"
 
 type HostRequest = {
   id: string
@@ -390,14 +391,14 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
     }
   }
 
-  window.dawDesktop?.setRequestHandler(request, (requestId) => requestControllers.get(requestId)?.abort())
-  window.dawDesktop?.onPrepareToClose(async () => ({ flushed: await controller.prepareToClose() }))
+  desktopBridge()?.setRequestHandler(request, (requestId) => requestControllers.get(requestId)?.abort())
+  desktopBridge()?.onPrepareToClose(async () => ({ flushed: await controller.prepareToClose() }))
 
   return () => {
     if (activeController !== controller) return
     activeController = undefined
-    window.dawDesktop?.setRequestHandler(undefined)
-    window.dawDesktop?.onPrepareToClose(undefined)
+    desktopBridge()?.setRequestHandler(undefined)
+    desktopBridge()?.onPrepareToClose(undefined)
     controller.dispose()
   }
 }
@@ -858,7 +859,7 @@ export const createAttachedHostController = (input: {
           )
 
           void submitted.completion.then(() => {
-            window.dawDesktop?.importTerminal?.(submitted.id)
+            desktopBridge()?.importTerminal?.(submitted.id)
           })
           result = { status: "queued", count: 0, jobId: submitted.id }
         }
@@ -958,7 +959,7 @@ export const createAttachedHostController = (input: {
             : input.exportService.submitPreparedStemExport(prepared, target)
 
           void submitted.completion.then((outcome) => {
-            window.dawDesktop?.exportTerminal(
+            desktopBridge()?.exportTerminal(
               submitted.id,
               outcome.type === "success" ? "success" : outcome.type === "canceled" ? "canceled" : "error",
             )
@@ -1001,7 +1002,7 @@ export const createAttachedHostController = (input: {
         input.setPlayhead(parsedInput.data.seconds)
         result = transport()
       } else if (request_.operation === "diagnostics.snapshot.v2") {
-        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-before-native")
+        desktopBridge()?.traceDiagnosticsV2(request_.id, "controller-before-native")
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
 
@@ -1022,7 +1023,7 @@ export const createAttachedHostController = (input: {
         }
 
         try {
-          const nativeReply = await window.dawDesktop?.audioHost?.diagnostics()
+          const nativeReply = await desktopBridge()?.audioHost?.diagnostics()
 
           if (nativeReply) {
             native = nativeReply.ok
@@ -1031,7 +1032,7 @@ export const createAttachedHostController = (input: {
           }
         } catch {}
 
-        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-after-native")
+        desktopBridge()?.traceDiagnosticsV2(request_.id, "controller-after-native")
         const scheduler = input.schedulerDiagnostics?.()
 
         const diagnosticSnapshot = {
@@ -1052,7 +1053,7 @@ export const createAttachedHostController = (input: {
         result = desktopDiagnosticsSchemaV2.parse(scheduler === undefined
           ? diagnosticSnapshot
           : { ...diagnosticSnapshot, scheduler })
-        window.dawDesktop?.traceDiagnosticsV2(request_.id, "controller-parsed")
+        desktopBridge()?.traceDiagnosticsV2(request_.id, "controller-parsed")
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()

@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { getAudioClipTimeMap, getMarkerWarpTimelineSegments } from '@daw-browser/timeline-core/audio-clip-time-map'
 import type { Clip } from '@daw-browser/timeline-core/types'
 import { normalizeSourceBeatOffsetValue } from '@daw-browser/shared'
@@ -193,7 +194,7 @@ export function getAudioWaveformLayout(
   clip: Clip<AudioBuffer>,
   cssW: number,
   bufferDurationSec?: number,
-  projectBpm = 120,
+  projectBpm = DEFAULT_BPM,
   window?: { startSec: number; endSec: number },
 ): AudioWaveformLayout {
   const sourceDurationSec = Math.max(

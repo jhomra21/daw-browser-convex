@@ -7,6 +7,8 @@ import {
   type RecorderReturnMessage,
 } from './recording-protocol'
 import { observeResource, type ResourceObserver } from '../runtime-diagnostics'
+import { safeDisconnect } from '../safe-disconnect'
+import { bestEffort } from '@daw-browser/shared'
 
 export type RecordingMonitorMode = 'off' | 'auto' | 'on'
 
@@ -169,11 +171,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     session.transport?.terminate()
     session.disconnectMonitor?.()
 
-    try { session.monitorGain?.disconnect() } catch {}
-
-    try { session.source.disconnect() } catch {}
-
-    try { session.worklet.disconnect() } catch {}
+    safeDisconnect(session.monitorGain)
+    safeDisconnect(session.source)
+    safeDisconnect(session.worklet)
 
     session.releaseResources()
   }
@@ -199,7 +199,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
     const transport = session.transport
 
     if (!transport || releaseImmediately) {
-      if (transport) void transport.abort().catch(() => undefined)
+      if (transport) bestEffort(transport.abort(), 'the session is already failing or cancelled')
       void finishTerminal(session, { state: 'failed', sessionId: session.sessionId, reason })
 
       return
@@ -498,11 +498,9 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
 
       try { disconnectMonitor?.() } catch {}
 
-      try { monitorGain?.disconnect() } catch {}
-
-      try { source?.disconnect() } catch {}
-
-      try { worklet?.disconnect() } catch {}
+      safeDisconnect(monitorGain)
+      safeDisconnect(source)
+      safeDisconnect(worklet)
 
       releaseResources()
 
@@ -573,7 +571,7 @@ export const createRecordingRuntime = (options: RecordingRuntimeOptions) => {
 
     if (!session || session.terminal) return
 
-    if (session.transport) void session.transport.abort().catch(() => undefined)
+    if (session.transport) bestEffort(session.transport.abort(), 'the session is already failing or cancelled')
     void finishTerminal(session, { state: 'cancelled', sessionId: session.sessionId })
   }
 

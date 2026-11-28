@@ -170,6 +170,7 @@ import { createTimelineExtensionHost } from "~/lib/extensions";
 import { createSampledInstrumentSession } from "~/lib/sampled-instrument-session";
 import { createAudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver";
 import { isEventFromDomDescendant } from "~/lib/pointer-event-target";
+import { desktopBridge, isDesktopRenderer } from "~/lib/runtime";
 
 type TimelineProps = {
   bootstrapIfEmpty: boolean;
@@ -180,24 +181,24 @@ type TimelineProps = {
 
 const Timeline: Component<TimelineProps> = (props) => {
   // Electron audio is native-only; browser Web Audio is never a desktop fallback.
-  const requiresNativeAudio = import.meta.env.VITE_DESKTOP === 'true';
-  const acceptance = desktopAcceptanceObserver(window.dawDesktop);
+  const requiresNativeAudio = isDesktopRenderer();
+  const acceptance = desktopAcceptanceObserver(desktopBridge());
   const navigate = useNavigate();
   const exportQueue = createExportQueue();
   const importQueue = createImportJobQueue();
   onCleanup(exportQueue.dispose);
 
   const nativeOfflineBridge = requiresNativeAudio
-    ? window.dawDesktop?.audioHost?.offlineRender
+    ? desktopBridge()?.audioHost?.offlineRender
     : undefined;
 
   const nativeOfflinePcmRenderer = nativeOfflineBridge
     ? createDesktopNativeOfflinePcmRenderer(nativeOfflineBridge)
     : undefined;
 
-  const nativeVstParameterQueue = window.dawDesktop
+  const nativeVstParameterQueue = desktopBridge()
     ? createNativeVstParameterQueue(async (bytes) => {
-        const queue = window.dawDesktop?.audioHost?.session.queueVstParameterEvents;
+        const queue = desktopBridge()?.audioHost?.session.queueVstParameterEvents;
 
         if (!queue) return { ok: false, error: "Native VST parameter delivery is unavailable." };
 
@@ -229,7 +230,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     if (vst3ScanPromise) return vst3ScanPromise;
 
     const scan = async () => {
-      const bridge = window.dawDesktop?.pluginCatalog;
+      const bridge = desktopBridge()?.pluginCatalog;
 
       if (!bridge) {
         throw new Error("Plug-in rescanning requires the desktop app.");
@@ -314,7 +315,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   const sampledInstrumentSession = createSampledInstrumentSession({
     projectId,
     nativeAudio: () => requiresNativeAudio,
-    nativeMemoryPolicy: window.dawDesktop?.audioHost?.instrumentBudgetPolicy,
+    nativeMemoryPolicy: desktopBridge()?.audioHost?.instrumentBudgetPolicy,
   });
 
   onCleanup(sampledInstrumentSession.dispose);
@@ -719,7 +720,7 @@ const Timeline: Component<TimelineProps> = (props) => {
           if (!processor) throw new Error(`Native VST3 processor "${attachment.instanceId}" is missing.`)
 
           if (!processor.manifest.supportsState) return undefined
-          const capture = await window.dawDesktop?.audioHost?.session.captureVstState(attachment.instanceId)
+          const capture = await desktopBridge()?.audioHost?.session.captureVstState(attachment.instanceId)
 
           if (capture?.ok) {
             const persisted = await persistLocalExternalProcessorState(
@@ -912,7 +913,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       // Local adoption replaces the snapshot even for automation/effect-only commits.
       playbackInputs: nativePlaybackInputs,
       captureNativeVstStates: async ({ projectId: capturedProjectId, instanceIds }) => {
-        const bridge = window.dawDesktop?.audioHost?.session
+        const bridge = desktopBridge()?.audioHost?.session
 
         if (!bridge || instanceIds.length === 0) return
 
@@ -2342,7 +2343,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     syncPlaybackBackend,
     renderTracks,
     nativePlaybackEnabled: () => appPreferences.audio.preferences().nativePlaybackEnabled,
-    captureVstState: async (instanceId) => window.dawDesktop?.audioHost?.session.captureVstState(instanceId),
+    captureVstState: async (instanceId) => desktopBridge()?.audioHost?.session.captureVstState(instanceId),
     persistState: persistVstState,
   });
 
@@ -2399,7 +2400,7 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const captureNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
-    const bridge = window.dawDesktop?.audioHost?.session
+    const bridge = desktopBridge()?.audioHost?.session
 
     if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
     const capturedProjectId = capture?.projectId ?? projectId()
@@ -2437,8 +2438,10 @@ const Timeline: Component<TimelineProps> = (props) => {
     report: (_instanceId, error) => notify("Plug-in state not saved", error.message),
   })
 
-  if (window.dawDesktop) {
-    const unsubscribeCapturedEditorState = window.dawDesktop.audioHost?.onVstEditorCapturedState(
+  const nativeBridge = desktopBridge();
+
+  if (nativeBridge) {
+    const unsubscribeCapturedEditorState = nativeBridge.audioHost?.onVstEditorCapturedState(
       createCapturedEditorStatePersister(persistVstState),
     );
 
@@ -2446,7 +2449,7 @@ const Timeline: Component<TimelineProps> = (props) => {
 
     // The playback worker owns a plug-in's state while a session is prepared, and an editor closing is a
     // persistence point (the editor session never reads such an instance).
-    const unsubscribeEditorState = window.dawDesktop.audioHost?.onVstEditorState((payload) => {
+    const unsubscribeEditorState = nativeBridge.audioHost?.onVstEditorState((payload) => {
       if (!payload.open && payload.projectId === projectId()) requestNativeVstStateCapture(payload.instanceId);
     });
 

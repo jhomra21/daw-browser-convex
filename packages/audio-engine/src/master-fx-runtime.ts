@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { isGainReductionMeterKind, isOwnedProcessorKind } from '@daw-browser/shared'
 import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
 import type { CompressorChainState } from './effects/compressor-chain-state'
@@ -17,6 +18,7 @@ import { countStaticWorklets, type LiveWorkletBudget } from './effects/live-work
 import { getEffectChainTiming } from './effects/timing'
 import { createChainAdmission } from './chain-admission'
 import { closeResources, createEffectChainTransaction, type EffectChainOutcome, type InstanceResources } from './effect-chain-transaction'
+import { safeDisconnect } from './safe-disconnect'
 
 type MasterFxRuntimeOptions = {
   getFaultGeneration: () => number
@@ -59,7 +61,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   const compressorMeterSubscriptions = new Map<string, () => void>()
   const gateMeterListeners = new Map<string, Set<GateMeterListener>>()
   const gateMeterSubscriptions = new Map<string, () => void>()
-  let currentBpm = 120
+  let currentBpm = DEFAULT_BPM
   let retiredResources: Array<{ resources: InstanceResources; ids: Set<string> }> = []
   let graphPublicationPending = false
 
@@ -186,7 +188,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     }
 
     if (analyserConnected && analyser) {
-      try { masterGain.disconnect(analyser) } catch {}
+      safeDisconnect(masterGain, analyser)
     }
 
     analyserConnected = false

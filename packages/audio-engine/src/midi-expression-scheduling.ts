@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import {
   compileMidiMappingSourceIndex,
   getAutomationParameterDescriptor,
@@ -71,7 +72,7 @@ export const compileTrackMidiExpressionSchedule = (input: {
   rangeStartSec: number
   rangeEndSec: number
 }): MidiExpressionScheduleEvent[] => {
-  const secondsPerBeat = 60 / Math.max(1, input.bpm || 120)
+  const secondsPerBeat = 60 / Math.max(1, input.bpm || DEFAULT_BPM)
   const candidates: ExpressionCandidate[] = []
   const endings: Array<{ timeSec: number; clipId: string; mapping: MidiMapping }> = []
 

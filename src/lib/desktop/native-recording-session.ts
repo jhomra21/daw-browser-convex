@@ -5,6 +5,7 @@ import { importNativeRecordingSpool } from "~/lib/recording/native-spool-importe
 import type { RecordingTerminationCause } from "~/lib/recording/recording-diagnostics"
 import type { DesktopBridge } from "~/types/desktop-bridge"
 import { assertReply } from "./native-publication-transaction"
+import { bestEffort } from "@daw-browser/shared"
 
 type NativeAudioHost = NonNullable<DesktopBridge["audioHost"]>
 
@@ -144,7 +145,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
 
       // Never cancel an accepted Finish. Its native owner resolves truthfully;
       // all published sources outlive this controller regardless of failure.
-      if (!session.finish && !proofFailure) void cancelRecording().catch(() => undefined)
+      if (!session.finish && !proofFailure) bestEffort(cancelRecording(), 'the session failure is already reported')
     }
 
     session.unsubscribeStatus = bridge.session.onRecordingStatus((status) => {
@@ -201,7 +202,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
       if (!session.isCurrent()) throw new Error("Recording scope changed.")
       const started = waitForStatus(session, (status) => status.active)
       // Observe rejection immediately if Start itself rejects before the status.
-      void started.catch(() => undefined)
+      bestEffort(started, 'the awaiting caller below observes this rejection')
       assertReply(await bridge.session.startRecording({ ...scope, generation, sessionId: numericSessionId }))
       const status = await started
 
@@ -229,7 +230,7 @@ export const createNativeRecording = (host: NativeRecordingHost) => {
     session.finish = Promise.resolve().then(async () => {
       try {
         const complete = waitForStatus(session, (status) => status.spool?.state === nativeAudioHostSpoolStates.complete)
-        void complete.catch(() => undefined)
+        bestEffort(complete, 'the awaiting caller below observes this rejection')
         assertReply(await bridge.session.stopRecording())
         const status = await complete
 

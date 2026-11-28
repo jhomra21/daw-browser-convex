@@ -18,6 +18,7 @@ import {
   writePackagedNativeReleaseArtifactManifest,
   type NativeReleaseArtifact,
 } from "./native-release-artifacts"
+import { desktopEnv } from "./env"
 
 const run = promisify(execFile)
 
@@ -115,7 +116,7 @@ export const getPluginHostReleaseArtifactPlan = (
 
 export const validatePluginHostReleaseArtifactPlan = async (
   plan: readonly PluginHostReleaseArtifact[],
-  manifestPath = process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH,
+  manifestPath = desktopEnv.nativeArtifactManifestPath(),
 ): Promise<void> => {
   if (plan.length === 0) return
 
@@ -354,6 +355,8 @@ const compileNativeFileCapabilityHelper = async () => {
   await chmod(output, 0o755)
 }
 
+const nativeArtifactManifestPath = desktopEnv.nativeArtifactManifestPath()
+
 const config: ForgeConfig = {
   packagerConfig: {
     asar: true,
@@ -362,8 +365,8 @@ const config: ForgeConfig = {
       ? [
           ".native/file-capability-helper",
           ...pluginHostReleaseArtifacts.map((artifact) => artifact.sourcePath),
-          ...(pluginHostReleaseArtifacts.length > 0 && process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH
-            ? [path.resolve(process.env.DAW_NATIVE_ARTIFACT_MANIFEST_PATH)]
+          ...(pluginHostReleaseArtifacts.length > 0 && nativeArtifactManifestPath
+            ? [path.resolve(nativeArtifactManifestPath)]
             : []),
         ]
       : [],

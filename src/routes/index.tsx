@@ -3,7 +3,7 @@ import { createSignal, onCleanup, onMount } from 'solid-js'
 import { Dashboard } from '~/components/dashboard/dashboard'
 import Timeline from '~/components/Timeline'
 import { isLocalId } from '@daw-browser/shared'
-import { readLocationSearchParam, writeLocationSearchParams } from '~/lib/location-search-param'
+import { publishLocationSearchParams, readLocationSearchParam, subscribeLocationSearch } from '~/lib/location-search-param'
 import { markLocalProjectOpened } from '~/lib/local-project-db'
 import { useSessionQuery } from '~/lib/session'
 import { useDashboardRouteParam } from '~/hooks/useDashboardRouteParam'
@@ -29,20 +29,16 @@ function Index() {
     }
 
     syncLocationState()
-    window.addEventListener('popstate', syncLocationState)
-    onCleanup(() => {
-      window.removeEventListener('popstate', syncLocationState)
-    })
+    onCleanup(subscribeLocationSearch(syncLocationState))
   })
 
   const openProject = (nextProjectId: string) => {
-    writeLocationSearchParams([
+    publishLocationSearchParams([
       { name: 'projectId', value: nextProjectId },
       { name: 'roomId', value: null },
       { name: 'dashboard', value: null },
     ], 'push')
     setProjectId(nextProjectId)
-    window.dispatchEvent(new PopStateEvent('popstate'))
     void markLocalProjectOpened(nextProjectId)
   }
 

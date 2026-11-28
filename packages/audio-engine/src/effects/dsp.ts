@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, linearFromDb, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
@@ -112,7 +113,7 @@ export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): numbe
   const normalized = normalizeDelayParams(params)
 
   if (normalized.mode === 'time') return Math.min(DELAY_MAX_DELAY_TIME_SEC, normalized.timeMs / 1000)
-  const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : 120)
+  const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : DEFAULT_BPM)
   const multipliers = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
 
   return Math.min(DELAY_MAX_DELAY_TIME_SEC, beatSec * (multipliers[normalized.syncDivision] ?? 0.5))

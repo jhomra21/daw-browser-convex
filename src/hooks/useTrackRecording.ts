@@ -64,6 +64,7 @@ import type { NativeRecordingDiagnostics } from '~/lib/desktop/native-recording-
 
 import type { NativeRecordingImportedTake } from '~/types/desktop-bridge'
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
+import { desktopBridge } from '~/lib/runtime'
 
 type ConvexClientType = typeof convexClient
 
@@ -229,7 +230,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
   const [isStarting, setIsStarting] = createSignal(false)
   let cancelPendingSetup: ((stopTransport?: boolean) => void) | undefined
   const saves = new WeakMap<RecordingContext, Promise<void>>()
-  const audioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const audioHostBridge = desktopBridge()?.audioHost
   const hasAudioLifecycle = audioHostBridge !== undefined
   let audioLifecycleState: "suspended" | "recovering" | "ready" | "failed" = hasAudioLifecycle ? "recovering" : "ready"
   let recordingStartGeneration = 0
@@ -243,7 +244,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
       cancelPendingSetup?.()
     }
 
-    const spool = globalThis.window?.dawDesktop?.audioHost?.recordingSpool
+    const spool = desktopBridge()?.audioHost?.recordingSpool
 
     if (!declaredProject || !spool) return
     const scopeGeneration = recordingStartGeneration
@@ -471,7 +472,7 @@ export function useTrackRecording(options: UseTrackRecordingOptions): UseTrackRe
  return }
 
       try {
-        const spool = globalThis.window?.dawDesktop?.audioHost?.recordingSpool
+        const spool = desktopBridge()?.audioHost?.recordingSpool
 
         if (!spool) throw new Error('Native recording source release is unavailable.')
         await spool.release(nativeTake.scope, nativeTake.takeId, { ...nativeTake.acknowledgment, savedClip })

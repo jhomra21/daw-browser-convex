@@ -116,6 +116,7 @@ import { registerVstEditorStateAckIpc } from "./ipc/vst-editor-state-ack-ipc"
 import { registerNativeSessionTransportIpc } from "./ipc/native-session-transport-ipc"
 import { registerNativeSessionRecordingIpc } from "./ipc/native-session-recording-ipc"
 import { nativeSessionRequestAllowed, type NativeSessionEvent } from "./ipc/native-session-access"
+import { rendererSenderAllowed, type RendererSenderEvent } from "./ipc/renderer-sender"
 import { createNativeFileCapabilityHelper } from "./native-file-capability-helper"
 import { createRequestCorrelation } from "./request-correlation"
 import { createPreparationRegistry } from "./preparation-registry"
@@ -204,13 +205,15 @@ import {
 } from "./benchmark-runtime"
 import { offlinePcmAckSchema } from "./offline-pcm-protocol"
 import { createRecordingStartDiagnostic } from "./recording-start-diagnostic"
+import { desktopEnv } from "./env"
+import { bestEffort } from "@daw-browser/shared"
 
 protocol.registerSchemesAsPrivileged([{ scheme: "daw", privileges: { standard: true, secure: true, supportFetchAPI: true, corsEnabled: true } }])
 
-const captureInhibited = process.env.DAW_RECORDING_START_DIAGNOSTIC === "1"
+const captureInhibited = desktopEnv.recordingStartDiagnostic()
 
 const recordingStartDiagnostic = createRecordingStartDiagnostic(
-  process.env.DAW_RECORDING_START_DIAGNOSTIC === "1" || process.env.DAW_RECORDING_START_EVIDENCE === "1",
+  desktopEnv.recordingStartDiagnostic() || desktopEnv.recordingStartEvidence(),
   (event) => console.log("[recording-start-diagnostic]", JSON.stringify(event)),
 )
 
@@ -305,7 +308,7 @@ const nativeInstanceEnvelopeSchema = nativeSessionEnvelopeSchema(uuidSchema)
 const pluginDirectorySchema = z.object({ directory: z.string() }).passthrough()
 const closePreparationResultSchema = z.object({ flushed: z.literal(true) }).passthrough()
 
-const diagnosticsTraceEnabled = process.env.DAW_DIAGNOSTICS_V2_TRACE === "1"
+const diagnosticsTraceEnabled = desktopEnv.diagnosticsV2Trace()
 const diagnosticsTrace = createDiagnosticsTrace(diagnosticsTraceEnabled, console.error)
 const diagnosticsStarts = new Map<string, number>()
 
@@ -352,7 +355,7 @@ const pendingEditorStateAcks = new Map<string, {
   reject: (error: Error) => void
 }>()
 
-const evidenceDirectory = process.env.DAW_AE08_EVIDENCE_DIR
+const evidenceDirectory = desktopEnv.ae08EvidenceDirectory()
 const ae08Evidence = createAe08Evidence(evidenceDirectory)
 
 const ae08WorkerEnvironment: NodeJS.ProcessEnv = evidenceDirectory
@@ -485,7 +488,7 @@ const fileCapabilities = createFileCapabilityManager({
 })
 
 const settleCapabilityRevocation = (operation: Promise<void>) => {
-  void operation.catch(() => undefined)
+  bestEffort(operation, 'revocation runs during invalidation and has no caller to report a failure to')
 }
 
 const availableDesktopOperations = () => desktopOperations(nativeMediaAvailable)
@@ -1139,14 +1142,14 @@ const handleSocket = (socket: Socket) => {
 }
 
 const registerIpc = () => {
-  const applicationMenuStateAllowed = (event: Electron.IpcMainEvent | Electron.IpcMainInvokeEvent) => (
-    window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && event.senderFrame === event.sender.mainFrame
-    && sameAppOrigin(event.senderFrame.url)
-  )
+  const senderAllowed = (event: RendererSenderEvent, options: { privileged: boolean; mainFrameOnly: boolean }) => rendererSenderAllowed(event, {
+    rendererId: window_?.webContents.id,
+    sameAppOrigin,
+    privileged: { required: options.privileged, accepted: rendererLifecycle.acceptsPrivilegedRequests() },
+    mainFrameOnly: options.mainFrameOnly,
+  })
+
+  const applicationMenuStateAllowed = (event: RendererSenderEvent) => senderAllowed(event, { privileged: true, mainFrameOnly: true })
 
   registerApplicationMenuIpc({
     ipcMain,
@@ -1198,7 +1201,7 @@ const registerIpc = () => {
     return { accepted: true }
   })
   ipcMain.on(hostResponseChannel, (event, message) => {
-    if (!window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
+    if (!senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = rendererMessageSchema.safeParse(message)
 
     if (!parsed.success || parsed.data.generation !== generation) return
@@ -1237,7 +1240,7 @@ const registerIpc = () => {
     pending.resolve(parsed.data.frame)
   })
   ipcMain.on(diagnosticsV2TraceChannel, (event, message) => {
-    if (!diagnosticsTraceEnabled || !window_ || event.sender.id !== window_.webContents.id || !event.senderFrame || !sameAppOrigin(event.senderFrame.url)) return
+    if (!diagnosticsTraceEnabled || !senderAllowed(event, { privileged: false, mainFrameOnly: false })) return
     const parsed = diagnosticsTraceMessageSchema.safeParse(message)
 
     if (parsed.success) {
@@ -1246,14 +1249,7 @@ const registerIpc = () => {
     }
   })
 
-  const scopeAllowed = (event: Electron.IpcMainInvokeEvent) => (
-    window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && event.senderFrame === event.sender.mainFrame
-    && sameAppOrigin(event.senderFrame.url)
-  )
+  const scopeAllowed = applicationMenuStateAllowed
 
   const scopeFor = (event: Electron.IpcMainInvokeEvent, requestId: string) => (
     scopeAllowed(event) ? { requestId, rendererGeneration: generation } : undefined
@@ -1261,11 +1257,7 @@ const registerIpc = () => {
 
   const catalogAllowed = (event: Electron.IpcMainInvokeEvent) => (
     process.platform === "darwin"
-    && window_ !== undefined
-    && rendererLifecycle.acceptsPrivilegedRequests()
-    && event.sender.id === window_.webContents.id
-    && event.senderFrame !== null
-    && sameAppOrigin(event.senderFrame.url)
+    && senderAllowed(event, { privileged: true, mainFrameOnly: false })
     && pluginCatalogStore !== undefined
   )
 
@@ -2642,9 +2634,9 @@ else {
         }
       }
     } else if (process.platform === "darwin") {
-      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, process.env.DAW_VST3_SCANNER_PATH)
-      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, process.env.DAW_VST3_WORKER_PATH)
-      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, process.env.DAW_AUDIO_HOST_PATH)
+      scannerPath = packagedVst3ScannerPath(process.resourcesPath, false, desktopEnv.vst3ScannerPath())
+      vst3WorkerPath = packagedVst3WorkerPath(process.resourcesPath, false, desktopEnv.vst3WorkerPath())
+      audioHostPath = packagedAudioHostPath(process.resourcesPath, false, desktopEnv.audioHostPath())
       nativeReleaseArtifactVerification = { status: "development" }
     }
 
@@ -2668,7 +2660,7 @@ else {
     }
 
     const recordingOrderEvidence = createRecordingSpoolOrderEvidence(
-      process.env.DAW_RECORDING_SPOOL_ORDER_EVIDENCE,
+      desktopEnv.recordingSpoolOrderEvidence(),
       (line) => { process.stdout.write(line) },
     )
 
@@ -2824,7 +2816,7 @@ else {
       responseHeaders: {
         ...details.responseHeaders,
         "Content-Security-Policy": [createContentSecurityPolicy(Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL))],
-        ...benchmarkSabHeaders(details.url, process.env.DAW_BENCHMARK_SAB_RECORDING === "1"),
+        ...benchmarkSabHeaders(details.url, desktopEnv.benchmarkSabRecording()),
       },
     }))
     session.defaultSession.setPermissionRequestHandler((webContents, permission, callback, details) => callback(

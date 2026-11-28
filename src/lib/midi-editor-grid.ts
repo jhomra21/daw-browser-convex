@@ -1,3 +1,4 @@
+import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
 import { clamp, getMidiNoteLabel } from '@daw-browser/shared'
 
 export type MidiEditorNote = {
@@ -40,7 +41,7 @@ const getMidiEditorStepsPerBeat = (gridDenominator: number) => (
   Math.max(1, Math.round((gridDenominator || 4) / 4))
 )
 
-const getMidiEditorSecondsPerBeat = (bpm: number) => 60 / Math.max(1e-6, bpm || 120)
+const getMidiEditorSecondsPerBeat = (bpm: number) => 60 / Math.max(1e-6, bpm || DEFAULT_BPM)
 
 const getMidiEditorClipBeats = (
   clipDurationSec: number,

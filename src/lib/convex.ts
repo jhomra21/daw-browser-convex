@@ -8,6 +8,7 @@ import type {
   FunctionReference,
   FunctionArgs,
 } from "convex/server";
+import { isDesktopRenderer } from "~/lib/runtime";
 
 const convexUrl = z.string().min(1).parse(import.meta.env.VITE_CONVEX_URL);
 const convex = new ConvexClient(convexUrl);
@@ -20,14 +21,14 @@ const fetchConvexAccessToken = async () => {
   try {
     response = await fetch('/api/convex-auth/token', { credentials: 'include' });
   } catch {
-    if (import.meta.env.VITE_DESKTOP) return null;
+    if (isDesktopRenderer()) return null;
     throw new Error('Failed to fetch Convex auth token');
   }
 
   if (response.status === 401) return null;
 
   if (!response.ok) {
-    if (import.meta.env.VITE_DESKTOP) return null;
+    if (isDesktopRenderer()) return null;
     throw new Error('Failed to fetch Convex auth token');
   }
 

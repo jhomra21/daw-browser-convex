@@ -4,7 +4,7 @@ import {
   type LocalProjectEntityRow,
   type LocalProjectStoredValue,
 } from '~/lib/local-project-db'
-import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, isSidechainCapableKind, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
+import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, isSidechainCapableKind, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind, bestEffort } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
 import {
@@ -61,7 +61,7 @@ const abortLocalTimelineTransaction = (tx: { abort: () => void; done: Promise<un
     tx.abort()
   } catch {}
 
-  void tx.done.catch(() => undefined)
+  bestEffort(tx.done, 'the transaction is being aborted, so done rejects by design')
 }
 
 const isLocalProjectStoredObject = (

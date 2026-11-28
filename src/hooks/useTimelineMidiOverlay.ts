@@ -1,11 +1,11 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from 'solid-js'
 
 import type { AudioEngine, LiveMidiNoteHandle } from '@daw-browser/audio-engine/audio-engine'
-import { canUseLocalStorage } from '~/lib/timeline-storage'
+import { createStoredValue } from '~/lib/stored-value'
 import { DEFAULT_NOTE_VELOCITY } from '~/lib/midi-editor-grid'
 import { createTimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import type { Track } from '@daw-browser/timeline-core/types'
-import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibleWithTrack, midiMappingValue, normalizeLegacyMidiClip, type MidiMappingSourceEvent } from '@daw-browser/shared'
+import { automationTargetKey, compileMidiMappingSourceIndex, isClipKindCompatibleWithTrack, midiMappingValue, normalizeLegacyMidiClip, type MidiMappingSourceEvent, bestEffort } from '@daw-browser/shared'
 import { useMidiKeyboardInput } from './useMidiKeyboardInput'
 import { useMidiAccess } from '~/context/midi-access'
 import { createLiveMidiRouter } from '~/lib/midi/live-midi-router'
@@ -17,6 +17,7 @@ import { createAuditionReleaseTimerOwnership } from '~/lib/audition-release-time
 
 import type { TimelineSelectionController } from '~/lib/timeline-selection'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
+import { desktopBridge } from '~/lib/runtime'
 
 type UseTimelineMidiOverlayOptions = {
   audioEngine: AudioEngine
@@ -96,11 +97,14 @@ export function useTimelineMidiOverlay(
     return clipId && trackIndex().clipEntryById.get(clipId)?.clip.midi ? clipId : null
   })
 
-  const midiKeyboardStorageKey = () => {
-    const projectId = options.projectId() || 'default'
+  const storedMidiKeyboardEnabled = createStoredValue<boolean>({
+    key: (scope) => `mb:midi_kb:${scope}`,
+    fallback: () => false,
+    parse: (raw) => raw === '1',
+    serialize: (value) => value ? '1' : '0',
+  })
 
-    return `mb:midi_kb:${projectId}`
-  }
+  const midiKeyboardStorageScope = () => options.projectId() || 'default'
 
   const isPlayableMidiTrack = (track: Track | undefined) => isClipKindCompatibleWithTrack(track, 'midi')
 
@@ -137,7 +141,7 @@ export function useTimelineMidiOverlay(
   }
 
   const midiKeyboardTarget = createMemo(resolveTargetTrack)
-  const audioHostBridge = globalThis.window?.dawDesktop?.audioHost
+  const audioHostBridge = desktopBridge()?.audioHost
   const hasAudioLifecycle = audioHostBridge !== undefined
   const lifecycleBridge = audioHostBridge
   let midiSuspended = false
@@ -208,7 +212,7 @@ export function useTimelineMidiOverlay(
       }
 
       options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
+      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
 
       const handle = options.audioEngine.startLiveMidiNote({
         ...note,
@@ -298,7 +302,7 @@ export function useTimelineMidiOverlay(
           }
 
           options.audioEngine.ensureAudio()
-          void options.audioEngine.resume().catch(() => undefined)
+          bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
 
           const handle = options.audioEngine.startLiveMidiNote({
             ...note,
@@ -340,7 +344,7 @@ export function useTimelineMidiOverlay(
       }
 
       options.audioEngine.ensureAudio()
-      void options.audioEngine.resume().catch(() => undefined)
+      bestEffort(options.audioEngine.resume(), 'the note starts without waiting for the context to resume')
       const sourceId = auditionArpeggiator.noteOn(pitch, velocity)
 
       if (sourceId !== undefined) {
@@ -379,29 +383,9 @@ export function useTimelineMidiOverlay(
     onCleanup(unsubscribe)
   })
 
-  createEffect(() => {
-    const key = midiKeyboardStorageKey()
+  createEffect(() => setMidiKeyboardEnabled(storedMidiKeyboardEnabled.read(midiKeyboardStorageScope())))
 
-    if (!canUseLocalStorage()) {
-      setMidiKeyboardEnabled(false)
-
-      return
-    }
-
-    try {
-      setMidiKeyboardEnabled(window.localStorage.getItem(key) === '1')
-    } catch {
-      setMidiKeyboardEnabled(false)
-    }
-  })
-
-  createEffect(() => {
-    if (!canUseLocalStorage()) return
-
-    try {
-      window.localStorage.setItem(midiKeyboardStorageKey(), midiKeyboardEnabled() ? '1' : '0')
-    } catch {}
-  })
+  createEffect(() => storedMidiKeyboardEnabled.write(midiKeyboardStorageScope(), midiKeyboardEnabled()))
 
   const midiKeyboard = useMidiKeyboardInput({
     projectId: () => options.projectId(),

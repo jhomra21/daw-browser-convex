@@ -44,11 +44,16 @@ const saturator = z.object({
   outputDb: finiteNumber, dryWet: finiteNumber,
 }).strict()
 
+const delayDivision = z.enum(['1/32', '1/16', '1/8', '1/4', '1/2', '1/1'])
+const delayFeel = z.enum(['straight', 'dotted', 'triplet'])
+
 const delay = z.object({
-  enabled: z.boolean(), mode: z.enum(['sync', 'time']), timeMs: finiteNumber,
-  syncDivision: z.enum(['1/16', '1/8', '1/4', '1/2', '1/1']), feedback: finiteNumber,
-  dryWet: finiteNumber, pingPong: z.boolean(), filterEnabled: z.boolean(),
-  lowCutHz: finiteNumber, highCutHz: finiteNumber,
+  enabled: z.boolean(), link: z.boolean(), pingPong: z.boolean(), freeze: z.boolean(), filterEnabled: z.boolean(),
+  smoothing: z.enum(['repitch', 'fade', 'jump']),
+  syncLeft: z.boolean(), syncRight: z.boolean(), divisionLeft: delayDivision, divisionRight: delayDivision,
+  feelLeft: delayFeel, feelRight: delayFeel,
+  timeLeftMs: finiteNumber, timeRightMs: finiteNumber, offsetLeftPercent: finiteNumber, offsetRightPercent: finiteNumber,
+  feedback: finiteNumber, dryWet: finiteNumber, filterHz: finiteNumber, filterWidth: finiteNumber,
 }).strict()
 
 const compressor = z.object({

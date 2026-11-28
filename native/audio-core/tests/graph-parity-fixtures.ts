@@ -1731,13 +1731,25 @@ const dynamicsSidechainFixtures: readonly PortableGraphParityFixture[] = dynamic
 
 const delayState: DelayProcessorState = {
   enabled: true,
-  delayMs: 10,
+  link: true,
+  pingPong: true,
+  freeze: false,
+  filterEnabled: true,
+  smoothing: 'repitch',
+  syncLeft: false,
+  syncRight: false,
+  divisionLeft: '1/8',
+  divisionRight: '1/8',
+  feelLeft: 'straight',
+  feelRight: 'straight',
+  timeLeftMs: 10,
+  timeRightMs: 10,
+  offsetLeftPercent: 0,
+  offsetRightPercent: 0,
   feedback: 0.5,
   dryWet: 0.5,
-  pingPong: true,
-  filterEnabled: true,
-  lowCutHz: 120,
-  highCutHz: 8_000,
+  filterHz: 1_000,
+  filterWidth: 5,
 }
 
 const reverbState: ReverbProcessorState = {
@@ -1783,7 +1795,7 @@ const timeEffectTailFrames = (
     if (!state.enabled || state.dryWet === 0) return 0
     const repeats = Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(Math.max(state.feedback, 1e-6))))
 
-    return Math.ceil(state.delayMs * sampleRateHz / 1_000 * repeats)
+    return Math.ceil(Math.max(state.timeLeftMs, state.timeRightMs) * sampleRateHz / 1_000 * repeats)
   }
 
   if (kind === 'reverb' && 'decaySec' in state) {
@@ -2100,7 +2112,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       48_000,
       stereo(left, right),
       {
-        state: { ...delayState, delayMs: 20, feedback: 0.3, pingPong: false },
+        state: { ...delayState, timeLeftMs: 20, timeRightMs: 20, feedback: 0.3, pingPong: false },
         maxFramesPerBlock: 512,
         blockPartitions: Array.from({ length: frames / 512 }, () => 512),
         enabledEdits: [{ frame: 1_024, enabled: false }, { frame: 4_096, enabled: true }],
@@ -2148,14 +2160,18 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
       'full-block-dry-wet-automation',
       'fullBlockAutomation',
       48_000,
-      new Float32Array(8).fill(1),
-      { maxFramesPerBlock: 4, parameters: parameterEnvelopeForTarget(7, [0, 1, 1, 1]) },
+      new Float32Array(64).fill(1),
+      { maxFramesPerBlock: 32, parameters: parameterEnvelopeForTarget(7, Array.from({ length: 32 }, (_, frame) => (frame < 8 ? 0 : 1))) },
     )
 
     fixture.legacyDelay = undefined
     fixture.legacyDifferenceMinimum = undefined
+    // The delay reads its controls every 8 frames and smooths the wet gain over 10 ms: the first 8 frames are dry, then the wet gain
+    // glides up, so the dry level (the delayed signal is still silent) falls steadily instead of dropping at once.
     fixture.assertOutput = (output) => finite(output)
-      && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => closeTo(sample, 0)))
+      && output.every((plane) => plane.slice(0, 8).every((sample) => closeTo(sample, 1))
+        && plane.slice(9).every((sample, frame) => sample <= (plane[8 + frame] ?? 0) + 1e-7)
+        && (plane[31] ?? 1) < 0.97 && (plane[31] ?? 0) > 0.5)
 
     return fixture
   })(),

@@ -93,8 +93,11 @@ describe('mixer routing plan', () => {
       { id: 'delay.timeMs', target: 5 },
       { id: 'delay.feedback', target: 6 },
       { id: 'delay.dryWet', target: 7 },
-      { id: 'delay.lowCutHz', target: 8 },
-      { id: 'delay.highCutHz', target: 9 },
+      { id: 'delay.filterHz', target: 8 },
+      { id: 'delay.filterWidth', target: 9 },
+      { id: 'delay.timeRightMs', target: 200 },
+      { id: 'delay.offsetLeftPercent', target: 201 },
+      { id: 'delay.offsetRightPercent', target: 202 },
     ])
   })
 
@@ -498,7 +501,7 @@ describe('mixer routing plan', () => {
       trackFx: {
         source: {
           instances: [
-            { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), mode: 'sync', syncDivision: '1/4', feedback: 0.5 } },
+            { id: 'delay', kind: 'delay', params: { ...createDefaultDelayParams(), divisionLeft: '1/4', feedback: 0.5 } },
             { id: 'reverb', kind: 'reverb', params: { ...createDefaultReverbParams(), decaySec: 2 } },
           ],
         },
@@ -507,12 +510,15 @@ describe('mixer routing plan', () => {
 
     const processors = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000, bpm: 120 }).nodes[0]?.processorOrder
     expect(processors?.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength, processor.latencyFrames, processor.parameterTargets])).toEqual([
-      ['delay', 13, 32, 0, [
+      ['delay', 13, 80, 0, [
         { id: 'delay.timeMs', target: 5 },
         { id: 'delay.feedback', target: 6 },
         { id: 'delay.dryWet', target: 7 },
-        { id: 'delay.lowCutHz', target: 8 },
-        { id: 'delay.highCutHz', target: 9 },
+        { id: 'delay.filterHz', target: 8 },
+        { id: 'delay.filterWidth', target: 9 },
+        { id: 'delay.timeRightMs', target: 200 },
+        { id: 'delay.offsetLeftPercent', target: 201 },
+        { id: 'delay.offsetRightPercent', target: 202 },
       ]],
       ['reverb', 14, 124, 0, [
         { id: 'reverb.wet', target: 10 },

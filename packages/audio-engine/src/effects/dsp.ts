@@ -135,53 +135,28 @@ export function applySaturatorNodeParams(nodes: {
   nodes.outputGain.gain.value = linearFromDb(normalized.outputDb)
 }
 
+const DELAY_DIVISION_BEATS = { '1/32': 0.125, '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
+
+const DELAY_FEEL_SCALE = { straight: 1, dotted: 1.5, triplet: 2 / 3 }
+
+// The longer of the two channels' times, which is how long the first echo takes to leave the delay.
 export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): number {
   const normalized = normalizeDelayParams(params)
-
-  if (normalized.mode === 'time') return Math.min(DELAY_MAX_DELAY_TIME_SEC, normalized.timeMs / 1000)
   const beatSec = 60 / (Number.isFinite(bpm) && bpm > 0 ? bpm : DEFAULT_BPM)
-  const multipliers = { '1/16': 0.25, '1/8': 0.5, '1/4': 1, '1/2': 2, '1/1': 4 }
 
-  return Math.min(DELAY_MAX_DELAY_TIME_SEC, beatSec * (multipliers[normalized.syncDivision] ?? 0.5))
-}
+  const channelSec = (side: 'Left' | 'Right') => {
+    const free = normalized[`time${side}Ms`] / 1000
 
-export function applyDelayNodeParams(nodes: {
-  delayLeft: DelayNode
-  delayRight?: DelayNode
-  feedbackLeft: GainNode
-  feedbackRight?: GainNode
-  dryGain: GainNode
-  wetGain: GainNode
-  lowCutLeft: BiquadFilterNode
-  highCutLeft: BiquadFilterNode
-  lowCutRight?: BiquadFilterNode
-  highCutRight?: BiquadFilterNode
-}, params: DelayParamsLite, bpm: number) {
-  const normalized = normalizeDelayParams(params)
-  const timeSec = resolveDelayTimeSec(normalized, bpm)
-  nodes.delayLeft.delayTime.value = timeSec
+    if (!normalized[`sync${side}`]) return free
 
-  if (nodes.delayRight) nodes.delayRight.delayTime.value = timeSec
-  nodes.feedbackLeft.gain.value = normalized.feedback
-
-  if (nodes.feedbackRight) nodes.feedbackRight.gain.value = normalized.feedback
-  // A disabled delay keeps running on its input and only its output is dry.
-  nodes.dryGain.gain.value = normalized.enabled ? 1 - normalized.dryWet : 1
-  nodes.wetGain.gain.value = normalized.enabled ? normalized.dryWet : 0
-
-  for (const filter of [nodes.lowCutLeft, nodes.lowCutRight]) {
-    if (!filter) continue
-    filter.type = 'highpass'
-    filter.frequency.value = normalized.filterEnabled ? normalized.lowCutHz : 20
-    filter.Q.value = 0.707
+    return beatSec * DELAY_DIVISION_BEATS[normalized[`division${side}`]] * DELAY_FEEL_SCALE[normalized[`feel${side}`]]
+      * (1 + normalized[`offset${side}Percent`] / 100)
   }
 
-  for (const filter of [nodes.highCutLeft, nodes.highCutRight]) {
-    if (!filter) continue
-    filter.type = 'lowpass'
-    filter.frequency.value = normalized.filterEnabled ? normalized.highCutHz : 20000
-    filter.Q.value = 0.707
-  }
+  const left = channelSec('Left')
+  const right = normalized.link ? left : channelSec('Right')
+
+  return Math.min(DELAY_MAX_DELAY_TIME_SEC, Math.max(left, right))
 }
 
 export function applyArpeggiatorToNotes(

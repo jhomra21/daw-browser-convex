@@ -8,7 +8,11 @@ import {
   createDefaultEqParams,
   createDefaultReverbParams,
   DELAY_FEEDBACK_MAX,
+  DELAY_FILTER_HZ_MIN,
+  DELAY_FILTER_WIDTH_MAX,
+  DELAY_OFFSET_PERCENT_MAX,
   DELAY_TIME_MS_MAX,
+  DELAY_TIME_MS_MIN,
   createDefaultEqBand,
   EQ_FREQUENCY_MIN,
   EQ_GAIN_DB_MAX,
@@ -421,13 +425,16 @@ describe('Saturator params', () => {
 })
 
 describe('Delay params', () => {
-  test('normalizes limits and keeps low cut below high cut', () => {
-    const normalized = normalizeDelayParams({ timeMs: 9999, feedback: 4, dryWet: -1, lowCutHz: 1900, highCutHz: 1000 })
+  test('normalizes limits of the time, offset and band-pass filter', () => {
+    const normalized = normalizeDelayParams({ timeLeftMs: 9999, timeRightMs: 0, offsetLeftPercent: 90, feedback: 4, dryWet: -1, filterHz: 5, filterWidth: 99 })
 
-    expect(normalized.timeMs).toBe(DELAY_TIME_MS_MAX)
+    expect(normalized.timeLeftMs).toBe(DELAY_TIME_MS_MAX)
+    expect(normalized.timeRightMs).toBe(DELAY_TIME_MS_MIN)
+    expect(normalized.offsetLeftPercent).toBe(DELAY_OFFSET_PERCENT_MAX)
     expect(normalized.feedback).toBe(DELAY_FEEDBACK_MAX)
     expect(normalized.dryWet).toBe(0)
-    expect(normalized.lowCutHz).toBeLessThan(normalized.highCutHz)
+    expect(normalized.filterHz).toBe(DELAY_FILTER_HZ_MIN)
+    expect(normalized.filterWidth).toBe(DELAY_FILTER_WIDTH_MAX)
     expect(serializeDelayParams(normalized)).toBe(serializeDelayParams({ ...normalized, feedback: 4 }))
   })
 

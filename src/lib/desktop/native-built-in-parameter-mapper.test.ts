@@ -91,7 +91,7 @@ test('maps every continuous target for every live built-in family', () => {
   const utilityFrom = createDefaultUtilityParams()
   const autoFilterFrom = createDefaultAutoFilterParams()
   const loFiFrom = createDefaultLoFiParams()
-  const delayFrom = { ...createDefaultDelayParams(), mode: 'time' as const }
+  const delayFrom = createDefaultDelayParams()
   const reverbFrom = createDefaultReverbParams()
   const saturatorFrom = createDefaultSaturatorParams()
   const chorusFrom = createDefaultChorusParams()
@@ -149,9 +149,9 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'delay', instanceId: 'delay-1',
         from: delayFrom,
-        to: { ...delayFrom, timeMs: 240, feedback: 0.7, dryWet: 0.6, lowCutHz: 200, highCutHz: 12_000 },
+        to: { ...delayFrom, timeLeftMs: 240, timeRightMs: 260, feedback: 0.7, dryWet: 0.6, filterHz: 2_000, filterWidth: 3, offsetLeftPercent: 10 },
       } satisfies EffectParamsCommitPayload<'delay'>,
-      expected: [['delay.timeMs', 240], ['delay.feedback', 0.7], ['delay.dryWet', 0.6], ['delay.lowCutHz', 200], ['delay.highCutHz', 12_000]],
+      expected: [['delay.timeMs', 240], ['delay.timeRightMs', 260], ['delay.offsetLeftPercent', 10], ['delay.feedback', 0.7], ['delay.dryWet', 0.6], ['delay.filterHz', 2_000], ['delay.filterWidth', 3]],
     },
     {
       name: 'reverb',
@@ -480,9 +480,10 @@ test('rejects missing instances and mixed or unsupported changes', () => {
   ])
 })
 
-test('resolves sync delay time using BPM and maps other supported delay fields', () => {
+// The core resolves a synced time against the transport tempo, so a division change rewrites the state instead of a live value.
+test('leaves a synced delay division to the core and maps the other delay fields', () => {
   const from = createDefaultDelayParams()
-  const to: typeof from = { ...from, mode: 'sync', syncDivision: '1/4', feedback: 0.75 }
+  const to: typeof from = { ...from, feedback: 0.75 }
 
   const payload = {
     targetId: 'track-1',
@@ -495,10 +496,10 @@ test('resolves sync delay time using BPM and maps other supported delay fields',
   expect(mapNativeBuiltInParameterCommit(payload, 100)).toEqual({
     instanceId: 'delay-1',
     values: [
-      { parameterId: 'delay.timeMs', value: 600 },
       { parameterId: 'delay.feedback', value: 0.75 },
     ],
   })
+  expect(mapNativeBuiltInParameterCommit({ ...payload, to: { ...to, divisionLeft: '1/4' } }, 100)).toBeUndefined()
 })
 
 test('maps LoFi and Reverb targets while rejecting state-only fields', () => {

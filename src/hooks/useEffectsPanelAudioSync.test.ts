@@ -292,13 +292,13 @@ for (const local of [true, false]) {
     try {
       await f.drain();
       f.setLegacyMode(false);
-      await f.write({ ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, mode: "time", timeMs: 777 });
+      await f.write({ ...AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams(), enabled: true, syncLeft: false, timeLeftMs: 777 });
       await f.drain();
       f.setLegacyMode(true);
       await f.drain();
       const value = f.runtime.track.resolveTrackAutomationBindings(f.targetId, "delay.timeMs", f.instanceId)[0]?.param.value;
       console.log("REVIEW mode", JSON.stringify({ local, value, calls: f.calls }));
-      expect(value).toBeCloseTo(0.777);
+      expect(value).toBeCloseTo(777);
     } finally { f.close(); }
   });
   test(`REVIEW FX track restore local=${local}`, async () => {
@@ -346,8 +346,7 @@ test("B5d delay and EQ reorder local track closed and unselected", async () => {
       `eq.${AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams().bands[0]?.id}.gainDb`, "eq:reorder")[0]?.param;
 
     const eq = f.runtime.audio.biquads.find(node => node.gain === eqParam);
-    const delayParam = f.runtime.track.resolveTrackAutomationBindings(f.targetId, "delay.timeMs", f.instanceId)[0]?.param;
-    const delay = f.runtime.audio.delays.find(node => node.delayTime === delayParam);
+    const delay = f.runtime.audio.delayNode();
 
     if (!delay || !eq) throw new Error("Missing heterogeneous runtime nodes");
     expect(reaches(delay, eq)).toBe(true);
@@ -441,7 +440,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
         expect(f.audio.snapshotExportRows([f.targetId])[0]?.params).toEqual(next);
 
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
-        else if (kind === "delay") expect(f.bindings().map(binding => binding.param.value)).toEqual([1, 0]);
+        else if (kind === "delay") expect(f.runtime.audio.delayEnabled()).toBe(false);
         else expect(f.bindings()).toEqual([]);
         console.log("B5c3 FX matrix", JSON.stringify({ group: "external", scenario, family: kind, local,
           target: master ? "master" : "track", calls: f.calls.slice(before), subscription: scenario === "collaborator" }));
@@ -466,7 +465,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
       expect(f.audio.snapshotExportRows([f.targetId])[0]?.params).toEqual(next);
 
       if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(0);
-      else if (kind === "delay") expect(f.bindings().map(binding => binding.param.value)).toEqual([1, 0]);
+      else if (kind === "delay") expect(f.runtime.audio.delayEnabled()).toBe(false);
       else expect(f.bindings()).toEqual([]);
       console.log("B5c3 FX matrix", JSON.stringify({ group: "agent", scenario: "agent commit", family: kind, local,
         target: master ? "master" : "track", calls: f.calls.slice(before), subscription: !local }));
@@ -538,8 +537,7 @@ for (const local of [true, false]) for (const master of [false, true]) for (cons
 
         if (kind === "compressor" || kind === "reverb") expect(f.runtime.audio.liveWorkletCount()).toBe(enabled ? 1 : 0);
         else if (kind === "delay") {
-          const wet = AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams().dryWet;
-          expect(f.bindings().map(binding => binding.param.value)).toEqual(enabled ? [1 - wet, wet] : [1, 0]);
+          expect(f.runtime.audio.delayEnabled()).toBe(enabled);
         }
         else expect(f.bindings().length > 0).toBe(enabled);
         console.log("B5c3 FX matrix", JSON.stringify({ group: "history", scenario: direction, family: kind, local,

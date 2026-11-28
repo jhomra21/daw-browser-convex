@@ -125,7 +125,7 @@ const ensemble = (enabled: boolean): Instance => ({
 
 const delay = (enabled: boolean): Instance => ({
   id: 'subject', kind: 'delay',
-  params: { ...createDefaultDelayParams(), enabled, mode: 'time', timeMs: 5, feedback: 0.5, dryWet: 1 },
+  params: { ...createDefaultDelayParams(), enabled, syncLeft: false, syncRight: false, timeLeftMs: 5, timeRightMs: 5, feedback: 0.5, dryWet: 1 },
 })
 
 const reverb = (enabled: boolean): Instance => ({

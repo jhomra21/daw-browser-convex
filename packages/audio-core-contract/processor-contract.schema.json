@@ -350,14 +350,21 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 13 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 32 }, "tombstone": { "const": false },
-            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "delayMs", "feedback", "dryWet", "pingPong", "filterEnabled", "lowCutHz", "highCutHz"], "properties": {
-              "enabled": { "type": "boolean" }, "delayMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 3000, "portableParameter": true, "portableParameterId": "timeMs" },
-              "feedback": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 0.95, "portableParameter": true },
+            "id": { "const": 13 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 80 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "link", "pingPong", "freeze", "filterEnabled", "smoothing", "syncLeft", "syncRight", "divisionLeft", "divisionRight", "feelLeft", "feelRight", "timeLeftMs", "timeRightMs", "offsetLeftPercent", "offsetRightPercent", "feedback", "dryWet", "filterHz", "filterWidth"], "properties": {
+              "enabled": { "type": "boolean" }, "link": { "type": "boolean" }, "pingPong": { "type": "boolean" }, "freeze": { "type": "boolean" }, "filterEnabled": { "type": "boolean" },
+              "smoothing": { "enum": ["repitch", "fade", "jump"] },
+              "syncLeft": { "type": "boolean" }, "syncRight": { "type": "boolean" },
+              "divisionLeft": { "enum": ["1/32", "1/16", "1/8", "1/4", "1/2", "1/1"] }, "divisionRight": { "enum": ["1/32", "1/16", "1/8", "1/4", "1/2", "1/1"] },
+              "feelLeft": { "enum": ["straight", "dotted", "triplet"] }, "feelRight": { "enum": ["straight", "dotted", "triplet"] },
+              "timeLeftMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 5000, "portableParameter": true, "portableParameterId": "timeMs" },
+              "timeRightMs": { "type": "number", "default": 250, "minimum": 1, "maximum": 5000, "portableParameter": true },
+              "offsetLeftPercent": { "type": "number", "default": 0, "minimum": -33, "maximum": 33, "portableParameter": true },
+              "offsetRightPercent": { "type": "number", "default": 0, "minimum": -33, "maximum": 33, "portableParameter": true },
+              "feedback": { "type": "number", "default": 0.25, "minimum": 0, "maximum": 1, "portableParameter": true },
               "dryWet": { "type": "number", "default": 0.2, "minimum": 0, "maximum": 1, "portableParameter": true },
-              "pingPong": { "type": "boolean" }, "filterEnabled": { "type": "boolean" },
-              "lowCutHz": { "type": "number", "default": 120, "minimum": 20, "maximum": 2000, "portableParameter": true },
-              "highCutHz": { "type": "number", "default": 8000, "minimum": 1000, "maximum": 20000, "portableParameter": true }
+              "filterHz": { "type": "number", "default": 1000, "minimum": 20, "maximum": 20000, "portableParameter": true },
+              "filterWidth": { "type": "number", "default": 5, "minimum": 0.5, "maximum": 9, "portableParameter": true }
             }}
           }
         },

@@ -206,21 +206,6 @@ const toPortableInstrument = (
   return compilePortableSynthState(instrument.params)
 }
 
-export const resolvePortableDelayMs = (
-  params: ReturnType<typeof normalizeDelayParams>,
-  bpm: number,
-) => {
-  if (params.mode === 'time') return params.timeMs
-
-  const beats = params.syncDivision === '1/16' ? 0.25
-    : params.syncDivision === '1/8' ? 0.5
-      : params.syncDivision === '1/4' ? 1
-        : params.syncDivision === '1/2' ? 2
-          : 4
-
-  return Math.min(3_000, beats * 60_000 / Math.max(1, bpm))
-}
-
 const toPortableProcessor = (
   instance: ResolvedMixerGraph['master']['instances'][number],
   sampleRate: number,
@@ -482,22 +467,16 @@ const toPortableProcessor = (
     const params = normalizeDelayParams(instance.params)
 
     return {
-      ...common, kind: 'delay', kindId: processorIds.delay, state: encodeDelayProcessorState({
-        enabled: params.enabled,
-        delayMs: resolvePortableDelayMs(params, bpm),
-        feedback: params.feedback,
-        dryWet: params.dryWet,
-        pingPong: params.pingPong,
-        filterEnabled: params.filterEnabled,
-        lowCutHz: params.lowCutHz,
-        highCutHz: params.highCutHz,
-      }),
+      ...common, kind: 'delay', kindId: processorIds.delay, state: encodeDelayProcessorState(params),
       parameterTargets: [
         { id: 'delay.timeMs', target: 5 },
         { id: 'delay.feedback', target: 6 },
         { id: 'delay.dryWet', target: 7 },
-        { id: 'delay.lowCutHz', target: 8 },
-        { id: 'delay.highCutHz', target: 9 },
+        { id: 'delay.filterHz', target: 8 },
+        { id: 'delay.filterWidth', target: 9 },
+        { id: 'delay.timeRightMs', target: 200 },
+        { id: 'delay.offsetLeftPercent', target: 201 },
+        { id: 'delay.offsetRightPercent', target: 202 },
       ],
       bypassed: !params.enabled,
     }

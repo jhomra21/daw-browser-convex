@@ -59,13 +59,12 @@ export const BUILTIN_INSTRUMENT_PRESETS: readonly InstrumentPreset[] = [
       {
         kind: "delay",
         params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams({
-          syncDivision: "1/8",
           feedback: 0.24,
           dryWet: 0.18,
           pingPong: true,
           filterEnabled: true,
-          lowCutHz: 180,
-          highCutHz: 7200,
+          filterHz: 1140,
+          filterWidth: 5.3,
         }),
       },
       {
@@ -110,13 +109,12 @@ export const BUILTIN_INSTRUMENT_PRESETS: readonly InstrumentPreset[] = [
       {
         kind: "delay",
         params: AUDIO_EFFECT_CONTRACTS.delay.normalizeParams({
-          syncDivision: "1/8",
           feedback: 0.34,
           dryWet: 0.26,
           pingPong: true,
           filterEnabled: true,
-          lowCutHz: 220,
-          highCutHz: 6800,
+          filterHz: 1220,
+          filterWidth: 4.9,
         }),
       },
       {

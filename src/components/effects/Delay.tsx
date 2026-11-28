@@ -1,24 +1,27 @@
-import EffectShell from '~/components/effects/EffectShell'
-import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
-import { DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
-import Knob from '~/components/ui/knob'
 import { For, Show } from 'solid-js'
+import EffectShell from '~/components/effects/EffectShell'
+import AutomatedKnob from '~/components/effects/AutomatedKnob'
+import { DraggableDeviceGraph, handleGraphKeyDelta } from '~/components/effects/draggable-device-graph'
+import { ChoiceMenu, DeviceToggleButton, DeviceValueStrip } from '~/components/ui/device-control'
 import {
   createDefaultDelayParams,
   DELAY_DRY_WET_MAX,
   DELAY_DRY_WET_MIN,
   DELAY_FEEDBACK_MAX,
   DELAY_FEEDBACK_MIN,
-  DELAY_HIGH_CUT_HZ_MAX,
-  DELAY_HIGH_CUT_HZ_MIN,
-  DELAY_LOW_CUT_HZ_MAX,
-  DELAY_LOW_CUT_HZ_MIN,
+  DELAY_FILTER_HZ_MAX,
+  DELAY_FILTER_HZ_MIN,
+  DELAY_FILTER_WIDTH_MAX,
+  DELAY_FILTER_WIDTH_MIN,
+  DELAY_OFFSET_PERCENT_MAX,
+  DELAY_OFFSET_PERCENT_MIN,
   DELAY_TIME_MS_MAX,
   DELAY_TIME_MS_MIN,
+  type DelayFeel,
   type DelayParams,
+  type DelaySmoothing,
   type DelaySyncDivision,
 } from '@daw-browser/shared'
-import { useSteppedValueControl } from '~/hooks/useSteppedValueControl'
 import { cn } from '~/lib/utils'
 import { formatDeviceFrequency, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
@@ -33,178 +36,124 @@ type DelayProps = {
   onManualAutomationOverride?: (parameterId: string) => void
 }
 
-const DEFAULT_PARAMS = createDefaultDelayParams()
-const DIVISIONS: DelaySyncDivision[] = ['1/16', '1/8', '1/4', '1/2', '1/1']
+const defaults = createDefaultDelayParams()
+const DIVISIONS: readonly DelaySyncDivision[] = ['1/32', '1/16', '1/8', '1/4', '1/2', '1/1']
 
-const formatMs = (value: number) => formatDeviceMilliseconds(value, 0)
-const formatFrequency = (value: number) => formatDeviceFrequency(value, 1)
+const FEEL_CHOICES: readonly { value: DelayFeel; label: string }[] = [
+  { value: 'straight', label: 'Straight' },
+  { value: 'dotted', label: 'Dotted' },
+  { value: 'triplet', label: 'Triplet' },
+]
+
+const SMOOTHINGS: readonly { value: DelaySmoothing; label: string }[] = [
+  { value: 'repitch', label: 'Repitch' },
+  { value: 'fade', label: 'Fade' },
+  { value: 'jump', label: 'Jump' },
+]
+
+// The filter graph is a log frequency axis, 20 Hz to 20 kHz, over the 180 by 58 units of DraggableDeviceGraph.
+const GRAPH_WIDTH = 180
+const GRAPH_HEIGHT = 58
+const CURVE_STEPS = 48
+const DB_BOTTOM = -36
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
-const normalizeLowCut = (value: number, highCutHz: number) => Math.round(clamp(value, DELAY_LOW_CUT_HZ_MIN, Math.min(DELAY_LOW_CUT_HZ_MAX, highCutHz - 1)))
-const normalizeHighCut = (value: number, lowCutHz: number) => Math.round(clamp(value, Math.max(DELAY_HIGH_CUT_HZ_MIN, lowCutHz + 1), DELAY_HIGH_CUT_HZ_MAX) / 100) * 100
+const hzToX = (hz: number) => Math.log(hz / DELAY_FILTER_HZ_MIN) / Math.log(DELAY_FILTER_HZ_MAX / DELAY_FILTER_HZ_MIN) * GRAPH_WIDTH
+const xToHz = (x: number) => DELAY_FILTER_HZ_MIN * (DELAY_FILTER_HZ_MAX / DELAY_FILTER_HZ_MIN) ** (x / GRAPH_WIDTH)
+// A wider filter sits higher on the graph.
 
-const frequencyX = (value: number, min: number, max: number) => {
-  const normalized = (Math.log10(value) - Math.log10(min)) / (Math.log10(max) - Math.log10(min))
+const widthToY = (width: number) => (DELAY_FILTER_WIDTH_MAX - width) / (DELAY_FILTER_WIDTH_MAX - DELAY_FILTER_WIDTH_MIN) * GRAPH_HEIGHT
+const yToWidth = (y: number) => DELAY_FILTER_WIDTH_MAX - y / GRAPH_HEIGHT * (DELAY_FILTER_WIDTH_MAX - DELAY_FILTER_WIDTH_MIN)
 
-  return clamp(normalized, 0, 1) * 180
+// The kernel's band-pass: constant 0 dB peak, with a bandwidth in octaves.
+const bandPassDb = (hz: number, centerHz: number, widthOctaves: number) => {
+  const q = 1 / (2 * Math.sinh(Math.LN2 / 2 * widthOctaves))
+  const detune = hz / centerHz - centerHz / hz
+
+  return -10 * Math.log10(1 + q * q * detune * detune)
 }
 
-const pointToFrequency = (x: number) => {
-  const normalized = clamp(x / 180, 0, 1)
-  const logMin = Math.log10(DELAY_LOW_CUT_HZ_MIN)
-  const logMax = Math.log10(DELAY_HIGH_CUT_HZ_MAX)
+const curvePath = (centerHz: number, widthOctaves: number) =>
+  Array.from({ length: CURVE_STEPS + 1 }, (_, step) => {
+    const x = step / CURVE_STEPS * GRAPH_WIDTH
+    const y = -clamp(bandPassDb(xToHz(x), centerHz, widthOctaves), DB_BOTTOM, 0) / -DB_BOTTOM * GRAPH_HEIGHT
 
-  return 10 ** (logMin + normalized * (logMax - logMin))
-}
+    return `${step === 0 ? 'M' : 'L'} ${x.toFixed(1)} ${y.toFixed(2)}`
+  }).join(' ')
 
-function DelayValueStrip(props: {
-  label: string
-  value: number
-  valueLabel: string
-  min: number
-  max: number
-  step: number
-  resetValue: number
+const percentOffset = (value: number) => `${Math.round(value)} %`
+
+type ChannelProps = {
+  title: string
   disabled: boolean
-  onValueChange: (value: number) => void
-}) {
-  const control = useSteppedValueControl({
-    value: () => props.value,
-    min: () => props.min,
-    max: () => props.max,
-    step: () => props.step,
-    disabled: () => props.disabled,
-    onValueChange: (value) => props.onValueChange(value),
-    valueFromDrag: ({ startValue, startPosition, currentPosition }) => {
-      const deltaY = startPosition.y - currentPosition.y
-      const logMin = Math.log10(props.min)
-      const logMax = Math.log10(props.max)
-      const normalizedStart = (Math.log10(startValue) - logMin) / (logMax - logMin)
-      const normalizedNext = clamp(normalizedStart + deltaY * 0.005, 0, 1)
+  sync: boolean
+  division: DelaySyncDivision
+  feel: DelayFeel
+  timeMs: number
+  defaultTimeMs: number
+  offsetPercent: number
+  timeParameterId: string
+  offsetParameterId: string
+  automation: Pick<DelayProps, 'automationRangesByParameterId' | 'onAutomationParameterTouch' | 'onManualAutomationOverride'>
+  onSync: (sync: boolean) => void
+  onDivision: (division: DelaySyncDivision) => void
+  onFeel: (feel: DelayFeel) => void
+  onTime: (timeMs: number) => void
+  onOffset: (offsetPercent: number) => void
+}
 
-      return 10 ** (logMin + normalizedNext * (logMax - logMin))
-    },
-  })
-
-  const handleDoubleClick = () => {
-    if (!props.disabled) control.commitValue(props.resetValue)
-  }
-
+function DelayChannel(props: ChannelProps) {
   return (
-    <div
-      role="slider"
-      tabindex={props.disabled ? undefined : 0}
-      aria-label={props.label}
-      aria-disabled={props.disabled ? "true" : "false"}
-      aria-valuemin={props.min}
-      aria-valuemax={props.max}
-      aria-valuenow={control.visualValue()}
-      aria-valuetext={props.valueLabel}
-      class={props.disabled ? 'cursor-not-allowed opacity-50' : 'cursor-ns-resize'}
-      onPointerDown={control.onPointerDown}
-      onKeyDown={control.handleKeyDown}
-      onKeyUp={control.handleKeyUp}
-      onBlur={control.handleBlur}
-      onWheel={control.handleWheel}
-      onDblClick={handleDoubleClick}
-    >
-      <DeviceValueStrip value={props.valueLabel} valueClass="text-left" />
-    </div>
+    <section class="flex min-w-0 flex-col items-stretch gap-1" aria-label={props.title}>
+      <h3 class="h-4 text-center text-xs font-semibold leading-none text-muted-foreground">{props.title}</h3>
+      <div class="grid grid-cols-2 gap-1">
+        <DeviceToggleButton label="Sync" ariaLabel={`${props.title} Sync`} active={props.sync} disabled={props.disabled} onClick={() => props.onSync(true)} />
+        <DeviceToggleButton label="Time" ariaLabel={`${props.title} Time`} active={!props.sync} disabled={props.disabled} onClick={() => props.onSync(false)} />
+      </div>
+      <Show
+        when={props.sync}
+        fallback={
+          <div class="flex h-[72px] items-center justify-center">
+            <AutomatedKnob size={32} label="Time" ariaLabel={`${props.title} Time knob`} valueLabel={formatDeviceMilliseconds(props.timeMs, 0)} value={props.timeMs} resetValue={props.defaultTimeMs} min={DELAY_TIME_MS_MIN} max={DELAY_TIME_MS_MAX} step={1} logarithmic disabled={props.disabled} parameterId={props.timeParameterId} automation={props.automation} onValueChange={props.onTime} />
+          </div>
+        }
+      >
+        <div class="flex h-[72px] flex-col gap-1">
+          <div class="grid grid-cols-3 gap-1">
+            <For each={DIVISIONS}>
+              {(division) => (
+                <DeviceToggleButton label={division} ariaLabel={`${props.title} ${division}`} active={props.division === division} disabled={props.disabled} onClick={() => props.onDivision(division)} />
+              )}
+            </For>
+          </div>
+          <ChoiceMenu label={`${props.title} Feel`} choices={FEEL_CHOICES} value={props.feel} disabled={props.disabled} onSelect={props.onFeel} />
+        </div>
+      </Show>
+      {/* Offset nudges the synced sixteenths, so it only exists in Sync mode, as in Live. */}
+      <Show when={props.sync}>
+        <div class="flex justify-center">
+          <AutomatedKnob size={26} label="Offset" ariaLabel={`${props.title} Offset`} valueLabel={percentOffset(props.offsetPercent)} value={props.offsetPercent} resetValue={0} min={DELAY_OFFSET_PERCENT_MIN} max={DELAY_OFFSET_PERCENT_MAX} step={1} bipolar disabled={props.disabled} parameterId={props.offsetParameterId} automation={props.automation} onValueChange={props.onOffset} />
+        </div>
+      </Show>
+    </section>
   )
 }
 
-function DelayFilterGraph(props: {
-  params: DelayParams
-  disabled: boolean
-  onLowCutChange: (value: number) => void
-  onHighCutChange: (value: number) => void
-}) {
-  const lowX = () => frequencyX(props.params.lowCutHz, DELAY_LOW_CUT_HZ_MIN, DELAY_HIGH_CUT_HZ_MAX)
-  const highX = () => frequencyX(props.params.highCutHz, DELAY_LOW_CUT_HZ_MIN, DELAY_HIGH_CUT_HZ_MAX)
-
-  const onLowCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => props.onLowCutChange(props.params.lowCutHz + 10),
-    ArrowUp: () => props.onLowCutChange(props.params.lowCutHz + 10),
-    ArrowLeft: () => props.onLowCutChange(props.params.lowCutHz - 10),
-    ArrowDown: () => props.onLowCutChange(props.params.lowCutHz - 10),
-    PageUp: () => props.onLowCutChange(props.params.lowCutHz + 100),
-    PageDown: () => props.onLowCutChange(props.params.lowCutHz - 100),
-    Home: () => props.onLowCutChange(DELAY_LOW_CUT_HZ_MIN),
-    End: () => props.onLowCutChange(DELAY_LOW_CUT_HZ_MAX),
-  })
-
-  const onHighCutKeyDown = (event: KeyboardEvent) => handleGraphKeyDelta(event, {
-    ArrowRight: () => props.onHighCutChange(props.params.highCutHz + 100),
-    ArrowUp: () => props.onHighCutChange(props.params.highCutHz + 100),
-    ArrowLeft: () => props.onHighCutChange(props.params.highCutHz - 100),
-    ArrowDown: () => props.onHighCutChange(props.params.highCutHz - 100),
-    PageUp: () => props.onHighCutChange(props.params.highCutHz + 1000),
-    PageDown: () => props.onHighCutChange(props.params.highCutHz - 1000),
-    Home: () => props.onHighCutChange(DELAY_HIGH_CUT_HZ_MIN),
-    End: () => props.onHighCutChange(DELAY_HIGH_CUT_HZ_MAX),
-  })
-
-  const filterPath = () => {
-    if (!props.params.filterEnabled) return 'M 0 30 L 180 30'
-
-    return `M 0 48 C ${lowX()} 48 ${lowX()} 30 ${lowX() + 28} 30 L ${highX() - 28} 30 C ${highX()} 30 ${highX()} 48 180 48`
-  }
-
-  return (
-    <DraggableDeviceGraph
-      disabled={props.disabled || !props.params.filterEnabled}
-      path={filterPath}
-      class="h-[116px]"
-      patternWidth={14}
-      patternHeight={10}
-      stroke="#22d3ee"
-      handles={props.params.filterEnabled
-        ? [
-          {
-            label: 'Delay low cut frequency',
-            x: lowX,
-            y: () => 30,
-            onDrag: (point) => props.onLowCutChange(pointToFrequency(point.x)),
-            onKeyDown: onLowCutKeyDown,
-          },
-          {
-            label: 'Delay high cut frequency',
-            x: highX,
-            y: () => 30,
-            onDrag: (point) => props.onHighCutChange(pointToFrequency(point.x)),
-            onKeyDown: onHighCutKeyDown,
-          },
-        ]
-        : []}
-    >
-      <line x1="0" y1="29" x2="180" y2="29" stroke="#525252" stroke-width="1" />
-    </DraggableDeviceGraph>
-  )
-}
+const filterKeys = (params: () => DelayParams, change: (updates: Partial<DelayParams>) => void) => (event: KeyboardEvent) => handleGraphKeyDelta(event, {
+  ArrowRight: () => change({ filterHz: Math.round(clamp(params().filterHz * 1.05, DELAY_FILTER_HZ_MIN, DELAY_FILTER_HZ_MAX)) }),
+  ArrowLeft: () => change({ filterHz: Math.round(clamp(params().filterHz / 1.05, DELAY_FILTER_HZ_MIN, DELAY_FILTER_HZ_MAX)) }),
+  ArrowUp: () => change({ filterWidth: clamp(params().filterWidth + 0.1, DELAY_FILTER_WIDTH_MIN, DELAY_FILTER_WIDTH_MAX) }),
+  ArrowDown: () => change({ filterWidth: clamp(params().filterWidth - 0.1, DELAY_FILTER_WIDTH_MIN, DELAY_FILTER_WIDTH_MAX) }),
+})
 
 export default function Delay(props: DelayProps) {
-  const timeMode = () => props.params.mode === 'time'
-  const automationRange = (parameterId: string) => props.automationRangesByParameterId?.get(parameterId)
+  const off = () => !props.params.enabled
+  const filterOff = () => off() || !props.params.filterEnabled
 
-  const changeAutomated = (parameterId: string, updates: Partial<DelayParams>) => {
-    props.onManualAutomationOverride?.(parameterId)
+  // A handle drag moves automatable params without going through a knob, so it reports the override itself.
+  const changeFromGraph = (updates: Partial<DelayParams>) => {
+    for (const key of Object.keys(updates)) props.onManualAutomationOverride?.(`delay.${key}`)
     props.onChange(updates)
-  }
-
-  const updateAutomatedLowCut = (value: number) => {
-    const lowCutHz = normalizeLowCut(value, props.params.highCutHz)
-
-    if (lowCutHz === props.params.lowCutHz) return
-    props.onManualAutomationOverride?.('delay.lowCutHz')
-    props.onChange({ lowCutHz })
-  }
-
-  const updateAutomatedHighCut = (value: number) => {
-    const highCutHz = normalizeHighCut(value, props.params.lowCutHz)
-
-    if (highCutHz === props.params.highCutHz) return
-    props.onManualAutomationOverride?.('delay.highCutHz')
-    props.onChange({ highCutHz })
   }
 
   return (
@@ -214,61 +163,98 @@ export default function Delay(props: DelayProps) {
       enabled={props.params.enabled}
       onToggleEnabled={props.onToggleEnabled}
       onReset={props.onReset}
-      class={cn('w-[380px] min-w-[380px]', props.class)}
+      class={cn('w-[640px] min-w-[640px]', props.class)}
     >
-      <div class={cn('flex min-h-0 flex-1 flex-col px-3 py-3', !props.params.enabled && 'opacity-70')}>
-        <div class="grid grid-cols-[5.6rem_minmax(0,1fr)_4.75rem] gap-2">
-          <div class="flex min-w-0 flex-col gap-2">
-            <div class="grid grid-cols-2 gap-1">
-              <DeviceToggleButton label="Sync" active={!timeMode()} disabled={!props.params.enabled} onClick={() => props.onChange({ mode: 'sync' })} />
-              <DeviceToggleButton label="Time" active={timeMode()} disabled={!props.params.enabled} onClick={() => props.onChange({ mode: 'time' })} />
-            </div>
-            <Show
-              when={timeMode()}
-              fallback={
-                <div class="grid grid-cols-2 gap-1">
-                  <For each={DIVISIONS}>
-                    {(syncDivision) => (
-                      <DeviceToggleButton
-                        label={syncDivision}
-                        active={props.params.syncDivision === syncDivision}
-                        disabled={!props.params.enabled}
-                        onClick={() => props.onChange({ syncDivision })}
-                      />
-                    )}
-                  </For>
-                </div>
-              }
-            >
-              <Knob class="py-1" label="Time" valueLabel={formatMs(props.params.timeMs)} value={props.params.timeMs} resetValue={DEFAULT_PARAMS.timeMs} min={DELAY_TIME_MS_MIN} max={DELAY_TIME_MS_MAX} step={1} disabled={!props.params.enabled} automationRange={automationRange('delay.timeMs')} automated={!!automationRange('delay.timeMs')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.timeMs')} onValueChange={(timeMs) => changeAutomated('delay.timeMs', { timeMs })} />
-            </Show>
-          </div>
-
-          <div class="flex min-w-0 flex-col gap-2 rounded-sm border border-border bg-app-surface/70 p-2">
-            <DelayFilterGraph
-              params={props.params}
-              disabled={!props.params.enabled}
-              onLowCutChange={updateAutomatedLowCut}
-              onHighCutChange={updateAutomatedHighCut}
+      <div class={cn('grid min-h-0 flex-1 grid-cols-[17.5rem_minmax(0,1fr)_5rem] gap-2 px-3 py-2', off() && 'opacity-70')}>
+        <div class="flex min-h-0 min-w-0 flex-col gap-1">
+          <div class="grid grid-cols-[minmax(0,1fr)_2rem_minmax(0,1fr)] gap-1">
+            <DelayChannel
+              title="Left"
+              disabled={off()}
+              sync={props.params.syncLeft}
+              division={props.params.divisionLeft}
+              feel={props.params.feelLeft}
+              timeMs={props.params.timeLeftMs}
+              defaultTimeMs={defaults.timeLeftMs}
+              offsetPercent={props.params.offsetLeftPercent}
+              timeParameterId="delay.timeMs"
+              offsetParameterId="delay.offsetLeftPercent"
+              automation={props}
+              onSync={(syncLeft) => props.onChange({ syncLeft })}
+              onDivision={(divisionLeft) => props.onChange({ divisionLeft })}
+              onFeel={(feelLeft) => props.onChange({ feelLeft })}
+              onTime={(timeLeftMs) => props.onChange({ timeLeftMs })}
+              onOffset={(offsetLeftPercent) => props.onChange({ offsetLeftPercent })}
             />
-            <div class="grid grid-cols-[4.2rem_minmax(0,1fr)_minmax(0,1fr)] gap-1">
-              <DeviceToggleButton label="Filter" active={props.params.filterEnabled} disabled={!props.params.enabled} onClick={() => props.onChange({ filterEnabled: !props.params.filterEnabled })} />
-              <DelayValueStrip label="Delay low cut frequency" value={props.params.lowCutHz} valueLabel={formatFrequency(props.params.lowCutHz)} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} resetValue={DEFAULT_PARAMS.lowCutHz} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedLowCut} />
-              <DelayValueStrip label="Delay high cut frequency" value={props.params.highCutHz} valueLabel={formatFrequency(props.params.highCutHz)} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={100} resetValue={DEFAULT_PARAMS.highCutHz} disabled={!props.params.enabled || !props.params.filterEnabled} onValueChange={updateAutomatedHighCut} />
+            <div class="flex items-center">
+              <DeviceToggleButton class="w-full" label="Link" ariaLabel="Link channels" active={props.params.link} disabled={off()} onClick={() => props.onChange({ link: !props.params.link })} />
             </div>
+            <DelayChannel
+              title="Right"
+              disabled={off() || props.params.link}
+              sync={props.params.syncRight}
+              division={props.params.divisionRight}
+              feel={props.params.feelRight}
+              timeMs={props.params.timeRightMs}
+              defaultTimeMs={defaults.timeRightMs}
+              offsetPercent={props.params.offsetRightPercent}
+              timeParameterId="delay.timeRightMs"
+              offsetParameterId="delay.offsetRightPercent"
+              automation={props}
+              onSync={(syncRight) => props.onChange({ syncRight })}
+              onDivision={(divisionRight) => props.onChange({ divisionRight })}
+              onFeel={(feelRight) => props.onChange({ feelRight })}
+              onTime={(timeRightMs) => props.onChange({ timeRightMs })}
+              onOffset={(offsetRightPercent) => props.onChange({ offsetRightPercent })}
+            />
           </div>
-
-          <div class="flex min-w-0 flex-col justify-between gap-2">
-            <DeviceToggleButton label="Ping Pong" active={props.params.pingPong} disabled={!props.params.enabled} onClick={() => props.onChange({ pingPong: !props.params.pingPong })} />
-          </div>
+          <section class="flex items-center justify-around gap-2 pt-1" aria-label="Feedback and Freeze">
+            <AutomatedKnob size={26} label="Feedback" valueLabel={formatDevicePercent(props.params.feedback)} value={props.params.feedback} resetValue={defaults.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={off()} parameterId="delay.feedback" automation={props} onValueChange={(feedback) => props.onChange({ feedback })} />
+            <DeviceToggleButton class="w-16" label="Freeze" active={props.params.freeze} disabled={off()} onClick={() => props.onChange({ freeze: !props.params.freeze })} />
+          </section>
         </div>
 
-        <div class="mt-auto grid grid-cols-4 gap-3 pb-2 pt-3">
-          <Knob class="px-1 py-1" label="Low Cut" valueLabel={formatFrequency(props.params.lowCutHz)} value={props.params.lowCutHz} resetValue={DEFAULT_PARAMS.lowCutHz} min={DELAY_LOW_CUT_HZ_MIN} max={DELAY_LOW_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.lowCutHz')} automated={!!automationRange('delay.lowCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.lowCutHz')} onValueChange={updateAutomatedLowCut} />
-          <Knob class="px-1 py-1" label="High Cut" valueLabel={formatFrequency(props.params.highCutHz)} value={props.params.highCutHz} resetValue={DEFAULT_PARAMS.highCutHz} min={DELAY_HIGH_CUT_HZ_MIN} max={DELAY_HIGH_CUT_HZ_MAX} step={1} logarithmic disabled={!props.params.enabled || !props.params.filterEnabled} automationRange={automationRange('delay.highCutHz')} automated={!!automationRange('delay.highCutHz')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.highCutHz')} onValueChange={updateAutomatedHighCut} />
-              <Knob class="px-1 py-1" label="Feedback" valueLabel={formatDevicePercent(props.params.feedback)} value={props.params.feedback} resetValue={DEFAULT_PARAMS.feedback} min={DELAY_FEEDBACK_MIN} max={DELAY_FEEDBACK_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.feedback')} automated={!!automationRange('delay.feedback')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.feedback')} onValueChange={(feedback) => changeAutomated('delay.feedback', { feedback })} />
-              <Knob class="px-1 py-1" label="Dry/Wet" valueLabel={formatDevicePercent(props.params.dryWet)} value={props.params.dryWet} resetValue={DEFAULT_PARAMS.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={!props.params.enabled} automationRange={automationRange('delay.dryWet')} automated={!!automationRange('delay.dryWet')} onAutomationSelect={() => props.onAutomationParameterTouch?.('delay.dryWet')} onValueChange={(dryWet) => changeAutomated('delay.dryWet', { dryWet })} />
-        </div>
+        <section class="flex min-h-0 min-w-0 flex-col gap-1 pt-5" aria-label="Filter">
+          <DraggableDeviceGraph
+            disabled={filterOff()}
+            class="h-[116px]"
+            stroke="#22d3ee"
+            path={() => props.params.filterEnabled ? curvePath(props.params.filterHz, props.params.filterWidth) : `M 0 0 L ${GRAPH_WIDTH} 0`}
+            handles={[{
+              label: 'Filter frequency and width',
+              dimmed: () => !props.params.filterEnabled,
+              x: () => hzToX(props.params.filterHz),
+              y: () => widthToY(props.params.filterWidth),
+              onDrag: (point: { x: number; y: number }) => changeFromGraph({ filterHz: Math.round(clamp(xToHz(point.x), DELAY_FILTER_HZ_MIN, DELAY_FILTER_HZ_MAX)), filterWidth: clamp(Math.round(yToWidth(point.y) * 100) / 100, DELAY_FILTER_WIDTH_MIN, DELAY_FILTER_WIDTH_MAX) }),
+              onKeyDown: filterKeys(() => props.params, changeFromGraph),
+            }]}
+          />
+          <div class="grid grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)] gap-1">
+            <DeviceToggleButton label="Filter" ariaLabel="Filter on" active={props.params.filterEnabled} disabled={off()} onClick={() => props.onChange({ filterEnabled: !props.params.filterEnabled })} />
+            <DeviceValueStrip value={formatDeviceFrequency(props.params.filterHz, 2)} />
+            <DeviceValueStrip value={props.params.filterWidth.toFixed(2)} />
+          </div>
+          <div class="grid grid-cols-[3rem_minmax(0,1fr)_minmax(0,1fr)] gap-1 text-2xs leading-none text-muted-foreground">
+            <span />
+            <span>Freq</span>
+            <span>Width</span>
+          </div>
+        </section>
+
+        <section class="flex min-h-0 min-w-0 flex-col justify-between gap-1" aria-label="Output">
+          <div class="flex flex-col gap-1">
+            <h3 class="h-4 text-center text-xs font-semibold leading-none text-muted-foreground">Smoothing</h3>
+            <For each={SMOOTHINGS}>
+              {(smoothing) => (
+                <DeviceToggleButton label={smoothing.label} active={props.params.smoothing === smoothing.value} disabled={off()} onClick={() => props.onChange({ smoothing: smoothing.value })} />
+              )}
+            </For>
+          </div>
+          <DeviceToggleButton label="Ping Pong" active={props.params.pingPong} disabled={off()} onClick={() => props.onChange({ pingPong: !props.params.pingPong })} />
+          <div class="flex justify-center">
+            <AutomatedKnob size={32} label="Dry/Wet" valueLabel={formatDevicePercent(props.params.dryWet)} value={props.params.dryWet} resetValue={defaults.dryWet} min={DELAY_DRY_WET_MIN} max={DELAY_DRY_WET_MAX} step={0.01} disabled={off()} parameterId="delay.dryWet" automation={props} onValueChange={(dryWet) => props.onChange({ dryWet })} />
+          </div>
+        </section>
       </div>
     </EffectShell>
   )

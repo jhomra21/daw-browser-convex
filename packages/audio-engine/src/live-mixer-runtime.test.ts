@@ -810,14 +810,14 @@ describe('track effect chain delivery', () => {
       const { audio, runtime, budget, begins } = createChainRuntime()
       const gate = staticGateInstance(-40, 4, 'gate')
       await runtime.setTrackFxInstances('track-1', [gate, syncedDelayInstance('delay')])
-      audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+      audio.failNextTempoPost()
 
-      expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+      expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
       audio.faultCompressor(0)
 
       expect(budget.committedCount()).toBe(0)
       expect(await runtime.setTrackFxInstances('track-1', [syncedDelayInstance('delay')])).toBe('applied')
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
       expect(begins()).toBe(3)
     })
 
@@ -831,7 +831,7 @@ describe('track effect chain delivery', () => {
 
       expect(await pending).toBe('superseded')
       expect(await runtime.setTrackFxInstances('track-1', [delay])).toBe('skipped')
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
     })
 
     test('a retired gate fault cannot disturb a pending track edit and retirement closes it once', async () => {
@@ -851,7 +851,7 @@ describe('track effect chain delivery', () => {
       expect(await pending).toBe('applied')
       timers.run()
       expect(audio.workletCloseCount()).toBe(1)
-      expect(audio.liveWorkletCount()).toBe(0)
+      expect(audio.liveWorkletCount()).toBe(1) // only the delay worklet is left
     })
 
     test('a failed deferred EQ write still retires a removed track gate', async () => {
@@ -979,11 +979,11 @@ describe('track effect chain delivery', () => {
       const { audio, runtime } = createChainRuntime()
       const delay = syncedDelayInstance()
       await runtime.setTrackFxInstances('track-1', [delay])
-      audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+      audio.failNextTempoPost()
 
-      expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+      expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
       expect(await runtime.setTrackFxInstances('track-1', [delay])).toBe('applied')
-      expect(audio.delays.map((node) => node.delayTime.value)).toEqual([0.5, 0.5])
+      expect(audio.delayTempos()).toEqual([60])
     })
 
     for (const wholeChain of [false, true]) {
@@ -1004,14 +1004,12 @@ describe('track effect chain delivery', () => {
 
         await runtime.setTrackFxInstances('track-1', initial)
         const pending = runtime.setTrackFxInstances('track-1', requested)
-        audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+        audio.failNextTempoPost()
 
-        expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
+        expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
         expect(await pending).toBe('superseded')
         expect(await runtime.setTrackFxInstances('track-1', requested)).toBe('applied')
-        expect(audio.delays.map((node) => node.delayTime.value)).toEqual(
-          wholeChain ? [0.5, 0.5, 0.5, 0.5] : [0.5, 0.5],
-        )
+        expect(audio.delayTempos()).toEqual(wholeChain ? [60, 60] : [60])
       })
     }
 
@@ -1040,10 +1038,10 @@ describe('track effect chain delivery', () => {
       try {
         await runtime.setTrackFxInstances('track-1', [failed, healthy])
         const publicationsBeforeTempo = latencies.length
-        audio.failNextParameterWrite(audio.delays[1]?.delayTime)
+        audio.failNextTempoPost()
 
-        expect(() => runtime.setBpm(60)).toThrow('Audio parameter write failed.')
-        expect(audio.delays.slice(2).map((node) => node.delayTime.value)).toEqual([0.5, 0.5])
+        expect(() => runtime.setBpm(60)).toThrow('Worklet tempo post failed.')
+        expect(audio.delayTempos().slice(1)).toEqual([60])
         expect(latencies.length).toBeGreaterThan(publicationsBeforeTempo)
       } finally {
         runtime.disposeTrack('track-1')

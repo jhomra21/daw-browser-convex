@@ -114,7 +114,7 @@ async function buildOfflineFxChain(
     }
 
     if (instance.kind === 'delay') {
-      const delay = createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? DEFAULT_BPM)
+      const delay = await createDelayNodeChain(ctx, normalizeDelayParams(instance.params), config.bpm ?? DEFAULT_BPM)
       delayByInstanceId.set(instance.id, delay)
       stages.push({ id: instance.id, kind: instance.kind, delayChain: delay })
       continue

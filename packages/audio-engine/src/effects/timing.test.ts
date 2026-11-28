@@ -74,10 +74,14 @@ test('includes external reported latency in PDC timing without widening built-in
 test('bounds sync-resolved Delay timing and removes disabled or dry-only tails', () => {
   const params = createDefaultDelayParams()
   expect(getEffectTiming(
-    { kind: 'delay', params: { ...params, mode: 'sync', syncDivision: '1/1', feedback: 0 } },
+    { kind: 'delay', params: { ...params, syncLeft: true, divisionLeft: '1/1', feedback: 0 } },
     48_000,
     20,
-  ).tail).toEqual({ kind: 'finite', frames: 144_000 })
+  ).tail).toEqual({ kind: 'finite', frames: 240_000 })
+  expect(getEffectTiming(
+    { kind: 'delay', params: { ...params, freeze: true } },
+    48_000,
+  ).tail).toEqual({ kind: 'unbounded' })
   expect(getEffectTiming(
     { kind: 'delay', params: { ...params, dryWet: 0 } },
     48_000,

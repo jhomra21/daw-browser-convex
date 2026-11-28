@@ -885,7 +885,7 @@ window.deviceKnobFixture = {
             onChange: updates => device.delay.changeInstance('delay-1', current => ({ ...current, ...updates })),
             onToggleEnabled: enabled => device.delay.changeInstance('delay-1', current => ({ ...current, enabled })),
             onReset: () => device.delay.changeInstance('delay-1', () => AUDIO_EFFECT_CONTRACTS.delay.createDefaultParams()),
-            automationRangesByParameterId: new Map([['delay.feedback', { min: 0, max: 0.95 }]]),
+            automationRangesByParameterId: new Map([['delay.feedback', { min: 0, max: 1 }]]),
             onManualAutomationOverride: parameterId => overrides.push(parameterId),
           })
         },
@@ -1057,7 +1057,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
     }
 
     await page.read(pointSchema, 'deviceKnobFixture.mount(false)')
-    const strip = await page.read(pointSchema, `(() => { const element = document.querySelector('[aria-label="Delay low cut frequency"]'); const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } })()`)
+    const strip = await page.read(pointSchema, `(() => { const element = document.querySelector('[aria-label="Filter frequency and width"]'); const rect = element.getBoundingClientRect(); return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 } })()`)
     await page.mouse('move', strip.x, strip.y)
     await page.mouse('down')
     await page.mouse('move', strip.x, strip.y - 35)
@@ -1116,7 +1116,7 @@ const resultSchema = z.object({ writes: z.array(z.number()), history: z.number()
     await pressKey('End', 'keydown')
     await pressKey('End', 'keyup')
     const boundary = await page.read(resultSchema, 'deviceKnobFixture.result()')
-    expect(boundary.value).toBe(0.95)
+    expect(boundary.value).toBe(1)
     expect(boundary.writes).toHaveLength(4)
     expect(boundary.history).toBeGreaterThanOrEqual(reset.history)
     await pressKey('End', 'keydown')

@@ -29,6 +29,7 @@
 
 #include "autofilter_kernel.h"
 #include "reverb_kernel.h"
+#include "delay_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
 #include "limiter_kernel.h"
@@ -101,8 +102,6 @@ constexpr uint32_t kSpectralInputFrames = 131072;
 constexpr uint32_t kSpectralInputFrames = 16384;
 #endif
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
-// One extra frame lets a 96 kHz processor read the full 3,000 ms contract maximum.
-constexpr uint32_t kMaximumTimeEffectDelayFrames = 288001;
 static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
 static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == 1u);
 
@@ -573,15 +572,11 @@ struct ModulationHistory {
   float bypass = 0.0F;
 };
 
+// The kernel owns its lines, sized for the core's sample rate when the history is built.
 struct DelayHistory {
-  std::array<float, kMaximumTimeEffectDelayFrames> left{};
-  std::array<float, kMaximumTimeEffectDelayFrames> right{};
-  uint32_t write = 0;
-  BiquadHistory highpass_left{};
-  BiquadHistory highpass_right{};
-  BiquadHistory lowpass_left{};
-  BiquadHistory lowpass_right{};
-  double phase = 0.0;
+  daw::audio_core::DelayKernel kernel;
+  daw::audio_core::DelayValues values;
+  daw::audio_core::DelayConfig config;
   float bypass = 0.0F;
 };
 
@@ -1485,27 +1480,6 @@ inline float process_biquad(float input, const BiquadCoefficients &coefficients,
     - coefficients.a1 * history.y1 - coefficients.a2 * history.y2;
   history.x2 = history.x1; history.x1 = input; history.y2 = history.y1; history.y1 = output;
   return output;
-}
-
-template <size_t DelayFrames>
-float read_time_effect_delay(
-  const std::array<float, DelayFrames> &buffer,
-  uint32_t write,
-  float delay_frames) {
-  const float delay = std::fmax(1.0F, std::fmin(delay_frames, static_cast<float>(DelayFrames - 1)));
-  const float read = static_cast<float>(write) - delay;
-  const float base = std::floor(read);
-  const float fraction = read - base;
-  const auto index = [&buffer, base](int32_t offset) {
-    const int64_t size = static_cast<int64_t>(buffer.size());
-    int64_t value = static_cast<int64_t>(base) + offset;
-    value %= size;
-    if (value < 0) value += size;
-    return static_cast<size_t>(value);
-  };
-  const float older = buffer[index(0)];
-  const float newer = buffer[index(1)];
-  return older + (newer - older) * fraction;
 }
 
 inline void reset_spectral_history(SpectralHistory &history, const daw_audio_spectral_state &state) {

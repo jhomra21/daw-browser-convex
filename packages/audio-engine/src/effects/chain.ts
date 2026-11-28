@@ -1,8 +1,8 @@
-import { DELAY_MAX_DELAY_TIME_SEC, normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, isOwnedProcessorKind, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
-import { applyDelayNodeParams, applySaturatorNodeParams } from './dsp'
+import { normalizeCompressorParams, normalizeDelayParams, normalizeReverbParams, normalizeSaturatorParams, isOwnedProcessorKind, type AudioEffectKind, type CompressorParamsLite, type DelayParamsLite, type ReverbParamsLite, type SaturatorParamsLite } from '@daw-browser/shared'
+import { applySaturatorNodeParams } from './dsp'
 import { scheduleAudioParamRamp } from '../audio-param-ramp'
 import { ensureCompressorWorklet, postCompressorParams } from './compressor-worklet'
-import { compressorWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
+import { compressorWorklet, delayWorklet, reverbWorklet, resolveWorkletModuleUrl } from '../worklet-manifest'
 import type { StaticWorkletNodeChain } from './static-worklet-chain'
 import { loadWorkletModule } from '../worklet-loader'
 import { safeDisconnect } from '../safe-disconnect'
@@ -156,22 +156,12 @@ export type SaturatorNodeChain = {
   outputGain: GainNode
 }
 
+// The worklet is both ends of the chain: a disabled delay stays in the routing and keeps hearing its input, so its bypass is a crossfade inside the processor.
 export type DelayNodeChain = {
   enabled: boolean
-  pingPong: boolean
-  internalsConnected: boolean
-  dryGain: GainNode
-  wetGain: GainNode
-  delayLeft: DelayNode
-  delayRight: DelayNode
-  feedbackLeft: GainNode
-  feedbackRight: GainNode
-  lowCutLeft: BiquadFilterNode
-  highCutLeft: BiquadFilterNode
-  lowCutRight: BiquadFilterNode
-  highCutRight: BiquadFilterNode
-  splitter: ChannelSplitterNode
-  merger: ChannelMergerNode
+  workletNode: AudioWorkletNode
+  revision: number
+  bpm: number
 }
 
 export type FxChainStageConfig = {
@@ -393,73 +383,64 @@ function connectSaturatorInternals(chain: SaturatorNodeChain) {
   chain.internalsConnected = true
 }
 
-export function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsLite, bpm: number): DelayNodeChain {
-  const normalized = normalizeDelayParams(params)
+export async function createDelayNodeChain(ctx: BaseAudioContext, params: DelayParamsLite, bpm: number): Promise<DelayNodeChain> {
+  await loadWorkletModule(ctx, resolveWorkletModuleUrl(delayWorklet.modulePath))
 
   const chain: DelayNodeChain = {
-    enabled: normalized.enabled,
-    pingPong: normalized.pingPong,
-    internalsConnected: false,
-    dryGain: ctx.createGain(),
-    wetGain: ctx.createGain(),
-    delayLeft: ctx.createDelay(DELAY_MAX_DELAY_TIME_SEC),
-    delayRight: ctx.createDelay(DELAY_MAX_DELAY_TIME_SEC),
-    feedbackLeft: ctx.createGain(),
-    feedbackRight: ctx.createGain(),
-    lowCutLeft: ctx.createBiquadFilter(),
-    highCutLeft: ctx.createBiquadFilter(),
-    lowCutRight: ctx.createBiquadFilter(),
-    highCutRight: ctx.createBiquadFilter(),
-    splitter: ctx.createChannelSplitter(2),
-    merger: ctx.createChannelMerger(2),
+    enabled: params.enabled,
+    workletNode: new AudioWorkletNode(ctx, delayWorklet.processorName, {
+      numberOfInputs: 1,
+      numberOfOutputs: 1,
+      outputChannelCount: [2],
+      channelCount: 2,
+      channelCountMode: 'explicit',
+      channelInterpretation: 'speakers',
+    }),
+    revision: 0,
+    bpm: 0,
   }
 
-  applyDelayNodeChainParams(chain, normalized, bpm)
+  setDelayChainTempo(chain, bpm)
+  applyDelayNodeChainParams(chain, params)
 
   return chain
 }
 
-export function applyDelayNodeChainParams(chain: DelayNodeChain, params: DelayParamsLite, bpm: number) {
+// A worklet knows no project tempo, so the one a synced time resolves against is posted to it.
+export function setDelayChainTempo(chain: DelayNodeChain, bpm: number) {
+  if (chain.bpm === bpm) return
+  chain.workletNode.port.postMessage({ type: 'tempo', version: 1, bpm })
+  chain.bpm = bpm
+}
+
+export function applyDelayNodeChainParams(chain: DelayNodeChain, params: DelayParamsLite) {
   const normalized = normalizeDelayParams(params)
   chain.enabled = normalized.enabled
-  chain.pingPong = normalized.pingPong
-  applyDelayNodeParams(chain, normalized, bpm)
+  chain.revision += 1
+  chain.workletNode.port.postMessage({ type: 'configure', version: 1, revision: chain.revision, state: normalized })
+
+  for (const [parameterId, value] of [
+    ['delay.timeMs', normalized.timeLeftMs],
+    ['delay.timeRightMs', normalized.timeRightMs],
+    ['delay.offsetLeftPercent', normalized.offsetLeftPercent],
+    ['delay.offsetRightPercent', normalized.offsetRightPercent],
+    ['delay.feedback', normalized.feedback],
+    ['delay.dryWet', normalized.dryWet],
+    ['delay.filterHz', normalized.filterHz],
+    ['delay.filterWidth', normalized.filterWidth],
+  ] as const) {
+    const parameter = chain.workletNode.parameters.get(parameterId)
+
+    if (parameter) parameter.value = value
+  }
 }
 
 export function disconnectDelayChain(chain: DelayNodeChain) {
-  disconnectAudioNodes([
-    chain.dryGain, chain.wetGain, chain.delayLeft, chain.delayRight, chain.feedbackLeft, chain.feedbackRight,
-    chain.lowCutLeft, chain.highCutLeft, chain.lowCutRight, chain.highCutRight, chain.splitter, chain.merger,
-  ])
-  chain.internalsConnected = false
-}
+  disconnectAudioNodes([chain.workletNode])
 
-function connectDelayInternals(chain: DelayNodeChain) {
-  if (chain.internalsConnected) return
+  try { chain.workletNode.port.postMessage({ type: 'release', version: 1 }) } catch {}
 
-  if (chain.pingPong) {
-    chain.splitter.connect(chain.delayLeft, 0)
-    chain.splitter.connect(chain.delayRight, 1)
-    chain.delayLeft.connect(chain.lowCutLeft)
-    chain.lowCutLeft.connect(chain.highCutLeft)
-    chain.highCutLeft.connect(chain.merger, 0, 0)
-    chain.highCutLeft.connect(chain.feedbackRight)
-    chain.feedbackRight.connect(chain.delayRight)
-    chain.delayRight.connect(chain.lowCutRight)
-    chain.lowCutRight.connect(chain.highCutRight)
-    chain.highCutRight.connect(chain.merger, 0, 1)
-    chain.highCutRight.connect(chain.feedbackLeft)
-    chain.feedbackLeft.connect(chain.delayLeft)
-    chain.merger.connect(chain.wetGain)
-  } else {
-    chain.delayLeft.connect(chain.lowCutLeft)
-    chain.lowCutLeft.connect(chain.highCutLeft)
-    chain.highCutLeft.connect(chain.wetGain)
-    chain.highCutLeft.connect(chain.feedbackLeft)
-    chain.feedbackLeft.connect(chain.delayLeft)
-  }
-
-  chain.internalsConnected = true
+  try { chain.workletNode.port.close() } catch {}
 }
 
 function connectReverbInternals(chain: ReverbNodeChain) {
@@ -492,8 +473,6 @@ export function connectFxChain(
 
     if (saturator) connectSaturatorInternals(saturator)
     else if (stageConfig.saturatorChain) disconnectSaturatorChain(stageConfig.saturatorChain)
-
-    if (delay) connectDelayInternals(delay)
 
     if (reverb) connectReverbInternals(reverb)
     else if (stageConfig.reverbChain) disconnectReverbChain(stageConfig.reverbChain)
@@ -550,14 +529,11 @@ export function connectFxChain(
 
     if (stageConfig.kind === 'delay') {
       if (!delay) return null
-      disconnectAudioNodes([delay.dryGain, delay.wetGain])
+      disconnectAudioNodes([delay.workletNode])
 
       return {
-        connectInput: (source) => {
-          source.connect(delay.dryGain)
-          source.connect(delay.pingPong ? delay.splitter : delay.delayLeft)
-        },
-        outputs: [delay.dryGain, delay.wetGain],
+        connectInput: (source) => source.connect(delay.workletNode),
+        outputs: [delay.workletNode],
       }
     }
 

@@ -1,3 +1,4 @@
+import { migrateLimiterParamsV1 } from './limiter-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
 import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
@@ -13,7 +14,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   reverb: 1,
   autofilter: 2,
   gate: 1,
-  limiter: 1,
+  limiter: 2,
   lofi: 1,
   chorus: 1,
   flanger: 1,
@@ -54,6 +55,8 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     // EQ Eight: curve B (a copy of curve A, so L/R and M/S start identical), Scale 100 %, Output 0 dB, Adaptive Q off and
     // Hi-Quality off. Band types, frequencies, gains and Qs and the channel mode (incl. 'mono') carry over unchanged.
     eq: { 1: migrateEqV1ToV2 },
+    // Limiter: Gain 0 dB, Auto off, lookahead snapped to the nearest 1.5/3/6 ms step.
+    limiter: { 1: migrateLimiterParamsV1 },
   },
   parameterValues: {
     autofilter: {

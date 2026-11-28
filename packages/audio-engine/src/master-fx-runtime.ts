@@ -193,6 +193,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     },
     subscribeCompressorMeter: instanceState.subscribeCompressorMeter,
     subscribeGateMeter: instanceState.subscribeGateMeter,
+    // Gate and Limiter share the static worklet's positive gain-reduction frame.
+    subscribeLimiterMeter: instanceState.subscribeGateMeter,
     // Every chain request, whole or single, goes through the admission: an equal request joins the work still running
     // (failure included) and a different one supersedes it in applyFxInstances. Without a context the request is only
     // kept, and the revision moves so the work of the chain it replaces cannot commit over it.

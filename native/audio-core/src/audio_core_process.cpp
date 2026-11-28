@@ -250,6 +250,7 @@ extern "C" daw_audio_core_result daw_audio_core_stage_processor_state_patch(
   staged.history_slot = current->history_slot;
   staged.delay_slot = current->delay_slot;
   staged.reverb_slot = current->reverb_slot;
+  staged.limiter_slot = current->limiter_slot;
   staged.spectral_slot = current->spectral_slot;
   staged.state_size = patch->state_size;
   for (uint32_t index = 0; index < patch->state_size; ++index) staged.state[index] = patch->state[index];

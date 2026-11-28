@@ -270,11 +270,10 @@ const legacyDynamicsParameters = (dynamics: PortableLegacyDynamicsFixture) => {
     const state = dynamics.state
 
     return {
+      'limiter.gainDb': Float32Array.of(state.gainDb),
       'limiter.ceiling': Float32Array.of(state.ceilingDbtp),
       'limiter.release': Float32Array.of(state.releaseMs),
-      'limiter.lookaheadMs': Float32Array.of(state.lookaheadMs),
       'limiter.link': Float32Array.of(state.link),
-      'limiter.detectorOversampling': Float32Array.of(state.detectorOversampling),
     }
   }
 

@@ -468,11 +468,11 @@ describe('mixer routing plan', () => {
         { id: 'compressor.sidechain.frequencyHz', target: 125 },
         { id: 'compressor.sidechain.q', target: 126 },
       ]],
-      ['limiter', 12, 24, 240, [
+      ['limiter', 12, 28, 144, [
         { id: 'limiter.ceiling', target: 127 },
         { id: 'limiter.release', target: 128 },
-        { id: 'limiter.lookaheadMs', target: 129 },
         { id: 'limiter.link', target: 130 },
+        { id: 'limiter.gainDb', target: 170 },
       ]],
     ])
   })

@@ -87,7 +87,7 @@ const compressor = (enabled: boolean, thresholdDb: number): Instance => ({
 
 const limiter = (enabled: boolean): Instance => ({
   id: 'subject', kind: 'limiter',
-  params: { version: 1, state: { ...createDefaultLimiterParams(), enabled, ceilingDbtp: -12, releaseMs: 20, lookaheadMs: 1, link: 1 } },
+  params: { version: 1, state: { ...createDefaultLimiterParams(), enabled, ceilingDbtp: -12, releaseMs: 20, lookaheadMs: 1.5, link: 1 } },
 })
 
 // The other eleven kinds, each set so that it audibly changes a 220 Hz tone (full wet,

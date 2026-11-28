@@ -291,7 +291,7 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'ensemble', id: 9, stateBytes: 28 }),
     expect.objectContaining({ name: 'gate', id: 10, stateBytes: 60 }),
     expect.objectContaining({ name: 'compressor', id: 11, stateBytes: 72 }),
-    expect.objectContaining({ name: 'limiter', id: 12, stateBytes: 24 }),
+    expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
     expect.objectContaining({ name: 'delay', id: 13, stateBytes: 32 }),
     expect.objectContaining({ name: 'reverb', id: 14, stateBytes: 72 }),
     expect.objectContaining({ name: 'spectral', id: 15, stateBytes: 60 }),
@@ -319,7 +319,7 @@ test('dynamics codecs preserve portable little-endian state layouts', () => {
 
   expect(compressor.byteLength).toBe(72)
   expect(new DataView(compressor.buffer).getUint32(60, true)).toBe(2)
-  expect(encodeLimiterProcessorState({ enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }).byteLength).toBe(24)
+  expect(encodeLimiterProcessorState({ enabled: true, gainDb: 0, ceilingDbtp: -1, releaseMs: 100, autoRelease: false, lookaheadMs: 6, link: 1 }).byteLength).toBe(28)
 })
 
 test('modulation codecs preserve the native little-endian state layouts', () => {

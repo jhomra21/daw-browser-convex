@@ -25,11 +25,12 @@ const limiter = (id: string, ceilingDbtp: number, enabled = true) => ({
     version: 1 as const,
     state: {
       enabled,
+      gainDb: 0,
       ceilingDbtp,
       releaseMs: 100,
-      lookaheadMs: 5,
+      autoRelease: false,
+      lookaheadMs: 6 as const,
       link: 1,
-      detectorOversampling: 4 as const,
     },
   },
 })

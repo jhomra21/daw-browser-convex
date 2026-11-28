@@ -475,12 +475,16 @@ const mapLimiter = (payload: EffectChange<'limiter' | 'master-limiter'>) => {
 
   return mapFields(
     [
+      { parameterId: 'limiter.gainDb', from: from.gainDb, to: to.gainDb },
       { parameterId: 'limiter.ceiling', from: from.ceilingDbtp, to: to.ceilingDbtp },
       { parameterId: 'limiter.release', from: from.releaseMs, to: to.releaseMs },
-      { parameterId: 'limiter.lookaheadMs', from: from.lookaheadMs, to: to.lookaheadMs },
       { parameterId: 'limiter.link', from: from.link, to: to.link },
     ],
-    [{ from: from.enabled, to: to.enabled }, { from: from.detectorOversampling, to: to.detectorOversampling }],
+    [
+      { from: from.enabled, to: to.enabled },
+      { from: from.autoRelease, to: to.autoRelease },
+      { from: from.lookaheadMs, to: to.lookaheadMs },
+    ],
   )
 }
 

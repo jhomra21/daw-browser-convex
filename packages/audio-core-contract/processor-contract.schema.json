@@ -321,9 +321,9 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 12 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
-            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "ceilingDbtp", "releaseMs", "lookaheadMs", "link", "detectorOversampling"], "properties": {
-              "enabled": { "type": "boolean" }, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0, "portableParameter": true, "portableParameterId": "ceiling"}, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true, "portableParameterId": "release"}, "lookaheadMs": { "type": "number", "default": 5, "minimum": 1, "maximum": 5, "portableParameter": true}, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}, "detectorOversampling": { "const": 4 }
+            "id": { "const": 12 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "state": { "type": "object", "additionalProperties": false, "required": ["enabled", "gainDb", "ceilingDbtp", "releaseMs", "autoRelease", "lookaheadMs", "link"], "properties": {
+              "enabled": { "type": "boolean" }, "gainDb": { "type": "number", "default": 0, "minimum": -12, "maximum": 24, "portableParameter": true}, "ceilingDbtp": { "type": "number", "default": -1, "minimum": -12, "maximum": 0, "portableParameter": true, "portableParameterId": "ceiling"}, "releaseMs": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true, "portableParameterId": "release"}, "autoRelease": { "type": "boolean" }, "lookaheadMs": { "enum": [1.5, 3, 6] }, "link": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true}
             }}
           }
         },

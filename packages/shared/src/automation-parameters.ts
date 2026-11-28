@@ -164,6 +164,7 @@ const effectDescriptors: AutomationParameterDescriptor[] = [
   { id: 'gate.rangeDb', label: 'Gate Range', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: -80, max: 0, defaultValue: -80, scale: 'linear', unit: 'db' },
   { id: 'gate.lookaheadMs', label: 'Gate Lookahead', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: 0, max: 2, defaultValue: 0, scale: 'linear' },
   { id: 'gate.link', label: 'Gate Link', group: 'Audio Effects', device: 'Gate', owner: 'gate', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear' },
+  { id: 'limiter.gainDb', label: 'Limiter Gain', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: -12, max: 24, defaultValue: 0, scale: 'linear', unit: 'db' },
   { id: 'limiter.ceiling', label: 'Limiter Ceiling', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: -12, max: 0, defaultValue: -1, scale: 'linear', unit: 'db' },
   { id: 'limiter.release', label: 'Limiter Release', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 20, max: 1000, defaultValue: 100, scale: 'linear' },
   { id: 'limiter.link', label: 'Limiter Link', group: 'Audio Effects', device: 'Limiter', owner: 'limiter', targetKinds: ['track', 'master'], min: 0, max: 1, defaultValue: 1, scale: 'linear' },

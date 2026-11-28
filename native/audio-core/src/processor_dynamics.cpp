@@ -14,38 +14,6 @@ uint32_t dynamics_delay_frames(float milliseconds, uint32_t sample_rate) {
   return std::min(kMaximumDynamicsDelayFrames - 1, static_cast<uint32_t>(std::ceil(milliseconds * static_cast<float>(sample_rate) / 1000.0F)));
 }
 
-double limiter_true_peak(const std::array<double, 12> &history, uint32_t history_write) {
-  double peak = 0.0;
-  for (uint32_t phase = 0; phase < 4; ++phase) {
-    double value = 0.0;
-    for (uint32_t tap = 0; tap < 12; ++tap) {
-      const uint32_t history_index = (history_write + 11 - tap) % 12;
-      value += history[history_index] * kLimiterTruePeakFir[tap * 4 + phase];
-    }
-    peak = std::max(peak, std::abs(value));
-  }
-  // Tap t reads the frame t + 1 behind history_write, so the centre taps interpolate between the frames 6 and 7
-  // behind it, and no phase lands on an input frame. Include those raw frames: a sample on the grid is never read low.
-  for (const uint32_t frames_behind : {6u, 7u}) peak = std::max(peak, std::abs(history[(history_write + 12 - frames_behind) % 12]));
-  return peak;
-}
-
-// Minimum of the targets pushed over the last `window` + 1 frames; window < kMaximumDynamicsDelayFrames
-// keeps the deque within capacity.
-float limiter_window_minimum(LimiterTargetWindow &targets, float target, uint32_t window) {
-  const auto slot = [&targets](uint32_t offset) { return (targets.head + offset) % kMaximumDynamicsDelayFrames; };
-  while (targets.count > 0 && targets.value[slot(targets.count - 1)] >= target) --targets.count;
-  while (targets.count > 0 && targets.now - targets.frame[slot(0)] > window) {
-    targets.head = slot(1);
-    --targets.count;
-  }
-  const uint32_t tail = slot(targets.count);
-  targets.value[tail] = target;
-  targets.frame[tail] = targets.now++;
-  ++targets.count;
-  return targets.value[slot(0)];
-}
-
 float compressor_curve_db(float input_db, const daw_audio_compressor_state &state) {
   if (state.dynamics_mode != 0) {
     if (input_db >= state.threshold_db) return input_db;
@@ -76,7 +44,7 @@ void render_dynamics_processor(
   const bool gate = processor.kind == DAW_AUDIO_PROCESSOR_KIND_GATE;
   const bool compressor = processor.kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR;
   const uint32_t fixed_delay = dynamics_delay_frames(
-    gate ? 2.0F : compressor ? 10.0F : 5.0F, core.config.sample_rate_hz);
+    gate ? 2.0F : 10.0F, core.config.sample_rate_hz);
   const uint32_t write = history.write;
   const uint32_t read = (write + kMaximumDynamicsDelayFrames - fixed_delay) % kMaximumDynamicsDelayFrames;
   history.delay_left[write] = dry_left;
@@ -181,42 +149,13 @@ void render_dynamics_processor(
     const float gain = dynamics_db_to_gain(history.compressor_envelope_db + state.makeup_db + state.output_db);
     left = left * (1.0F - state.dry_wet) + left * gain * state.dry_wet;
     right = right * (1.0F - state.dry_wet) + right * gain * state.dry_wet;
-  } else {
-    daw_audio_limiter_state state = processor.limiter;
-    state.ceiling_dbtp = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_CEILING, frame, state.ceiling_dbtp);
-    state.release_ms = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_RELEASE, frame, state.release_ms);
-    state.lookahead_ms = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LOOKAHEAD_MS, frame, state.lookahead_ms);
-    state.link = processor_parameter_value(core, processor, DAW_AUDIO_PROCESSOR_PARAMETER_LIMITER_LINK, frame, state.link);
-    const uint32_t detector_read = (write + kMaximumDynamicsDelayFrames - (fixed_delay - std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz)))) % kMaximumDynamicsDelayFrames;
-    const uint32_t true_peak_write = history.limiter_true_peak_write;
-    history.limiter_true_peak_left[true_peak_write] = history.detector_left[detector_read];
-    history.limiter_true_peak_right[true_peak_write] = history.detector_right[detector_read];
-    const double detector_left = limiter_true_peak(history.limiter_true_peak_left, true_peak_write);
-    const double detector_right = limiter_true_peak(history.limiter_true_peak_right, true_peak_write);
-    history.limiter_true_peak_write = (true_peak_write + 1) % 12;
-    const float ceiling = dynamics_db_to_gain(state.ceiling_dbtp);
-    const float target_left = static_cast<float>(std::fmin(1.0, static_cast<double>(ceiling) / std::fmax(detector_left, 1e-12)));
-    const float target_right = static_cast<float>(std::fmin(1.0, static_cast<double>(ceiling) / std::fmax(detector_right, 1e-12)));
-    const float linked = std::fmin(target_left, target_right);
-    const std::array<float, 2> targets{target_left + (linked - target_left) * state.link, target_right + (linked - target_right) * state.link};
-    const float release = std::exp(-1.0F / (state.release_ms * 0.001F * static_cast<float>(core.config.sample_rate_hz)));
-    // The detector runs `lookahead` frames ahead of the output, so a target must hold for that many frames
-    // after it is computed; the true-peak window only reaches back to samples that are still in the delay line.
-    const uint32_t lookahead = std::min(fixed_delay, dynamics_delay_frames(state.lookahead_ms, core.config.sample_rate_hz));
-    for (uint32_t channel = 0; channel < 2; ++channel) {
-      const float floor = limiter_window_minimum(history.limiter_targets[channel], targets[channel], lookahead);
-      history.gain[channel] = std::fmin(floor, 1.0F + release * (history.gain[channel] - 1.0F));
-    }
   }
   history.write = (write + 1) % kMaximumDynamicsDelayFrames;
   if (gate) {
     left *= history.gain[0];
     right *= history.gain[1];
-  } else if (!compressor) {
-    left *= history.gain[0];
-    right *= history.gain[1];
   }
-  const bool enabled = gate ? processor.gate.enabled != 0 : compressor ? processor.compressor.enabled != 0 : processor.limiter.enabled != 0;
+  const bool enabled = gate ? processor.gate.enabled != 0 : processor.compressor.enabled != 0;
   advance_bypass(core, history.bypass, processor.bypassed != 0 || !enabled);
   *output_left = bypass_mix(std::isfinite(left) ? left : 0.0F, delayed_left, history.bypass);
   *output_right = bypass_mix(std::isfinite(right) ? right : 0.0F, delayed_right, history.bypass);

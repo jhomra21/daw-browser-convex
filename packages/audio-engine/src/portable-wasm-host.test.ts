@@ -2418,8 +2418,11 @@ test('W-C9-spectral-1 a Spectral FFT size change at the seam is adopted: the old
 // AE-08 phase 8 step 9h: a delaying effect inserted or removed at a seam. The node's latency is its processors' sum, as
 // graph-contract gives it, and a route that meets the delayed one waits for it. Track `a` carries the effect, track
 // `b` plays the sine: the core moves b's read head, so b's output is its own signal delayed by the effect's latency.
-const fxLimiter = (id: string, instanceId: number) => fxProcessor(id, instanceId, 'limiter', 12, encodeLimiterProcessorState(
-  { enabled: true, ceilingDbtp: -1, releaseMs: 100, lookaheadMs: 5, link: 1, detectorOversampling: 4 }), 240)
+const fxLimiter = (id: string, instanceId: number) => ({
+  ...fxProcessor(id, instanceId, 'limiter', 12, encodeLimiterProcessorState(
+    { enabled: true, gainDb: 0, ceilingDbtp: -1, releaseMs: 100, autoRelease: false, lookaheadMs: 6, link: 1 }), 288),
+  stateVersion: 2,
+})
 
 const adoptDelaying = async (before: readonly FxProcessor[], after: readonly FxProcessor[]) => {
   const withLatency = (revision: number, chain: readonly FxProcessor[]) => {

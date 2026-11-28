@@ -272,9 +272,9 @@ test('maps every continuous target for every live built-in family', () => {
       payload: {
         targetId: 'track-1', effect: 'limiter', instanceId: 'limiter-1',
         from: envelope(limiterFrom),
-        to: envelope({ ...limiterFrom, ceilingDbtp: -3, releaseMs: 120, lookaheadMs: 3, link: 0.5 }),
+        to: envelope({ ...limiterFrom, gainDb: 4, ceilingDbtp: -3, releaseMs: 120, link: 0.5 }),
       } satisfies EffectParamsCommitPayload<'limiter'>,
-      expected: [['limiter.ceiling', -3], ['limiter.release', 120], ['limiter.lookaheadMs', 3], ['limiter.link', 0.5]],
+      expected: [['limiter.gainDb', 4], ['limiter.ceiling', -3], ['limiter.release', 120], ['limiter.link', 0.5]],
     },
     {
       name: 'spectral',

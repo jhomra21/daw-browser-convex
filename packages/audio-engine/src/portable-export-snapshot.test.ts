@@ -808,7 +808,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     ['ensemble', 0, 1_152],
     ['gate', 96, 0],
     ['compressor', 480, 0],
-    ['limiter', 240, 0],
+    ['limiter', 144, 0],
   ])
   expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder[1]?.parameterTargets).toHaveLength(50)
 
@@ -942,8 +942,8 @@ test('reports the total output latency of the exact graph it compiled', () => {
   }
 
   expect(compileLatency({})).toBe(0)
-  expect(compileLatency({ fx: limiterFx })).toBe(240)
-  expect(compileLatency({ fx: limiterFx, externalLatencyFrames: new Map([['track-1', 100]]) })).toBe(340)
+  expect(compileLatency({ fx: limiterFx })).toBe(144)
+  expect(compileLatency({ fx: limiterFx, externalLatencyFrames: new Map([['track-1', 100]]) })).toBe(244)
   expect(compileLatency({
     fx: limiterFx,
     mixerGraph: resolveExportMixerGraph({ tracks: [source], fx: { masterFxInstances: [], trackFx: {} } }),

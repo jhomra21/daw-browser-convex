@@ -80,8 +80,8 @@ const gate = envelope(z.object({
 }).strict())
 
 const limiter = envelope(z.object({
-  enabled: z.boolean(), ceilingDbtp: finiteNumber, releaseMs: finiteNumber,
-  lookaheadMs: finiteNumber, link: finiteNumber, detectorOversampling: z.literal(4),
+  enabled: z.boolean(), gainDb: finiteNumber, ceilingDbtp: finiteNumber, releaseMs: finiteNumber, autoRelease: z.boolean(),
+  lookaheadMs: z.union([z.literal(1.5), z.literal(3), z.literal(6)]), link: finiteNumber,
 }).strict())
 
 const autoFilter = envelope(z.object({

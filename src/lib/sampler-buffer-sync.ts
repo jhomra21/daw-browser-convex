@@ -1,4 +1,5 @@
-import { createSamplerBufferCache, type AudioEngine, type EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
+import { createSamplerBufferCache } from '@daw-browser/audio-engine/sampled-instrument-buffer-cache'
 import {
   resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,

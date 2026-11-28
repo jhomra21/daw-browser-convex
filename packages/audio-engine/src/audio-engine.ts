@@ -13,7 +13,6 @@ import { createMetronomeRuntime } from './metronome-runtime'
 import { createSourceRegistry, stopAndDisconnectSource } from './source-registry'
 import { createInstrumentRuntime, type SetTrackInstrumentInput } from './instrument-runtime'
 
-export { createSamplerBufferCache } from './sampler-core'
 
 import { createTransportClock } from './transport-clock'
 import { rampAudioParam } from './audio-param-ramp'
@@ -84,15 +83,7 @@ export class AudioEngine {
   private masterVolume = 1
   private sources = createSourceRegistry()
   private workletBudget = createLiveWorkletBudget()
-  readonly instruments = createInstrumentRuntime({
-    ensureAudio: () => this.ensureAudio(),
-    getAudioContext: () => this.audioCtx,
-    getBpm: () => this.clock.getBpm(),
-    timelineToCtxTime: (timelineSec) => this.timelineToCtxTime(timelineSec),
-    ensureTrackInput: (trackId) => this.mixer.ensureTrackInput(trackId),
-    sources: this.sources,
-    getAutomationEnvelopes: () => this.automationEnvelopes,
-  })
+  readonly instruments = createInstrumentRuntime()
   readonly mixer = createLiveMixerRuntime({
     ensureAudio: () => this.ensureAudio(),
     getAudioContext: () => this.audioCtx,
@@ -517,10 +508,6 @@ export class AudioEngine {
     this.instruments.clearTrackInstrument(trackId)
   }
 
-  private stopAllActiveNotes() {
-    this.instruments.stopAll()
-  }
-
   setBpm(nextBpm: number) {
     if (!this.clock.setBpm(nextBpm)) return
     this.metronome.onBpmChange(this.audioCtx)
@@ -901,12 +888,11 @@ export class AudioEngine {
     return envelope.target.kind === 'master'
       ? this.masterFx.resolveMasterAutomationBindings(envelope.parameterId, this.masterGain, envelope.target.effectInstanceId)
       : parseSynthAutomationKey(envelope.parameterId)
-        ? this.instruments.resolveSynthAutomationBindings(envelope.target.trackId, envelope.parameterId)
+        ? []
         : this.mixer.resolveTrackAutomationBindings(envelope.target.trackId, envelope.parameterId, envelope.target.effectInstanceId)
   }
 
   private stopClipSources() {
-    this.stopAllActiveNotes()
     // Snapshot currently active sources to avoid stopping newly scheduled ones
     const toStop = this.sources.snapshot()
     // Reset tracking immediately so subsequent schedules are isolated

@@ -1,6 +1,6 @@
 import { disconnectAudioNodes } from './effects/chain'
 
-export type SourceRegistry = {
+type SourceRegistry = {
   add: (clipId: string, source: AudioScheduledSourceNode) => void
   remove: (clipId: string, source: AudioScheduledSourceNode) => void
   snapshot: () => AudioScheduledSourceNode[]

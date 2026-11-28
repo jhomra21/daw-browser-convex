@@ -1,12 +1,11 @@
 import type { AudioEngine, EngineDisposition } from '@daw-browser/audio-engine/audio-engine'
-import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
 import {
   resolveSampledInstrumentRegion,
   sampledInstrumentRegionBytes,
   validateSampledInstrumentBuffer,
   type SampledInstrumentBuffer,
 } from '@daw-browser/audio-engine/sampled-instrument-region'
-import type { DrumRackPadSample, DrumRackParams, TrackInstrumentParams } from '@daw-browser/shared'
+import { DRUM_RACK_MAX_DECODED_BYTES, type DrumRackPadSample, type DrumRackParams, type TrackInstrumentParams } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import {
   loadSampledInstrumentRegion,
@@ -28,7 +27,7 @@ import {
   type SampledInstrumentRegionBudget,
   type SampledInstrumentRegionPin,
 } from '~/lib/sampled-instrument-region-budget'
-import { createSamplerBufferCache } from '@daw-browser/audio-engine/audio-engine'
+import { createSamplerBufferCache } from '@daw-browser/audio-engine/sampled-instrument-buffer-cache'
 import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 /* oxlint-disable eslint/no-restricted-imports -- NativeInstrumentPreparation stays next to the desktop budget policy until the batch that owns the certification-pinned playback files moves it */
 import type { NativeInstrumentPreparation } from '~/lib/desktop/native-instrument-budget-policy'

@@ -4,9 +4,7 @@ import type {
   TrackInstrumentParams,
 } from '@daw-browser/shared'
 import type { AudioEffectRuntimeInstance } from './effects/runtime-instance'
-import type { DrumRackResolvedBuffers } from './drum-rack-runtime'
-import type { GranularInstalledBuffer } from './granular-runtime'
-import type { SamplerResolvedBuffers } from './sampler-runtime'
+import type { DrumRackResolvedBuffers, GranularInstalledBuffer, SamplerResolvedBuffers } from './sampled-instrument-region'
 
 export type ExportFx = {
   masterVolume?: number

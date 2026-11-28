@@ -1,14 +1,12 @@
 // Browser side of the DV-01 step-E engine witnesses. It drives the real AudioEngine, live-mixer-runtime, master-fx-runtime,
-// synth-runtime and sampler-buffer-sync over a real AudioContext and reads what the nodes hold: the last parameter message
+// sampler-buffer-sync over a real AudioContext and reads what the nodes hold: the last parameter message
 // each compressor worklet received, the gain each EQ biquad holds, and how many nodes were constructed.
 // Run through tools/acceptance/dv01-engine-witnesses.ts, which bundles this file, opens it in Chromium and writes the JSON.
 import { z } from "zod";
 import { AudioEngine, type EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
-import { AUDIO_EFFECT_CONTRACTS, createDefaultSamplerParams, createDefaultSynthParams, type DecodedAudioPage, type SamplerParams } from "@daw-browser/shared";
+import { AUDIO_EFFECT_CONTRACTS, createDefaultSamplerParams, type DecodedAudioPage, type SamplerParams } from "@daw-browser/shared";
 import { createSamplerBufferSync } from "~/lib/sampler-buffer-sync";
 import { createSampledInstrumentRegionBudget } from "~/lib/sampled-instrument-region-budget";
-import { createSourceRegistry } from "../../packages/audio-engine/src/source-registry";
-import { createSynthRuntime } from "../../packages/audio-engine/src/synth-runtime";
 import { countFactoryCalls } from "./device-control-cost-spy";
 import { createCompressorChainState } from "../../packages/audio-engine/src/effects/compressor-chain-state";
 import { createFlushedRoot } from "~/test-support/create-flushed-root";
@@ -575,47 +573,6 @@ const staleReverbRoutedRow = () => staleEnableRoutedRow("stale-reverb-routed", "
   params: { ...AUDIO_EFFECT_CONTRACTS.reverb.createDefaultParams(), enabled, wet: 0.8 },
 }));
 
-// AudioEngine creates its context on demand, so the real synth runtime is given a context only when this row says so.
-const synthDroppedNoContextRow = async (): Promise<RowResult> => {
-  resetRecorders();
-  const context = new AudioContext();
-  let available: AudioContext | null = null;
-
-  const runtime = createSynthRuntime({
-    ensureAudio: () => {},
-    getAudioContext: () => available,
-    getBpm: () => 60,
-    timelineToCtxTime: (time) => time,
-    ensureTrackInput: () => context.createGain(),
-    sources: createSourceRegistry(),
-  });
-
-  const engine = new AudioEngine();
-
-  try {
-    const params = { ...createDefaultSynthParams(), gain: 0.6 };
-    const dropped = runtime.setTrackSynth(track, params, "synth-instance");
-    available = context;
-    const equalWithContext = runtime.setTrackSynth(track, { ...params }, "synth-instance");
-    const equalAgain = runtime.setTrackSynth(track, { ...params }, "synth-instance");
-    const lazy = engine.setTrackSynth("lazy-track", params, "synth-instance");
-
-    return {
-      row: "synth-dropped-no-context",
-      observed: { withoutContext: dropped, equalWithContext, equalAgain, engineWithoutPriorContext: lazy },
-      checks: [
-        check("no context: dropped", dropped, "dropped"),
-        check("never counted as installed: the equal request once a context exists is applied", equalWithContext, "applied"),
-        check("and only then is an equal request skipped", equalAgain, "skipped"),
-        check("the engine creates its context on demand, so it never drops for lack of one", lazy, "applied"),
-      ],
-    };
-  } finally {
-    engine.close();
-    await context.close();
-  }
-};
-
 const rows = new Map([
   ["R4-5 compressor in-place pending tick plus panel cancel", panelCompressorCancelRow],
   ["installed-A-pending-B-request-A-compressor", () => compressorRow("installed-A-pending-B-request-A-compressor", false)],
@@ -631,7 +588,6 @@ const rows = new Map([
   ["sampled-eviction-then-equal", sampledEvictionRow],
   ["stale-compressor-routed", staleCompressorRoutedRow],
   ["stale-reverb-routed", staleReverbRoutedRow],
-  ["synth-dropped-no-context", synthDroppedNoContextRow],
 ]);
 
 Object.assign(window, {

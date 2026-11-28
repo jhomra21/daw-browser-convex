@@ -2,7 +2,7 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { getExportRangeBounds, type ExportRange } from '@daw-browser/audio-engine/export-range'
 import { loadSampledInstrumentRegion } from '~/lib/sampled-instrument-region-loader'
 import { resolveSampledInstrumentRegion, sampledInstrumentRegionBytes, sampledInstrumentRegionIdentity, validateSampledInstrumentBuffer, type SampledInstrumentBuffer } from '@daw-browser/audio-engine/sampled-instrument-region'
-import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/audio-engine/drum-rack-runtime'
+import { DRUM_RACK_MAX_DECODED_BYTES } from '@daw-browser/shared'
 import { runWithConcurrency } from '~/lib/run-with-concurrency'
 import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { isPortableStretchClip } from '@daw-browser/audio-engine/portable-stretch-preparation'

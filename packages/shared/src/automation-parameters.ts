@@ -116,6 +116,17 @@ export const parseExternalAutomationParameterId = (parameterId: string) => {
     : null
 }
 
+// The overridden lanes native playback holds by leaving them out of its schedule. A VST lane is held by the host's own
+// override table.
+export const builtInOverriddenAutomationTargetKeys = (
+  envelopes: readonly AutomationEnvelope[],
+  overriddenTargetKeys: ReadonlySet<string>,
+): Set<string> => new Set(
+  envelopes
+    .filter((envelope) => overriddenTargetKeys.has(envelope.targetKey) && !parseExternalAutomationParameterId(envelope.parameterId))
+    .map((envelope) => envelope.targetKey),
+)
+
 const staticDescriptors: AutomationParameterDescriptor[] = [
   { id: 'volume', label: 'Volume', group: 'Mixer', device: 'Mixer', owner: 'mixer', targetKinds: ['track', 'master'], min: 0, max: 2, defaultValue: 1, scale: 'linear', unit: 'percent' },
 ]

@@ -1,4 +1,4 @@
-import type { AudioPcmSourceDescriptor } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import { loadWaveformSourceData } from './select-waveform-window'
 import type { WaveformSourceData, WaveformSourceIdentity } from './types'
 

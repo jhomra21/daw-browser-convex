@@ -1,6 +1,5 @@
 import { expect, test } from 'bun:test'
 
-import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { convexApi, convexClient } from '~/lib/convex'
 
@@ -30,6 +29,7 @@ const actions = {
   commitClipTiming: () => {},
   commitClipAudioWarp: () => {},
   commitClipFades: () => {},
+  commitClipMidi: () => {},
   rescheduleChangedClips: () => {},
   cancelTrackVolumeWrite: () => {},
   cancelTrackRoutingWrite: () => {},
@@ -74,11 +74,35 @@ test('compensates completed section children in reverse after a later child fail
     projectId: 'local:project-1',
     userId: 'local',
     persistLocalMix: (_projectId, _trackId, patch) => { if (patch.volume !== undefined) persisted.push(patch.volume) },
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions,
   })).rejects.toThrow('Clip not found')
+  expect(persisted).toEqual([0.9, 0.5])
+})
+
+test('refuses a section child when a recording take starts mid-replay and compensates the completed children', async () => {
+  const persisted: number[] = []
+  const reached: string[] = []
+  let checks = 0
+  await expect(execRedo(entry(), {
+    convexClient,
+    convexApi,
+    getTracks: () => tracks,
+    getHistoryEntries: () => [],
+    projectId: 'local:project-1',
+    userId: 'local',
+    persistLocalMix: (_projectId, _trackId, patch) => { if (patch.volume !== undefined) persisted.push(patch.volume) },
+    grantTrackWrite: () => {},
+    grantClipWrite: () => {},
+    refuseStep: (child) => {
+      reached.push(child.type)
+      checks += 1
+      return checks === 2 ? 'Recording target locked' : undefined
+    },
+    actions,
+  })).rejects.toThrow('Recording target locked')
+  expect(reached).toEqual(['track-volume', 'clip-timing'])
   expect(persisted).toEqual([0.9, 0.5])
 })
 
@@ -97,7 +121,6 @@ test('preserves the original section failure first when compensation fails', asy
         if (patch.volume === 0.5) throw new Error('compensation failure')
         if (patch.volume !== undefined) persisted.push(patch.volume)
       },
-      audioEngine: new AudioEngine(),
       grantTrackWrite: () => {},
       grantClipWrite: () => {},
       actions,

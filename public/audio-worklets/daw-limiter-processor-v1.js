@@ -29,6 +29,36 @@ const createFir = () => {
   return coefficients
 }
 
+// Sliding minimum of the recent gain targets: the gain stays down until the peak that caused it
+// has left the lookahead delay line.
+class TargetWindow {
+  constructor(capacity) {
+    this.values = new Float64Array(capacity)
+    this.frames = new Float64Array(capacity)
+    this.head = 0
+    this.count = 0
+    this.now = 0
+  }
+
+  reset() {
+    this.head = 0; this.count = 0; this.now = 0
+  }
+
+  minimum(target, window) {
+    const capacity = this.values.length
+    while (this.count > 0 && this.values[(this.head + this.count - 1) % capacity] >= target) this.count--
+    while (this.count > 0 && this.now - this.frames[this.head] > window) {
+      this.head = (this.head + 1) % capacity
+      this.count--
+    }
+    const tail = (this.head + this.count) % capacity
+    this.values[tail] = target
+    this.frames[tail] = this.now++
+    this.count++
+    return this.values[this.head]
+  }
+}
+
 class DawLimiterProcessor extends AudioWorkletProcessor {
   static get parameterDescriptors() {
     return parameters.map(([name, defaultValue, minValue, maxValue, automationRate]) => ({
@@ -52,6 +82,8 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
     this.historyWrite = 0
     this.gainL = 1
     this.gainR = 1
+    this.targetsL = new TargetWindow(this.delayFrames + 1)
+    this.targetsR = new TargetWindow(this.delayFrames + 1)
     this.meterFrames = 0
     this.minimumGain = 1
     this.metering = false
@@ -73,6 +105,7 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       this.historyL.fill(0); this.historyR.fill(0)
       this.write = 0; this.historyWrite = 0
       this.gainL = 1; this.gainR = 1
+      this.targetsL.reset(); this.targetsR.reset()
       this.meterFrames = 0; this.minimumGain = 1
       return
     }
@@ -98,6 +131,9 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       }
       peak = Math.max(peak, Math.abs(value))
     }
+    // Tap t reads the frame t + 1 behind historyWrite, so the centre taps interpolate between the frames 6 and 7
+    // behind it, and no phase lands on an input frame. Include those raw frames: a sample on the grid is never read low.
+    for (const framesBehind of [6, 7]) peak = Math.max(peak, Math.abs(history[(this.historyWrite + 12 - framesBehind) % 12]))
     return peak
   }
 
@@ -143,8 +179,8 @@ class DawLimiterProcessor extends AudioWorkletProcessor {
       const linkedTargetR = targetR + (linked - targetR) * link
       const releaseMs = values['limiter.release'][values['limiter.release'].length === 1 ? 0 : frame]
       const release = Math.exp(-1 / (releaseMs * 0.001 * sampleRate))
-      this.gainL = linkedTargetL < this.gainL ? linkedTargetL : 1 + release * (this.gainL - 1)
-      this.gainR = linkedTargetR < this.gainR ? linkedTargetR : 1 + release * (this.gainR - 1)
+      this.gainL = Math.min(this.targetsL.minimum(linkedTargetL, lookaheadFrames), 1 + release * (this.gainL - 1))
+      this.gainR = Math.min(this.targetsR.minimum(linkedTargetR, lookaheadFrames), 1 + release * (this.gainR - 1))
       if (!Number.isFinite(this.gainL) || !Number.isFinite(this.gainR)) {
         this.gainL = 1; this.gainR = 1
         this.fault('nonfinite-state')

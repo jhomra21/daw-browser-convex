@@ -1,4 +1,4 @@
-import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from './json-value'
+import { isJsonObject, isJsonString, type JsonValue } from './json-value'
 import {
   createDefaultSynthParams,
   normalizeSynthParams,
@@ -109,27 +109,23 @@ export function isInstrumentKind(value: JsonValue): value is InstrumentKind {
   return value === 'synth' || value === 'drum-rack' || value === 'sampler' || value === 'granular'
 }
 
-const isRecord = (value: JsonValue): value is JsonObject => (
-  isJsonObject(value)
-)
-
 export function normalizeTrackInstrumentParams(value: JsonValue): TrackInstrumentParams | undefined {
-  if (!isRecord(value) || !isInstrumentKind(value.kind)) return undefined
+  if (!isJsonObject(value) || !isInstrumentKind(value.kind)) return undefined
   const instanceId = isJsonString(value.instanceId) && value.instanceId ? value.instanceId : undefined
   if (!instanceId) return undefined
   if (value.kind === 'synth') {
     return { kind: value.kind, instanceId, params: normalizeSynthParams(value.params) }
   }
   if (value.kind === 'sampler') {
-    return { kind: value.kind, instanceId, params: normalizeSamplerParams(isRecord(value.params) ? value.params : {}) }
+    return { kind: value.kind, instanceId, params: normalizeSamplerParams(isJsonObject(value.params) ? value.params : {}) }
   }
   if (value.kind === 'granular') {
-    return { kind: value.kind, instanceId, params: normalizeGranularParams(isRecord(value.params) ? value.params : {}) }
+    return { kind: value.kind, instanceId, params: normalizeGranularParams(isJsonObject(value.params) ? value.params : {}) }
   }
   return {
     kind: value.kind,
     instanceId,
-    params: normalizeDrumRackParams(isRecord(value.params) ? value.params : {}),
+    params: normalizeDrumRackParams(isJsonObject(value.params) ? value.params : {}),
   }
 }
 

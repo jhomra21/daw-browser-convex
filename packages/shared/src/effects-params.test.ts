@@ -112,14 +112,13 @@ describe('EQ params', () => {
     expect(normalizeEqParamsForUpdate({ channelMode: 'stereo' }, existing).channelMode).toBe('stereo')
   })
 
-  test('uses shared defaults for bands beyond the default set', () => {
-    const normalized = normalizeEqParams({
-      bands: Array.from({ length: 9 }, (_, index) => (
-        index === 8 ? { id: '', type: 'invalid' } : createDefaultEqBand(index)
-      )),
-    })
+  test('keeps exactly eight bands', () => {
+    const custom = { id: 'b8', type: 'highpass' as const, frequency: 180, gainDb: 0, q: 0.7, enabled: true }
+    const fewer = normalizeEqParams({ bands: [custom] })
+    const more = normalizeEqParams({ bands: Array.from({ length: 9 }, (_, index) => createDefaultEqBand(index)) })
 
-    expect(normalized.bands[8]).toEqual(createDefaultEqBand(8))
+    expect(fewer.bands).toEqual([custom, ...createDefaultEqParams().bands.slice(1, 7), { ...createDefaultEqBand(7), id: 'b8-default' }])
+    expect(more.bands).toEqual(createDefaultEqParams().bands)
   })
 
   test('parses shared EQ operations with normalized payloads', () => {
@@ -154,7 +153,7 @@ describe('EQ params', () => {
             gainDb: EQ_GAIN_DB_MAX,
             q: EQ_Q_MAX,
             enabled: true,
-          }],
+          }, ...createDefaultEqParams().bands.slice(1)],
         },
       },
     })

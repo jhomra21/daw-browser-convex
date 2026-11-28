@@ -1,4 +1,4 @@
-import { For, createSignal, createMemo, onMount, onCleanup, createEffect, untrack } from 'solid-js'
+import { For, createSignal, createMemo, onMount, onCleanup, createEffect, on, untrack } from 'solid-js'
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import EffectShell from '~/components/effects/EffectShell'
 import EqFilterTypeSelect from '~/components/effects/eq-filter-type-select'
@@ -25,7 +25,11 @@ import {
   type EqBandParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { formatDeviceDb, formatDeviceFrequency } from '~/lib/device-value-format'
 import { smoothSpectrumLinear } from '~/components/effects/eq-render-work'
+import { useDrag } from '~/hooks/useDrag'
+import { useDeviceCollapseContext } from '~/components/timeline/create-effects-panel-device-collapse'
+import { useParameterGesture } from '~/components/effects/effect-parameter-interaction'
 
 
 // ===== Component =====
@@ -43,10 +47,6 @@ type EqProps = {
   automationRangesByParameterId?: ReadonlyMap<string, { min: number; max: number }>
   onAutomationParameterTouch?: (parameterId: string) => void
   onManualAutomationOverride?: (parameterId: string) => void
-  onPreviewBandChange?: (bandId: string, updates: Partial<EqBandParams>) => void
-  onBeginInteraction?: () => void
-  onCommitInteraction?: () => void
-  onCancelInteraction?: () => void
 }
 
 const DEFAULT_EQ_PARAMS = createDefaultEqParams()
@@ -65,10 +65,9 @@ const SPECTRUM_DECAY_PER_SECOND = 0.04
 const SPECTRUM_SILENCE_THRESHOLD = 0.003
 const SPECTRUM_SMOOTHING_RADIUS = 8
 
-const formatFrequency = (frequency: number) =>
-  frequency >= 1000 ? `${(frequency / 1000).toFixed(2)} kHz` : `${Math.round(frequency)} Hz`
+const formatFrequency = (frequency: number) => formatDeviceFrequency(frequency, 2)
 
-const formatDb = (value: number) => `${value.toFixed(2)} dB`
+const formatDb = (value: number) => formatDeviceDb(value, 2)
 
 const formatQ = (value: number) => value.toFixed(2)
 
@@ -169,10 +168,14 @@ export default function Eq(props: EqProps) {
     responseFilter = undefined
   })
 
+  // A folded device is not drawn, so its decay loop would only burn frames; unfolding restarts it.
+  const collapse = useDeviceCollapseContext()
+  const collapsed = () => collapse?.collapsed() ?? false
+
   const runSpectrumDecay = (time: number) => {
     spectrumDecayFrame = null
     const data = displayedSpectrum
-    if (!data) return
+    if (!data || untrack(collapsed)) return
 
     const elapsedSinceFresh = time - lastFreshSpectrumAt
     const elapsed = Math.max(0, time - lastSpectrumDecayAt) / 1000
@@ -188,11 +191,20 @@ export default function Eq(props: EqProps) {
   }
 
   const startSpectrumDecay = () => {
-    if (spectrumDecayFrame !== null) return
+    if (spectrumDecayFrame !== null || untrack(collapsed)) return
     // The analyser stops producing fresh frames when transport pauses; this visual-only RAF lets the displayed spectrum decay to silence instead of freezing.
     lastSpectrumDecayAt = performance.now()
     spectrumDecayFrame = requestAnimationFrame(runSpectrumDecay)
   }
+
+  createEffect(on(collapsed, (isCollapsed) => {
+    if (isCollapsed) {
+      if (spectrumDecayFrame !== null) cancelAnimationFrame(spectrumDecayFrame)
+      spectrumDecayFrame = null
+    } else if (displayedSpectrum && hasAudibleSpectrum(displayedSpectrum)) {
+      startSpectrumDecay()
+    }
+  }, { defer: true }))
 
   createEffect(() => {
     const frame = props.spectrumData
@@ -473,42 +485,55 @@ export default function Eq(props: EqProps) {
   })
 
   // Interaction: drag nodes to set freq/gain
-  const onCanvasPointerDown = (ev: PointerEvent) => {
-    if (!props.enabled || !canvasRef) return
-    ev.preventDefault()
-    if (ev.currentTarget instanceof HTMLCanvasElement) {
-      ev.currentTarget.setPointerCapture(ev.pointerId)
-    }
-    const rect = canvasRef.getBoundingClientRect()
-    const x = ev.clientX - rect.left
-    const y = ev.clientY - rect.top
+  const gesture = useParameterGesture({ onClosed: () => canvasDrag.cancelDrag() })
+  const canvasDrag = useDrag({
+    onDragStart: ({ x, y }) => {
+      const id = draggedId()
+      if (!id || !canvasRef) return
+      const rect = canvasRef.getBoundingClientRect()
+      gesture.open()
+      gesture.tick(() => applyBandPointerValue(id, x - rect.left, y - rect.top))
+    },
+    onDragMove: ({ x, y }) => {
+      const id = draggedId()
+      if (!id || !canvasRef) return
+      const rect = canvasRef.getBoundingClientRect()
+      gesture.tick(() => applyBandPointerValue(id, x - rect.left, y - rect.top))
+    },
+    onDragEnd: () => {
+      if (!draggedId()) return
+      setDraggedId(null)
+      gesture.end()
+    },
+    onDragCancel: () => {
+      if (!draggedId()) return
+      setDraggedId(null)
+      gesture.cancel()
+    },
+  })
 
-    // find nearest enabled band within 24px
-    let closest: { id: string; d: number } | null = null
-    for (const b of props.bands) {
-      if (!b.enabled) continue
-      const dx = x - freqToX(b.frequency)
-      const yCenter = gainToY(supportsGain(b.type) ? b.gainDb : 0)
-      const dy = y - yCenter
-      const d = Math.hypot(dx, dy)
-      if (d < 24 && (!closest || d < closest.d)) closest = { id: b.id, d }
+  const onCanvasPointerDown = (event: PointerEvent) => {
+    if (!props.enabled || !canvasRef || canvasDrag.isDragging()) return
+    const rect = canvasRef.getBoundingClientRect()
+    const x = event.clientX - rect.left
+    const y = event.clientY - rect.top
+    let closest: { id: string; distance: number } | undefined
+    for (const band of props.bands) {
+      if (!band.enabled) continue
+      const distance = Math.hypot(
+        x - freqToX(band.frequency),
+        y - gainToY(supportsGain(band.type) ? band.gainDb : 0),
+      )
+      if (distance < 24 && (!closest || distance < closest.distance)) closest = { id: band.id, distance }
     }
     if (!closest) return
     setSelectedId(closest.id)
     setDraggedId(closest.id)
-    props.onBeginInteraction?.()
-    props.onManualAutomationOverride?.(createEqBandParameterId(closest.id, 'frequencyHz'))
-    props.onManualAutomationOverride?.(createEqBandParameterId(closest.id, 'gainDb'))
-    applyBandPointerValue(closest.id, x, y)
+    canvasDrag.onPointerDown(event)
   }
 
-  const onCanvasPointerMove = (ev: PointerEvent) => {
-    const id = draggedId(); if (!id || !canvasRef) return
-    ev.preventDefault()
-    const rect = canvasRef.getBoundingClientRect()
-    const x = ev.clientX - rect.left
-    const y = ev.clientY - rect.top
-    applyBandPointerValue(id, x, y)
+  const overrideAutomation = (bandId: string, property: 'frequencyHz' | 'gainDb' | 'q') => {
+    props.onManualAutomationOverride?.(createEqBandParameterId(bandId, property))
   }
 
   const applyBandPointerValue = (id: string, x: number, y: number) => {
@@ -520,22 +545,17 @@ export default function Eq(props: EqProps) {
       const gainDb = Math.round(ng * 10) / 10
       const frequency = Math.round(nf)
       if (band.gainDb !== gainDb || band.frequency !== frequency) {
-        if (props.onPreviewBandChange) props.onPreviewBandChange(id, { gainDb, frequency })
-        else props.onBandChange(id, { gainDb, frequency })
+        overrideAutomation(id, 'frequencyHz')
+        overrideAutomation(id, 'gainDb')
+        props.onBandChange(id, { gainDb, frequency })
       }
     } else {
       const frequency = Math.round(nf)
       if (band.frequency !== frequency) {
-        if (props.onPreviewBandChange) props.onPreviewBandChange(id, { frequency })
-        else props.onBandChange(id, { frequency })
+        overrideAutomation(id, 'frequencyHz')
+        props.onBandChange(id, { frequency })
       }
     }
-  }
-
-  const onCanvasPointerUp = () => {
-    if (!draggedId()) return
-    setDraggedId(null)
-    props.onCommitInteraction?.()
   }
 
   // UI helpers
@@ -571,15 +591,6 @@ export default function Eq(props: EqProps) {
     const band = selectedBand()
     return band ? createEqBandParameterId(band.id, property) : undefined
   }
-  let activeKnobInteraction = false
-  const beginKnobInteraction = () => {
-    activeKnobInteraction = true
-    props.onBeginInteraction?.()
-  }
-  const finishKnobInteraction = () => {
-    activeKnobInteraction = false
-    props.onCommitInteraction?.()
-  }
   const updateKnob = (property: 'frequency' | 'gainDb' | 'q', value: number) => {
     const band = selectedBand()
     if (!band) return
@@ -588,11 +599,7 @@ export default function Eq(props: EqProps) {
       : property === 'gainDb'
         ? { gainDb: value }
         : { q: value }
-    if (activeKnobInteraction && props.onPreviewBandChange) {
-      props.onPreviewBandChange(band.id, updates)
-      return
-    }
-    props.onManualAutomationOverride?.(createEqBandParameterId(band.id, property === 'frequency' ? 'frequencyHz' : property))
+    overrideAutomation(band.id, property === 'frequency' ? 'frequencyHz' : property)
     props.onBandChange(band.id, updates)
   }
 
@@ -631,14 +638,6 @@ export default function Eq(props: EqProps) {
               const parameterId = selectedBandParameterId('frequencyHz')
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
-            onInteractionStart={() => {
-              const band = selectedBand()
-              if (!band) return
-              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'frequencyHz'))
-              beginKnobInteraction()
-            }}
-            onInteractionEnd={finishKnobInteraction}
-            onInteractionCancel={finishKnobInteraction}
             onValueChange={(v) => updateKnob('frequency', v)}
           />
 
@@ -660,14 +659,6 @@ export default function Eq(props: EqProps) {
               const parameterId = selectedBandParameterId('gainDb')
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
-            onInteractionStart={() => {
-              const band = selectedBand()
-              if (!band) return
-              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'gainDb'))
-              beginKnobInteraction()
-            }}
-            onInteractionEnd={finishKnobInteraction}
-            onInteractionCancel={finishKnobInteraction}
             onValueChange={(v) => updateKnob('gainDb', v)}
           />
 
@@ -687,14 +678,6 @@ export default function Eq(props: EqProps) {
               const parameterId = selectedBandParameterId('q')
               if (parameterId) props.onAutomationParameterTouch?.(parameterId)
             }}
-            onInteractionStart={() => {
-              const band = selectedBand()
-              if (!band) return
-              props.onManualAutomationOverride?.(createEqBandParameterId(band.id, 'q'))
-              beginKnobInteraction()
-            }}
-            onInteractionEnd={finishKnobInteraction}
-            onInteractionCancel={finishKnobInteraction}
             onValueChange={(v) => updateKnob('q', v)}
           />
         </div>
@@ -711,10 +694,6 @@ export default function Eq(props: EqProps) {
             height={canvasSize().height}
             class={cn('absolute inset-0 block h-full w-full touch-none', props.enabled ? 'cursor-crosshair' : 'cursor-not-allowed opacity-60')}
             onPointerDown={onCanvasPointerDown}
-            onPointerMove={onCanvasPointerMove}
-            onPointerUp={onCanvasPointerUp}
-            onPointerCancel={onCanvasPointerUp}
-            onLostPointerCapture={onCanvasPointerUp}
           />
         </div>
 

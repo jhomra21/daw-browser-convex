@@ -4,14 +4,15 @@ import {
   openLocalProjectDb,
   queryFileSystemHandlePermission,
   requestFileSystemHandlePermission,
-  saveProjectDirectoryHandle,
+  retainedAssetPaths,
+  saveProjectDirectoryHandleUnlocked,
   type LocalProjectAssetRow,
 } from '~/lib/local-project-db'
 import { sha256File } from '@daw-browser/audio-engine/media-pages'
 import { assetCloudIdMappingKey } from '~/lib/local-cloud-id-map'
 import { createLocalAssetId } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
-import { withLocalProjectAssetLock } from '~/lib/local-project-asset-lock'
+import { withLocalProjectAssetLock, withLocalStorageRootLock } from '~/lib/local-project-asset-lock'
 
 type LocalAssetMetadata = {
   sourceKind?: 'upload' | 'url' | 'recording'
@@ -184,7 +185,10 @@ type LocalAssetRemovalResult =
   | { status: 'deleted' | 'already-missing' }
   | { status: 'permission-unavailable' | 'retryable-failure' }
 
-/** Removes a retained asset without prompting or publishing a project change. */
+/**
+ * Removes a retained asset without prompting or publishing a project change.
+ * The caller must hold project → root locks and verify retainedAssetPaths, or own a newly created unique name.
+ */
 export const removeLocalAssetFileUnlocked = async (
   projectId: string,
   storagePath: string,
@@ -207,13 +211,6 @@ export const removeLocalAssetFileUnlocked = async (
     return { status: 'retryable-failure' }
   }
 }
-
-export const removeLocalAssetFile = (
-  projectId: string,
-  storagePath: string,
-): Promise<LocalAssetRemovalResult> => (
-  withLocalProjectAssetLock(projectId, () => removeLocalAssetFileUnlocked(projectId, storagePath))
-)
 
 /** Caller must hold the project asset lock. */
 export const writeLocalAssetFileUnlocked = async (
@@ -270,7 +267,7 @@ const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<L
   try {
     await writeFile(root, storagePath, input.file, input.signal)
     const db = await openLocalProjectDb(input.projectId)
-    await db.put('assets', row)
+    await withLocalStorageRootLock(() => db.put('assets', row))
   } catch (error) {
     await removeFileIfPresent(root, storagePath).catch(() => null)
     throw error
@@ -304,26 +301,43 @@ export const setLocalProjectAssetDirectory = async (
   await withLocalProjectAssetLock(projectId, async () => {
     const rows = await listLocalAssets(projectId)
     await requireWritableDirectory(nextRoot)
+    const previousDirectory = await getProjectDirectoryHandle(projectId)
     const previousRoot = await getWritableProjectRoot(projectId)
-    if (rows.length === 0) {
-      await saveProjectDirectoryHandle(projectId, nextRoot)
-      return
-    }
-    if (!previousRoot) {
+    if (rows.length > 0 && !previousRoot) {
       throw new LocalAssetWriteError('permission-denied', 'Project storage permission is required before changing folders.')
     }
 
+    // Reserve the destination's existing paths before copying, but do not hold
+    // the root lock over file I/O. The project lock covers every sibling copy;
+    // cleanup can recover a crash reservation only after that owner lock releases.
+    await withLocalStorageRootLock(async () => {
+      await saveProjectDirectoryHandleUnlocked(projectId, previousRoot ?? nextRoot, nextRoot)
+    })
     try {
-      const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
-      await Promise.all(rows.map(async (row) => {
-        const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
-        await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
-      }))
+      if (rows.length > 0 && previousRoot) {
+        try {
+          const previousAssetsDir = await previousRoot.getDirectoryHandle(ASSETS_DIRECTORY_NAME)
+          const copies = await Promise.allSettled(rows.map(async (row) => {
+            const previousFileHandle = await previousAssetsDir.getFileHandle(row.storagePath)
+            await writeFile(nextRoot, row.storagePath, await previousFileHandle.getFile())
+          }))
+          const failure = copies.find((copy) => copy.status === 'rejected')
+          if (failure) throw failure.reason
+        } catch (error) {
+          if (error instanceof LocalAssetWriteError) throw error
+          throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
+        }
+      }
+      await withLocalStorageRootLock(() => saveProjectDirectoryHandleUnlocked(projectId, nextRoot))
     } catch (error) {
-      if (error instanceof LocalAssetWriteError) throw error
-      throw new LocalAssetWriteError('write-failed', 'Existing project audio could not be copied to the new folder.')
+      // Partial copies may remain in the destination after a failed switch.
+      try {
+        await withLocalStorageRootLock(() => saveProjectDirectoryHandleUnlocked(projectId, previousDirectory))
+      } catch (rollbackError) {
+        console.warn('The previous local project storage folder could not be restored.', rollbackError)
+      }
+      throw error
     }
-    await saveProjectDirectoryHandle(projectId, nextRoot)
   })
 }
 
@@ -358,25 +372,28 @@ const deleteLocalAssetUnlocked = async (
   assetId: string,
 ): Promise<void> => {
   const row = await getLocalAsset(projectId, assetId)
-  const db = await openLocalProjectDb(projectId)
-  const cloudMapping = await db.get('syncState', assetCloudIdMappingKey(assetId))
-  const timestamp = now()
-  const tx = db.transaction(['assets', 'syncState'], 'readwrite')
-  await Promise.all([
-    tx.objectStore('assets').delete(assetId),
-    cloudMapping?.value
-      ? tx.objectStore('syncState').put({
-        key: `cloud-delete:asset:${assetId}`,
-        value: cloudMapping.value,
-        updatedAt: timestamp,
-      })
-      : Promise.resolve(),
-    tx.done,
-  ])
-  if (row) {
-    const root = await getWritableProjectRoot(projectId)
-    if (root) await removeFileIfPresent(root, row.storagePath).catch(() => undefined)
-  }
+  // Permission prompts must not stall other projects' root publications.
+  const root = row ? await getWritableProjectRoot(projectId) : undefined
+  await withLocalStorageRootLock(async () => {
+    const db = await openLocalProjectDb(projectId)
+    const cloudMapping = await db.get('syncState', assetCloudIdMappingKey(assetId))
+    const timestamp = now()
+    const tx = db.transaction(['assets', 'syncState'], 'readwrite')
+    await Promise.all([
+      tx.objectStore('assets').delete(assetId),
+      cloudMapping?.value
+        ? tx.objectStore('syncState').put({
+          key: `cloud-delete:asset:${assetId}`,
+          value: cloudMapping.value,
+          updatedAt: timestamp,
+        })
+        : Promise.resolve(),
+      tx.done,
+    ])
+    if (row && root && !(await retainedAssetPaths(root, { projectId })).has(row.storagePath)) {
+      await removeFileIfPresent(root, row.storagePath).catch(() => undefined)
+    }
+  })
   notifyLocalProjectChanged(projectId)
 }
 

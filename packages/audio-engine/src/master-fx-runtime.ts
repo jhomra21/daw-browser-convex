@@ -1,61 +1,36 @@
-import { normalizeCompressorParams, normalizeEqParams, serializeNormalizedEqParams, type EqParams } from '@daw-browser/shared'
-import { connectFxChain, createCompressorNodeChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner } from './effects/chain'
-import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './effects/dsp'
-import { createCompressorChainState, type CompressorChainState } from './effects/compressor-chain-state'
-import { createDelayChainState, type DelayChainState } from './effects/delay-chain-state'
-import { createReverbChainState, type ReverbChainState } from './effects/reverb-chain-state'
-import { createSaturatorChainState, type SaturatorChainState } from './effects/saturator-chain-state'
+import { connectFxChain, createGainTransitionOwner, disconnectAudioNodes, type FxChainStageConfig, type GainTransitionOwner, type GainTransitionScheduler } from './effects/chain'
+import type { CompressorChainState } from './effects/compressor-chain-state'
+import type { EqChainState } from './effects/eq-chain-state'
+import type { DelayChainState } from './effects/delay-chain-state'
+import type { ReverbChainState } from './effects/reverb-chain-state'
+import type { SaturatorChainState } from './effects/saturator-chain-state'
 import type { CompressorMeterListener } from './effects/compressor-worklet'
 import type { SpectrumFrame } from './metering-runtime'
 import type { AutomationAudioBinding } from './automation'
 import { resolveDelayAutomationBindings, resolveEqAutomationBindings, resolveReverbAutomationBindings, resolveSaturatorAutomationBindings } from './automation-bindings'
 import { normalizeAudioEffectRuntimeInstances, type AudioEffectRuntimeInstance } from './effects/runtime-instance'
 import type { ResolveMixerGraphOptions } from './mixer/types'
-import { applyStaticWorkletNodeParams, createStaticWorkletNodeChain, disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletKind, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
+import { disconnectStaticWorkletNodeChain, resolveStaticWorkletAutomationBinding, subscribeStaticGateMeter, type GateMeterListener, type StaticWorkletNodeChain } from './effects/static-worklet-chain'
 import { observeResource, type ResourceObserver } from './runtime-diagnostics'
-import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletTransaction } from './effects/live-worklet-budget'
-const isStaticWorkletInstance = (
-  instance: AudioEffectRuntimeInstance,
-): instance is Extract<AudioEffectRuntimeInstance, { kind: StaticWorkletKind }> => isStaticWorkletKind(instance.kind)
+import { countStaticWorklets, isStaticWorkletKind, type LiveWorkletBudget } from './effects/live-worklet-budget'
+import { getEffectChainTiming } from './effects/timing'
+import { createChainAdmission } from './chain-admission'
+import { closeResources, createEffectChainTransaction, type EffectChainOutcome, type InstanceResources } from './effect-chain-transaction'
 
 type MasterFxRuntimeOptions = {
   getFaultGeneration: () => number
-  workletBudget: {
-    begin: (owner: string, count: number) => LiveWorkletTransaction
-    commit: (transaction: LiveWorkletTransaction, count: number) => boolean
-    isCurrent: (transaction: LiveWorkletTransaction) => boolean
-    rollback: (transaction: LiveWorkletTransaction) => void
-    releaseOwner: (owner: string) => void
-  }
+  workletBudget: LiveWorkletBudget
+  transitionScheduler?: GainTransitionScheduler
   onWorkletFault?: (generation: number, kind: 'compressor' | 'owned-processor', code: string, context: string) => void
   resourceObserver?: ResourceObserver
 }
 
-type InstanceResources = {
-  eq: Map<string, BiquadFilterNode[]>
-  eqByBand: Map<string, Map<string, BiquadFilterNode>>
-  eqSignatures: Map<string, string>
-  eqTopologySignatures: Map<string, string>
-  compressors: Map<string, CompressorChainState>
-  reverbs: Map<string, ReverbChainState>
-  saturators: Map<string, SaturatorChainState>
-  delays: Map<string, DelayChainState>
-  staticWorklets: Map<string, StaticWorkletNodeChain>
-}
+type MasterFxOutcome = EffectChainOutcome
 
-type MasterCandidate = {
-  instances: AudioEffectRuntimeInstance[]
-  transaction: LiveWorkletTransaction
-  resources: InstanceResources
-  ownedIds: Set<string>
-  requiresRoutingRebuild: boolean
-  desiredStaticCount: number
-  eqParamUpdates: Array<{ nodes: BiquadFilterNode[]; params: EqParams }>
-}
-
-type StaticWorkletChainHolder = {
-  chain: StaticWorkletNodeChain | undefined
-}
+// A request that joins work is 'joined' only when that work installed; any other outcome is the joined request's too.
+const joinedOutcome = (underlying: MasterFxOutcome): MasterFxOutcome => (
+  { ...underlying, disposition: underlying.disposition === 'applied' ? 'joined' : underlying.disposition }
+)
 
 export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let analyser: AnalyserNode | null = null
@@ -65,19 +40,19 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   let releaseAnalyser: () => void = () => undefined
   let masterFxInstances: AudioEffectRuntimeInstance[] = []
   let masterChainInstances: AudioEffectRuntimeInstance[] = []
-  let pendingFxInstances: AudioEffectRuntimeInstance[] | null = null
+  const admission = createChainAdmission<MasterFxOutcome>(joinedOutcome)
   let fxInstanceRevision = 0
+  // What the live nodes are known to hold, recorded when a request commits. A request superseded after it changed a node
+  // leaves the node on its value, so the installed chain alone cannot say whether a request is already in place.
+  const liveParams = new Map<string, AudioEffectRuntimeInstance['params']>()
   let routingGain: GainNode | null = null
   let releaseRoutingGain: () => void = () => undefined
   let routingTransitionOwner: GainTransitionOwner | null = null
-  const instanceEqChains = new Map<string, BiquadFilterNode[]>()
-  const instanceEqNodesByBand = new Map<string, Map<string, BiquadFilterNode>>()
-  const instanceEqSignatures = new Map<string, string>()
-  const instanceEqTopologySignatures = new Map<string, string>()
-  const instanceCompressorChains = new Map<string, ReturnType<typeof createCompressorChainState>>()
-  const instanceReverbChains = new Map<string, ReturnType<typeof createReverbChainState>>()
-  const instanceSaturatorChains = new Map<string, ReturnType<typeof createSaturatorChainState>>()
-  const instanceDelayChains = new Map<string, ReturnType<typeof createDelayChainState>>()
+  const instanceEqChains = new Map<string, EqChainState>()
+  const instanceCompressorChains = new Map<string, CompressorChainState>()
+  const instanceReverbChains = new Map<string, ReverbChainState>()
+  const instanceSaturatorChains = new Map<string, SaturatorChainState>()
+  const instanceDelayChains = new Map<string, DelayChainState>()
   const instanceStaticWorkletChains = new Map<string, StaticWorkletNodeChain>()
   const compressorMeterListeners = new Map<string, Set<CompressorMeterListener>>()
   const compressorMeterSubscriptions = new Map<string, () => void>()
@@ -85,54 +60,16 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   const gateMeterSubscriptions = new Map<string, () => void>()
   let currentBpm = 120
   let retiredResources: Array<{ resources: InstanceResources; ids: Set<string> }> = []
+  let graphPublicationPending = false
 
   const currentResources = (): InstanceResources => ({
-    eq: instanceEqChains,
-    eqByBand: instanceEqNodesByBand,
-    eqSignatures: instanceEqSignatures,
-    eqTopologySignatures: instanceEqTopologySignatures,
+    eqs: instanceEqChains,
     compressors: instanceCompressorChains,
     reverbs: instanceReverbChains,
     saturators: instanceSaturatorChains,
     delays: instanceDelayChains,
     staticWorklets: instanceStaticWorkletChains,
   })
-
-  const snapshotResources = (): InstanceResources => {
-    const resources = currentResources()
-    return {
-      eq: new Map(resources.eq),
-      eqByBand: new Map(resources.eqByBand),
-      eqSignatures: new Map(resources.eqSignatures),
-      eqTopologySignatures: new Map(resources.eqTopologySignatures),
-      compressors: new Map(resources.compressors),
-      reverbs: new Map(resources.reverbs),
-      saturators: new Map(resources.saturators),
-      delays: new Map(resources.delays),
-      staticWorklets: new Map(resources.staticWorklets),
-    }
-  }
-
-  const closeResources = (resources: InstanceResources, ids?: Iterable<string>) => {
-    const resourceIds = ids ? new Set(ids) : new Set([
-      ...resources.eq.keys(),
-      ...resources.compressors.keys(),
-      ...resources.reverbs.keys(),
-      ...resources.saturators.keys(),
-      ...resources.delays.keys(),
-      ...resources.staticWorklets.keys(),
-    ])
-    for (const id of resourceIds) {
-      const eq = resources.eq.get(id)
-      if (eq) disconnectAudioNodes(eq)
-      resources.compressors.get(id)?.close()
-      resources.reverbs.get(id)?.close()
-      resources.saturators.get(id)?.close()
-      resources.delays.get(id)?.close()
-      const staticWorklet = resources.staticWorklets.get(id)
-      if (staticWorklet) disconnectStaticWorkletNodeChain(staticWorklet)
-    }
-  }
 
   const drainRetiredResources = () => {
     for (const { resources, ids } of retiredResources) closeResources(resources, ids)
@@ -145,10 +82,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   }
 
   const publishResources = (resources: InstanceResources) => {
-    replaceMap(instanceEqChains, resources.eq)
-    replaceMap(instanceEqNodesByBand, resources.eqByBand)
-    replaceMap(instanceEqSignatures, resources.eqSignatures)
-    replaceMap(instanceEqTopologySignatures, resources.eqTopologySignatures)
+    replaceMap(instanceEqChains, resources.eqs)
     replaceMap(instanceCompressorChains, resources.compressors)
     replaceMap(instanceReverbChains, resources.reverbs)
     replaceMap(instanceSaturatorChains, resources.saturators)
@@ -156,29 +90,13 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     replaceMap(instanceStaticWorkletChains, resources.staticWorklets)
   }
 
-  const removeCandidateResources = (resources: InstanceResources, id: string) => {
-    resources.eq.delete(id)
-    resources.eqByBand.delete(id)
-    resources.eqSignatures.delete(id)
-    resources.eqTopologySignatures.delete(id)
-    resources.compressors.delete(id)
-    resources.reverbs.delete(id)
-    resources.saturators.delete(id)
-    resources.delays.delete(id)
-    resources.staticWorklets.delete(id)
-  }
-
   const closeInstanceState = (instanceId: string) => {
     compressorMeterSubscriptions.get(instanceId)?.()
     compressorMeterSubscriptions.delete(instanceId)
     gateMeterSubscriptions.get(instanceId)?.()
     gateMeterSubscriptions.delete(instanceId)
-    const eq = instanceEqChains.get(instanceId)
-    if (eq) disconnectAudioNodes(eq)
+    instanceEqChains.get(instanceId)?.close()
     instanceEqChains.delete(instanceId)
-    instanceEqNodesByBand.delete(instanceId)
-    instanceEqSignatures.delete(instanceId)
-    instanceEqTopologySignatures.delete(instanceId)
     instanceCompressorChains.get(instanceId)?.close()
     instanceCompressorChains.delete(instanceId)
     instanceReverbChains.get(instanceId)?.close()
@@ -190,6 +108,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     const staticWorklet = instanceStaticWorkletChains.get(instanceId)
     if (staticWorklet) disconnectStaticWorkletNodeChain(staticWorklet)
     instanceStaticWorkletChains.delete(instanceId)
+    liveParams.delete(instanceId)
   }
 
   const bindGateMeter = (instanceId: string, chain: StaticWorkletNodeChain) => {
@@ -202,7 +121,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     }))
   }
 
-  const bindCompressorMeter = (instanceId: string, state: ReturnType<typeof createCompressorChainState>) => {
+  const bindCompressorMeter = (instanceId: string, state: CompressorChainState) => {
     compressorMeterSubscriptions.get(instanceId)?.()
     compressorMeterSubscriptions.delete(instanceId)
     const listeners = compressorMeterListeners.get(instanceId)
@@ -229,7 +148,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
   ): FxChainStageConfig[] => instances.map((instance) => ({
     id: instance.id,
     kind: instance.kind,
-    eqNodes: instance.kind === 'eq' ? resources.eq.get(instance.id) : undefined,
+    eqNodes: instance.kind === 'eq' ? resources.eqs.get(instance.id)?.nodes() : undefined,
     compressorChain: instance.kind === 'compressor' ? resources.compressors.get(instance.id)?.chain() : undefined,
     saturatorChain: instance.kind === 'saturator' ? resources.saturators.get(instance.id)?.chain() : undefined,
     delayChain: instance.kind === 'delay' ? resources.delays.get(instance.id)?.chain() : undefined,
@@ -241,8 +160,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     ctx: AudioContext,
     masterGain: GainNode,
     destination: AudioDestinationNode,
-    afterReconnect?: () => void,
   ) => {
+    let wasPending = false
     let nextRoutingGain = routingGain
     if (!nextRoutingGain) {
       nextRoutingGain = ctx.createGain()
@@ -250,13 +169,15 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       routingGain = nextRoutingGain
       releaseRoutingGain = observeResource(options.resourceObserver, 'audio-nodes', nextRoutingGain)
       masterGain.connect(nextRoutingGain)
-      routingTransitionOwner = createGainTransitionOwner(nextRoutingGain, () => ctx.currentTime)
+      routingTransitionOwner = createGainTransitionOwner(nextRoutingGain, () => ctx.currentTime, options.transitionScheduler)
     }
     if (analyserConnected && analyser) {
       try { masterGain.disconnect(analyser) } catch {}
     }
     analyserConnected = false
     const reconnect = () => {
+      wasPending = graphPublicationPending
+      graphPublicationPending = true
       disconnectAudioNodes([nextRoutingGain])
       connectFxChain(nextRoutingGain, destination, {
         instances: createInstanceStageConfigs(masterChainInstances),
@@ -265,9 +186,14 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         masterGain.connect(analyser)
         analyserConnected = true
       }
-      afterReconnect?.()
+      drainRetiredResources()
     }
-    routingTransitionOwner?.request(reconnect)
+    routingTransitionOwner?.request(
+      reconnect,
+      () => {
+        if (!wasPending) graphPublicationPending = false
+      },
+    )
   }
 
   const ensureAnalyser = (ctx: AudioContext | null, masterGain: GainNode | null) => {
@@ -291,244 +217,75 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
     destination: AudioDestinationNode,
     instanceId: string,
     chain: StaticWorkletNodeChain,
-    revision: number,
   ) => {
-    if (fxInstanceRevision !== revision || instanceStaticWorkletChains.get(instanceId) !== chain) return
+    if (instanceStaticWorkletChains.get(instanceId) !== chain) return
+    fxInstanceRevision += 1
     closeInstanceState(instanceId)
+    const requested = admission.intent()
+    if (requested) admission.adopt(requested.filter((instance) => instance.id !== instanceId))
     masterChainInstances = masterChainInstances.filter((instance) => instance.id !== instanceId)
     masterFxInstances = masterChainInstances
     const transaction = options.workletBudget.begin('master', 0)
     options.workletBudget.commit(transaction, countStaticWorklets(masterChainInstances))
-    rebuildRouting(ctx, masterGain, destination)
+    try {
+      rebuildRouting(ctx, masterGain, destination)
+    } catch (error) {
+      graphPublicationPending = true
+      throw error
+    }
   }
 
-  const applyFxInstances = async (
+  const installFxInstances = (
     ctx: AudioContext,
     masterGain: GainNode,
     destination: AudioDestinationNode,
     instances: AudioEffectRuntimeInstance[],
-  ) => {
-    const revision = ++fxInstanceRevision
-    const inputIds = new Set<string>()
-    for (const instance of instances) {
-      if (inputIds.has(instance.id)) throw new Error(`Duplicate effect instance ID: ${instance.id}`)
-      inputIds.add(instance.id)
-    }
-    const normalized = normalizeAudioEffectRuntimeInstances(instances)
-    const previous = masterChainInstances
-    const previousById = new Map(previous.map((instance) => [instance.id, instance]))
-    const unchanged = (instance: AudioEffectRuntimeInstance) => {
-      const prior = previousById.get(instance.id)
-      if (!prior || prior.kind !== instance.kind || JSON.stringify(prior.params) !== JSON.stringify(instance.params)) return false
-      if (isStaticWorkletKind(instance.kind)) return instanceStaticWorkletChains.get(instance.id)?.state === 'active'
-      if (instance.kind === 'compressor') return !instance.params.enabled || instanceCompressorChains.get(instance.id)?.chain()?.state === 'active'
-      return true
-    }
-    const candidateWorkletCount = normalized.filter((instance) => isStaticWorkletKind(instance.kind) && !unchanged(instance)).length
-    const transaction = options.workletBudget.begin('master', candidateWorkletCount)
-    const oldResources = snapshotResources()
-    const candidate: MasterCandidate = {
-      instances: normalized,
-      transaction,
-      resources: {
-        eq: new Map(oldResources.eq),
-        eqByBand: new Map(oldResources.eqByBand),
-        eqSignatures: new Map(oldResources.eqSignatures),
-        eqTopologySignatures: new Map(oldResources.eqTopologySignatures),
-        compressors: new Map(oldResources.compressors),
-        reverbs: new Map(oldResources.reverbs),
-        saturators: new Map(oldResources.saturators),
-        delays: new Map(oldResources.delays),
-        staticWorklets: new Map(oldResources.staticWorklets),
-      },
-      ownedIds: new Set(),
-      requiresRoutingRebuild: previous.length !== normalized.length ||
-        previous.some((instance, index) => instance.id !== normalized[index]?.id || instance.kind !== normalized[index]?.kind),
-      desiredStaticCount: countStaticWorklets(normalized),
-      eqParamUpdates: [],
-    }
-    const discard = () => {
-      closeResources(candidate.resources, candidate.ownedIds)
-      options.workletBudget.rollback(transaction)
-    }
-    const stale = () => fxInstanceRevision !== revision || !options.workletBudget.isCurrent(transaction)
-    try {
-      for (const instance of normalized) {
-      if (unchanged(instance)) continue
-      if (instance.kind === 'eq') {
-        const normalizedParams = normalizeEqParams(instance.params)
-        const prior = previousById.get(instance.id)
-        const priorParams = prior?.kind === 'eq' ? normalizeEqParams(prior.params) : undefined
-        const priorNodes = candidate.resources.eq.get(instance.id)
-        if (priorParams && priorNodes && getEqTopologySignature(priorParams) === getEqTopologySignature(normalizedParams)) {
-          candidate.resources.eqSignatures.set(instance.id, serializeNormalizedEqParams(normalizedParams))
-          candidate.eqParamUpdates.push({ nodes: priorNodes, params: normalizedParams })
-          continue
-        }
+  ) => createEffectChainTransaction({
+    owner: 'master',
+    budget: options.workletBudget,
+    bpm: () => currentBpm,
+    eqChannelCount: () => ctx.destination.maxChannelCount || 2,
+    faultGeneration: options.getFaultGeneration,
+    reportFault: (generation, kind, code, context) => options.onWorkletFault?.(generation, kind, code, context),
+    installed: () => masterChainInstances,
+    install: (installed) => {
+      masterChainInstances = installed
+      masterFxInstances = installed
+    },
+    resources: currentResources,
+    publishResources,
+    retire: (resources, ids) => { retiredResources.push({ resources, ids }) },
+    liveParams: () => liveParams,
+    revision: () => fxInstanceRevision,
+    bumpRevision: () => ++fxInstanceRevision,
+    publicationPending: () => graphPublicationPending,
+    beginPublication: () => { graphPublicationPending = true },
+    finishPublication: () => { graphPublicationPending = false },
+    bypassStaticWorklet: (instanceId, chain) => bypassStaticWorklet(ctx, masterGain, destination, instanceId, chain),
+    bindStaticWorkletMeter: bindGateMeter,
+    bindCompressorMeter,
+    route: ({ previous, instances: installed, ownedIds, requiresRoutingRebuild, publicationPending }) => {
+      const rebuild = requiresRoutingRebuild || publicationPending
+      if (rebuild) {
+        rebuildRouting(ctx, masterGain, destination)
+      } else if (!routingTransitionOwner?.pending()) {
+        drainRetiredResources()
       }
-      const prior = previousById.get(instance.id)
-      if (isStaticWorkletInstance(instance)) {
-        const retained = candidate.resources.staticWorklets.get(instance.id)
-        if (prior?.kind === instance.kind && retained?.state === 'active') {
-          applyStaticWorkletNodeParams(retained, instance.params)
-          continue
-        }
+      return {
+        settled: true,
+        inPlace: ownedIds.size === 0 && !rebuild &&
+          getEffectChainTiming(previous ?? [], ctx.sampleRate, currentBpm).latencyFrames ===
+            getEffectChainTiming(installed, ctx.sampleRate, currentBpm).latencyFrames,
       }
-      if (instance.kind === 'compressor' && prior?.kind === 'compressor') {
-        const state = candidate.resources.compressors.get(instance.id)
-        if (state) {
-          const result = await state.set(ctx, normalizeCompressorParams(instance.params))
-          candidate.requiresRoutingRebuild = result.requiresRoutingRebuild || candidate.requiresRoutingRebuild
-          continue
-        }
-      }
-      if (instance.kind === 'saturator' && prior?.kind === 'saturator') {
-        const state = candidate.resources.saturators.get(instance.id)
-        if (state) {
-          const result = state.set(ctx, instance.params)
-          candidate.requiresRoutingRebuild = result.requiresRoutingRebuild || candidate.requiresRoutingRebuild
-          continue
-        }
-      }
-      if (instance.kind === 'delay' && prior?.kind === 'delay') {
-        const state = candidate.resources.delays.get(instance.id)
-        if (state) {
-          const result = state.set(ctx, instance.params, currentBpm)
-          candidate.requiresRoutingRebuild = result.requiresRoutingRebuild || candidate.requiresRoutingRebuild
-          continue
-        }
-      }
-      if (instance.kind === 'reverb' && prior?.kind === 'reverb') {
-        const state = candidate.resources.reverbs.get(instance.id)
-        if (state) {
-          const result = await state.set(ctx, instance.params)
-          candidate.requiresRoutingRebuild = result.requiresRoutingRebuild || candidate.requiresRoutingRebuild
-          continue
-        }
-      }
-      candidate.ownedIds.add(instance.id)
-      removeCandidateResources(candidate.resources, instance.id)
-      if (isStaticWorkletInstance(instance)) {
-        const faultGeneration = options.getFaultGeneration()
-        const createdHolder: StaticWorkletChainHolder = { chain: undefined }
-        const created = await createStaticWorkletNodeChain(ctx, instance.kind, instance.params, (code) => {
-          const chain = createdHolder.chain
-          if (!chain) return
-          bypassStaticWorklet(ctx, masterGain, destination, instance.id, chain, revision)
-          options.onWorkletFault?.(faultGeneration, 'owned-processor', code, `master:effect:${instance.id}`)
-        })
-        createdHolder.chain = created
-        if (stale()) {
-          disconnectStaticWorkletNodeChain(created)
-          discard()
-          return
-        }
-        candidate.resources.staticWorklets.set(instance.id, created)
-        candidate.requiresRoutingRebuild = true
-        continue
-      }
-      if (instance.kind === 'eq') {
-        const normalizedParams = normalizeEqParams(instance.params)
-        const nodes = createEqNodes(ctx, normalizedParams, ctx.destination.maxChannelCount || 2)
-        candidate.resources.eq.set(instance.id, nodes)
-        candidate.resources.eqByBand.set(instance.id, new Map(normalizedParams.bands.filter((band) => band.enabled).flatMap((band, index) => {
-          const node = nodes[index]
-          return node ? [[band.id, node]] : []
-        })))
-        candidate.resources.eqSignatures.set(instance.id, serializeNormalizedEqParams(normalizedParams))
-        candidate.resources.eqTopologySignatures.set(instance.id, getEqTopologySignature(normalizedParams))
-        candidate.requiresRoutingRebuild = true
-        continue
-      }
-      if (instance.kind === 'compressor') {
-        const faultGeneration = options.getFaultGeneration()
-        const state = createCompressorChainState((audioContext, params) =>
-          createCompressorNodeChain(audioContext, params, (code) =>
-            options.onWorkletFault?.(faultGeneration, 'compressor', code, `master:effect:${instance.id}`)))
-        const result = await state.set(ctx, normalizeCompressorParams(instance.params))
-        if (stale()) {
-          state.close()
-          discard()
-          return
-        }
-        if (instance.params.enabled && !state.chain()) throw new Error('Failed to construct compressor chain.')
-        candidate.resources.compressors.set(instance.id, state)
-        candidate.requiresRoutingRebuild = result.changed || candidate.requiresRoutingRebuild
-        continue
-      }
-      if (instance.kind === 'saturator') {
-        const state = createSaturatorChainState()
-        state.set(ctx, instance.params)
-        candidate.resources.saturators.set(instance.id, state)
-        candidate.requiresRoutingRebuild = true
-        continue
-      }
-      if (instance.kind === 'delay') {
-        const state = createDelayChainState()
-        state.set(ctx, instance.params, currentBpm)
-        candidate.resources.delays.set(instance.id, state)
-        candidate.requiresRoutingRebuild = true
-        continue
-      }
-      if (instance.kind !== 'reverb') throw new Error('Unsupported audio effect kind.')
-      const state = createReverbChainState()
-      await state.set(ctx, instance.params)
-      candidate.resources.reverbs.set(instance.id, state)
-      candidate.requiresRoutingRebuild = true
-      }
-    } catch (error) {
-      discard()
-      throw error
-    }
-    if (stale()) {
-      discard()
-      return
-    }
-    if (!options.workletBudget.commit(transaction, candidate.desiredStaticCount)) {
-      discard()
-      return
-    }
-    masterChainInstances = candidate.instances
-    masterFxInstances = candidate.instances
-    pendingFxInstances = null
-    publishResources(candidate.resources)
-    for (const update of candidate.eqParamUpdates) applyEqNodeParams(update.nodes, update.params)
-    for (const instance of candidate.instances) {
-      const staticWorklet = candidate.resources.staticWorklets.get(instance.id)
-      if (staticWorklet) bindGateMeter(instance.id, staticWorklet)
-      const compressor = candidate.resources.compressors.get(instance.id)
-      if (compressor) bindCompressorMeter(instance.id, compressor)
-    }
-    const displaced = new Set<string>()
-    for (const id of candidate.ownedIds) {
-      if (oldResources.eq.has(id) || oldResources.compressors.has(id) || oldResources.reverbs.has(id) ||
-        oldResources.saturators.has(id) || oldResources.delays.has(id) || oldResources.staticWorklets.has(id)) displaced.add(id)
-    }
-    for (const id of [
-      ...oldResources.eq.keys(), ...oldResources.compressors.keys(), ...oldResources.reverbs.keys(),
-      ...oldResources.saturators.keys(), ...oldResources.delays.keys(), ...oldResources.staticWorklets.keys(),
-    ]) {
-      if (!candidate.instances.some((instance) => instance.id === id)) displaced.add(id)
-    }
-    if (displaced.size > 0) retiredResources.push({ resources: oldResources, ids: displaced })
-    if (candidate.requiresRoutingRebuild) rebuildRouting(ctx, masterGain, destination, drainRetiredResources)
-    else drainRetiredResources()
-  }
+    },
+  }).apply(ctx, instances)
+  const noInstall: MasterFxOutcome = { disposition: 'dropped', inPlace: false }
 
   return {
+    // The chain asked for before there was a context installs through the same path as any request. installFxInstances
+    // has already reported a failure.
     applyPending: (ctx: AudioContext, masterGain: GainNode, destination: AudioDestinationNode) => {
-      if (pendingFxInstances) {
-        const instances = pendingFxInstances
-        pendingFxInstances = null
-        void applyFxInstances(ctx, masterGain, destination, instances).catch((error) => {
-          options.onWorkletFault?.(
-            options.getFaultGeneration(),
-            'owned-processor',
-            'effect-chain-construction-failed',
-            `master:${error instanceof Error ? error.message : String(error)}`,
-          )
-        })
-      }
+      void admission.replay((instances) => installFxInstances(ctx, masterGain, destination, instances), noInstall)?.catch(() => undefined)
       rebuildRouting(ctx, masterGain, destination)
     },
     subscribeCompressorMeter: (instanceId: string, listener: CompressorMeterListener) => {
@@ -566,33 +323,37 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         gateMeterListeners.delete(instanceId)
       }
     },
-    setFxInstances: async (
+    // Every chain request, whole or single, goes through the admission: an equal request joins the work still running
+    // (failure included) and a different one supersedes it in applyFxInstances. Without a context the request is only
+    // kept, and the revision moves so the work of the chain it replaces cannot commit over it.
+    setFxInstances: (
       ctx: AudioContext | null,
       masterGain: GainNode | null,
       destination: AudioDestinationNode | null,
       instances: AudioEffectRuntimeInstance[],
-    ) => {
-      const normalized = normalizeAudioEffectRuntimeInstances(instances)
-      if (!ctx || !masterGain) {
-        pendingFxInstances = normalized
-        fxInstanceRevision += 1
-        return
-      }
-      try {
-        await applyFxInstances(ctx, masterGain, destination ?? ctx.destination, normalized)
-      } catch (error) {
-        options.onWorkletFault?.(
-          options.getFaultGeneration(),
-          'owned-processor',
-          'effect-chain-construction-failed',
-          `master:${error instanceof Error ? error.message : String(error)}`,
-        )
-        throw error
-      }
+    ): Promise<MasterFxOutcome> => {
+      if (!ctx || !masterGain) fxInstanceRevision += 1
+      return admission.admit(
+        normalizeAudioEffectRuntimeInstances(instances),
+        ctx && masterGain ? (chain) => installFxInstances(ctx, masterGain, destination ?? ctx.destination, chain) : undefined,
+        noInstall,
+      )
     },
+    // The chain last requested, installed or not.
+    retainedInstances: (): readonly AudioEffectRuntimeInstance[] => admission.intent() ?? masterChainInstances,
     setBpm: (bpm: number) => {
       currentBpm = bpm
-      for (const state of instanceDelayChains.values()) state.setBpm(bpm)
+      let failure: unknown
+      for (const [instanceId, state] of instanceDelayChains) {
+        try {
+          state.setBpm(bpm)
+        } catch (error) {
+          fxInstanceRevision += 1
+          liveParams.delete(instanceId)
+          failure ??= error
+        }
+      }
+      if (failure !== undefined) throw failure
     },
     getMixerFx: (): Pick<
       ResolveMixerGraphOptions,
@@ -604,7 +365,7 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       if (parameterId === 'volume') return masterGain ? [{ param: masterGain.gain, valueToAudioValue: (value) => value }] : []
       if (effectInstanceId) {
         return [
-          ...resolveEqAutomationBindings(instanceEqNodesByBand.get(effectInstanceId) ?? new Map(), parameterId),
+          ...resolveEqAutomationBindings(instanceEqChains.get(effectInstanceId)?.nodesByBand() ?? new Map(), parameterId),
           ...resolveSaturatorAutomationBindings(instanceSaturatorChains.get(effectInstanceId), parameterId),
           ...resolveDelayAutomationBindings(instanceDelayChains.get(effectInstanceId), parameterId),
           ...resolveReverbAutomationBindings(instanceReverbChains.get(effectInstanceId), parameterId),
@@ -612,8 +373,8 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
         ]
       }
       const eqNodes = new Map<string, BiquadFilterNode>()
-      for (const nodesByBand of instanceEqNodesByBand.size === 1 ? instanceEqNodesByBand.values() : []) {
-        for (const [bandId, node] of nodesByBand) eqNodes.set(bandId, node)
+      for (const state of instanceEqChains.size === 1 ? instanceEqChains.values() : []) {
+        for (const [bandId, node] of state.nodesByBand()) eqNodes.set(bandId, node)
       }
       return [
         ...resolveEqAutomationBindings(eqNodes, parameterId),
@@ -658,8 +419,9 @@ export function createMasterFxRuntime(options: MasterFxRuntimeOptions) {
       routingGain = null
       masterFxInstances = []
       masterChainInstances = []
-      pendingFxInstances = null
+      graphPublicationPending = false
       fxInstanceRevision += 1
+      admission.reset()
       closeAllInstanceStates()
       drainRetiredResources()
       options.workletBudget.releaseOwner('master')

@@ -12,7 +12,7 @@ export const vst3TrustAcknowledgementStorageKey = "daw:vst3-trust-acknowledged";
 
 export type NativeVst3PlaybackFaultKind = "launch-authorization-required";
 
-const nativeVst3LaunchAuthorizationRequiredMessage =
+export const nativeVst3LaunchAuthorizationRequiredMessage =
   "A native VST3 attachment is stale or no longer trusted.";
 
 export const classifyNativeVst3PlaybackFault = (
@@ -58,7 +58,10 @@ export const vst3ScanHealthLabel = (health: Vst3ScanHealth) => scanHealthLabels[
 
 export const externalProcessorStatusLabel = (
   processor: Pick<ExternalProcessor, "bypassed" | "health">,
+  failed = false,
 ) => {
+  // A plug-in that faulted is silent until the user replaces or removes it, bypassed or not.
+  if (failed) return "Plug-in failed · Muted";
   if (!processor.bypassed && processor.health.state === "ready") return "Enabled · Preflight passed";
   const bypass = processor.bypassed ? "Bypassed" : "Enabled";
   const health = processor.health.state.charAt(0).toUpperCase() + processor.health.state.slice(1);

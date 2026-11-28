@@ -1,0 +1,616 @@
+{
+ "name": "ae08-phase8-step11d-anchors",
+ "sequence": 34,
+ "createdAt": "2026-11-14T00:48:45.235Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 11d integration (11d A-E and A2 on 11c, plus d72a7d08 and a settling fix to one HT witness). Every arm anchored in or witnessed by the touched files (609 anchored and 126 witness-only live arms, controls as dependencies) was run one at a time with --only --jobs 1; the gates f-controller (667/1/0 judged unchanged), rc1-g-controller, rc1-i6-desktop and f-hookwit passed. (1) Re-pointed, 19 arms whose `from` anchor 11d moved in useTimelinePlayback.ts: ledger:457:mutant:{b6f,hookwit,playback} and ledger:466:mutant:{b6f,b6f2,b6f3,playback} (the post-prepare block now sets `nativePreviewCompiledFingerprint` and calls `adoptEditsPastBaseline()`; the mutation still drops the portable fallback and sets the baseline only when the preview started), ledger:459:mutant:{b6f,hookwit,playback} (`desiredAtStart` now sits between `seekSequence` and `commitPortableStart`), ledger:470:mutant:{b6f,b6f2,b6f3} (the block now ends in `adoptEditsPastBaseline()`), ledger:477:mutant:{b6f5,matrix,playback} (the portable-browser baseline now reads `desiredAtStart`), ledger:482:mutant:{b6f5,matrix,playback} (the effect's own `requestTimelineSchedule` is gone; the mutation drops `followPortableEdits()` from the playing branch). Each live one is still killed with its recorded failing names, run alone with --only: 457:b6f, 457:playback, 459:b6f/hookwit/playback, 466:b6f/b6f3/playback, 477:b6f5/matrix/playback, 482:b6f5/matrix/playback. 457:hookwit, 466:b6f2 and 470:b6f/b6f2/b6f3 are recorded survivors that tiers.ts already retires (exit 0, nothing failing); only their anchors move. (2) Retired: none. No arm's code was deleted: `timeline-schedule-replaced`, `audio-source-hydration-pending` and `native-paused-adoption-failure` are held by no arm and the first two by no source line. (3) Killer rename: 11d A renamed the two B6d7 tests `schedule-replacement dispose` -> `project-switch dispose` (same assertions, different dispose held). The failing names move for the 10 arms whose observed set is exactly the recorded set with that rename: rc2:421:1, 428:1, 436:0, 436:1, 436:2 and diag:419:419-plus-428, 419:419-plus-436, 428:428-repeat, 434:434-plus-436-playback, 434:436-alone-playback. Counts stay recorded (the judge takes counts as notes and compares the control delta). (4) Witness repaired in the 11d integration commit: the B6f5 rename test read the preview as settled while its start was still pending, so the rename landed in 11d B's keep-while-preparing window and the mutant (track name in the fingerprint) survived; with the settling turns it fails ledger:492:mutant:{playback,step5b} and 493:mutant:step5b as recorded, so those arms keep their records. (5) Not changed, fail until the parent rules: 12 arms whose killers narrowed. rc2:427:1 and diag 418:418-plus-427-playback, 418:427-alone-playback, 419:419-plus-427, 419:427-alone lose the B6d7 begin-released-first killer (22 of 23 remain, the other B6d7 killer renamed); ledger:468:mutant:playback loses B6f4 re-run and W-UD7p-2 and gains C9e W-C9-track-11; 468:b6f4 and 469:b6f4 keep 1 of 2; 469:playback keeps 17 of 49; 470:playback keeps 2 of 3; 469:b6f3 and 470:b6f4 now survive (exit 0). No retirement: their code is live. No watched hash moves here. For --full: manifest and fuzz-source hashes of useTimelinePlayback.ts, useTimelinePlayback.test.ts, native-playback-controller.ts and its test, Timeline.tsx, vst-instance-failures.ts, timeline-source-test-support.ts, live-native-projection.ts and native-spool-wav.test.ts (pinned at 57807ade); the g-tools-typecheck record (17 recorded diagnostics, 15 now: both native-spool-wav.test.ts TS2339 'offset' entries were fixed by 311548c3; tools/tsc-baseline.txt stays at 101 and `bun tools/typecheck.ts` passes); the HT and C test pass counts; and the seeds:hook shard failures that already fail at HEAD.",
+  "expectationsSha256": "64a3dc1a71c1531a36689a4ced6ab7f671bda35d465c550607db24275ecc0c4e"
+ },
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:hookwit",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:hookwit",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+   "new": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n",
+   "new": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:hookwit",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+   "new": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:hookwit",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n",
+   "new": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      const seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n",
+   "new": "      const seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "      let seekSequence = nativeSeekSequence\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n",
+   "new": "      let seekSequence = nativeSeekSequence\n      // An edit that lands while the start compiles is not in this fingerprint, so the follow after the commit adopts it.\n      const desiredAtStart = readDesiredScheduleFingerprint()\n      const commitPortableStart = (backend: Extract<ActiveAudioBackend, 'native' | 'portable-browser'>) => {\n        seekSequence = nativeSeekSequence\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f2",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f2",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f3",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f3",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token === nativeLifecycleToken && !nativePlayback.isActive()) previewProjectionBaseline = trackFingerprint\n",
+   "new": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive())\n            previewProjectionBaseline = trackFingerprint\n          return result\n",
+   "new": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+   "new": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+   "new": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : readDesiredScheduleFingerprint()",
+   "new": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
+   "new": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n",
+   "new": "    if (isPlaying()) {\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
+   "new": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:matrix",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n",
+   "new": "    if (isPlaying()) {\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n      followPortableEdits()\n",
+   "new": "    if (isPlaying()) {\n      followPortableEdits()\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        void untrack(() => requestTimelineSchedule(loopOptions?.getTracks?.() ?? []))\n",
+   "new": "    if (isPlaying()) {\n      return\n    }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:428:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:421:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d4 a Stop issued after a locate superseded a waiting Play still stops",
+    "B6d5 a Stop that cancels a pending Play keeps a live paused graph at the start",
+    "B6d5 a Stop while a Play waits on an uncommitted preview leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a locate during a Pause that cancels a pending Play keeps its paused rebuild and reports no fault",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:2:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:0:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-428",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-436",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:428:428-repeat",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "B6d8 a Stop while a paused rebuild is retiring its graph leaves nothing running and a live paused graph at the start",
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-436-playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d6 a Stop while a resuming rebuild retires the playing graph at the VST state capture leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:436-alone-playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held schedule-replacement dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (begin released first) and leaves nothing running and a live paused graph at the start",
+    "B6d7 a Stop that joins a held project-switch dispose cancels the Play started inside it (teardown released first) and leaves nothing running and a live paused graph at the start",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "seedRecordChanges": []
+}

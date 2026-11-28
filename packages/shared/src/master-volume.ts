@@ -4,6 +4,8 @@ export const MIXER_VOLUME_MIN_DB = -60
 export const MIXER_VOLUME_MAX_DB = 6
 export const MIXER_VOLUME_SLIDER_STEP = 0.001
 
+import { linearFromDb } from './decibels'
+
 export const DEFAULT_MASTER_VOLUME = DEFAULT_MIXER_VOLUME
 
 const clamp = (value: number, min: number, max: number) =>
@@ -53,5 +55,5 @@ export function mixerSliderPositionToVolume(position: number): number {
   const db =
     MIXER_VOLUME_MIN_DB +
     normalizedPosition * (MIXER_VOLUME_MAX_DB - MIXER_VOLUME_MIN_DB)
-  return normalizeMixerVolume(10 ** (db / 20))
+  return normalizeMixerVolume(linearFromDb(db))
 }

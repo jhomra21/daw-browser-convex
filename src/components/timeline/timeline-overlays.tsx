@@ -1,15 +1,12 @@
 import { type Component, For, Show, createMemo } from 'solid-js'
 import type { TimelineTrackIndex } from '@daw-browser/timeline-core/track-index'
 import { LANE_HEIGHT } from '~/lib/timeline-utils'
-import type { Clip, Track } from '@daw-browser/timeline-core/types'
-import type { RuntimeClip, RuntimeTrack } from '~/lib/timeline-runtime-types'
-import type { TimelineMidiBounds } from '~/lib/timeline-midi-bounds'
+import type { Track } from '@daw-browser/timeline-core/types'
+import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import type { TimelineRangeSelection } from '~/lib/timeline-range-selection'
 import type { TimelineTrackLayoutRow } from '~/lib/timeline-track-layout'
-import type { AutomationTargetDeviceInstance } from '@daw-browser/shared'
 import RecordingPreview, { clipRecordingPreviewToViewport } from '~/components/timeline/RecordingPreview'
 import GridOverlay from '~/components/timeline/GridOverlay'
-import MidiEditorCard from '~/components/midi/MidiEditorCard'
 import {
   intersectTimelineRangeWithViewport,
   projectTimelineTimeToViewport,
@@ -44,36 +41,12 @@ type TimelineOverlaysProps = {
     previewPoints: Array<{ offset: number; amplitude: number }>
     recordingTrackId: Track['id'] | null
   }
-  midi: {
-    clipId: string | null
-    card: TimelineMidiBounds
-    userId?: string
-    projectId?: string
-    canWrite: boolean
-    close: () => void
-    changeBounds: (next: TimelineMidiBounds) => void
-    auditionNote: (trackId: string, pitch: number, velocity?: number, durSec?: number) => void
-    keyboard: {
-      isActive: (pitch: number) => boolean
-    }
-    onLocalMidiSaved: (clipId: string, midi: Clip['midi']) => void
-  }
-  effectInstancesByOwnerKey: Record<string, AutomationTargetDeviceInstance[]>
 }
 
 const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
-  const midiClip = createMemo<RuntimeClip | undefined>(() => {
-    const id = props.midi.clipId
-    if (!id) return undefined
-    return props.timeline.trackLookup.clipById.get(id)
-  })
   const layoutByTrackId = createMemo(() => new Map(
     props.timeline.rowLayouts.map((row) => [row.trackId, row]),
   ))
-  const midiTrackId = createMemo(() => {
-    const clip = midiClip()
-    return clip ? props.timeline.trackLookup.clipEntryById.get(clip.id)?.track.id : undefined
-  })
 
   const recordingPreview = createMemo(() => {
     const start = props.recording.previewStartSec
@@ -208,28 +181,6 @@ const TimelineOverlays: Component<TimelineOverlaysProps> = (props) => {
           class="absolute top-0 bottom-0 z-[25] w-px bg-red-500 pointer-events-none"
           style={{ left: `${playheadProjection() ?? 0}px` }}
         />
-      </Show>
-      <Show when={midiClip()}>
-        {(clip) => (
-          <MidiEditorCard
-            clipId={clip().id}
-            bpm={props.timeline.bpm}
-            gridDenominator={props.timeline.gridDenominator}
-            clipDurationSec={clip().duration}
-            bounds={props.midi.card}
-            onClose={props.midi.close}
-            onChangeBounds={props.midi.changeBounds}
-            midi={clip().midi}
-            userId={props.midi.userId}
-            projectId={props.midi.projectId}
-            canWrite={props.midi.canWrite}
-            onAuditionNote={props.midi.auditionNote}
-            midiKeyboard={props.midi.keyboard}
-            onLocalMidiSaved={props.midi.onLocalMidiSaved}
-            trackId={midiTrackId()}
-            effectInstances={midiTrackId() ? props.effectInstancesByOwnerKey[midiTrackId() ?? ''] : undefined}
-          />
-        )}
       </Show>
     </>
   )

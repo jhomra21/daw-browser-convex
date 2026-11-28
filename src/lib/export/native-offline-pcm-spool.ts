@@ -6,8 +6,8 @@ const PCM_FILE = 'render.f32'
 const METADATA_FILE = 'metadata.json'
 const RECOVERY_CURSOR_FILE = 'recovery.cursor'
 const FLOAT_BYTES = Float32Array.BYTES_PER_ELEMENT
-export const nativeOfflinePcmSpoolReplayFrames = 16_384
-export const nativeOfflinePcmSpoolRecoveryBatchSize = 8
+const nativeOfflinePcmSpoolReplayFrames = 16_384
+const nativeOfflinePcmSpoolRecoveryBatchSize = 8
 export const nativeOfflinePcmSpoolRecoveryTtlMs = 24 * 60 * 60 * 1000
 
 type NativeOfflinePcmSpoolFailure =
@@ -95,6 +95,7 @@ export type NativeOfflinePcmSpoolDescriptor = {
 }
 
 export type NativeOfflinePcmSpoolReplayOptions = {
+  startFrame?: number
   endFrame?: number
   gain?: number
   signal?: AbortSignal
@@ -504,18 +505,24 @@ export const createNativeOfflinePcmSpool = (options: CreateNativeOfflinePcmSpool
       if (state !== 'finalized' || !descriptor) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool must be finalized before replay.')
       }
+      const requestedStartFrame = replayOptions.startFrame ?? 0
       const requestedEndFrame = replayOptions.endFrame ?? descriptor.totalFrames
       if (!Number.isSafeInteger(requestedEndFrame)
         || requestedEndFrame <= 0
         || requestedEndFrame > descriptor.totalFrames) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay end frame is invalid.')
       }
+      if (!Number.isSafeInteger(requestedStartFrame)
+        || requestedStartFrame < 0
+        || requestedStartFrame >= requestedEndFrame) {
+        throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay start frame is invalid.')
+      }
       const gain = replayOptions.gain ?? 1
       if (!Number.isFinite(gain) || gain < 0) {
         throw new NativeOfflinePcmSpoolError('read-failed', 'Native offline PCM spool replay gain is invalid.')
       }
 
-      for (let startFrame = 0; startFrame < requestedEndFrame; startFrame += replayFrames) {
+      for (let startFrame = requestedStartFrame; startFrame < requestedEndFrame; startFrame += replayFrames) {
         replayOptions.signal?.throwIfAborted()
         const frameCount = Math.min(replayFrames, requestedEndFrame - startFrame)
         const startByte = startFrame * descriptor.channelCount * FLOAT_BYTES

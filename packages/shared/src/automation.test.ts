@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import { automationEnvelopeFromRow, automationEnvelopeValueRange, automationTargetKey, automationTargetKeysAfterReEnable, automationTargetKeysForManualOverride, automationTargetMatchesEffectInstance, createAutomationTarget, filterAutomationEnvelopesForScheduling, type AutomationEnvelope } from './automation'
 import { instrumentAutomationKey } from './sampler-automation'
 import { synthAutomationKey } from './synth-automation'
-import { automationRatioToValue, automationValueToRatio, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
+import { automationRatioToValue, automationValueToRatio, builtInOverriddenAutomationTargetKeys, createEqBandParameterId, evaluatedAutomationValuesByTargetKey, externalAutomationParameterId, getAutomationParameterDescriptor, getAutomationParameterOptions, getAutomationParameterOptionsForTarget, normalizeAutomationPoints, parseExternalAutomationParameterId, valueAtAutomationTime, type AutomationEffectInstance } from './automation-parameters'
 
 describe('automation helpers', () => {
   test('keeps EQ Q automation within the shared processor contract bounds', () => {
@@ -415,5 +415,19 @@ describe('manual automation override helpers', () => {
     expect(filtered).toEqual([eqEnvelope])
     expect(envelopes).toEqual([volumeEnvelope, eqEnvelope])
     expect(filterAutomationEnvelopesForScheduling(envelopes, new Set())).toBe(envelopes)
+  })
+
+  test('native playback holds an overridden built-in lane but leaves a VST lane to the host', () => {
+    const vstEnvelope: AutomationEnvelope = {
+      ...volumeEnvelope,
+      id: 'env-3',
+      targetKey: 'track:track-1:vst3:plugin:7',
+      parameterId: externalAutomationParameterId('plugin', 7),
+    }
+    const overridden = new Set([volumeEnvelope.targetKey, vstEnvelope.targetKey])
+
+    expect(builtInOverriddenAutomationTargetKeys([volumeEnvelope, eqEnvelope, vstEnvelope], overridden))
+      .toEqual(new Set([volumeEnvelope.targetKey]))
+    expect(builtInOverriddenAutomationTargetKeys([volumeEnvelope], new Set())).toEqual(new Set())
   })
 })

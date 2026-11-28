@@ -1,0 +1,70 @@
+{
+  "phase": 8,
+  "passed": true,
+  "certifying": true,
+  "verdict": "PHASE 8 PACKAGED PASS: 2/2 rows",
+  "rows": [
+    {
+      "phase": 8,
+      "row": "paused-structural",
+      "passed": true,
+      "verdict": "PHASE 8 PASS: paused-structural",
+      "checks": {
+        "singleHost": true,
+        "deviceIdentityUnchanged": true,
+        "noLifecycleEvent": true,
+        "publishedInPlace": true,
+        "captureIntegrity": true,
+        "audibleAfterEdit": true,
+        "gapFree": true,
+        "resumesAtPause": true
+      },
+      "spawns": 1,
+      "deviceSession": "6572-0x7702ce0000",
+      "publications": [
+        {
+          "revision": 4,
+          "cause": "block-boundary",
+          "publicationFrame": 96256
+        }
+      ],
+      "lifecycle": [],
+      "owner": {
+        "pid": 6572,
+        "captureId": 3
+      },
+      "analyzerSha256": "73e88c056ea480cf1ca7922d6c8569841dce78b84cfee34062b513300af6e2c9"
+    },
+    {
+      "phase": 8,
+      "row": "playing-structural",
+      "passed": true,
+      "verdict": "PHASE 8 PASS: playing-structural",
+      "checks": {
+        "singleHost": true,
+        "deviceIdentityUnchanged": true,
+        "noLifecycleEvent": true,
+        "publishedInPlace": true,
+        "captureIntegrity": true,
+        "audibleAfterEdit": true,
+        "gapFree": true,
+        "resumesAtPause": true
+      },
+      "spawns": 1,
+      "deviceSession": "6689-0x7b4ccf0000",
+      "publications": [
+        {
+          "revision": 4,
+          "cause": "block-boundary",
+          "publicationFrame": 107008
+        }
+      ],
+      "lifecycle": [],
+      "owner": {
+        "pid": 6689,
+        "captureId": 4
+      },
+      "analyzerSha256": "73e88c056ea480cf1ca7922d6c8569841dce78b84cfee34062b513300af6e2c9"
+    }
+  ]
+}

@@ -18,7 +18,7 @@ import { getTrackWriteAccess, requireTrackOwnerForWrite } from "./trackWrites";
 import { getClipWriteAccess } from "./clipWrites";
 import { requireAuthenticatedUserId, requireProjectAccess, requireProjectRole } from "./projectAccess";
 import { runSharedOperationOnce } from "./sharedOperationResults";
-import { advanceProjectRevision } from "./projectRows";
+import { advanceProjectRevision, withProjectEdit, type ProjectEdit } from "./projectRows";
 import { effectiveControlMixerBoolean } from "./controlEffectiveValues";
 import {
   deriveTrackDeletionAfterStatesV1,
@@ -358,6 +358,7 @@ export const listByRoom = query({
 
 export const createTrackRow = async (
   ctx: MutationCtx,
+  edit: ProjectEdit,
   input: {
     projectId: string
     ownerUserId: string
@@ -369,6 +370,7 @@ export const createTrackRow = async (
     name?: string
   },
 ) => {
+  edit.stamp();
   const color = input.color === undefined ? undefined : normalizeTrackColor(input.color)
   if (input.color !== undefined && !color) throw new Error("Invalid track color.");
   const existing = await listProjectTracksWithMixerChannels(ctx, input.projectId);
@@ -407,8 +409,10 @@ export const createTrackRow = async (
     trackId,
   });
   if (input.kind === "instrument" && channelRole === "track") {
+    edit.stamp();
     const instanceId = createInstrumentInstanceId();
     await ctx.db.insert("effects", {
+      revision: edit.revision,
       projectId: input.projectId,
       targetType: "track",
       trackId,
@@ -446,9 +450,10 @@ const createTrackForUser = async (
   isResult: (value): value is string => typeof value === "string",
   run: async () => {
     await requireProjectRole(ctx, input.projectId, input.userId, ["owner", "editor"]);
-    const result = await createTrackRow(ctx, { ...input, ownerUserId: input.userId });
-    await advanceProjectRevision(ctx, input.projectId);
-    return result.trackId;
+    return await withProjectEdit(ctx, input.projectId, async (edit) => {
+      const result = await createTrackRow(ctx, edit, { ...input, ownerUserId: input.userId });
+      return result.trackId;
+    });
   },
 });
 
@@ -777,6 +782,7 @@ export const setRouting = mutation({
   handler: async (ctx, { trackId, outputTargetId, sends }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId,
@@ -816,6 +822,7 @@ export const serverSetRouting = mutation({
     }
 
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackRoutingRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
@@ -977,6 +984,7 @@ export const setGroup = mutation({
   handler: async (ctx, { trackId, groupId }) => {
     const userId = await requireAuthenticatedUserId(ctx);
     const { track } = await requireTrackOwnerForWrite(ctx, trackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackGroupRow(ctx, { projectId: track.projectId, trackId, groupId });
     if (result.changed) await advanceProjectRevision(ctx, track.projectId);
   },
@@ -993,6 +1001,7 @@ export const serverSetGroup = mutation({
       : ctx.db.normalizeId("tracks", groupId);
     if (groupId !== null && groupId !== undefined && !normalizedGroupId) throw new Error("Group track not found.");
     const { track } = await requireTrackOwnerForWrite(ctx, normalizedTrackId, userId);
+    await requireTrackNotLockedByOther(ctx, track, userId);
     const result = await setTrackGroupRow(ctx, {
       projectId: track.projectId,
       trackId: normalizedTrackId,
@@ -1188,6 +1197,10 @@ const isTrackLockedByOther = async (ctx: any, track: any, userId: string) => {
   const channel = await ensureMixerChannelForTrack(ctx, track);
   const lockState = normalizeMixerLockState(channel.lockedBy, channel.lockedAt);
   return lockState.isLocked && lockState.lockedBy !== userId;
+};
+
+const requireTrackNotLockedByOther = async (ctx: any, track: any, userId: string) => {
+  if (await isTrackLockedByOther(ctx, track, userId)) throw new Error("Track locked by another user");
 };
 
 const hasRoutingReferenceTo = (track: any, targetTrackId: string) => (
@@ -1617,7 +1630,7 @@ export const serverRestoreUngroup = mutation({
           || (value.status === "applied" && "groupId" in value && typeof value.groupId === "string")
         )
       ),
-      run: async () => {
+      run: async () => await withProjectEdit(ctx, input.projectId, async (edit) => {
         await requireProjectRole(ctx, input.projectId, userId, ["owner", "editor"]);
         const effects = normalizeSharedUngroupRestoreEffects(input.effects);
         const automation = normalizeSharedUngroupRestoreAutomation(input.automation);
@@ -1677,6 +1690,7 @@ export const serverRestoreUngroup = mutation({
           if (matchingEffects.length !== 1) return { status: "rejected" as const };
         }
 
+        edit.stamp();
         const index = Math.max(0, Math.min(Math.round(input.group.index), tracks.length));
         for (const track of tracks) {
           if (track.index >= index) await ctx.db.patch(track._id, { index: track.index + 1 });
@@ -1716,8 +1730,10 @@ export const serverRestoreUngroup = mutation({
             : (child.outputTargetId ? trackById.get(child.outputTargetId)?._id : undefined);
           await ctx.db.patch(channel._id, { outputTargetId: childOutputTargetId });
         }
+        const effectRevision = edit.revision;
         for (const effect of effects) {
           await ctx.db.insert("effects", {
+            revision: effectRevision,
             projectId: input.projectId,
             targetType: "track",
             trackId: groupId,
@@ -1753,9 +1769,8 @@ export const serverRestoreUngroup = mutation({
             effectInstanceId: route.effectInstanceId,
           });
         }
-        await advanceProjectRevision(ctx, input.projectId);
         return { status: "applied" as const, groupId: String(groupId) };
-      },
+      }),
     });
   },
 });

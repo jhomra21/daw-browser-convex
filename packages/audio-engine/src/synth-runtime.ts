@@ -13,6 +13,7 @@ import {
 } from '@daw-browser/shared'
 import type { AutomationAudioBinding } from './automation'
 import type { SourceRegistry } from './source-registry'
+import type { EngineDisposition } from './engine-disposition'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 
 type RuntimeClip = Clip<AudioBuffer>
@@ -252,15 +253,15 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
   }
 
   return {
-    setTrackSynth: (trackId: string, params: SynthParamsInput, instanceId?: string) => {
+    setTrackSynth: (trackId: string, params: SynthParamsInput, instanceId?: string): EngineDisposition => {
       const state = ensureState(trackId)
-      if (!state) return
+      if (!state) return 'dropped'
       const nextParams = normalizeSynthParams(params)
       const previousParams = state.params
       if (synthParamsEqual(previousParams, nextParams)) {
         state.instanceId = instanceId ?? state.instanceId
         state.params = nextParams
-        return
+        return 'skipped'
       }
       state.params = nextParams
       state.instanceId = instanceId ?? state.instanceId
@@ -338,6 +339,7 @@ export function createSynthRuntime(options: SynthRuntimeOptions) {
         }
       }
       enforcePolyphony(state, now)
+      return 'applied'
     },
     clearTrackSynth: (trackId: string) => {
       disposeTrack(trackId)

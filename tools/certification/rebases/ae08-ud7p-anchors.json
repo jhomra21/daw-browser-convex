@@ -1,0 +1,357 @@
+{
+ "name": "ae08-ud7p-anchors",
+ "sequence": 17,
+ "createdAt": "2026-11-12T17:42:46.267Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 203,
+   "new": 204
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d2 a paused structural change requested while the pause is pending is not dropped",
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 201,
+   "new": 202
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 215
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 5,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:b6f4",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+   "new": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:b6f3",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+   "new": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:b6f2",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+   "new": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+   "new": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // ensurePrepared keeps a paused session that stands at the playhead, so an edit replaces the one compiled before it.\n        void disposeNativePreview(undefined, \"paused-preview-structural-change\")\n",
+   "new": "          // The kept paused session adopts the edit in place; what it cannot carry replaces it (requestTimelineSchedule).\n          adoptPortableEdits()\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:b6f4",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // The paused session now carries this fingerprint, so a re-run without an edit keeps it.\n        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive())\n          previewProjectionBaseline = trackFingerprint\n",
+   "new": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:b6f4",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "",
+   "new": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        // The paused session now carries this fingerprint, so a re-run without an edit keeps it.\n        if (token === nativeLifecycleToken && portableBrowserPlayback.isPrepared() && !portableBrowserPlayback.isActive())\n          previewProjectionBaseline = trackFingerprint\n",
+   "new": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "",
+   "new": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 213,
+   "new": 214
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 5,
+   "new": 4
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 7 (UD 7 paused in place, portable): a note, tempo or loop edit on a paused prepared session is adopted by that session instead of disposing and re-preparing it, so the paused-preview effect no longer disposes for an edit. Arm 468 (remove the paused replacement) re-points to the adoption call that replaced it in the same effect branch. Arm 470 (the baseline a re-run keeps) re-points to the baseline the paused adoption records. Arms 452, 465, 471 and rc2:404 lose B6f4 'a mixer edit ...' and 'a paused-preview re-run ...' (and 471 loses 'keeps a paused portable session compatible when enabling a loop') from their recorded failures: those tests only failed because the mutants broke the dispose and re-prepare that edits no longer take; each arm keeps other recorded failures (counts pass+1/fail-1 per removed test). The B6f4 re-run witness now also asserts that the re-run compiles and posts nothing, which keeps arms 470 and 471 (b6f4) killed. See PHASE8-STEP7-UD7P.md.",
+  "expectationsSha256": "75e5cfe6fec0e5b96128e62759563cc6862412453dbfd9a999b8785934739c62"
+ }
+}

@@ -404,6 +404,16 @@ export const TimelineLeftBrowser: Component<{ browser: TimelineLeftBrowserModel 
           placeholder={`Search ${timelineBrowserTabLabels[props.browser.activeTab].toLowerCase()}`}
           class="h-9 w-full bg-transparent px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:bg-app-surface/60"
           onInput={(event) => props.browser.onSearchQueryChange(props.browser.activeTab, event.currentTarget.value)}
+          onKeyDown={(event) => {
+            if (event.key !== "Escape") return;
+            event.preventDefault();
+            event.stopPropagation();
+            if (props.browser.searchQueryByTab[props.browser.activeTab]) {
+              props.browser.onSearchQueryChange(props.browser.activeTab, "");
+            } else {
+              event.currentTarget.blur();
+            }
+          }}
         />
       </div>
 

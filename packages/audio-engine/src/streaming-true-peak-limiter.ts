@@ -1,3 +1,4 @@
+import { linearFromDb } from '@daw-browser/shared'
 import {
   predictLinkedTruePeakAtFrame,
   truePeakFutureFrames,
@@ -22,7 +23,6 @@ const DEFAULT_OUTPUT_CHUNK_FRAMES = 16_384
 const LOOKAHEAD_SEC = 0.005
 const RELEASE_SEC = 0.08
 
-const linearFromDb = (value: number) => 10 ** (value / 20)
 const validPositiveInteger = (value: number) => Number.isSafeInteger(value) && value > 0
 
 export const createStreamingTruePeakLimiter = (options: StreamingTruePeakLimiterOptions) => {

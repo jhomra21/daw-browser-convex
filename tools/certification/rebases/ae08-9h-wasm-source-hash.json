@@ -1,0 +1,57 @@
+{
+ "name": "ae08-9h-wasm-source-hash",
+ "sequence": 28,
+ "createdAt": "2026-11-13T04:01:03.297Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "#60",
+    "judge",
+    "value"
+   ],
+   "old": "2b2a0156f6d4d0a298e22d2172d7a2a2ad89b52d799e12dbb68e63bf13834dc8",
+   "new": "afabc2f5d1229e98f9d356cad330068d57c349e8dccebe0a50ef394b874a4747"
+  },
+  {
+   "path": [
+    "gates",
+    "#60",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
+   "new": "bba35816783b14573dad666705bdd7c9447a746fdd789f9a1a177ab5a328c5e6"
+  },
+  {
+   "path": [
+    "gates",
+    "#60",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "b60bb1dc9a188038306776464457305daa4306f686d485a357cb713ad82e4ac0",
+   "new": "bba35816783b14573dad666705bdd7c9447a746fdd789f9a1a177ab5a328c5e6"
+  },
+  {
+   "path": [
+    "gates",
+    "#60",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "660e366b3accf9bc4b0d7a1864eaacf3c4961e68062bec100f10dd3def49cc94",
+   "new": "2cbaa4de961efde2aeceadff983b773c958c3be9c0dfdc82c850346b689e2a8b"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9h: the portable core carries latency and PDC changes (shared prepare_latency_heads, read heads, move/completion revisions), so the rebuilt wasm and manifest have new hashes; x-wasm-source-hash is re-pinned to them. The pin was already stale since step 9a2's wasm change."
+ }
+}

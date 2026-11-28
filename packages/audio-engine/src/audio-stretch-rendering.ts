@@ -12,7 +12,7 @@ import {
   type AudioStretchMaterializationPolicy,
   type AudioStretchReadPlan,
 } from './audio-stretch-read-plan'
-import type { AudioPcmSourceDescriptor } from './media-pages'
+import type { AudioPcmSourceDescriptor } from '@daw-browser/shared'
 import {
   createRemoteMediaOperation,
   defaultRemoteMediaMaximumBytes,

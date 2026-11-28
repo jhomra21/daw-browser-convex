@@ -1,5 +1,5 @@
 import type { Context } from "hono";
-import { isJsonObject, isJsonString, type JsonObject, type JsonValue } from "@daw-browser/shared";
+import { isJsonObject, isJsonString, type JsonValue } from "@daw-browser/shared";
 import { z } from "zod";
 import type { ApiBindings } from "./app-types";
 
@@ -76,8 +76,6 @@ type TokenResponse = {
   scope?: string;
 };
 
-type JsonRecord = JsonObject;
-
 export type ControlBearer = {
   userId: string;
   issuer: string;
@@ -86,7 +84,6 @@ export type ControlBearer = {
   scopes: string[];
 };
 
-const isRecord = (value: JsonValue | undefined): value is JsonRecord => isJsonObject(value);
 
 const sha256 = async (value: string) => {
   const bytes = new TextEncoder().encode(value);
@@ -197,7 +194,7 @@ export const validateControlClientRegistration = (
   body: JsonValue,
   approvedOrigins: Set<string>,
 ): string | null => {
-  if (!isRecord(body)) return "metadata must be a JSON object";
+  if (!isJsonObject(body)) return "metadata must be a JSON object";
   const allowedKeys = new Set([
     "client_name", "client_uri", "logo_uri", "contacts", "tos_uri", "policy_uri",
     "software_id", "software_version", "redirect_uris", "token_endpoint_auth_method",

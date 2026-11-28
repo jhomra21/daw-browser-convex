@@ -55,8 +55,27 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
     return (cardRects[targetIndex - 1].right + cardRects[targetIndex].left) / 2;
   };
 
+  const measureGeometry = () => {
+    if (!sourceElement) return;
+    const sourceRect = sourceElement.getBoundingClientRect();
+    sourceLeft = sourceRect.left;
+    ghostSize = { width: sourceRect.width, height: sourceRect.height };
+    const parent = sourceElement?.parentElement;
+    if (parent) {
+      const parentRect = parent.getBoundingClientRect();
+      chainRect = { top: parentRect.top, height: parentRect.height };
+      cardRects = [];
+      for (const element of parent.children) {
+        if (!(element instanceof HTMLElement) || !element.dataset.reorderKey || element.dataset.reorderKey === options.key) continue;
+        const rect = element.getBoundingClientRect();
+        cardRects.push({ left: rect.left, right: rect.right, centerX: rect.left + rect.width / 2 });
+      }
+    }
+  };
+
   const updatePreview = (position: { x: number; y: number }) => {
     if (!chainRect || !ghostOffset || !ghostSize) return;
+    measureGeometry();
     const targetIndex = targetIndexForPoint(position.x);
     options.onPreviewChange({
       key: options.key,
@@ -95,18 +114,8 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
   const activateDrag = (position: { x: number; y: number }) => {
       if (!sourceElement) return;
       const sourceRect = sourceElement.getBoundingClientRect();
-      sourceLeft = sourceRect.left;
       ghostOffset = { x: position.x - sourceRect.left, y: position.y - sourceRect.top };
-      ghostSize = { width: sourceRect.width, height: sourceRect.height };
-      const parentRect = sourceElement.parentElement?.getBoundingClientRect();
-      chainRect = parentRect ? { top: parentRect.top, height: parentRect.height } : undefined;
-      for (const element of sourceElement.parentElement?.children ?? []) {
-        if (!(element instanceof HTMLElement)) continue;
-        const reorderKey = element.dataset.reorderKey;
-        if (!reorderKey || reorderKey === options.key) continue;
-        const rect = element.getBoundingClientRect();
-        cardRects.push({ left: rect.left, right: rect.right, centerX: rect.left + rect.width / 2 });
-      }
+      measureGeometry();
       dragActivated = true;
       document.body.classList.add('select-none', 'cursor-grabbing')
       updatePreview(position);
@@ -126,6 +135,7 @@ export function createEffectCardReorderDrag(options: EffectCardReorderDragOption
   const finishPointer = (event: PointerEvent, cancelled: boolean) => {
     if (event.pointerId !== pointerId) return
     const position = { x: event.clientX, y: event.clientY }
+    if (dragActivated) updatePreview(position)
     const order = options.orderedKeys()
     const currentIndex = order.indexOf(options.key)
     const targetIndex = targetIndexForPoint(position.x)

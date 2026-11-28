@@ -2,8 +2,8 @@ import {
   decodeAudioPages,
   type DecodeAudioPageSource,
   type DecodeAudioPagesOptions,
-  type DecodedAudioPage,
 } from '@daw-browser/audio-engine/media-pages'
+import type { DecodedAudioPage } from '@daw-browser/shared'
 import {
   sampledInstrumentRegion,
   sampledInstrumentRegionBytes,
@@ -39,7 +39,11 @@ export type SampledInstrumentRegionLoaderOptions = {
   remoteLoadDeadlineMs?: number
 }
 
-export const DEFAULT_SAMPLED_INSTRUMENT_REMOTE_LOAD_DEADLINE_MS = 10 * 60 * 1000
+export type SampledInstrumentRegionLoadResult =
+  | { status: 'ready'; buffer: SampledInstrumentBuffer }
+  | { status: 'missing' }
+
+const DEFAULT_SAMPLED_INSTRUMENT_REMOTE_LOAD_DEADLINE_MS = 10 * 60 * 1000
 
 const defaultCreateBuffer = (channels: number, frames: number, sampleRate: number) => {
   const AudioBufferConstructor = globalThis.AudioBuffer
@@ -92,19 +96,26 @@ const resolveSource = async (
   input: SampledInstrumentRegionLoadInput,
   options: SampledInstrumentRegionLoaderOptions,
   signal: AbortSignal | undefined,
-): Promise<DecodeAudioPageSource | null> => {
+): Promise<{ status: 'ready'; source: DecodeAudioPageSource } | { status: 'missing' }> => {
   const id = localAssetId(input.url)
   if (id) {
     const projectId = options.projectId?.()
-    if (!projectId) return null
+    if (!projectId) {
+      throw new Error(`Project context is unavailable for local audio asset "${id}". Retry to reload the sample.`)
+    }
     const result = options.readLocalAsset
       ? await options.readLocalAsset(projectId, id)
       : await (await import('~/lib/local-assets')).readLocalAssetBytes(projectId, id)
     throwIfAborted(signal)
-    return result.status === 'ready' ? result.file : null
+    if (result.status === 'missing') return { status: 'missing' }
+    if (result.status === 'permission-denied') {
+      throw new Error(`Permission to read local audio asset "${id}" was denied. Retry to reload the sample.`)
+    }
+    return { status: 'ready', source: result.file }
   }
   const url = (options.resolveUrl ?? resolveSamplePlaybackUrlForRuntime)(input.url)
-  return url
+  if (!url) throw new Error(`Sample URL "${input.url}" could not be resolved. Retry to reload the sample.`)
+  return { status: 'ready', source: url }
 }
 
 const validatePage = (
@@ -134,7 +145,7 @@ export const loadSampledInstrumentRegion = async (
   maxDecodedBytes: number,
   signal?: AbortSignal,
   options: SampledInstrumentRegionLoaderOptions = {},
-): Promise<SampledInstrumentBuffer | null> => {
+): Promise<SampledInstrumentRegionLoadResult> => {
   const region = sampledInstrumentRegion(
     input.source,
     bounds.sourceStartFrame / input.source.sampleRate,
@@ -149,8 +160,9 @@ export const loadSampledInstrumentRegion = async (
     throw new Error(`Sampled instrument region exceeds the ${maxDecodedBytes} byte limit.`)
   }
   throwIfAborted(signal)
-  const source = await resolveSource(input, options, signal)
-  if (!source) return null
+  const resolved = await resolveSource(input, options, signal)
+  if (resolved.status === 'missing') return resolved
+  const source = resolved.source
   const sourceEndFrame = sourceFrameCount(input.source)
   const isRemote = !input.url.startsWith(LOCAL_ASSET_PREFIX)
   const deadline = isRemote
@@ -211,10 +223,12 @@ export const loadSampledInstrumentRegion = async (
       for (let channel = 0; channel < input.source.channelCount; channel += 1) {
         const plane = page.planes[channel]
         if (!plane) throw new Error('Decoded sampled instrument page is missing a channel plane.')
-        buffer.getChannelData(channel).set(
-          plane.subarray(pageOffset, pageOffset + copyFrameCount),
-          localOffset,
-        )
+        const samples = plane.subarray(pageOffset, pageOffset + copyFrameCount)
+        // An indexed loop: `every(Number.isFinite)` is about 20x slower on long regions.
+        for (let frame = 0; frame < samples.length; frame += 1) {
+          if (!Number.isFinite(samples[frame])) throw new Error('Decoded sampled instrument PCM contains a non-finite sample.')
+        }
+        buffer.getChannelData(channel).set(samples, localOffset)
       }
       nextFrame = copyEndFrame
     }
@@ -228,7 +242,7 @@ export const loadSampledInstrumentRegion = async (
       sourceIdentity: sampledInstrumentRegionIdentity(input, region),
     }
     Object.defineProperty(sampled, 'sourceIdentity', { enumerable: false })
-    return sampled
+    return { status: 'ready', buffer: sampled }
   } finally {
     deadline?.dispose()
   }

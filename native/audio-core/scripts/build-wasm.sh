@@ -13,7 +13,7 @@ emcmake cmake -S native -B native/build/audio-core-wasm \
   -DBUILD_TESTING=OFF \
   -DDAW_AUDIO_CORE_BUILD_WASM=ON \
   -DDAW_AUDIO_CORE_BUILD_WASM_HARNESS=ON
-cmake --build native/build/audio-core-wasm --target daw-audio-core-wasm daw-audio-core-wasm-harness
+cmake --build native/build/audio-core-wasm --target daw-audio-core-wasm daw-audio-core-wasm-harness --parallel "$(bun tools/jobs.ts)"
 
 artifact_dir=native/build/audio-core-wasm/audio-core
 artifact="$artifact_dir/daw-audio-core-wasm.wasm"

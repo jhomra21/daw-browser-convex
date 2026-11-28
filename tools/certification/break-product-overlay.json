@@ -1,0 +1,10 @@
+{
+ "id": "break-controller-116",
+ "changes": [
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "    if (attachmentGeneration(change.instanceId) !== change.generation)",
+   "to": "    if (false)"
+  }
+ ]
+}

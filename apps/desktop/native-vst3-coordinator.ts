@@ -2,11 +2,13 @@ import { createHash } from "node:crypto"
 import {
   decodeNativeExternalAttachmentPlan,
   maxVst3WorkerStateBytes,
+  nativeVst3LaunchNotTrustedFaultOrigin,
+  nativeVst3PluginFaultOrigins,
   type NativeExternalAttachmentPlan,
   type NativeVst3PreflightResult,
 } from "@daw-browser/plugin-host-protocol"
-import type { AudioCoreGraphSnapshot } from "@daw-browser/audio-core-contract"
-import { serializeNativeGraph } from "@daw-browser/audio-engine/native-host-wire"
+import type { DesktopVstInstanceEvent } from "@daw-browser/desktop-protocol"
+import type { NativeAudioHostParkingLimits } from "@daw-browser/desktop-protocol/native-audio-host"
 import {
   NativeAudioHostCommandError,
   type NativeAudioHostSupervisor,
@@ -16,12 +18,13 @@ import {
 import type { PluginCatalogData } from "./plugin-catalog"
 import { resolveVst3Attachment } from "./vst3-attachment"
 import { preflightNativeVst3Worker } from "./vst3-preflight"
+import type { HostEvidence } from "./ae08-evidence"
 
 type Attachment = NativeExternalAttachmentPlan["attachments"][number]
 type PreflightAttachment = ResolvedVst3Attachment & { stateRevision: number }
 type CapturedVst3State = { bytes: Uint8Array; sha256: string }
 
-export type NativeVst3CoordinatorFailureCode =
+type NativeVst3CoordinatorFailureCode =
   | "invalid-plan"
   | "catalog-unavailable"
   | "attachment-unresolved"
@@ -33,130 +36,11 @@ export type NativeVst3CoordinatorFailureCode =
   | "state-invalid"
   | "native-transaction-failed"
 
-export type NativeVst3CoordinatorResult =
+type NativeVst3CoordinatorResult =
   | { ok: true; attached: number }
   | { ok: false; code: NativeVst3CoordinatorFailureCode; message: string; instanceId?: string }
 
-export type NativeVst3PlaybackGateReason =
-  | "deterministic-vst3-fixture-unavailable"
-  | "browser-playback-active"
-  | "attachment-subset-unproven"
-  | "attachment-handshake-unacknowledged"
-  | "graph-revision-unacknowledged"
-  | "graph-revision-invalid"
-  | "dynamic-bus-layout-unsupported"
-  | "worker-missed-deadline"
-  | "worker-faulted"
-  | "revision-prepare-failed"
-  | "revision-publish-failed"
-  | "revision-retire-failed"
-  | "safe-stop-failed"
-
-export type NativeVst3PlaybackStatus =
-  | { active: true; revision: number }
-  | { active: false; revision: number; reason: NativeVst3PlaybackGateReason }
-
-export type NativeVst3WorkerRevisionNotification =
-  | { kind: "latency"; instanceId: string; revision: number; frames: number }
-  | { kind: "tail"; instanceId: string; revision: number; frames: number }
-  | {
-    kind: "buses"
-    instanceId: string
-    revision: number
-  }
-  | { kind: "restart"; instanceId: string; revision: number }
-  | { kind: "miss"; instanceId: string; revision: number }
-  | { kind: "fault"; instanceId: string; revision: number }
-
-export type NativeVst3RevisionResult =
-  | { ok: true; status: "stale" | "unchanged" | "published"; revision: number }
-  | { ok: false; reason: NativeVst3PlaybackGateReason; revision: number; instanceId?: string }
-
-export type NativeVst3RevisionHost = {
-  prepareRevision(input: {
-    snapshot: AudioCoreGraphSnapshot
-    serializedGraph: Uint8Array
-    attachments: readonly Attachment[]
-  }): Promise<void>
-  publishRevision(revision: number): Promise<void>
-  rollbackRevision(revision: number): Promise<void>
-  retireRevision(revision: number): Promise<void>
-  stopAudio(reason: NativeVst3PlaybackGateReason): Promise<void>
-}
-
-export type NativeVst3RevisionCoordinator = {
-  status(): NativeVst3PlaybackStatus
-  snapshot(): AudioCoreGraphSnapshot
-  handleNotification(notification: NativeVst3WorkerRevisionNotification): Promise<NativeVst3RevisionResult>
-}
-
-export type NativeVst3RevisionCoordinatorInput = {
-  snapshot: AudioCoreGraphSnapshot
-  attachments: readonly Attachment[]
-  attachmentHandshakeAcknowledged: boolean
-  graphRevisionAcknowledged: boolean
-  browserPlaybackActive: boolean
-  host: NativeVst3RevisionHost
-}
-
-export type NativeVst3RevisionCoordinatorCreation =
-  | { ok: true; coordinator: NativeVst3RevisionCoordinator }
-  | { ok: false; status: Extract<NativeVst3PlaybackStatus, { active: false }> }
-
-export const nativeVst3RevisionHost = (
-  supervisor: Pick<NativeAudioHostSupervisor,
-    "prepareGraphRevision" | "publishGraphRevision" | "rollbackGraphRevision" | "retireGraphRevision" | "stopAudio">,
-): NativeVst3RevisionHost => {
-  const expectStatus = (
-    status: Awaited<ReturnType<NativeAudioHostSupervisor["prepareGraphRevision"]>>,
-    expected: typeof status.status,
-  ) => {
-    if (status.status !== expected) throw new Error(`Native graph revision ${status.status}.`)
-  }
-  return {
-    async prepareRevision(input) {
-      expectStatus(await supervisor.prepareGraphRevision(input.serializedGraph), "prepared")
-    },
-    async publishRevision(revision) {
-      expectStatus(await supervisor.publishGraphRevision(revision), "published")
-    },
-    async rollbackRevision(revision) {
-      expectStatus(await supervisor.rollbackGraphRevision(revision), "rolled-back")
-    },
-    async retireRevision(revision) {
-      expectStatus(await supervisor.retireGraphRevision(revision), "retired")
-    },
-    async stopAudio() {
-      await supervisor.stopAudio()
-    },
-  }
-}
-
-export const nativeVst3WorkerRevisionNotification = (
-  notification: NativeWorkerNotification,
-): NativeVst3WorkerRevisionNotification | undefined => {
-  if (notification.kind === "editor-interaction" || notification.kind === "parameter-edit") return undefined
-  const identity = {
-    instanceId: notification.instanceId,
-    revision: notification.graphRevision,
-  }
-  if (notification.kind === "latency") return { kind: "latency", ...identity, frames: notification.value }
-  if (notification.kind === "tail") return { kind: "tail", ...identity, frames: notification.value }
-  if (notification.kind === "buses") return { kind: "buses", ...identity }
-  if (notification.kind === "restart") return { kind: "restart", ...identity }
-  if (notification.kind === "miss") return { kind: "miss", ...identity }
-  if (notification.kind === "fault") return { kind: "fault", ...identity }
-  return undefined
-}
-
-export const connectNativeVst3RevisionCoordinator = (
-  supervisor: Pick<NativeAudioHostSupervisor, "onWorkerNotification">,
-  coordinator: NativeVst3RevisionCoordinator,
-) => supervisor.onWorkerNotification((notification) => {
-  const revisionNotification = nativeVst3WorkerRevisionNotification(notification)
-  if (!revisionNotification) return
-  void coordinator.handleNotification(revisionNotification)
-})
+export type NativeVst3Defect = { source: string; instanceId?: string; detail: string }
 
 const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachments].sort((left, right) => (
   left.graphNodeId.localeCompare(right.graphNodeId)
@@ -165,7 +49,6 @@ const canonicalAttachments = (attachments: readonly Attachment[]) => [...attachm
   || left.instanceId.localeCompare(right.instanceId)
 ))
 
-const maximumExternalStageIndex = 0x7fff_ffff
 const sha256Pattern = /^[a-f0-9]{64}$/
 
 const decodeCapturedVst3State = (value: CapturedVst3State): CapturedVst3State | undefined => {
@@ -286,372 +169,222 @@ const resolveAttachment = (
   }
 }
 
-const maximumRevision = 0xffff_ffff
+export const nativeVst3CoordinatorFailureOrigin = (
+  code: NativeVst3CoordinatorFailureCode,
+): "plugin" | "host" => code === "worker-crashed" ? "plugin" : "host"
 
-const attachmentLatency = (attachment: Attachment) => (
-  attachment.declaredLatencyFrames + attachment.workerTransport.maximumFrames
-)
-
-const attachmentSubsetIsProven = (
-  snapshot: AudioCoreGraphSnapshot,
-  attachments: readonly Attachment[],
-) => {
-  if (attachments.length === 0) return false
-  const instanceIds = new Set(attachments.map((attachment) => attachment.instanceId))
-  if (instanceIds.size !== attachments.length) return false
-  const nodes = new Map(snapshot.nodes.map((node) => [node.id, node]))
-  const chains = new Map<string, Attachment[]>()
-  const instruments = new Map<string, Attachment>()
-  const graphNodeByNativeId = new Map<string, string>()
-  for (const attachment of attachments) {
-    if (
-      !Number.isSafeInteger(attachment.stageIndex)
-      || attachment.stageIndex < 0
-      || attachment.stageIndex > maximumExternalStageIndex
-    ) return false
-    const existingGraphNode = graphNodeByNativeId.get(attachment.nativeGraphNodeId)
-    if (existingGraphNode !== undefined && existingGraphNode !== attachment.graphNodeId) return false
-    graphNodeByNativeId.set(attachment.nativeGraphNodeId, attachment.graphNodeId)
-    if (attachment.role === "instrument") {
-      if (instruments.has(attachment.graphNodeId)) return false
-      instruments.set(attachment.graphNodeId, attachment)
-      continue
-    }
-    const chain = chains.get(attachment.graphNodeId) ?? []
-    if (chain.some((candidate) => candidate.stageIndex === attachment.stageIndex)) return false
-    chain.push(attachment)
-    chains.set(attachment.graphNodeId, chain)
-  }
-  const graphNodeIds = new Set([...chains.keys(), ...instruments.keys()])
-  for (const graphNodeId of graphNodeIds) {
-    const chain = chains.get(graphNodeId) ?? []
-    const node = nodes.get(graphNodeId)
-    if (!node) return false
-    const ordered = [...chain].sort((left, right) => left.stageIndex - right.stageIndex)
-    const instrument = instruments.get(graphNodeId)
-    let totalLatency = instrument && !instrument.bypassed ? attachmentLatency(instrument) : 0
-    if (instrument && (instrument.sourceIndex ?? 0) !== 0) return false
-    for (const [index, attachment] of ordered.entries()) {
-      if (attachment.nativeGraphNodeId !== ordered[0]?.nativeGraphNodeId) return false
-      const previous = ordered[index - 1]
-      const expectedInput = index === 0
-        ? node.inputLayout
-        : previous?.outputBuses
-          ? layoutFor(previous.outputBuses)
-          : undefined
-      const inputLayout = attachment.role === "instrument"
-        ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
-        : layoutFor(attachment.inputBuses)
-      const outputLayout = layoutFor(attachment.outputBuses)
-      if (outputLayout !== node.outputLayout
-        || (index === 0 && attachment.role === "instrument"
-          ? inputLayout !== "none" || node.kind !== "instrument"
-          : inputLayout !== expectedInput)
-        || (index > 0 && attachment.role !== "effect")
-        || attachment.workerTransport.inputChannels !== (inputLayout === "mono" ? 1 : inputLayout === "stereo" ? 2 : 0)
-        || attachment.workerTransport.outputChannels !== (outputLayout === "mono" ? 1 : 2)) return false
-      if (!attachment.bypassed) totalLatency += attachmentLatency(attachment)
-      if (!Number.isSafeInteger(totalLatency)) return false
-    }
-    if ((node.externalLatencyFrames ?? 0) !== totalLatency) return false
-  }
-  return [...chains.values()].every((chain) => chain.every((attachment) => {
-    const node = nodes.get(attachment.graphNodeId)
-    const inputLayout = attachment.role === "instrument"
-      ? attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
-      : layoutFor(attachment.inputBuses)
-    const outputLayout = layoutFor(attachment.outputBuses)
-    const inputChannels = attachment.workerTransport.inputChannels
-    const outputChannels = attachment.workerTransport.outputChannels
-      return node !== undefined
-      && outputLayout !== undefined
-      && outputChannels === (outputLayout === "mono" ? 1 : 2)
-      && (attachment.role === "instrument"
-        ? inputLayout === "none" && inputChannels === 0 && node.kind === "instrument"
-        : inputLayout !== undefined
-          && inputChannels === (inputLayout === "mono" ? 1 : 2)
-          && node.inputLayout === inputLayout)
-      && node.outputLayout === outputLayout
-  }))
-  && [...instruments.entries()].every(([graphNodeId, attachment]) => {
-    const node = nodes.get(graphNodeId)
-    const inputLayout = attachment.inputBuses.some((bus) => bus.enabled) ? undefined : "none"
-    const outputLayout = layoutFor(attachment.outputBuses)
-    return node !== undefined
-      && attachment.sourceIndex === 0
-      && outputLayout !== undefined
-      && attachment.workerTransport.inputChannels === 0
-      && attachment.workerTransport.outputChannels === (outputLayout === "mono" ? 1 : 2)
-      && inputLayout === "none"
-      && node.kind === "instrument"
-      && node.outputLayout === outputLayout
-  })
-}
-
-const chainLatency = (attachments: readonly Attachment[], graphNodeId: string) => (
-  attachments
-    .filter((attachment) => !attachment.bypassed && attachment.graphNodeId === graphNodeId)
-    .reduce((total, attachment) => total + attachmentLatency(attachment), 0)
-)
-
-const reviseGraphExternalLatency = (
-  snapshot: AudioCoreGraphSnapshot,
-  graphNodeId: string,
-  latencyFrames: number,
-  revision: number,
-): AudioCoreGraphSnapshot | undefined => {
-  if (
-    !Number.isSafeInteger(latencyFrames) || latencyFrames < 0 || latencyFrames > maximumRevision
-    || !Number.isSafeInteger(revision) || revision <= snapshot.revision || revision > maximumRevision
-  ) return undefined
-  let targetFound = false
-  const nodes = snapshot.nodes.map((node) => {
-    if (node.id !== graphNodeId) return node
-    targetFound = true
-    return { ...node, externalLatencyFrames: latencyFrames }
-  })
-  if (!targetFound) return undefined
-  const nodeById = new Map(nodes.map((node) => [node.id, node]))
-  const incomingCount = new Map(nodes.map((node) => [node.id, 0]))
-  const incoming = new Map<string, Array<AudioCoreGraphSnapshot["edges"][number]>>()
-  const outgoing = new Map<string, string[]>()
-  for (const edge of snapshot.edges) {
-    if (!nodeById.has(edge.fromNodeId) || !nodeById.has(edge.toNodeId)) return undefined
-    if (edge.sidechain) continue
-    incomingCount.set(edge.toNodeId, (incomingCount.get(edge.toNodeId) ?? 0) + 1)
-    const sources = incoming.get(edge.toNodeId) ?? []
-    sources.push(edge)
-    incoming.set(edge.toNodeId, sources)
-    const targets = outgoing.get(edge.fromNodeId) ?? []
-    targets.push(edge.toNodeId)
-    outgoing.set(edge.fromNodeId, targets)
-  }
-  const ready = nodes.filter((node) => incomingCount.get(node.id) === 0).map((node) => node.id)
-  const processOrder: string[] = []
-  while (ready.length > 0) {
-    const nodeId = ready.shift()!
-    processOrder.push(nodeId)
-    for (const targetId of outgoing.get(nodeId) ?? []) {
-      const remaining = (incomingCount.get(targetId) ?? 0) - 1
-      incomingCount.set(targetId, remaining)
-      if (remaining === 0) ready.push(targetId)
-    }
-  }
-  if (processOrder.length !== nodes.length) return undefined
-  const pathLatency = new Map<string, number>()
-  const pdcDelay = new Map<string, number>()
-  const effectiveLatency = (node: AudioCoreGraphSnapshot["nodes"][number]) => (
-    node.latencyFrames + (node.externalLatencyFrames ?? 0)
-  )
-  for (const nodeId of processOrder) {
-    const node = nodeById.get(nodeId)
-    if (!node) return undefined
-    const incomingEdges = incoming.get(nodeId) ?? []
-    let upstreamLatency = 0
-    const arrivals = new Map<string, number>()
-    for (const edge of incomingEdges) {
-      const source = nodeById.get(edge.fromNodeId)
-      const sourcePathLatency = pathLatency.get(edge.fromNodeId)
-      if (!source || sourcePathLatency === undefined) return undefined
-      const arrival = edge.tap === "pre-fx"
-        ? sourcePathLatency - effectiveLatency(source)
-        : sourcePathLatency
-      if (arrival < 0) return undefined
-      arrivals.set(edge.id, arrival)
-      upstreamLatency = Math.max(upstreamLatency, arrival)
-    }
-    const nodeLatency = effectiveLatency(node)
-    if (upstreamLatency > maximumRevision - nodeLatency) return undefined
-    pathLatency.set(nodeId, upstreamLatency + nodeLatency)
-    for (const edge of incomingEdges) {
-      const arrival = arrivals.get(edge.id)
-      if (arrival === undefined) return undefined
-      pdcDelay.set(edge.id, upstreamLatency - arrival)
-    }
-  }
-  return {
-    ...snapshot,
-    revision,
-    nodes,
-    edges: snapshot.edges.map((edge) => edge.sidechain
-      ? edge
-      : { ...edge, pdcDelayFrames: pdcDelay.get(edge.id) ?? 0 }),
-  }
-}
-
-export const nativeVst3PlaybackDefaultStatus = (
-  revision: number,
-): Extract<NativeVst3PlaybackStatus, { active: false }> => ({
-  active: false,
-  revision,
-  reason: "deterministic-vst3-fixture-unavailable",
+// A refused coordination as the renderer receives it: the origin tells it whether to retry (ours) or to mark the
+// instance failed (the plug-in's).
+export const nativeVst3CoordinationFailureReply = (
+  result: Extract<NativeVst3CoordinatorResult, { ok: false }>,
+) => ({
+  ok: false,
+  error: result.message,
+  failure: {
+    code: result.code,
+    origin: nativeVst3CoordinatorFailureOrigin(result.code),
+    ...(result.instanceId !== undefined && { instanceId: result.instanceId }),
+  },
+} satisfies {
+  ok: false
+  error: string
+  failure: { code: NativeVst3CoordinatorFailureCode; origin: "plugin" | "host"; instanceId?: string }
 })
 
-const createNativeVst3RevisionCoordinatorImplementation = (
-  input: NativeVst3RevisionCoordinatorInput,
-): NativeVst3RevisionCoordinatorCreation => {
-  const rejected = (reason: NativeVst3PlaybackGateReason): NativeVst3RevisionCoordinatorCreation => ({
-    ok: false,
-    status: { active: false, revision: input.snapshot.revision, reason },
-  })
-  if (input.browserPlaybackActive) return rejected("browser-playback-active")
-  if (
-    !Number.isSafeInteger(input.snapshot.revision)
-    || input.snapshot.revision <= 0
-    || input.snapshot.revision > maximumRevision
-  ) return rejected("graph-revision-invalid")
-  if (!attachmentSubsetIsProven(input.snapshot, input.attachments)) return rejected("attachment-subset-unproven")
-  if (!input.attachmentHandshakeAcknowledged) return rejected("attachment-handshake-unacknowledged")
-  if (!input.graphRevisionAcknowledged) return rejected("graph-revision-unacknowledged")
-
-  let snapshot = input.snapshot
-  let attachments = canonicalAttachments(input.attachments)
-  let playbackStatus: NativeVst3PlaybackStatus = { active: true, revision: snapshot.revision }
-  let pending = Promise.resolve()
-
-  const stopSafely = async (
-    reason: NativeVst3PlaybackGateReason,
-    instanceId?: string,
-  ): Promise<NativeVst3RevisionResult> => {
-    playbackStatus = { active: false, revision: snapshot.revision, reason }
-    try {
-      await input.host.stopAudio(reason)
-      return {
-        ok: false,
-        reason,
-        revision: snapshot.revision,
-        instanceId,
-      }
-    } catch {
-      playbackStatus = { active: false, revision: snapshot.revision, reason: "safe-stop-failed" }
-      return {
-        ok: false,
-        reason: "safe-stop-failed",
-        revision: snapshot.revision,
-        instanceId,
-      }
-    }
-  }
-
-  const handle = async (
-    notification: NativeVst3WorkerRevisionNotification,
-  ): Promise<NativeVst3RevisionResult> => {
-    if (!playbackStatus.active) {
-      return {
-        ok: false,
-        reason: playbackStatus.reason,
-        revision: snapshot.revision,
-        instanceId: notification.instanceId,
-      }
-    }
-    if (notification.revision !== snapshot.revision) {
-      return { ok: true, status: "stale", revision: snapshot.revision }
-    }
-    const attachmentIndex = attachments.findIndex((attachment) => attachment.instanceId === notification.instanceId)
-    const attachment = attachments[attachmentIndex]
-    if (attachment === undefined) return stopSafely("attachment-subset-unproven", notification.instanceId)
-    if (notification.kind === "buses") return stopSafely("dynamic-bus-layout-unsupported", notification.instanceId)
-    if (notification.kind === "restart") return stopSafely("worker-faulted", notification.instanceId)
-    if (notification.kind === "miss") return stopSafely("worker-missed-deadline", notification.instanceId)
-    if (notification.kind === "fault") return stopSafely("worker-faulted", notification.instanceId)
-    if (notification.kind === "tail") {
-      const declaredTailFrames = notification.frames === 0xffff_ffff ? null : notification.frames
-      if (!Number.isSafeInteger(notification.frames)
-        || notification.frames < 0
-        || (declaredTailFrames !== null && declaredTailFrames > 100_000_000)) {
-        return stopSafely("revision-prepare-failed", notification.instanceId)
-      }
-      if ((attachment.declaredTailFrames ?? null) === declaredTailFrames) {
-        return { ok: true, status: "unchanged", revision: snapshot.revision }
-      }
-      attachments = attachments.map((candidate, index) => index === attachmentIndex
-        ? { ...candidate, declaredTailFrames }
-        : candidate)
-      return { ok: true, status: "unchanged", revision: snapshot.revision }
-    }
-    if (notification.frames === attachment.declaredLatencyFrames) {
-      return { ok: true, status: "unchanged", revision: snapshot.revision }
-    }
-    const nextRevision = snapshot.revision + 1
-    if (nextRevision > maximumRevision) return stopSafely("revision-prepare-failed", notification.instanceId)
-    const nextAttachment = { ...attachment, declaredLatencyFrames: notification.frames }
-    const nextAttachments = attachments.map((candidate, index) => index === attachmentIndex ? nextAttachment : candidate)
-    const nextSnapshot = reviseGraphExternalLatency(
-      snapshot,
-      attachment.graphNodeId,
-      chainLatency(nextAttachments, attachment.graphNodeId),
-      nextRevision,
-    )
-    if (!nextSnapshot || !attachmentSubsetIsProven(nextSnapshot, nextAttachments)) {
-      return stopSafely("revision-prepare-failed", notification.instanceId)
-    }
-    try {
-      await input.host.prepareRevision({
-        snapshot: nextSnapshot,
-        serializedGraph: serializeNativeGraph(nextSnapshot),
-        attachments: nextAttachments,
-      })
-    } catch {
-      const stopped = await stopSafely("revision-prepare-failed", notification.instanceId)
-      try {
-        await input.host.rollbackRevision(nextRevision)
-      } catch {
-        // The safe-stop result remains authoritative.
-      }
-      return stopped
-    }
-    try {
-      await input.host.publishRevision(nextRevision)
-    } catch {
-      const stopped = await stopSafely("revision-publish-failed", notification.instanceId)
-      try {
-        await input.host.rollbackRevision(nextRevision)
-      } catch {
-        // The safe-stop result remains authoritative.
-      }
-      return stopped
-    }
-    const previousRevision = snapshot.revision
-    snapshot = nextSnapshot
-    attachments = nextAttachments
-    playbackStatus = { active: true, revision: nextRevision }
-    try {
-      // Retirement is an awaited control-plane operation after the block-boundary
-      // publish acknowledgement; the render callback never performs disposal.
-      await input.host.retireRevision(previousRevision)
-    } catch {
-      return stopSafely("revision-retire-failed", notification.instanceId)
-    }
-    return { ok: true, status: "published", revision: nextRevision }
-  }
-
-  const coordinator: NativeVst3RevisionCoordinator = {
-    status: () => playbackStatus,
-    snapshot: () => snapshot,
-    handleNotification(notification) {
-      const result = pending.then(() => handle(notification))
-      pending = result.then(() => undefined, () => undefined)
-      return result
-    },
-  }
-  return { ok: true, coordinator }
+const reportDefectToConsole = (defect: NativeVst3Defect) => {
+  console.error("[native-vst3] defect", JSON.stringify(defect))
 }
 
-export const createNativeVst3RevisionCoordinator = (
-  input: NativeVst3RevisionCoordinatorInput,
-): NativeVst3RevisionCoordinatorCreation => createNativeVst3RevisionCoordinatorImplementation(input)
+// The one place a host notification becomes something the renderer sees. A latency report is a live
+// publication; only the plug-in's own fault is a failed instance. A miss, any other fault origin and a
+// component restart never end the session: ours are logged as defects, a restart is the worker's own business.
+export const nativeVst3InstanceEvent = (
+  notification: NativeWorkerNotification,
+  reportDefect: (defect: NativeVst3Defect) => void = reportDefectToConsole,
+): DesktopVstInstanceEvent | undefined => {
+  const { instanceId } = notification
+  switch (notification.kind) {
+    case "latency":
+      return { kind: "latency", instanceId, latencyFrames: notification.value }
+    case "fault":
+      if (nativeVst3PluginFaultOrigins.has(notification.value & 0xff)) return { kind: "failed", instanceId }
+      if ((notification.value & 0xff) === nativeVst3LaunchNotTrustedFaultOrigin) return { kind: "launch-not-trusted", instanceId }
+      reportDefect({ source: "worker-fault", instanceId, detail: `origin ${notification.value & 0xff}` })
+      return undefined
+    case "miss":
+      reportDefect({ source: "worker-miss", instanceId, detail: "deadline miss" })
+      return undefined
+    default:
+      return undefined
+  }
+}
 
-export const coordinateNativeVst3Attachments = async (input: {
+type AvailablePreflight = Extract<NativeVst3PreflightResult, { status: "available" }>
+type LedgerEntry = {
+  plugin: string
+  binding: string
+  stateSha256: string | undefined
+}
+
+// What a preflight can learn: the worker loads this binary with this transport at this rate. It is given no state, and it only
+// echoes the state revision (a cached verdict takes the attachment's own), so neither is part of the key.
+const verdictKey = (native: PreflightAttachment, sampleRateHz: number) => JSON.stringify([
+  native.classId, native.vendorId, native.bundleFingerprint, native.binaryFingerprint, native.role,
+  native.workerTransport.slotCount, native.workerTransport.maximumFrames, native.workerTransport.inputChannels,
+  native.workerTransport.outputChannels, native.workerTransport.maximumEventsPerBlock, sampleRateHz,
+])
+
+const ledgerEntry = (attachment: Attachment, stateSha256: string | undefined): LedgerEntry => ({
+  plugin: JSON.stringify([
+    attachment.catalogIdentity, attachment.bundleFingerprint, attachment.binaryFingerprint, attachment.role,
+    attachment.inputBuses, attachment.outputBuses, attachment.workerTransport,
+  ]),
+  binding: JSON.stringify([attachment.nativeGraphNodeId, attachment.stageIndex, attachment.sourceIndex ?? 0, attachment.bypassed]),
+  stateSha256,
+})
+
+// The attachments one native session holds, so a plan reaches the host as a delta. Latency, tail
+// and parameter changes are not binding changes: the host and project control carry those.
+export const createNativeVst3AttachmentLedger = (
+  host: Pick<NativeAudioHostSupervisor, "detachVst">,
+  now: () => number = Date.now,
+  verdicts = new Map<string, AvailablePreflight>(),
+  parkingLimits: NativeAudioHostParkingLimits,
+) => {
+  const active = new Map<string, LedgerEntry>()
+  const staged = new Map<string, LedgerEntry>()
+  const parked = new Map<string, { plugin: string; at: number }>()
+  const liveCaptures = new Map<string, string>()
+  const isParked = (instanceId: string, plugin: string) => {
+    const entry = parked.get(instanceId)
+    return entry !== undefined
+      && entry.plugin === plugin
+      && now() - entry.at < parkingLimits.parkedAgeMs
+  }
+  return {
+    // Splits a plan into new instances, changed instances (detached first), staged ones it dropped and active ones it removed.
+    reconcile(entries: ReadonlyMap<string, LedgerEntry>) {
+      const attach: string[] = []
+      const replace: string[] = []
+      for (const [instanceId, entry] of entries) {
+        const holder = staged.has(instanceId) ? staged : active
+        const current = holder.get(instanceId)
+        if (current === undefined) attach.push(instanceId)
+        else if (current.plugin !== entry.plugin || current.binding !== entry.binding) replace.push(instanceId)
+        else if (current.stateSha256 !== entry.stateSha256) {
+          // A state captured from the running instance is what it already holds: record it instead of reloading.
+          if (liveCaptures.get(instanceId) === entry.stateSha256) holder.set(instanceId, entry)
+          else replace.push(instanceId)
+        }
+      }
+      const removed = [...active.keys()].filter((instanceId) => !entries.has(instanceId))
+      const dropped = [...staged.keys()].filter((instanceId) => !entries.has(instanceId))
+      return { attach, replace, removed, dropped: dropped.filter((instanceId) => !active.has(instanceId)) }
+    },
+    isParked,
+    verdict: (key: string) => verdicts.get(key),
+    rememberVerdict: (key: string, result: AvailablePreflight) => { verdicts.set(key, result) },
+    capturedFromLive: (instanceId: string, stateSha256: string) => { liveCaptures.set(instanceId, stateSha256) },
+    stage: (instanceId: string, entry: LedgerEntry) => { staged.set(instanceId, entry) },
+    // A staged instance is forgotten only once the host let go of it: a plan refused before that still finds it staged.
+    detach: async (instanceId: string, transactionToken?: string) => {
+      await host.detachVst(instanceId, transactionToken)
+      staged.delete(instanceId)
+      active.delete(instanceId)
+      liveCaptures.delete(instanceId)
+    },
+    // The host parks a removed instance before the revision that drops it is prepared, because it binds every instance it
+    // still holds into a prepared graph. The live graph keeps rendering it until that revision publishes. A rolled back
+    // removal leaves it parked, so a plan that restores it attaches it again from the host's parking. A host that refuses
+    // the detach no longer holds the instance (a worker that faulted or failed to spawn before it joined is retired when
+    // the next revision publishes, while the plug-in's fault is reported on its device): nothing is parked and a
+    // restoring plan loads it anew.
+    release: async (instanceId: string, transactionToken?: string) => {
+      const plugin = active.get(instanceId)?.plugin
+      if (plugin === undefined) return
+      const { status } = await host.detachVst(instanceId, transactionToken)
+      active.delete(instanceId)
+      liveCaptures.delete(instanceId)
+      if (status === "refused") return
+      // Deleted first so the Map's insertion order stays the parking order the eviction below relies on.
+      parked.delete(instanceId)
+      parked.set(instanceId, { plugin, at: now() })
+      for (const oldest of [...parked.keys()].slice(0, Math.max(0, parked.size - parkingLimits.maximumParkedInstances))) parked.delete(oldest)
+    },
+    // The revision is live: staged instances are active.
+    published() {
+      for (const [instanceId, entry] of staged) active.set(instanceId, entry)
+      staged.clear()
+    },
+    // A rollback retires every staged instance in the host, so the next plan attaches them again.
+    rolledBack() {
+      staged.clear()
+    },
+  }
+}
+
+type NativeVst3AttachmentLedger = ReturnType<typeof createNativeVst3AttachmentLedger>
+
+// One ledger per native session: a transaction begin starts a new one, a live coordination continues it, and the
+// transaction commit, a published revision and a rollback reach the one in force.
+export const createNativeVst3SessionLedger = () => {
+  let ledger: NativeVst3AttachmentLedger | undefined
+  // Held beside the ledger because an insertion's preflight arrives before the session has coordinated any plug-in.
+  let verdicts = new Map<string, AvailablePreflight>()
+  return {
+    begin: () => {
+      ledger = undefined
+      verdicts = new Map()
+    },
+    forHost: (
+      host: Pick<NativeAudioHostSupervisor, "detachVst">,
+      parkingLimits: NativeAudioHostParkingLimits,
+    ) => ledger ??= createNativeVst3AttachmentLedger(host, Date.now, verdicts, parkingLimits),
+    // An insertion's preflight is the verdict staging the plug-in would learn.
+    rememberVerdict: (attachment: PreflightAttachment, sampleRateHz: number, result: AvailablePreflight) => {
+      verdicts.set(verdictKey(attachment, sampleRateHz), result)
+    },
+    capturedFromLive: (instanceId: string, stateSha256: string) => ledger?.capturedFromLive(instanceId, stateSha256),
+    published: () => ledger?.published(),
+    rolledBack: () => ledger?.rolledBack(),
+  }
+}
+
+type CoordinationInput = {
   serializedPlan: string
   sampleRateHz: number
   workerPath: string
   catalogStore: { load(): Promise<PluginCatalogData> }
   audioHost: Pick<NativeAudioHostSupervisor, "attachVst">
+  ledger?: NativeVst3AttachmentLedger
   transactionToken?: string
   capturedVstStates?: ReadonlyMap<string, CapturedVst3State>
   requiredVstStateInstanceIds?: ReadonlySet<string>
   preflight?: typeof preflightNativeVst3Worker
-}): Promise<NativeVst3CoordinatorResult> => {
+  evidence?: HostEvidence
+  workerEnvironment?: NodeJS.ProcessEnv
+  reportDefect?: (defect: NativeVst3Defect) => void
+}
+
+// Every failure that is not the plug-in's own crash is ours: it is logged as a defect.
+export const coordinateNativeVst3Attachments = async (
+  input: CoordinationInput,
+): Promise<NativeVst3CoordinatorResult> => {
+  const reportDefect = input.reportDefect ?? reportDefectToConsole
+  let result: NativeVst3CoordinatorResult
+  try {
+    result = await coordinateDelta(input)
+  } catch (error) {
+    reportDefect({ source: "attachment-command", detail: error instanceof Error ? error.message : "unknown" })
+    throw error
+  }
+  if (!result.ok && nativeVst3CoordinatorFailureOrigin(result.code) === "host") {
+    reportDefect({ source: `attachment-${result.code}`, instanceId: result.instanceId, detail: result.message })
+  }
+  return result
+}
+
+const coordinateDelta = async (input: CoordinationInput): Promise<NativeVst3CoordinatorResult> => {
   let plan: NativeExternalAttachmentPlan
   try {
     plan = decodeNativeExternalAttachmentPlan(input.serializedPlan)
@@ -678,19 +411,36 @@ export const coordinateNativeVst3Attachments = async (input: {
     }
     resolved.push({ attachment, native })
   }
+  const ledger = input.ledger
+  const entries = ledger && new Map(resolved.map(({ attachment }) => [
+    attachment.instanceId,
+    ledgerEntry(attachment, input.capturedVstStates?.get(attachment.instanceId)?.sha256),
+  ]))
+  const delta = ledger && entries ? ledger.reconcile(entries) : undefined
+  const changed = delta && new Set([...delta.attach, ...delta.replace])
+  const pending = changed ? resolved.filter((candidate) => changed.has(candidate.attachment.instanceId)) : resolved
   const runPreflight = input.preflight ?? preflightNativeVst3Worker
-  for (const candidate of resolved) {
-    const result = await runPreflight({
-      workerPath: input.workerPath,
-      attachment: candidate.native,
-      sampleRateHz: input.sampleRateHz,
-    })
+  for (const candidate of pending) {
+    const instanceId = candidate.attachment.instanceId
+    const entry = entries?.get(instanceId)
+    if (entry && ledger?.isParked(instanceId, entry.plugin)) continue
+    const key = verdictKey(candidate.native, input.sampleRateHz)
+    const cached = ledger?.verdict(key)
+    const result = cached
+      ? { ...cached, hello: { ...cached.hello, instanceId, manifest: { ...cached.hello.manifest, stateRevision: candidate.native.stateRevision } } }
+      : await runPreflight({
+        workerPath: input.workerPath,
+        attachment: candidate.native,
+        sampleRateHz: input.sampleRateHz,
+        evidence: input.evidence,
+        workerEnvironment: input.workerEnvironment,
+      })
     if (result.status === "unavailable") {
       return {
         ok: false,
         code: result.code,
         message: result.message,
-        instanceId: candidate.attachment.instanceId,
+        instanceId,
       }
     }
     if (!matchesManifest(candidate.attachment, result)) {
@@ -698,20 +448,21 @@ export const coordinateNativeVst3Attachments = async (input: {
         ok: false,
         code: "manifest-mismatch",
         message: "The native VST3 worker manifest does not match the attachment plan.",
-        instanceId: candidate.attachment.instanceId,
+        instanceId,
       }
     }
+    if (ledger && !cached) ledger.rememberVerdict(key, result)
     if (
       !candidate.attachment.bypassed
       && result.hello.manifest.supportsState === true
       && (input.requiredVstStateInstanceIds === undefined
-        || input.requiredVstStateInstanceIds.has(candidate.attachment.instanceId))
+        || input.requiredVstStateInstanceIds.has(instanceId))
     ) {
-      stateRequired.add(candidate.attachment.instanceId)
+      stateRequired.add(instanceId)
     }
   }
   const validatedStates = new Map<string, CapturedVst3State>()
-  for (const candidate of resolved) {
+  for (const candidate of pending) {
     const captured = input.capturedVstStates?.get(candidate.attachment.instanceId)
     if (!captured) {
       if (stateRequired.has(candidate.attachment.instanceId)) {
@@ -738,15 +489,21 @@ export const coordinateNativeVst3Attachments = async (input: {
     // The playback controller owns the encompassing graph transaction. Attach
     // only after preflight so graph publication and VST attachment commit
     // atomically as one native session.
-    for (const candidate of resolved) {
+    for (const instanceId of delta?.dropped ?? []) await ledger?.detach(instanceId, input.transactionToken)
+    for (const instanceId of delta?.removed ?? []) await ledger?.release(instanceId, input.transactionToken)
+    for (const candidate of pending) {
+      const instanceId = candidate.attachment.instanceId
       const { stateRevision: _stateRevision, ...attachment } = candidate.native
-      const state = validatedStates.get(candidate.attachment.instanceId)
+      const state = validatedStates.get(instanceId)
+      if (delta?.replace.includes(instanceId)) await ledger?.detach(instanceId, input.transactionToken)
       await input.audioHost.attachVst(
         state ? { ...attachment, initialState: state } : attachment,
         input.transactionToken,
       )
+      const entry = entries?.get(instanceId)
+      if (entry) ledger?.stage(instanceId, entry)
     }
-    return { ok: true, attached: resolved.length }
+    return { ok: true, attached: pending.length }
   } catch (error) {
     if (error instanceof NativeAudioHostCommandError) throw error
     return { ok: false, code: "native-transaction-failed", message: "The native VST3 attachment transaction failed." }

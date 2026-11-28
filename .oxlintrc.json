@@ -52,6 +52,20 @@
     },
     {
       "files": [
+        "src/lib/desktop/capability-export-output-targets.ts"
+      ],
+      "rules": {
+        "eslint/no-restricted-properties": [
+          "error",
+          {
+            "property": "createWritable",
+            "message": "Desktop export output goes through the scoped capability bridge, not a renderer file handle."
+          }
+        ]
+      }
+    },
+    {
+      "files": [
         "src/components/Timeline.tsx"
       ],
       "rules": {

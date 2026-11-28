@@ -1,4 +1,6 @@
-export type AudioFixture = readonly Float32Array[]
+import { linearFromDb } from '@daw-browser/shared'
+
+type AudioFixture = readonly Float32Array[]
 
 type AudioMetrics = {
   peak: number
@@ -9,13 +11,12 @@ type AudioMetrics = {
 
 export const ANALYZER_FFT_SIZE = 2048
 export const ANALYZER_BIN_COUNT = ANALYZER_FFT_SIZE / 2
-export const ANALYZER_NYQUIST_BIN = ANALYZER_FFT_SIZE / 2
 export const ANALYZER_SMOOTHING = 0.7
-export const ANALYZER_MIN_DECIBELS = -100
-export const ANALYZER_MAX_DECIBELS = -30
-export const ANALYZER_BLACKMAN_ALPHA = 0.16
+const ANALYZER_MIN_DECIBELS = -100
+const ANALYZER_MAX_DECIBELS = -30
+const ANALYZER_BLACKMAN_ALPHA = 0.16
 
-export type AnalyzerReferenceFrame = {
+type AnalyzerReferenceFrame = {
   magnitude: Float32Array
   decibels: Float32Array
   normalized: Float32Array
@@ -155,10 +156,178 @@ export const measureFrameOffset = (reference: Float32Array, candidate: Float32Ar
   return bestCorrelationMagnitude >= 0.5 ? bestOffset : null
 }
 
-export const measureChannelLeakageDb = (sourcePeak: number, leakedPeak: number) => {
-  if (leakedPeak <= 0) return Number.NEGATIVE_INFINITY
-  if (sourcePeak <= 0) return Number.POSITIVE_INFINITY
-  return 20 * Math.log10(leakedPeak / sourcePeak)
+type ToneMeasurement = {
+  amplitude: number
+  phaseRadians: number
+  finite: boolean
+}
+
+type ToneTransferMetrics = {
+  gainDb: number
+  phaseDegrees: number
+  finite: boolean
+}
+
+const validateToneFrequency = (frequencyHz: number, sampleRate: number) => {
+  if (!Number.isFinite(sampleRate) || sampleRate <= 0) throw new RangeError('Sample rate must be positive and finite.')
+  if (!Number.isFinite(frequencyHz) || frequencyHz <= 0 || frequencyHz >= sampleRate / 2) {
+    throw new RangeError('Tone frequency must be positive, finite, and below Nyquist.')
+  }
+}
+
+const phaseDegrees = (radians: number) => radians * 180 / Math.PI
+
+const wrapPhase = (radians: number) => {
+  let wrapped = radians
+  while (wrapped > Math.PI) wrapped -= 2 * Math.PI
+  while (wrapped <= -Math.PI) wrapped += 2 * Math.PI
+  return wrapped
+}
+
+/** Single-bin rectangular-window DFT; exact only when the window holds an integer number of tone cycles. */
+const measureTone = (
+  signal: Float32Array,
+  frequencyHz: number,
+  sampleRate: number,
+): ToneMeasurement => {
+  validateToneFrequency(frequencyHz, sampleRate)
+  const cycles = frequencyHz * signal.length / sampleRate
+  if (Math.abs(cycles - Math.round(cycles)) > 1e-6) {
+    throw new RangeError('Tone must complete an integer number of cycles in the measurement window.')
+  }
+  if (signal.length === 0) return { amplitude: 0, phaseRadians: 0, finite: true }
+  let sine = 0
+  let cosine = 0
+  let finite = true
+  for (let frame = 0; frame < signal.length; frame += 1) {
+    const sample = signal[frame]
+    if (!Number.isFinite(sample)) {
+      finite = false
+      continue
+    }
+    const angle = 2 * Math.PI * frequencyHz * frame / sampleRate
+    sine += sample * Math.sin(angle)
+    cosine += sample * Math.cos(angle)
+  }
+  if (!finite) return { amplitude: 0, phaseRadians: 0, finite: false }
+  const scale = 2 / signal.length
+  const sineCoefficient = sine * scale
+  const cosineCoefficient = cosine * scale
+  return {
+    amplitude: Math.hypot(sineCoefficient, cosineCoefficient),
+    phaseRadians: Math.atan2(cosineCoefficient, sineCoefficient),
+    finite: true,
+  }
+}
+
+export const measureToneTransfer = (
+  reference: Float32Array,
+  candidate: Float32Array,
+  frequencyHz: number,
+  sampleRate: number,
+): ToneTransferMetrics => {
+  const input = measureTone(reference, frequencyHz, sampleRate)
+  const output = measureTone(candidate, frequencyHz, sampleRate)
+  const phaseRadians = wrapPhase(output.phaseRadians - input.phaseRadians)
+  const gainDb = input.amplitude <= 0
+    ? Number.POSITIVE_INFINITY
+    : output.amplitude <= 0
+      ? Number.NEGATIVE_INFINITY
+      : 20 * Math.log10(output.amplitude / input.amplitude)
+  return {
+    gainDb,
+    phaseDegrees: phaseDegrees(phaseRadians),
+    finite: input.finite && output.finite,
+  }
+}
+
+export const measureThdPlusNoise = (
+  signal: Float32Array,
+  frequencyHz: number,
+  sampleRate: number,
+) => {
+  const tone = measureTone(signal, frequencyHz, sampleRate)
+  if (!tone.finite || tone.amplitude <= 0) return Number.POSITIVE_INFINITY
+  let dc = 0
+  for (const sample of signal) dc += sample
+  dc /= signal.length
+  let residualSquareSum = 0
+  for (let frame = 0; frame < signal.length; frame += 1) {
+    const angle = 2 * Math.PI * frequencyHz * frame / sampleRate + tone.phaseRadians
+    const residual = signal[frame] - dc - tone.amplitude * Math.sin(angle)
+    residualSquareSum += residual * residual
+  }
+  const residualRms = Math.sqrt(residualSquareSum / signal.length)
+  if (residualRms <= 0) return Number.NEGATIVE_INFINITY
+  return 20 * Math.log10(residualRms / (tone.amplitude / Math.SQRT2))
+}
+
+const foldFrequencyToNyquist = (frequencyHz: number, sampleRate: number) => {
+  const wrapped = frequencyHz % sampleRate
+  return wrapped <= sampleRate / 2 ? wrapped : sampleRate - wrapped
+}
+
+/**
+ * Measures energy at harmonic-fold alias frequencies relative to the fundamental.
+ *
+ * This is deliberately not a broadband FFT estimate. It targets the deterministic
+ * alias products created when harmonics above Nyquist fold back into the audible
+ * band, which makes the result stable enough to use as a release regression gate.
+ *
+ * The fundamental must be coherently sampled (see measureTone); every fold of a
+ * coherent fundamental then also lands on an exact DFT bin. A fold within two
+ * bins of DC, Nyquist, an in-band harmonic, or another fold cannot be separated
+ * from that content, so such fundamentals (for example any exact divisor of the
+ * sample rate) are rejected rather than measured.
+ */
+export const measureAliasingEnergyDb = (
+  signal: Float32Array,
+  fundamentalHz: number,
+  sampleRate: number,
+  maximumHarmonic = 9,
+) => {
+  if (!Number.isInteger(maximumHarmonic) || maximumHarmonic < 2) {
+    throw new RangeError('Maximum harmonic must be an integer greater than or equal to two.')
+  }
+  const fundamental = measureTone(signal, fundamentalHz, sampleRate)
+  const nyquist = sampleRate / 2
+  const separationHz = 2 * sampleRate / signal.length
+  const occupiedFrequencies = [0, nyquist]
+  const aliasFrequencies = new Set<number>()
+  for (let harmonic = 1; harmonic <= maximumHarmonic; harmonic += 1) {
+    const harmonicFrequency = harmonic * fundamentalHz
+    if (harmonicFrequency < nyquist) occupiedFrequencies.push(harmonicFrequency)
+    else aliasFrequencies.add(foldFrequencyToNyquist(harmonicFrequency, sampleRate))
+  }
+  const aliases = [...aliasFrequencies]
+  const ambiguous = aliases.some((aliasFrequency, index) =>
+    occupiedFrequencies.some((frequency) => Math.abs(aliasFrequency - frequency) <= separationHz)
+    || aliases.some((other, otherIndex) => otherIndex !== index && Math.abs(aliasFrequency - other) <= separationHz))
+  if (ambiguous) {
+    throw new RangeError('Fundamental folds harmonics within two bins of DC, Nyquist, harmonics, or other folds; alias energy is ambiguous.')
+  }
+  if (!fundamental.finite) return Number.POSITIVE_INFINITY
+  if (fundamental.amplitude <= 0) return Number.POSITIVE_INFINITY
+  if (aliases.length === 0) return Number.NEGATIVE_INFINITY
+  let aliasAmplitudeSquared = 0
+  for (const aliasFrequency of aliases) {
+    const alias = measureTone(signal, aliasFrequency, sampleRate)
+    if (!alias.finite) return Number.POSITIVE_INFINITY
+    aliasAmplitudeSquared += alias.amplitude * alias.amplitude
+  }
+  if (aliasAmplitudeSquared <= 0) return Number.NEGATIVE_INFINITY
+  return 10 * Math.log10(aliasAmplitudeSquared / (fundamental.amplitude * fundamental.amplitude))
+}
+
+export const measureCrosstalkDb = (
+  source: Float32Array,
+  leaked: Float32Array,
+) => {
+  const sourceRms = measureAudio([source]).rms
+  const leakedRms = measureAudio([leaked]).rms
+  if (leakedRms <= 0) return Number.NEGATIVE_INFINITY
+  if (sourceRms <= 0) return Number.POSITIVE_INFINITY
+  return 20 * Math.log10(leakedRms / sourceRms)
 }
 
 const blackmanWindow = (frame: number, length: number) => {
@@ -222,7 +391,7 @@ export const characterizeAnalyzerFrame = (
   return { magnitude, decibels, normalized }
 }
 
-export type ReverbCharacterizationMetrics = {
+type ReverbCharacterizationMetrics = {
   onsetFrame: number | null
   peak: number
   decayFrameAtMinus60Db: number | null
@@ -258,7 +427,7 @@ export const measureReverbCharacterization = (
     }
     return first
   }, null)
-  const decayThreshold = peak * Math.pow(10, (options.decayThresholdDb ?? -60) / 20)
+  const decayThreshold = peak * linearFromDb(options.decayThresholdDb ?? -60)
   let decayFrameAtMinus60Db: number | null = null
   if (peak > 0) {
     for (const channel of channels) {

@@ -1,0 +1,26 @@
+{
+ "name": "pr62-p09-native-guards",
+ "sequence": 63,
+ "createdAt": "2026-11-17T17:37:08.643Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-rtguard",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 5,
+   "new": 3
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P09 (pr62-cleanup 298683cb; hand record, no --bless). realtime_callback_guard.test.ts keeps the callback token blacklist (now also native_vst_attachments and PublishAutomationCredits( in ProcessPlanar) and drops two source-text tests: 'publish, rollback and the callback keep no revision-core branch' and 'asset reader completion is bounded and reclamation stays off the callback' (the latter's ordering check passed vacuously when indexOf returned -1). The behavior is executed by audio_host_test.cpp TestPublicationOwnershipSurvivesRollbackAndCommit and TestReaderCompletionControlsAssetReclamation (renamed from TestRollbackSafeGraphRevisionLifecycle and TestCheckpoint3CompletedAssetEpoch; the worker broke rollback and reader completion in turn and each failed). The removals are listed in removals/pr62-native-guards.json. x-rtguard pass 5 -> 3.",
+  "expectationsSha256": "48462597f05c7f1cb62292e01f54802e3a3a66517c99637d96d1bf0fdadc138a"
+ }
+}

@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase9-vst-part2",
+ "sequence": 41,
+ "createdAt": "2026-11-14T18:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 VST defects part 2 and the rows-launch oracle (cherry-picks of t3/1919b880 8004ae0b, d0d40c17, 5a02030a, 6c9cda26, e6e9648d with -x; hand record, no --bless). Covers fc971ff9 (tools/acceptance/ae-08-phase-9-{compare,launch,matrix,rows}.ts, unpinned, and ae-08-phase-5-fixture.ts, whose pinned hash 16d0acf1... was already stale for --full) and the part 2 files. V3: audio-host.cpp PrepareGraphRevision calls ProcessNativeVstControl() so a prepare right after a plug-in's latency report binds the new latency. V4: PrepareGraphRevision returns kPublishPending while a staged playback attachment's worker is still starting; the plug-in-gated TestDelayedReadyAcrossAPublication was rewritten to that rule and ran green here through run-ae08-test-plugin.ts (the first time). V5: audio_host_transaction_test.cpp witnesses kVstDetach. The host logs an acceptance-gated vst-editor-state line and the test plug-in has an AppKit editor view (native/plugin-host/CMakeLists.txt, test-plugin/ae08-test-effect.cpp, ae08-test-editor.{h,mm}). The rows open-editor, faulty-plugin and trust-negative were added; the one conflict (e6e9648d against fc971ff9 in the phase 9 compare, launch, matrix and rows files) is resolved by one Settle type (sequence, asset, refused, editor-open, plugin-fault) on the row or the step, with publicationComplete taking it, so the part 2 settledBy and its refusal value are gone (refused stays frame 0). No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed. Verified: x-host-ctest range -I 17,23 is unchanged by the new tests (no ctest was added; a fresh Debug tree has 24 tests, 17..23 are phase6i, plugin-host-worker, two spool tests, audio-host, graph-integration and transaction, #24 is the realtime guard that x-rtguard runs); ctest 1-24 all pass. Plug-in host tests via run-ae08-test-plugin.ts pass. C 672/1/0, HT 256/1/2 (2 known reds), coordinator 47/0, matrix, launch and compare self-tests pass, bun run typecheck 0, lint 17 warnings and 5 errors (baseline). Left for --full, not touched: pinned hashes of ae-08-phase-5-fixture.ts and ae-08-live-graph.ts, and the watched hashes of audio-host.cpp, audio_host_test.cpp, audio_host_transaction_test.cpp, native-playback-controller.test.ts and native-vst3-coordinator.ts.",
+  "expectationsSha256": "cff0d5d995f2b9b9ca38de3ee7ef2ded30c9b51758efb08647d48d456f6a75ae"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

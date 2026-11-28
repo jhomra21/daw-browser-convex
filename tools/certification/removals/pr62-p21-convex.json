@@ -1,0 +1,9 @@
+{
+ "ruling": "acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md",
+ "removed": [
+  { "file": "convex/projectRows.test.ts", "test": "accepts effect writer stamps only when each equals the owner's revision" },
+  { "file": "convex/deviceAutomationRows.phase3b1.test.ts", "test": "row helpers stamp the prospective project revision and never advance it" },
+  { "file": "convex/deviceAutomationRows.phase3b1.test.ts", "test": "phase 3B-1 automation row helpers stay revision-free while wrappers version writes" },
+  { "file": "convex/deviceAutomationRows.phase3b1.test.ts", "test": "phase 3B-1 device row helpers preserve rows without advancing revision" }
+ ]
+}

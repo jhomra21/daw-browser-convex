@@ -1,10 +1,12 @@
 import { createEffect, createMemo, createSignal, onCleanup, untrack, type Accessor } from "solid-js";
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { Track } from "@daw-browser/timeline-core/types";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import type { LiveProcessorControlResult } from "~/lib/live-processor-control";
 import {
   automationTargetKey,
   automationEnvelopeFromRow,
+  builtInOverriddenAutomationTargetKeys,
   createAutomationTarget,
   externalAutomationParameterId,
   automationTargetKeysAfterReEnable,
@@ -27,8 +29,9 @@ import {
 } from "@daw-browser/shared";
 import { createPersistedAutomationState } from "~/components/timeline/create-persisted-automation-state";
 import { createAutomationSeedEnvelope } from "~/components/timeline/automation-seed-envelope";
-import type { ExportAutomationPatch } from "~/lib/export/run-export-job";
+import type { ExportAutomationPatch } from "~/lib/desired-playback-state";
 import { clampAutomationLaneHeight, DEFAULT_AUTOMATION_LANE_HEIGHT } from "~/lib/timeline-utils";
+import { sameData } from "~/lib/reuse-equal";
 import { loadLocalAutomationEnvelopes, setLocalAutomationEnvelope, deleteLocalAutomationEnvelope } from "~/lib/local-automation";
 import { publishDurableSharedTimelineOperation } from "~/lib/shared-outbox";
 import { buildAutomationEnvelopeHistoryEntry } from "~/lib/undo/builders";
@@ -79,6 +82,7 @@ const isAutomationTargetKey = (cause: JsonValue): cause is string => (
 );
 
 type TimelineAutomationControllerOptions = {
+  acceptance?: PlaybackAcceptanceObserver;
   projectId: Accessor<string>;
   userId: Accessor<string>;
   tracks: Accessor<Track[]>;
@@ -102,7 +106,7 @@ type TimelineAutomationControllerOptions = {
   playheadSec: Accessor<number>;
   selectedTrackId: Accessor<Track["id"] | "">;
   pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void;
-  onPersistenceError?: (error: Error) => void;
+  onPersistenceError?: (projectId: string, error: Error) => void;
 };
 
 export type TimelineWorkspaceAutomationModel = {
@@ -253,11 +257,15 @@ const replaceAutomationEnvelope = (
 
 export function useTimelineAutomationController(options: TimelineAutomationControllerOptions) {
   const [automationEnvelopes, setAutomationEnvelopes] = createSignal<AutomationEnvelope[]>([]);
-  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({});
-  const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map());
+  // Every project change reloads these from storage; an unchanged result must not rebuild the lanes workspace.
+  const [effectInstancesByOwnerKey, setEffectInstancesByOwnerKey] = createSignal<Record<string, AutomationTargetDeviceInstance[]>>({}, { equals: sameData });
+  const [automationValuesByTargetKey, setAutomationValuesByTargetKey] = createSignal<ReadonlyMap<string, number>>(new Map(), { equals: sameData });
   const [effectDataReady, setEffectDataReady] = createSignal(false);
   const [automationDataReady, setAutomationDataReady] = createSignal(false);
   const [overriddenAutomationTargetKeys, setOverriddenAutomationTargetKeys] = createSignal<Set<string>>(new Set());
+  // The newest re-enable of a lane owns its outcome, so an older request answered later cannot undo it.
+  const reEnableOwners = new Map<string, number>();
+  let lastReEnable = 0;
   const seededAutomationTargetKeys = new Set<string>();
   let seededProjectId: string | undefined;
   const visibleAutomationTracks = useProjectPersistedState<Record<string, boolean>>({
@@ -420,12 +428,12 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
     }
   };
   const overrideAutomationTarget = (targetKey: string) => {
-    if (!options.isPlaying()) return;
     const envelope = automationEnvelopesByTargetKey().get(targetKey);
     if (!envelope?.enabled) return;
     setOverriddenAutomationTargetKeys((current) => {
       const next = automationTargetKeysForManualOverride(current, targetKey);
       if (next.size === current.size) return current;
+      options.acceptance?.ui("ui-automation-override", () => targetKey);
       options.audioEngine.cancelAutomationSchedules(new Set([targetKey]), automationEnvelopes());
       options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
       return next;
@@ -434,7 +442,10 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   const reEnableAutomation = async () => {
     const current = overriddenAutomationTargetKeys();
     if (current.size === 0) return;
+    options.acceptance?.ui("ui-automation-reenable", () => [...current].join(","));
     const reEnabledTargetKeys = new Set(current);
+    const operation = ++lastReEnable;
+    for (const targetKey of reEnabledTargetKeys) reEnableOwners.set(targetKey, operation);
     const envelopes = automationEnvelopes().filter((envelope) => reEnabledTargetKeys.has(envelope.targetKey));
     const byProcessor = new Map<string, { instanceId: string; parameterIds: string[] }>();
     for (const envelope of envelopes) {
@@ -444,6 +455,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       if (!entry.parameterIds.includes(envelope.parameterId)) entry.parameterIds.push(envelope.parameterId);
       byProcessor.set(key, entry);
     }
+    // Native compiles its schedule without the overridden lanes, so the lanes are released before the playback backend
+    // publishes the schedule that carries them again.
+    setOverriddenAutomationTargetKeys(automationTargetKeysAfterReEnable(current, reEnabledTargetKeys));
     const reenableProcessorAutomation = options.reenableProcessorAutomation;
     if (reenableProcessorAutomation) {
       const results = await Promise.all(
@@ -451,15 +465,21 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
           reenableProcessorAutomation(processor.instanceId, processor.parameterIds)
         )),
       );
+      const owned = [...reEnabledTargetKeys].filter((targetKey) => reEnableOwners.get(targetKey) === operation);
+      for (const targetKey of owned) reEnableOwners.delete(targetKey);
       const playbackControlAttempted = results.some((result) => result.accepted || result.reason !== "unavailable");
-      if (playbackControlAttempted && results.some((result) => !result.accepted)) return;
+      if (playbackControlAttempted && results.some((result) => !result.accepted)) {
+        setOverriddenAutomationTargetKeys((latest) => new Set([...latest, ...owned]));
+        return;
+      }
     }
-    const next = automationTargetKeysAfterReEnable(current, reEnabledTargetKeys);
-    setOverriddenAutomationTargetKeys(next);
     options.audioEngine.cancelAutomationSchedules(reEnabledTargetKeys, automationEnvelopes());
-    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), next));
-    if (options.isPlaying()) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: reEnabledTargetKeys });
-    else options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
+    // Overrides placed while the backend answered stay out of the schedule.
+    const overrides = overriddenAutomationTargetKeys();
+    options.audioEngine.setAutomationEnvelopes(filterAutomationEnvelopesForScheduling(automationEnvelopes(), overrides));
+    const scheduledTargetKeys = new Set([...reEnabledTargetKeys].filter((targetKey) => !overrides.has(targetKey)));
+    if (!options.isPlaying()) options.audioEngine.applyAutomationAtTimelineSec(options.playheadSec());
+    else if (scheduledTargetKeys.size > 0) options.audioEngine.scheduleAutomationFromPlayhead(options.playheadSec(), { targetKeys: scheduledTargetKeys });
   };
   const persistedAutomation = createPersistedAutomationState({
     targetKey: automationTargetKeyAccessor,
@@ -563,7 +583,7 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       seededAutomationTargetKeys.add(targetKey);
       void persistedAutomation.commitEnvelope(envelope).catch((cause: unknown) => {
         seededAutomationTargetKeys.delete(targetKey);
-        options.onPersistenceError?.(cause instanceof Error ? cause : new Error("Automation could not be saved."));
+        options.onPersistenceError?.(rid, cause instanceof Error ? cause : new Error("Automation could not be saved."));
       });
     };
 
@@ -956,8 +976,9 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
       byTargetKey: automationEnvelopesByTargetKey(),
       preview: persistedAutomation.previewEnvelope,
       commit: (envelope, targetKey) => {
+        const rid = options.projectId();
         void persistedAutomation.commitEnvelope(envelope, targetKey).catch((cause: unknown) => {
-          options.onPersistenceError?.(cause instanceof Error ? cause : new Error("Automation could not be saved."));
+          options.onPersistenceError?.(rid, cause instanceof Error ? cause : new Error("Automation could not be saved."));
         });
       },
       cancelPreview: persistedAutomation.cancelPreview,
@@ -980,6 +1001,15 @@ export function useTimelineAutomationController(options: TimelineAutomationContr
   return {
     envelopes: persistedAutomation.envelopes,
     snapshotExportPatches: (): ExportAutomationPatch[] => persistedAutomation.snapshotPatches(),
+    // An overridden lane is out of the native playback snapshot, so native holds the value set by hand. An offline
+    // export still applies it.
+    snapshotPlaybackPatches: (): ExportAutomationPatch[] => {
+      const held = builtInOverriddenAutomationTargetKeys(persistedAutomation.envelopes(), overriddenAutomationTargetKeys());
+      return [
+        ...persistedAutomation.snapshotPatches().filter((patch) => !held.has(patch.targetKey)),
+        ...[...held].map((targetKey) => ({ targetKey, envelope: undefined })),
+      ];
+    },
     envelopesByTargetKey: automationEnvelopesByTargetKey,
     evaluatedValuesByTargetKey,
     applyEnvelope: applyAutomationEnvelopeState,

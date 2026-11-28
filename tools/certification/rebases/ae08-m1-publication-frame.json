@@ -1,0 +1,28 @@
+{
+ "name": "ae08-m1-publication-frame",
+ "sequence": 12,
+ "createdAt": "2026-11-12T15:01:02.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:475:mutant:host",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "      if (staged && staged.schedule.revision === message.revision) this.commitSchedule(staged, true)\n",
+   "new": "    if (staged && staged.schedule.revision === revision) this.commitSchedule(staged, true, seam)\n"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 2 (M1) moved the publish steps of the v2 worklet into publishPrepared, so the exact anchor of arm ledger:475:mutant:host (the staged-schedule commit at an adoption publish) is re-pointed to the same line in its new place, now carrying the seam. Run alone with --only, the control passes and the mutant is killed (see PHASE8-STEP2-M1.md). The watched hashes of the worklet, protocol, backend and their tests are not recorded: they move only on --full.",
+  "expectationsSha256": "afeee1ec1f64db26d55e4346c07274d8621ac9b5412afa0335c229bcd9a92706"
+ }
+}

@@ -1,0 +1,9 @@
+{
+ "ruling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-P8-BLESS-BLOCKERS.md",
+ "removed": [
+  { "file": "src/lib/portable-browser-playback-controller.test.ts", "test": "refreshes from the latest old-session position without overlapping sessions", "replacedBy": "hands the portable schedule off in place before its installed range ends" },
+  { "file": "src/lib/portable-browser-playback-controller.test.ts", "test": "keeps the current portable session active when a rolling refresh fails", "replacedBy": "hands the portable schedule off in place before its installed range ends" },
+  { "file": "src/lib/portable-browser-playback-controller.test.ts", "test": "keeps the old session and retries once when the replacement range is stale", "replacedBy": "hands the portable schedule off in place before its installed range ends" },
+  { "file": "src/lib/portable-browser-playback-controller.test.ts", "test": "stops truthfully when a prepared replacement cannot start after old disposal", "replacedBy": "hands the portable schedule off in place before its installed range ends" }
+ ]
+}

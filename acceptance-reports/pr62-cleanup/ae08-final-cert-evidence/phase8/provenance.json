@@ -1,0 +1,21 @@
+{
+  "phase": 8,
+  "startedAt": "2026-11-19T17:56:34.342Z",
+  "app": "/Users/juan/Documents/daw-browser-convex/apps/desktop/out/@daw-browser-desktop-darwin-arm64/@daw-browser-desktop.app",
+  "telemetryOptIn": true,
+  "sourceHead": "005302eb2d5dcc42324c08191cff53af9aebfc91",
+  "dirtyDiffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+  "artifacts": {
+    "app.asar": "37ec18385c0db37606c31c563da0f0b4eddd5518cfb0c461ecd5b1a23b2c7781",
+    "daw-audio-host-macos": "af9e71a2dd26ffed1d339be9ef2b8bfcb29b15ad8f222ae96c027af4c1baf24f",
+    "daw-vst3-worker": "ee97be92db9ad62028d1af6eefc37e2354fbc4172f32645f104905148a5f1bf5",
+    "daw-vst3-scanner": "6c13c5382f4b871fcbb3272119878f405cd101ea585bd4b2c6242fdb8e4c670e",
+    "daw-native-artifacts-v1.json": "bb3852702f14e7a27570dce5ee767e371beb828265c9c0e805965bad71f896b1"
+  },
+  "fixture": "180s retained source; one structural edit (new track) while paused, then while playing, judged from host.jsonl (one host, one device session, in-place publication)",
+  "untrackedSourceManifestSha256": "44136fa355b3678a1146ad16f7e8649e94fb4fc21fe77e8310c060f61caaff8a",
+  "ownedPids": [
+    6524,
+    6618
+  ]
+}

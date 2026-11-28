@@ -5,11 +5,13 @@ import ProjectDeleteDialog from "~/components/project-delete-dialog";
 import ProjectRenameDialog, { type ProjectDialogProject } from "~/components/project-rename-dialog";
 import { ProjectSaveStatusBadge } from "~/components/project-save-status-badge";
 import { useShareMenuController } from "~/hooks/useShareMenuController";
-import { getProjectSaveStatus } from "~/lib/project-save-status";
+import { useProjectSaveStatus } from "~/hooks/useProjectSaveStatus";
+import { useSharedOutboxFailure } from "~/hooks/useSharedOutboxFailure";
 import { cn } from "~/lib/utils";
 import {
   createLocalProject,
   deleteLocalProject,
+  isLocalProjectCatalogOpenError,
   listLocalProjects,
   renameLocalProject,
   type LocalProjectEntry,
@@ -37,11 +39,18 @@ const getNextUntitledProjectName = (projects: LocalProjectEntry[]) => {
 
 type LocalProjectsDashboardViewProps = {
   projects: Accessor<LocalProjectEntry[] | undefined>;
+  error: Accessor<unknown>;
   reloadProjects: () => void;
   onOpenProject: (projectId: string) => void;
 };
 
 function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
+  const listingErrorMessage = () => {
+    const error = props.error();
+    return error instanceof Error && isLocalProjectCatalogOpenError(error)
+      ? error.message
+      : "Local projects could not be loaded.";
+  };
   const [busy, setBusy] = createSignal(false);
   const [operationError, setOperationError] = createSignal<string | null>(null);
   const [renamingProject, setRenamingProject] = createSignal<LocalProjectEntry | null>(null);
@@ -103,7 +112,7 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
         </Button>
       </div>
 
-      <Show when={operationError()}>
+      <Show when={!renamingProject() && !deletingProject() && operationError()}>
         {(message) => (
           <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
             {message()}
@@ -113,49 +122,61 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
 
       <div class="space-y-3">
         <Show
-          when={props.projects()}
+          when={!props.error()}
           fallback={
-            <div class="border border-border bg-app-surface/80 p-4 text-sm text-muted-foreground">
-              Loading local projects...
+            <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+              {listingErrorMessage()}
+              <Button variant="outline" size="sm" class="ml-2" onClick={props.reloadProjects}>
+                Retry
+              </Button>
             </div>
           }
         >
-          {(projectList) => (
-            <Show
-              when={projectList().length > 0}
-              fallback={
-                <div class="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
-                  No local projects yet.
-                </div>
-              }
-            >
-              <For each={projectList()}>
-                {(project) => (
-                  <article class="flex items-center justify-between gap-4 border border-border bg-app-surface/80 p-4">
-                    <button
-                      class="min-w-0 flex-1 text-left"
-                      type="button"
-                      onClick={() => props.onOpenProject(project.id)}
-                      disabled={busy()}
-                    >
-                      <div class="truncate font-medium text-foreground">{project.name}</div>
-                      <div class="mt-1 text-xs text-muted-foreground">
-                        Last opened {formatUpdatedAt(project.lastOpenedAt)}
+          <Show
+            when={props.projects()}
+            fallback={
+              <div class="border border-border bg-app-surface/80 p-4 text-sm text-muted-foreground">
+                Loading local projects...
+              </div>
+            }
+          >
+            {(projectList) => (
+              <Show
+                when={projectList().length > 0}
+                fallback={
+                  <div class="border border-dashed border-border p-8 text-center text-sm text-muted-foreground">
+                    No local projects yet.
+                  </div>
+                }
+              >
+                <For each={projectList()}>
+                  {(project) => (
+                    <article class="flex items-center justify-between gap-4 border border-border bg-app-surface/80 p-4">
+                      <button
+                        class="min-w-0 flex-1 text-left"
+                        type="button"
+                        onClick={() => props.onOpenProject(project.id)}
+                        disabled={busy()}
+                      >
+                        <div class="truncate font-medium text-foreground">{project.name}</div>
+                        <div class="mt-1 text-xs text-muted-foreground">
+                          Last opened {formatUpdatedAt(project.lastOpenedAt)}
+                        </div>
+                      </button>
+                      <div class="flex shrink-0 gap-2">
+                        <Button variant="outline" size="sm" onClick={() => setRenamingProject(project)} disabled={busy()}>
+                          Rename
+                        </Button>
+                        <Button variant="outline" size="sm" onClick={() => setDeletingProject(project)} disabled={busy()}>
+                          Delete
+                        </Button>
                       </div>
-                    </button>
-                    <div class="flex shrink-0 gap-2">
-                      <Button variant="outline" size="sm" onClick={() => setRenamingProject(project)} disabled={busy()}>
-                        Rename
-                      </Button>
-                      <Button variant="outline" size="sm" onClick={() => setDeletingProject(project)} disabled={busy()}>
-                        Delete
-                      </Button>
-                    </div>
-                  </article>
-                )}
-              </For>
-            </Show>
-          )}
+                    </article>
+                  )}
+                </For>
+              </Show>
+            )}
+          </Show>
         </Show>
       </div>
 
@@ -163,14 +184,16 @@ function LocalProjectsDashboardView(props: LocalProjectsDashboardViewProps) {
         open={Boolean(renamingProject())}
         project={renamingProject()}
         busy={busy()}
-        onOpenChange={(open) => { if (!open) setRenamingProject(null); }}
+        error={operationError()}
+        onOpenChange={(open) => { if (!open && !busy()) setRenamingProject(null); }}
         onConfirm={(project, name) => { void renameProject(project, name); }}
       />
       <ProjectDeleteDialog
         open={Boolean(deletingProject())}
         project={deletingProject()}
         busy={busy()}
-        onOpenChange={(open) => { if (!open) setDeletingProject(null); }}
+        error={operationError()}
+        onOpenChange={(open) => { if (!open && !busy()) setDeletingProject(null); }}
         onConfirm={(project) => { void removeProject(project); }}
       />
     </>
@@ -186,6 +209,10 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
   const [shareCopied, setShareCopied] = createSignal(false);
   let loadedMembersProjectId = "";
   const projectMenu = () => props.model.projectMenu;
+  const sharedOutboxFailure = useSharedOutboxFailure(() => ({
+    projectId: projectMenu().currentProjectId,
+    userId: projectMenu().currentUserId,
+  }));
   const currentProject = () =>
     projectMenu().projects.find((project) => project.projectId === projectMenu().currentProjectId);
   const isCurrentProjectLocal = () => isLocalId("project", projectMenu().currentProjectId);
@@ -196,13 +223,15 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
   const hasSharedOutboxWork = () => Boolean(
     (projectMenu().sharedOutboxStatus?.pending ?? 0) + (projectMenu().sharedOutboxStatus?.failed ?? 0),
   );
-  const currentSaveStatus = () => getProjectSaveStatus({
+  const currentSaveStatus = useProjectSaveStatus(() => ({
     projectId: projectMenu().currentProjectId,
     userId: projectMenu().currentUserId,
     mode: currentProjectMode(),
     sharedOutboxStatus: projectMenu().sharedOutboxStatus,
     cloudBackupStatus: projectMenu().cloudBackupStatus,
-  });
+    saveFailed: projectMenu().saveFailed,
+    sharedOutboxFailure: sharedOutboxFailure(),
+  }));
   const shareMenu = useShareMenuController({
     projectId: () => projectMenu().currentProjectId,
     onShare: () => projectMenu().onShare?.(),
@@ -240,6 +269,8 @@ function DashboardProjectSettings(props: { model: DashboardTimelineModel }) {
             mode={currentProjectMode()}
             sharedOutboxStatus={projectMenu().sharedOutboxStatus}
             cloudBackupStatus={projectMenu().cloudBackupStatus}
+            sharedOutboxFailure={sharedOutboxFailure()}
+            saveFailed={projectMenu().saveFailed}
           />
         </div>
         <div class="mt-4 grid grid-cols-2 gap-2">
@@ -337,6 +368,7 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
   const [renamingProject, setRenamingProject] = createSignal<ProjectDialogProject | null>(null);
   const [deletingProject, setDeletingProject] = createSignal<ProjectDialogProject | null>(null);
   const [busyProjectId, setBusyProjectId] = createSignal<string | null>(null);
+  const [cloudOperationError, setCloudOperationError] = createSignal<string | null>(null);
   const menu = () => props.model?.projectMenu;
   const [localProjects] = createResource(
     () => props.onOpenProject && !menu() ? localProjectsReloadToken() : null,
@@ -347,6 +379,7 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
     ? (
       <LocalProjectsDashboardView
         projects={() => localProjects.latest ?? localProjects()}
+        error={() => localProjects.error}
         reloadProjects={() => setLocalProjectsReloadToken((currentToken) => currentToken + 1)}
         onOpenProject={props.onOpenProject}
       />
@@ -358,15 +391,23 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
     project: ProjectDialogProject,
     name: string,
   ) => {
+    if (busyProjectId()) return;
     const nextName = name.trim();
     if (!nextName) {
       setRenamingProject(null);
       return;
     }
+    setCloudOperationError(null);
     setBusyProjectId(project.id);
     try {
-      await projectMenu.onRenameProject(project.id, nextName);
+      const outcome = await projectMenu.onRenameProject(project.id, nextName);
+      if (outcome?.status === "error") {
+        setCloudOperationError("This project could not be renamed.");
+        return;
+      }
       setRenamingProject(null);
+    } catch {
+      setCloudOperationError("This project could not be renamed.");
     } finally {
       setBusyProjectId(null);
     }
@@ -375,10 +416,31 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
     projectMenu: DashboardTimelineModel["projectMenu"],
     project: ProjectDialogProject,
   ) => {
+    if (busyProjectId()) return;
+    setCloudOperationError(null);
     setBusyProjectId(project.id);
     try {
-      await projectMenu.onDeleteProject(project.id);
+      const outcome = await projectMenu.onDeleteProject(project.id);
+      if (outcome?.status === "error") {
+        setCloudOperationError("This project could not be deleted.");
+        return;
+      }
       setDeletingProject(null);
+    } catch {
+      setCloudOperationError("This project could not be deleted.");
+    } finally {
+      setBusyProjectId(null);
+    }
+  };
+  const createCloudProject = async (projectMenu: DashboardTimelineModel["projectMenu"]) => {
+    if (busyProjectId()) return;
+    setCloudOperationError(null);
+    setBusyProjectId("create");
+    try {
+      const outcome = await projectMenu.onCreateProject();
+      if (outcome?.status === "error") setCloudOperationError("This project could not be created.");
+    } catch {
+      setCloudOperationError("This project could not be created.");
     } finally {
       setBusyProjectId(null);
     }
@@ -399,10 +461,17 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
             <DashboardSection title="Projects">
               <div class="flex items-center justify-between border-b border-border px-4 py-3">
                 <div class="text-xs text-muted-foreground">Create, open, rename, or delete projects.</div>
-                <Button size="sm" onClick={() => void model.projectMenu.onCreateProject()}>
+                <Button size="sm" disabled={busyProjectId() !== null} onClick={() => void createCloudProject(model.projectMenu)}>
                   New project
                 </Button>
               </div>
+              <Show when={!renamingProject() && !deletingProject() && cloudOperationError()}>
+                {(message) => (
+                  <div class="border border-red-900/70 bg-red-950/40 px-3 py-2 text-sm text-red-200">
+                    {message()}
+                  </div>
+                )}
+              </Show>
               <For each={model.projectMenu.projects}>
                 {(project) => (
                   <DashboardRow
@@ -415,10 +484,10 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
                         <Button size="sm" variant="ghost" onClick={() => model.projectMenu.onOpenProject(project.projectId)}>
                           Open
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => setRenamingProject(openDialogProject(project.projectId, project.name))}>
+                        <Button size="sm" variant="outline" disabled={busyProjectId() !== null} onClick={() => { setCloudOperationError(null); setRenamingProject(openDialogProject(project.projectId, project.name)); }}>
                           Rename
                         </Button>
-                        <Button size="sm" variant="outline" onClick={() => setDeletingProject(openDialogProject(project.projectId, project.name))}>
+                        <Button size="sm" variant="outline" disabled={busyProjectId() !== null} onClick={() => { setCloudOperationError(null); setDeletingProject(openDialogProject(project.projectId, project.name)); }}>
                           Delete
                         </Button>
                       </div>
@@ -431,14 +500,16 @@ export function DashboardProjectsView(props: DashboardProjectsViewProps) {
               open={Boolean(renamingProject())}
               project={renamingProject()}
               busy={busyProjectId() === renamingProject()?.id}
-              onOpenChange={(open) => { if (!open) setRenamingProject(null); }}
+              error={cloudOperationError()}
+              onOpenChange={(open) => { if (!open && busyProjectId() !== renamingProject()?.id) setRenamingProject(null); }}
               onConfirm={(project, name) => { void confirmRename(model.projectMenu, project, name); }}
             />
             <ProjectDeleteDialog
               open={Boolean(deletingProject())}
               project={deletingProject()}
               busy={busyProjectId() === deletingProject()?.id}
-              onOpenChange={(open) => { if (!open) setDeletingProject(null); }}
+              error={cloudOperationError()}
+              onOpenChange={(open) => { if (!open && busyProjectId() !== deletingProject()?.id) setDeletingProject(null); }}
               onConfirm={(project) => { void confirmDelete(model.projectMenu, project); }}
             />
           </>

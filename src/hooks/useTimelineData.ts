@@ -1,4 +1,4 @@
-import { createEffect, createMemo, createSignal, onCleanup, onMount, type Accessor } from 'solid-js'
+import { createEffect, createMemo, createSignal, on, onCleanup, onMount, type Accessor } from 'solid-js'
 import type { FunctionReturnType } from 'convex/server'
 import type { UseQueryResult } from '@tanstack/solid-query'
 
@@ -29,6 +29,7 @@ export type TimelineProject = {
   name: string
   mode?: LocalProjectMode
 }
+export type ProjectMutationOutcome = { status: 'success' } | { status: 'error' }
 
 type DeleteOwnedRoomResult =
   | { status: 'deleted' }
@@ -106,9 +107,9 @@ type UseTimelineDataReturn = {
   fullView: UseQueryResult<FunctionReturnType<typeof convexApi.timeline.fullViewAuthed>, Error>
   navigateToRoom: (projectId: string) => Promise<void>
   setProjectTransitionSettlement: (settle: (() => Promise<void>) | undefined) => void
-  createProject: () => Promise<void>
-  renameProject: (projectId: string, name: string) => Promise<void>
-  deleteProject: (projectId: string) => Promise<void>
+  createProject: () => Promise<ProjectMutationOutcome>
+  renameProject: (projectId: string, name: string) => Promise<ProjectMutationOutcome>
+  deleteProject: (projectId: string) => Promise<ProjectMutationOutcome>
 }
 
 type ProjectPayload = { projectId?: unknown; name?: unknown }
@@ -161,8 +162,10 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
   const setProjectTransitionSettlement = route.setProjectTransitionSettlement
   const clearBootstrapProjectId = route.clearBootstrapProjectId
 
+  // Runs on mount and whenever the open project changes, so a project opened elsewhere (dashboard) lists here.
+  createEffect(on(projectId, () => void loadLocalProjects()))
+
   onMount(() => {
-    void loadLocalProjects()
     const flushMidi = () => {
       void flushAllMidiProjectWrites().catch(() => undefined)
     }
@@ -412,7 +415,7 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
     }
   }
 
-  const createProject = async () => {
+  const createProject = async (): Promise<ProjectMutationOutcome> => {
     const currentProjectId = projectId()
     const ownerUserId = userId()
     if (!ownerUserId || isLocalId('project', currentProjectId)) {
@@ -421,43 +424,48 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
         const project = await createLocalProject('Untitled')
         await loadLocalProjects()
         await navigateToRoom(project.id)
+        return { status: 'success' }
       } catch {
         input.notify('Local project create failed', 'This local project could not be created.')
+        return { status: 'error' }
       }
-      return
     }
 
     const nextProjectId = crypto.randomUUID()
     const result = await createOwnedRoom(nextProjectId, ownerUserId, { showAlertOnError: true })
-    if (result.status !== 'created') return
+    if (result.status !== 'created') return { status: 'error' }
     await flushMidiProjectWrites(currentProjectId)
     await navigateToRoom(nextProjectId)
+    return { status: 'success' }
   }
 
-  const renameProject = async (targetProjectId: string, name: string) => {
+  const renameProject = async (targetProjectId: string, name: string): Promise<ProjectMutationOutcome> => {
     if (isLocalId('project', targetProjectId)) {
       try {
         await renameLocalProject(targetProjectId, name)
         await loadLocalProjects()
+        return { status: 'success' }
       } catch {
         input.notify('Local project rename failed', 'This local project could not be renamed.')
+        return { status: 'error' }
       }
-      return
     }
 
     const ownerUserId = userId()
-    if (!ownerUserId) return
+    if (!ownerUserId) return { status: 'error' }
     try {
       await convexClient.mutation(convexApi.projects.setName, {
         projectId: targetProjectId,
         name,
       })
+      return { status: 'success' }
     } catch {
       input.notify('Project rename failed', 'This project could not be renamed.')
+      return { status: 'error' }
     }
   }
 
-  const deleteProject = async (targetProjectId: string) => {
+  const deleteProject = async (targetProjectId: string): Promise<ProjectMutationOutcome> => {
     if (isLocalId('project', targetProjectId) && hasLocalProject(targetProjectId)) {
       try {
         if (targetProjectId === projectId()) {
@@ -473,45 +481,49 @@ export function useTimelineData(input: UseTimelineDataInput): UseTimelineDataRet
           await deleteLocalProject(targetProjectId)
           await loadLocalProjects()
         }
+        return { status: 'success' }
       } catch {
         input.notify('Local project delete failed', 'This local project could not be deleted.')
+        return { status: 'error' }
       }
-      return
     }
 
     const ownerUserId = userId()
-    if (!ownerUserId) return
+    if (!ownerUserId) return { status: 'error' }
 
     const canDeleteAsOwner = await convexClient.query(convexApi.projects.canDeleteAsOwner, {
       projectId: targetProjectId,
     }).catch(() => false)
     if (!canDeleteAsOwner) {
       const result = await leaveCloudProject(targetProjectId)
-      if (result.status !== 'left' || targetProjectId !== projectId()) return
+      if (result.status !== 'left') return { status: 'error' }
+      if (targetProjectId !== projectId()) return { status: 'success' }
       const destinationProjectId = projects().find((project) => project.projectId !== targetProjectId)?.projectId
       if (destinationProjectId) {
         await navigateToRoom(destinationProjectId)
-        return
+        return { status: 'success' }
       }
       const replacement = await createLocalProject('Untitled')
       await loadLocalProjects()
       await navigateToRoom(replacement.id)
-      return
+      return { status: 'success' }
     }
 
     if (targetProjectId !== projectId()) {
-      await deleteOwnedRoom(targetProjectId)
-      return
+      const result = await deleteOwnedRoom(targetProjectId)
+      return result.status === 'deleted' ? { status: 'success' } : { status: 'error' }
     }
 
     try {
-      await deleteCurrentCloudProjectAccess({
+      const result = await deleteCurrentCloudProjectAccess({
         settleActiveRecording: async () => await route.settleProjectTransition(),
         deleteCurrentProject: async () => await deleteCurrentOwnedRoom(targetProjectId, ownerUserId),
-        navigate: async (result) => await navigateToRoom(result.destinationProjectId),
+        navigate: async (deleted) => await navigateToRoom(deleted.destinationProjectId),
       })
+      return result.status === 'deleted' ? { status: 'success' } : { status: 'error' }
     } catch {
       input.notify('Project delete failed', 'This project could not be deleted.')
+      return { status: 'error' }
     }
   }
 

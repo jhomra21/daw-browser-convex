@@ -68,6 +68,11 @@ test('consumes an auto-open request only after issuing editor IPC', async () => 
   expect(handled).toBeGreaterThan(editorOpen)
 })
 
+test('dims the whole device while its plug-in instance is marked failed', async () => {
+  const source = await readFile(new URL('./external-plugin-card.tsx', import.meta.url), 'utf8')
+  expect(source).toContain('class={failed() ? "opacity-60" : undefined}')
+})
+
 test('does not turn a close response into a capability loss', async () => {
   const source = await readFile(new URL('./external-plugin-card.tsx', import.meta.url), 'utf8')
   expect(source).toContain('if (command !== "close") setLiveEditorSupported(result.status.supported);')

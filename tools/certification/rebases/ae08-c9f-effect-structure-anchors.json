@@ -1,0 +1,86 @@
+{
+ "name": "ae08-c9f-effect-structure-anchors",
+ "sequence": 25,
+ "createdAt": "2026-11-13T03:00:00.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:step5b",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:step5b",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot || !fingerprint) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), onSharedTracks(activeSnapshot, next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint(",
+   "new": "if (!compilation.supported || activeRevision === undefined || !activeSnapshot) return compilation\n    const next = inSessionOrder(compilation.snapshot, activeSnapshot)\n    // An adoption installs its schedule and sources at a seam, so it also takes tempo, loop, clip and track-set edits; a\n    // refresh or a start does not: they extend the graph that plays.\n    const [compared, installed] = context?.liveAdoption\n      ? [onKeptEffects(onSharedTracks(withSeamContentOf(next, activeSnapshot), activeSnapshot), activeSnapshot),\n        onKeptEffects(onSharedTracks(activeSnapshot, next), next)]\n      : [next, activeSnapshot]\n    if (fingerprint && fingerprint("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ],
+   "new": [
+    "B6f5 R6 a schedule refresh after an adoption continues the adopted revision",
+    "B6f5 step5b R6 a normal refresh after a structural edit skips without a fault and the rebuild carries it",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and keeps the take"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9f: an effect inserted, removed, replaced or moved on a track the session plays is adopted at a seam when no inserted, removed or moved effect delays the signal (class 4a). The compile wrapper of the controller now also reduces both sides of the adoption comparison to the effects present on both (onKeptEffects, carriesEffects) before the gate reads withLiveContentOf(compared, activeSnapshot) against installed. The anchors of the two ledger 491 mutants (step5b, portable) are re-pointed to the same lines; the mutants keep their meaning (a missing fingerprint no longer vetoes the adoption). The arms anchored in the controller, Timeline.tsx and the witness files that did not move were checked to still match once. See PHASE8-STEP9F.md. Arm ledger:476 mutant b6f5 (start guard inverted) is still killed by 3 witnesses of the controller test; the HT witness 'B6f5 A an edit the playing portable session cannot carry live rebuilds it once' no longer fails under it, because its example edit became a limiter (latency-bearing, the 9e example moved with the behaviour) and a second boundary (continuesDelays at the adoption) refuses it too. Its recorded fails list drops that test."
+ }
+}

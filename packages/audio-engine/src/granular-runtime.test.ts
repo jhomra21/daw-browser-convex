@@ -21,6 +21,31 @@ class FakeAudioBuffer {
 }
 
 describe('granular runtime transfer contract', () => {
+  test('3B1 r3 processorerror rejects an install before reporting its fault', async () => {
+    const faults: string[] = [];
+    const node: ReturnType<NonNullable<Parameters<typeof createGranularRuntime>[0]['createNode']>> = {
+      parameters: new Map(), connect: () => {}, disconnect: () => {}, onprocessorerror: null,
+      port: { onmessage: null, postMessage: () => {}, close: () => {} },
+    };
+    const runtime = await createGranularRuntime({
+      context: { currentTime: 0 }, params: createDefaultGranularParams(),
+      createNode: () => node, onFault: code => { faults.push(code); },
+    });
+    const buffer: AudioBuffer = {
+      duration: 1, length: 4, numberOfChannels: 1, sampleRate: 4,
+      copyFromChannel: () => {}, copyToChannel: () => {}, getChannelData: () => new Float32Array(4),
+    };
+    let failure: unknown;
+    const install = runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })
+      .catch(cause => { failure = cause; });
+    try {
+      node.onprocessorerror?.(Object.assign(new Event('processorerror'), { message: 'processor failed', filename: '', lineno: 0, colno: 0, error: null }));
+      for (let turn = 0; turn < 10; turn++) await Promise.resolve();
+      expect(failure instanceof Error ? failure.message : failure).toBe('Granular sample installation failed: processor-error');
+      expect(faults).toEqual(['processor-error']);
+    } finally { runtime.close(); await install; }
+  });
+
   test('configures stereo node params and schedules deterministic MIDI gates', async () => {
     const scheduled: Record<string, Array<[number, number]>> = {}
     const parameter = (name: string): AudioParam => ({
@@ -122,9 +147,13 @@ describe('granular runtime transfer contract', () => {
     const install = runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })
     expect(messages[0]).toMatchObject({ type: 'install' })
     expect(transfers[0]).toHaveLength(2)
+    let settled = false
+    void install.then(() => { settled = true })
+    await Promise.resolve()
+    expect(settled).toBe(false)
     node.port.onmessage?.(new MessageEvent('message', { data: { type: 'installed', version: 1, generation: 1 } }))
-    await install
-    await runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })
+    await expect(install).resolves.toBe('applied')
+    await expect(runtime.installSample({ assetKey: 'asset', buffer, sourceStartFrame: 0 })).resolves.toBe('skipped')
     expect(messages).toHaveLength(1)
     runtime.setFrozen(true)
     runtime.resetSeed(9)

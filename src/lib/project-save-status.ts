@@ -13,6 +13,9 @@ export type ProjectSaveStatusInput = {
   mode?: LocalProjectMode;
   sharedOutboxStatus?: SharedOutboxSummary | null;
   cloudBackupStatus?: CloudBackupStatus;
+  saveFailed?: boolean;
+  localTimelineWriteStatus?: "saved" | "saving" | "failed";
+  sharedOutboxFailure?: { reason: string; permanent: boolean };
 };
 
 const badgeClassByStatus = {
@@ -32,6 +35,51 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
     };
   }
 
+  const isLocalProject = isLocalId("project", input.projectId);
+  if (isLocalProject && input.localTimelineWriteStatus === "failed") {
+    return {
+      label: "Some changes could not be saved",
+      shortLabel: "Save failed",
+      compactLabel: "Local",
+      class: badgeClassByStatus.signedOut,
+    };
+  }
+  if (isLocalProject && input.localTimelineWriteStatus === "saving") {
+    return {
+      label: "Saving locally",
+      shortLabel: "Saving",
+      compactLabel: "Local",
+      class: badgeClassByStatus.local,
+    };
+  }
+  if (input.saveFailed) {
+    return {
+      label: "Some changes could not be saved",
+      shortLabel: "Save failed",
+      compactLabel: isLocalProject ? "Local" : "Cloud",
+      class: badgeClassByStatus.signedOut,
+    };
+  }
+
+  if (!isLocalProject && input.sharedOutboxFailure) {
+    const failure = input.sharedOutboxFailure;
+    return {
+      label: `${failure.permanent ? "Shared change rejected" : "Shared change retrying"}: ${failure.reason}`,
+      shortLabel: failure.permanent ? "Sync rejected" : "Sync retrying",
+      compactLabel: "Cloud",
+      class: badgeClassByStatus.signedOut,
+    };
+  }
+
+  if (!isLocalProject && input.userId && !input.sharedOutboxStatus) {
+    return {
+      label: "Cloud sync status unknown",
+      shortLabel: "Sync unknown",
+      compactLabel: "Cloud",
+      class: badgeClassByStatus.signedOut,
+    };
+  }
+
   const pending = input.sharedOutboxStatus?.pending ?? 0;
   const failed = input.sharedOutboxStatus?.failed ?? 0;
   if (pending + failed > 0) {
@@ -43,7 +91,6 @@ export const getProjectSaveStatus = (input: ProjectSaveStatusInput) => {
     };
   }
 
-  const isLocalProject = isLocalId("project", input.projectId);
   if (isLocalProject && input.mode === "backup") {
     if (input.cloudBackupStatus === "backing-up") {
       return { label: "Backing up to cloud", shortLabel: "Backing up", compactLabel: "Local", class: badgeClassByStatus.local };

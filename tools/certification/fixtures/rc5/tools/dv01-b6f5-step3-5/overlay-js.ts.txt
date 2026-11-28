@@ -1,0 +1,19 @@
+import { plugin } from "bun"
+import { readFileSync } from "node:fs"
+
+// B6f5 step 3-5: the B6f overlay's exact-anchor changes, for the AudioWorklet host scripts (.js), which
+// /tmp/dv01-b6f/overlay.ts does not load. Nothing is written to disk.
+const specFile = process.env.DV01_OVERLAY_FILE ?? ""
+const spec: { id: string; changes: { file: string; from: string; to: string }[] } = specFile
+  ? JSON.parse(readFileSync(specFile, "utf8")) : { id: "none", changes: [] }
+plugin({ name: `dv01-b6f5-js-${spec.id}`, setup(build) {
+  build.onLoad({ filter: /\/public\/audio-worklets\/[^/]+\.js$/ }, ({ path }) => {
+    let contents = readFileSync(path, "utf8")
+    for (const change of spec.changes.filter(change => path.endsWith(change.file))) {
+      if (contents.split(change.from).length !== 2) throw new Error("Overlay requires one exact anchor: " + spec.id + " " + change.file)
+      contents = contents.replace(change.from, change.to)
+      console.log("DV01-B6F-OVERLAY-APPLIED", spec.id, change.file)
+    }
+    return { contents, loader: "js" }
+  })
+} })

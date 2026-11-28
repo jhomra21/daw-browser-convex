@@ -64,20 +64,22 @@ describe("host actor identity", () => {
   })
 
   test("publishes one winner across concurrent loads without temporary files", async () => {
-    const root = await temporaryDirectory()
-    const directory = path.join(root, "identity")
-    const file = path.join(directory, "host-actor-v1.json")
+    for (let iteration = 0; iteration < 50; iteration += 1) {
+      const root = await temporaryDirectory()
+      const directory = path.join(root, "identity")
+      const file = path.join(directory, "host-actor-v1.json")
 
-    const identities = await Promise.all(
-      Array.from({ length: 32 }, () => loadDesktopActorIdentity(file)),
-    )
+      const identities = await Promise.all(
+        Array.from({ length: 64 }, () => loadDesktopActorIdentity(file)),
+      )
 
-    expect(new Set(identities).size).toBe(1)
-    expect((await readdir(directory)).sort()).toEqual(["host-actor-v1.json"])
-    expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
-      version: "v1",
-      actorId: identities[0],
-    })
+      expect(new Set(identities).size).toBe(1)
+      expect((await readdir(directory)).sort()).toEqual(["host-actor-v1.json"])
+      expect(JSON.parse(await readFile(file, "utf8"))).toEqual({
+        version: "v1",
+        actorId: identities[0],
+      })
+    }
   })
 
   test("uses the environment override without touching the default path", async () => {

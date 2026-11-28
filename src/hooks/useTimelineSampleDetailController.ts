@@ -7,7 +7,7 @@ import type { TimelineSelectionController } from "~/hooks/useTimelineSelectionSt
 import type { TimelineBottomPanelMode } from "~/hooks/useTimelineBottomPanelState";
 import type { TimelineTrackIndex } from "@daw-browser/timeline-core/track-index";
 import type { HistoryEntry } from "~/lib/undo/types";
-import { isEditableKeyboardTarget } from "~/lib/keyboard-event-target";
+import { isEditableKeyboardTarget, isLocalTimelineKeyboardTarget } from "~/lib/keyboard-event-target";
 
 type AudioWarpController = {
   changeAudioWarp: (clip: Clip, audioWarp: AudioWarp) => Promise<boolean> | boolean | void;
@@ -18,6 +18,7 @@ type Options = {
   userId: Accessor<string>;
   mode: Accessor<TimelineBottomPanelMode>;
   setMode: Setter<TimelineBottomPanelMode>;
+  open: Accessor<boolean>;
   setOpen: Setter<boolean>;
   trackLookup: Accessor<TimelineTrackIndex<AudioBuffer>>;
   selection: TimelineSelectionController;
@@ -30,7 +31,7 @@ type Options = {
   pushHistory: (entry: HistoryEntry, key?: string, debounceMs?: number) => void;
 };
 
-export const isTimelineSampleDetailClip = (clip: Clip<AudioBuffer> | undefined) => {
+export const isTimelineAudioClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => {
   if (!clip || clip.midi) return false;
   return Boolean(
     clip.sampleUrl ||
@@ -40,6 +41,12 @@ export const isTimelineSampleDetailClip = (clip: Clip<AudioBuffer> | undefined) 
   );
 };
 
+export const isTimelineMidiClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => Boolean(clip?.midi);
+
+const isTimelineClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => (
+  isTimelineAudioClipDetailClip(clip) || isTimelineMidiClipDetailClip(clip)
+);
+
 export function useTimelineSampleDetailController(options: Options) {
   const [markerDragging, setMarkerDragging] = createSignal(false);
   const selectedClip = createMemo(() => {
@@ -47,7 +54,15 @@ export function useTimelineSampleDetailController(options: Options) {
     if (!selected) return undefined;
     const match = options.trackLookup().clipEntryById.get(selected.clipId);
     if (!match || match.trackId !== selected.trackId) return undefined;
-    return isTimelineSampleDetailClip(match.clip) ? match.clip : undefined;
+    return isTimelineClipDetailClip(match.clip) ? match.clip : undefined;
+  });
+  const selectedAudioClip = createMemo(() => {
+    const clip = selectedClip();
+    return isTimelineAudioClipDetailClip(clip) ? clip : undefined;
+  });
+  const selectedMidiClip = createMemo(() => {
+    const clip = selectedClip();
+    return isTimelineMidiClipDetailClip(clip) ? clip : undefined;
   });
 
   const close = () => {
@@ -55,16 +70,32 @@ export function useTimelineSampleDetailController(options: Options) {
     options.setOpen(true);
   };
 
+  const openClipDetail = (clipId: string) => {
+    const match = options.trackLookup().clipEntryById.get(clipId);
+    if (!match || !isTimelineClipDetailClip(match.clip)) return;
+    const selected = options.selection.selectedClip();
+    if (
+      selected?.clipId === clipId &&
+      selected.trackId === match.trackId &&
+      options.open() &&
+      options.mode() === "clip-detail"
+    ) return;
+    options.selection.selectPrimaryClip({ trackId: match.trackId, clipId });
+    options.setMode("clip-detail");
+    options.setOpen(true);
+  };
+
   createEffect(() => {
-    if (options.mode() !== "sample-detail") return;
+    if (options.mode() !== "clip-detail") return;
     if (selectedClip()) return;
     close();
   });
 
   createEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key !== "Escape" || options.mode() !== "sample-detail") return;
-      if (isEditableKeyboardTarget(event.target)) return;
+      if (event.key !== "Escape" || options.mode() !== "clip-detail") return;
+      // The MIDI editor owns Escape (deselect, cancel drag); it never closes the clip view.
+      if (isEditableKeyboardTarget(event.target) || isLocalTimelineKeyboardTarget(event.target)) return;
       if (markerDragging()) return;
       event.preventDefault();
       close();
@@ -96,6 +127,9 @@ export function useTimelineSampleDetailController(options: Options) {
 
   return {
     selectedClip,
+    selectedAudioClip,
+    selectedMidiClip,
+    openClipDetail,
     changeWarp: (clip: Clip, audioWarp: AudioWarp) => options.audioWarpController.changeAudioWarp(clip, audioWarp),
     changeGain,
     markerDragging,

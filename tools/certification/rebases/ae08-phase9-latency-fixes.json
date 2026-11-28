@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase9-latency-fixes",
+ "sequence": 45,
+ "createdAt": "2026-11-15T01:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 latency fixes (hand record, no --bless). Cherry-picks with -x from t3/f6015c38, in order: 77d86a92 (renderer marks split the edit-to-publish span, opt-in through the AE-08 evidence channel; adds src/lib/desktop/ae08-marks.ts), f1bab2c8 (the compile reads no IndexedDB for a project that did not change), cecb5b39 (an inserted plug-in stages from its insertion preflight instead of spawning the worker again), b926481c (the mark bridge and handler satisfy the anti-slop lint rules). No expectation field moves.\n\nChecks on the tree after the picks: controller test 685 pass; useTimelinePlayback 256 pass, 2 fail (the 2 known reds); portable-browser-playback-controller, native-schedule-coordinator and native-vst3-coordinator tests 273 pass; Timeline.test 7 pass; apps/desktop 430 pass; typecheck exit 0; tools typecheck no new errors (101 known); lint 17 warnings and 5 errors (unchanged); ae-08-phase-9-matrix and ae-08-live-graph self-tests pass. The 293 non-search, non-retired arms whose targets, witnesses or fuzz sources changed since record 44 (22 changed files) were run with --only --jobs 1: 0 failing. Pinned hashes of the changed product files are left for --full; none is edited here.",
+  "expectationsSha256": "94b28dae74766bf827729d8ddb4cdc4ff7ff5ca8a3d06b1d1ba0cf705afcd508"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

@@ -1,3 +1,4 @@
+import { linearFromDb } from './decibels'
 import { isJsonNumber, isJsonObject, isJsonString, type JsonValue } from './json-value'
 
 export type AudioWarpMode = 'repitch' | 'stretch'
@@ -105,7 +106,7 @@ export const linearGainToDb = (gain: number) => (
 )
 
 export const dbToLinearGain = (db: number) => (
-  Number.isFinite(db) ? normalizeClipGain(10 ** (db / 20)) : 0
+  Number.isFinite(db) ? normalizeClipGain(linearFromDb(db)) : 0
 )
 
 export const normalizeClipGain = (gain: number) => (

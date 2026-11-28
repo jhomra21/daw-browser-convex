@@ -60,7 +60,7 @@ const availablePreflight = async (
     artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
     startupProtocolVersion: 1 as const,
     controlProtocolVersion: 2 as const,
-    transportAbiVersion: 6 as const,
+    transportAbiVersion: 7 as const,
     architecture: "arm64" as const,
   },
   hello: {
@@ -72,7 +72,7 @@ const availablePreflight = async (
       artifact: { id: "daw-vst3-worker" as const, version: "3" as const },
       startupProtocolVersion: 1 as const,
       controlProtocolVersion: 2 as const,
-      transportAbiVersion: 6 as const,
+      transportAbiVersion: 7 as const,
       architecture: "arm64" as const,
       role,
       inputBuses: role === "instrument" ? [] : [{ name: "Input", channels, enabled: true }],
@@ -112,6 +112,8 @@ test("preflights a trusted effect and returns only path-free persisted manifest 
     catalog: catalog(),
     workerPath: "/Resources/daw-vst3-worker",
     sampleRateHz: 48_000,
+    maximumFramesPerBlock: 512,
+    rememberVerdict: () => undefined,
     preflight: async () => availablePreflight(instanceId),
   })
 
@@ -149,6 +151,8 @@ test("rejects stale catalog identity before worker preflight", async () => {
     catalog: catalog(),
     workerPath: "/Resources/daw-vst3-worker",
     sampleRateHz: 48_000,
+    maximumFramesPerBlock: 512,
+    rememberVerdict: () => undefined,
     preflight: async () => {
       calls += 1
       return availablePreflight(crypto.randomUUID())
@@ -166,6 +170,8 @@ test("rejects unsupported buses without mutating any native transaction", async 
     catalog: catalog(),
     workerPath: "/Resources/daw-vst3-worker",
     sampleRateHz: 48_000,
+    maximumFramesPerBlock: 512,
+    rememberVerdict: () => undefined,
     preflight: async () => availablePreflight(instanceId, 1),
   })
 
@@ -179,6 +185,8 @@ test("preflights a zero-input instrument with a stereo output", async () => {
     catalog: catalog("instrument"),
     workerPath: "/Resources/daw-vst3-worker",
     sampleRateHz: 48_000,
+    maximumFramesPerBlock: 512,
+    rememberVerdict: () => undefined,
     preflight: async () => availablePreflight(instanceId, 2, "instrument"),
   })
 

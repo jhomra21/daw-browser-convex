@@ -4,6 +4,8 @@
 #import <mach/mach_time.h>
 
 #include <array>
+#include <chrono>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <vector>
@@ -292,7 +294,7 @@ std::optional<AudioDevice> SelectOutputDevice(const std::optional<std::string_vi
 
 std::optional<AudioDevice> SelectInputDevice(const std::optional<std::string_view> preferred_uid) {
   AudioDeviceID id = preferred_uid ? DeviceForUid(*preferred_uid) : kAudioObjectUnknown;
-  if (id == kAudioObjectUnknown) {
+  if (id == kAudioObjectUnknown && !preferred_uid) {
     const AudioObjectPropertyAddress address{
       .mSelector = kAudioHardwarePropertyDefaultInputDevice,
       .mScope = kAudioObjectPropertyScopeGlobal,
@@ -423,16 +425,29 @@ bool StartCoreAudioInputDevice(
 void StopCoreAudioDevice(void* opaque_session) {
   auto* session = static_cast<DeviceSession*>(opaque_session);
   if (session == nullptr) return;
+  using Clock = std::chrono::steady_clock;
+  auto started = Clock::now();
+  std::fprintf(stderr, "[native-audio-host-stop] phase=begin stage=coreaudio-device-stop\n");
   AudioDeviceStop(session->device, session->io_proc);
+  std::fprintf(stderr, "[native-audio-host-stop] phase=end stage=coreaudio-device-stop elapsed_us=%lld\n",
+    static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count()));
   if (session->watches_device_liveness) {
+    started = Clock::now();
+    std::fprintf(stderr, "[native-audio-host-stop] phase=begin stage=coreaudio-listener-remove\n");
     const AudioObjectPropertyAddress alive_address{
       .mSelector = kAudioDevicePropertyDeviceIsAlive,
       .mScope = kAudioObjectPropertyScopeGlobal,
       .mElement = kAudioObjectPropertyElementMain,
     };
     AudioObjectRemovePropertyListener(session->device, &alive_address, DeviceAliveChanged, session);
+    std::fprintf(stderr, "[native-audio-host-stop] phase=end stage=coreaudio-listener-remove elapsed_us=%lld\n",
+      static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count()));
   }
+  started = Clock::now();
+  std::fprintf(stderr, "[native-audio-host-stop] phase=begin stage=coreaudio-io-proc-destroy\n");
   AudioDeviceDestroyIOProcID(session->device, session->io_proc);
+  std::fprintf(stderr, "[native-audio-host-stop] phase=end stage=coreaudio-io-proc-destroy elapsed_us=%lld\n",
+    static_cast<long long>(std::chrono::duration_cast<std::chrono::microseconds>(Clock::now() - started).count()));
   delete session;
 }
 

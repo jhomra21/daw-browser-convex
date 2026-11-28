@@ -6,14 +6,14 @@ import {
 
 describe('waveform canvas bounds', () => {
   test('never exceeds the backing pixel budget', () => {
-    for (const dpr of [1, 1.5, 2, 3]) {
+    for (const [dpr, backingHeightPx] of [[1, 47], [1.5, 71], [2, 94], [3, 141]]) {
       const size = waveformCanvasSize({
         cssWidthPx: 2_000,
         cssHeightPx: 47,
         devicePixelRatio: dpr,
       })
       expect(size.cssWidthPx).toBe(2_000)
-      expect(size.backingHeightPx).toBe(Math.ceil(47 * dpr))
+      expect(size.backingHeightPx).toBe(backingHeightPx)
       expect(size.backingWidthPx * size.backingHeightPx).toBeLessThanOrEqual(MAX_WAVEFORM_BACKING_PIXELS)
       expect(size.contextScaleX * size.cssWidthPx).toBeCloseTo(size.backingWidthPx)
     }
@@ -54,7 +54,8 @@ describe('waveform canvas bounds', () => {
       devicePixelRatio: 3,
     })
     expect(size.backingWidthPx * size.backingHeightPx).toBeLessThanOrEqual(MAX_WAVEFORM_BACKING_PIXELS)
-    expect(size.backingWidthPx).toBe(Math.floor(MAX_WAVEFORM_BACKING_PIXELS / size.backingHeightPx))
+    expect(size.backingHeightPx).toBe(660)
+    expect(size.backingWidthPx).toBe(3_030)
     expect(size.contextScaleY).toBe(3)
   })
 

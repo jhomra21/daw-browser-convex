@@ -1,0 +1,12 @@
+import { readFileSync } from "node:fs"
+import { gateViolations } from "/Users/juan/Documents/daw-browser-convex/tools/acceptance/ae-08-processor-state-fuzz-classes"
+
+// Applies the hook gate's rejection predicate, verbatim from ae-08-processor-state-fuzz-hook-runner.ts:300-303,
+// to one seed summary. Read-only: it prints JSON and writes nothing.
+const [summaryPath, gate] = process.argv.slice(2)
+const summary = JSON.parse(readFileSync(summaryPath ?? "", "utf8"))
+const rejectionViolations = [summary].flatMap((summary) => summary.rejections
+  .filter((entry) => entry.classification !== "cancelled"
+    && gateViolations([{ invariant: "rejection", detail: entry.classification, domain: entry.domain, class: entry.class }], gate).length > 0)
+  .map((entry) => ({ seed: summary.seed, ...entry })))
+console.log(JSON.stringify({ summary: summaryPath, gate, rejectionViolations }))

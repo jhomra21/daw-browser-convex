@@ -1,4 +1,4 @@
-import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, linearFromDb, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
 
@@ -56,10 +56,6 @@ function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
   filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
 }
 
-export function dbToGain(db: number): number {
-  return Math.pow(10, db / 20)
-}
-
 export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {
   const values = new Float32Array(new ArrayBuffer(4096 * Float32Array.BYTES_PER_ELEMENT))
   for (let index = 0; index < values.length; index++) {
@@ -89,7 +85,7 @@ export function applySaturatorNodeParams(nodes: {
   outputGain: GainNode
 }, params: SaturatorParamsLite) {
   const normalized = normalizeSaturatorParams(params)
-  nodes.driveGain.gain.value = dbToGain(normalized.driveDb)
+  nodes.driveGain.gain.value = linearFromDb(normalized.driveDb)
   nodes.colorFilter.type = 'peaking'
   nodes.colorFilter.frequency.value = normalized.colorFrequencyHz
   nodes.colorFilter.Q.value = 0.8
@@ -98,7 +94,7 @@ export function applySaturatorNodeParams(nodes: {
   nodes.waveNode.oversample = '4x'
   nodes.dryGain.gain.value = 1 - normalized.dryWet
   nodes.wetGain.gain.value = normalized.dryWet
-  nodes.outputGain.gain.value = dbToGain(normalized.outputDb)
+  nodes.outputGain.gain.value = linearFromDb(normalized.outputDb)
 }
 
 export function resolveDelayTimeSec(params: DelayParamsLite, bpm: number): number {
@@ -127,8 +123,9 @@ export function applyDelayNodeParams(nodes: {
   if (nodes.delayRight) nodes.delayRight.delayTime.value = timeSec
   nodes.feedbackLeft.gain.value = normalized.feedback
   if (nodes.feedbackRight) nodes.feedbackRight.gain.value = normalized.feedback
-  nodes.dryGain.gain.value = 1 - normalized.dryWet
-  nodes.wetGain.gain.value = normalized.dryWet
+  // A disabled delay keeps running on its input and only its output is dry.
+  nodes.dryGain.gain.value = normalized.enabled ? 1 - normalized.dryWet : 1
+  nodes.wetGain.gain.value = normalized.enabled ? normalized.dryWet : 0
   for (const filter of [nodes.lowCutLeft, nodes.lowCutRight]) {
     if (!filter) continue
     filter.type = 'highpass'

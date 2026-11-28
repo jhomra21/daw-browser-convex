@@ -2,7 +2,7 @@ export const BOTTOM_PANEL_EDGE_PADDING_PX = 4;
 export const BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX = 8;
 export const BOTTOM_PANEL_FOOTER_HEIGHT_PX = 28;
 
-export type BottomPanelMode = "effects" | "sample-detail";
+export type BottomPanelMode = "effects" | "clip-detail";
 
 type BottomPanelFootprintInput = {
   open: boolean;

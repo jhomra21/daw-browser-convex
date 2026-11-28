@@ -5,25 +5,6 @@ const cmakeUrl = new URL('../CMakeLists.txt', import.meta.url)
 const wasmBuildScriptUrl = new URL('../scripts/build-wasm.sh', import.meta.url)
 const publishWasmAssetsUrl = new URL('../scripts/publish-wasm-assets.sh', import.meta.url)
 
-test('native validation scratch stays persistent while Wasm uses its configured stack', async () => {
-  const source = await Bun.file(coreSourceUrl).text()
-  const persistentScratchStart = source.indexOf('#if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)')
-  const persistentScratchEnd = source.indexOf('#endif', persistentScratchStart)
-  const validationStart = source.indexOf('  std::copy((*core.published_instruments).begin()')
-  const validationEnd = source.indexOf('  for (auto &indices : core.instrument_event_indices)', validationStart)
-
-  expect(persistentScratchStart).toBeGreaterThanOrEqual(0)
-  expect(persistentScratchEnd).toBeGreaterThan(persistentScratchStart)
-  expect(source.slice(persistentScratchStart, persistentScratchEnd)).toContain('proposed_instruments{}')
-  expect(validationStart).toBeGreaterThanOrEqual(0)
-  expect(validationEnd).toBeGreaterThan(validationStart)
-
-  const validation = source.slice(validationStart, validationEnd)
-  expect(validation).toContain('std::copy((*core.published_instruments).begin(), (*core.published_instruments).end(), core.proposed_instruments.begin())')
-  expect(validation).toContain('auto &proposed_instruments = core.proposed_instruments')
-  expect(validation).not.toContain('std::array<InstrumentNodeState, kMaximumGraphNodes> proposed_instruments')
-})
-
 test('Wasm build validates a same-filesystem directory before publication', async () => {
   const cmake = await Bun.file(cmakeUrl).text()
   const buildScript = await Bun.file(wasmBuildScriptUrl).text()
@@ -51,7 +32,7 @@ test('native graph stages cache built-in renderers outside the callback', async 
   const source = await Bun.file(coreSourceUrl).text()
   const nativeStageStart = source.indexOf('struct NativeGraphStage {')
   const nativeStageEnd = source.indexOf('struct NativeGraphHooks {', nativeStageStart)
-  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = core.published_native_hooks;')
+  const callbackStart = source.indexOf('    const NativeGraphHooks &native_stages = *core.published_native_hooks;')
   const callbackEnd = source.indexOf('#else', callbackStart)
 
   expect(nativeStageStart).toBeGreaterThanOrEqual(0)

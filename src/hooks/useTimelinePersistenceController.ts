@@ -3,16 +3,19 @@ import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine";
 import type { ClipBufferWriter, EnsureClipBuffer } from "~/lib/clip-buffer-cache";
 import { isLocalId } from "@daw-browser/shared";
 import type { LocalProjectMode } from "~/lib/local-project-db";
-import { flushSharedOutbox } from "~/lib/shared-outbox";
+import { createSharedOutboxRetry, flushSharedOutbox } from "~/lib/shared-outbox";
+import { subscribeToLocalProjectChanges } from "~/lib/local-project-changes";
 import { createTimelineClipWriteAdapter } from "~/lib/timeline-clip-write-adapter";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
 import { useCloudSyncTick } from "./useCloudSyncTick";
 import type { useLocalProjectActions } from "./useLocalProjectActions";
 import { useMissingMediaRecovery } from "./useLocalTimelineMediaRecovery";
+import type { TimelineSnapshot } from "~/lib/timeline-repository/types";
 
 type LocalProjectActions = ReturnType<typeof useLocalProjectActions>;
 
 type ProjectionActions = {
+  reconcileLocalSnapshot?: (snapshot: TimelineSnapshot) => void;
   insertLocalClip: (trackId: Track["id"], clip: Clip) => void;
   removeLocalClips: (clipIds: Iterable<string>) => void;
 };
@@ -41,6 +44,7 @@ type Input = {
   localProject: LocalProjectActions;
   projection: ProjectionActions;
   selection: SelectionActions;
+  notify: (title: string, message: string) => void;
 };
 
 export const useTimelinePersistenceController = (input: Input) => {
@@ -65,6 +69,8 @@ export const useTimelinePersistenceController = (input: Input) => {
     },
     projection: input.projection,
     selection: input.selection,
+    notify: input.notify,
+    onLocalSaveFailed: input.localProject.setLocalSaveFailure,
   });
   useCloudSyncTick({
     projectId: input.projectId,
@@ -78,12 +84,40 @@ export const useTimelinePersistenceController = (input: Input) => {
     const projectId = input.projectId();
     const userId = input.userId();
     if (!projectId || isLocalId("project", projectId) || !userId) return;
+    let active = true;
+    let flushPromise: Promise<void> | undefined;
+    let flushRequested = false;
+    const retry = createSharedOutboxRetry(projectId, userId, () => { void flush(); });
     const flush = () => {
-      void flushSharedOutbox(projectId, userId).catch(() => undefined);
+      if (flushPromise) {
+        flushRequested = true;
+        return flushPromise;
+      }
+      const operation = flushSharedOutbox(projectId, userId)
+        .then(() => retry.settled(true), () => {
+          flushRequested = false;
+          return retry.settled(false);
+        })
+        .finally(() => {
+          flushPromise = undefined;
+          if (flushRequested && active && !retry.backingOff()) {
+            flushRequested = false;
+            void flush();
+          }
+        });
+      flushPromise = operation;
+      return operation;
     };
-    flush();
-    window.addEventListener("online", flush);
-    onCleanup(() => window.removeEventListener("online", flush));
+    const onOnline = () => { void flush(); };
+    void flush();
+    window.addEventListener("online", onOnline);
+    const unsubscribe = subscribeToLocalProjectChanges(projectId, retry.refresh);
+    onCleanup(() => {
+      active = false;
+      retry.dispose();
+      unsubscribe();
+      window.removeEventListener("online", onOnline);
+    });
   });
 
   return {

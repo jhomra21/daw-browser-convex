@@ -12,6 +12,7 @@ import { buildTrackBooleanHistoryEntry, buildTrackRoutingHistoryEntry, buildTrac
 import type { HistoryEntry } from '~/lib/undo/types'
 import { normalizeTrackRouting } from '@daw-browser/timeline-core/track-routing'
 import { isTrackRoutingEqual } from '~/lib/track-routing-state'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import type { Track, TrackRouting, TrackSend } from '@daw-browser/timeline-core/types'
 
 type LocalTrackRouting = TrackRouting & { sends: TrackSend[] }
@@ -38,7 +39,9 @@ type UseTimelineMixerControllerOptions = {
   optimisticTrackIds: Accessor<Set<Track['id']>>
   canWriteTrack: (trackId: Track['id']) => boolean
   pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
-  onLocalSaveFailed?: (message: string) => void
+  onLocalSaveFailed?: (projectId: string, message: string) => void
+  recordingTargetLock?: RecordingTargetLock
+  notify?: (title: string, message: string) => void
   serverTrackState: Accessor<{
     serverVolumes: Map<Track['id'], number>
     serverMuted: Map<Track['id'], boolean>
@@ -164,10 +167,7 @@ export function useTimelineMixerController(
     }
   }
 
-  const reportTrackWriteFailure = (cause: unknown) => {
-    options.onLocalSaveFailed?.(cause instanceof Error ? cause.message : 'Local mix could not be saved.')
-  }
-  const writeQueue = createTimelineMixerWriteQueue<Track['id']>(reportTrackWriteFailure)
+  const writeQueue = createTimelineMixerWriteQueue<Track['id']>()
 
   const flushAllTimers = async () => {
     await writeQueue.flushTimers(volumeTimers)
@@ -175,6 +175,25 @@ export function useTimelineMixerController(
     await writeQueue.flushTimers(mixTimers)
   }
   const localWrites = createTimelineMixerLocalWrites(flushAllTimers)
+
+  // Writes can settle after the project switches, so the issuing project is captured here.
+  const scheduleProjectTrackWrite = <TResult,>(
+    timers: Map<Track['id'], ScheduledTrackWrite>,
+    trackId: Track['id'],
+    write: (trackWrites: ReturnType<typeof createTimelineTrackWriteAdapter>) => Promise<TResult>,
+    afterWrite?: () => void,
+  ) => {
+    const projectId = options.projectId()
+    const trackWrites = createTimelineTrackWriteAdapter({
+      projectId,
+      userId: options.userId(),
+      writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
+    })
+    writeQueue.scheduleTrackWrite(timers, trackId, () => write(trackWrites).then(() => undefined, (cause) => {
+      options.onLocalSaveFailed?.(projectId, cause instanceof Error ? cause.message : 'Local mix could not be saved.')
+      throw cause
+    }), afterWrite)
+  }
 
   const pruneLocalHistoryMap = <T,>(map: Map<Track['id'], T>, trackIds: Set<Track['id']>) => {
     for (const [trackId] of map) {
@@ -292,14 +311,8 @@ export function useTimelineMixerController(
   }
 
   const persistTrackRouting = (trackId: Track['id'], routing: LocalTrackRouting, afterWrite?: () => void) => {
-    const projectId = options.projectId()
-    const trackWrites = createTimelineTrackWriteAdapter({
-      projectId,
-      userId: options.userId(),
-      writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
-    })
-    writeQueue.scheduleTrackWrite(routingTimers, trackId, () =>
-      trackWrites.setRouting(trackId, routing).then(() => undefined).catch((error) => {
+    scheduleProjectTrackWrite(routingTimers, trackId, (trackWrites) =>
+      trackWrites.setRouting(trackId, routing).catch((error) => {
         setRawPendingSharedTrackRouting((current) => {
           const pending = current.get(trackId)
           if (!pending || !isTrackRoutingEqual(pending, routing)) return current
@@ -321,6 +334,13 @@ export function useTimelineMixerController(
     const previous = getTrackRoutingSnapshot(trackId)
     const normalized = normalizeTrackRouting(track, next, options.tracks())
     if (isTrackRoutingEqual(previous, normalized)) return
+    const refusal = options.recordingTargetLock?.refuseChange([{
+      trackId, outputTargetId: normalized.outputTargetId, sends: normalized.sends,
+    }])
+    if (refusal) {
+      options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+      return
+    }
 
     applyTrackRouting(trackId, normalized, false)
     const localProject = isLocalId('project', projectId)
@@ -384,14 +404,8 @@ export function useTimelineMixerController(
   }
 
   const persistTrackVolume = (trackId: Track['id'], volume: number, afterWrite?: () => void) => {
-    const projectId = options.projectId()
-    const trackWrites = createTimelineTrackWriteAdapter({
-      projectId,
-      userId: options.userId(),
-      writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
-    })
-    writeQueue.scheduleTrackWrite(volumeTimers, trackId, () =>
-      trackWrites.setVolume(trackId, volume).then(() => undefined).catch((error) => {
+    scheduleProjectTrackWrite(volumeTimers, trackId, (trackWrites) =>
+      trackWrites.setVolume(trackId, volume).catch((error) => {
         setRawPendingSharedTrackVolumes((current) => {
           if (current.get(trackId) !== volume) return current
           const next = new Map(current)
@@ -468,23 +482,16 @@ export function useTimelineMixerController(
       soloed: patch.soloed !== undefined ? true : undefined,
     })
     updatePendingTrackMix(trackId, (current) => ({
-      ...current,
-      muted: patch.muted !== undefined ? nextMuted : undefined,
-      soloed: patch.soloed !== undefined ? nextSoloed : undefined,
+      muted: patch.muted ?? current?.muted,
+      soloed: patch.soloed ?? current?.soloed,
     }))
   }
 
   const persistTrackMixState = (trackId: Track['id'], afterWrite?: () => void) => {
-    const projectId = options.projectId()
     const pendingMix = rawPendingSharedTrackMix().get(trackId)
     const muted = pendingMix?.muted
     const soloed = pendingMix?.soloed
-    const trackWrites = createTimelineTrackWriteAdapter({
-      projectId,
-      userId: options.userId(),
-      writeLocalTrack: (input) => localWrites.queueLocalTrackUpdate(projectId, input),
-    })
-    writeQueue.scheduleTrackWrite(mixTimers, trackId, () =>
+    scheduleProjectTrackWrite(mixTimers, trackId, (trackWrites) =>
       trackWrites.setMix(trackId, { muted, soloed })
         .then((result) => {
           if (result?.status === 'applied' || result?.status === 'noop') return

@@ -1,0 +1,36 @@
+{
+ "name": "pr62-final-review-wasm-repin",
+ "sequence": 77,
+ "createdAt": "2026-11-18T01:26:43.630Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "2621ce39130906e1dca3be686f3fe1ec98f0d3c3c85c19875e2ab924a066770e",
+   "new": "fda21f4c758b030154422e74711a23a24e4dd81f909ec25e6b578f5bfcc306ad"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "e4bc872ae20cccf570e12717baa64c9f3d38a42cdbe9d32990d00690a3783373",
+   "new": "b4cd51eedabe5ae048a2bdda489b10edd03b4a74d1161a23861f904eb9f100ca"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "The audio-core CMakeLists.txt moved the late spectral transfer contract from the source-including test build to the public test binary. CMakeLists.txt is a portable wasm source-hash input, so the manifest's source hash is re-pinned; the rebuilt wasm bytes are identical (public/audio-core/daw-audio-core.wasm unchanged). Measured with `bun run build:portable-wasm` and `bun run validate:portable-wasm`.",
+  "expectationsSha256": "5a7bdaf6c1c377e693bf42f096a93822fd0738b736d2a4af5af246907a1871ed"
+ }
+}

@@ -1,0 +1,202 @@
+{
+ "name": "ae08-479-rebuild-window-witness",
+ "sequence": 27,
+ "createdAt": "2026-11-13T03:29:50.358Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:matrix",
+    "command",
+    "argv",
+    "#11"
+   ],
+   "old": "B6F5PROBE",
+   "new": "B6F5PROBE|B6f5 479"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:matrix",
+    "command",
+    "argv",
+    "#11"
+   ],
+   "old": "B6F5PROBE",
+   "new": "B6F5PROBE|B6f5 479"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:b6f5",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 27,
+    "skip": 0,
+    "fail": 0
+   },
+   "new": {
+    "pass": 28,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:b6f5",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 26,
+    "skip": 0,
+    "fail": 1
+   },
+   "new": {
+    "pass": 27,
+    "skip": 0,
+    "fail": 1
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits"
+   ],
+   "new": [
+    "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:matrix",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 236,
+    "skip": 0,
+    "fail": 0
+   },
+   "new": {
+    "pass": 237,
+    "skip": 0,
+    "fail": 0
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:matrix",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 234,
+    "skip": 0,
+    "fail": 2
+   },
+   "new": {
+    "pass": 236,
+    "skip": 0,
+    "fail": 1
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:matrix",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6F5PROBE native-off rebuild-after-commit proc-nonlive",
+    "B6F5PROBE native-on rebuild-after-commit proc-nonlive"
+   ],
+   "new": [
+    "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:playback",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 227,
+    "skip": 1,
+    "fail": 2
+   },
+   "new": {
+    "pass": 234,
+    "skip": 1,
+    "fail": 2
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:playback",
+    "expect",
+    "counts"
+   ],
+   "old": {
+    "pass": 226,
+    "skip": 1,
+    "fail": 3
+   },
+   "new": {
+    "pass": 233,
+    "skip": 1,
+    "fail": 3
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 9h item 0: ledger 479 (rebuild guard 'rebuildPromise && rebuildInProgress', useTimelinePlayback.ts) re-pointed to a deterministic witness. The hook's follow reads the desired tracks synchronously once the rebuild has cleared rebuildInProgress and before its promise is released; the new HT test 'B6f5 479 a rebuild requested after the running rebuild passed its last request check runs next with the newest tracks' queues a rebuild request (new tracks) from that read (a microtask, no timers) and asserts the request lands with the flag clear (the rebuild's promise not yet released), a second rebuild runs (2 sessions after the mark) and the final session carries the newest tracks. Mutant (guard without rebuildInProgress) joins the finished promise and loses the request: it fails that test. Mutants b6f5, matrix and playback are killed by it; their old killer, the proc-nonlive cells, no longer lands in that window. The matrix arms' -t filter gains '|B6f5 479' so the probe run includes the witness (the probe fixture itself is unchanged). Counts re-measured: controls b6f5 28, matrix 237, playback 234/1/2."
+ }
+}

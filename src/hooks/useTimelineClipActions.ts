@@ -1,5 +1,5 @@
 import type { FunctionReturnType } from 'convex/server'
-import { batch, type Accessor, type Setter } from 'solid-js'
+import { batch, createSignal, type Accessor, type Setter } from 'solid-js'
 
 import { buildClipCreateSnapshot, buildCreatedClipSelection, createProjectedClips, createProjectedLocalClips, pushClipCreateHistory, type BatchClipCreateItem } from '~/lib/clip-create'
 import type { ClipBuffers } from '~/lib/clip-buffer-cache'
@@ -25,6 +25,7 @@ import {
 } from '~/lib/timeline-section-edit'
 import { calcNonOverlapStart, calcNonOverlapStartGridAligned } from '~/lib/timeline-utils'
 import { buildAutomationEnvelopeHistoryEntry, buildClipDeleteHistoryEntry, buildControlRangeDeleteHistoryEntry, buildTrackDeleteHistoryEntry } from '~/lib/undo/builders'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import { getTrackHistoryRef } from '~/lib/undo/refs'
 import type { HistoryEntry } from '~/lib/undo/types'
 import type { Clip, ExternalSidechainRoute, SelectedClip, Track } from '@daw-browser/timeline-core/types'
@@ -66,7 +67,7 @@ type TimelineClipActionsOptions = {
   sidechainRoutes: Accessor<ExternalSidechainRoute[]>
   applyAutomationEnvelope: (envelope: AutomationEnvelope | undefined, targetKey: string) => void
   grantClipWrites?: (clipIds: Iterable<string>, scope?: OptimisticGrantScope | null) => void
-  settleActiveRecording?: (trackIds: ReadonlySet<Track['id']>) => Promise<void>
+  recordingTargetLock?: RecordingTargetLock
   notify: (title: string, message: string) => void
 }
 
@@ -80,6 +81,10 @@ type TimelineClipActionsHandlers = {
   pasteTimelineSelection: () => boolean
   performDeleteTrack: (trackId: Track['id']) => Promise<void>
   requestDeleteTrack: (trackId: Track['id']) => void
+  hasWritableSelectedClips: () => boolean
+  hasWritableClips: () => boolean
+  selectAllTimelineClips: () => void
+  hasTimelineClipboard: Accessor<boolean>
 }
 
 const buildSectionHistoryEntry = (projectId: string, entries: HistoryEntry[]): HistoryEntry | null => (
@@ -111,7 +116,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     sidechainRoutes,
     applyAutomationEnvelope,
     grantClipWrites,
-    settleActiveRecording,
+    recordingTargetLock,
     notify,
   } = options
   const sectionClipboard = createTimelineSectionClipboard()
@@ -316,11 +321,54 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     automation: rangeAutomationFragments(range.trackIds, range),
   })
 
+  const [hasTimelineClipboard, setHasTimelineClipboard] = createSignal(false)
+
+  const writeTimelineClipboard = (clipboard: TimelineSectionClipboard) => {
+    sectionClipboard.write(clipboard)
+    setHasTimelineClipboard(true)
+    return true
+  }
+
+  // Clips copy as a bounding range of their own. Only the selected clips enter the fragments, so neighbours inside the box stay out.
+  const buildSelectedClipsClipboard = (clipIds: Set<string>): TimelineSectionClipboard => {
+    const selectedTracks = tracks().flatMap((track) => {
+      const clips = track.clips.filter((clip) => clipIds.has(clip.id))
+      return clips.length > 0 ? [{ ...track, clips }] : []
+    })
+    const startSec = Math.min(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec)))
+    const endSec = Math.max(...selectedTracks.flatMap((track) => track.clips.map((clip) => clip.startSec + clip.duration)))
+    const trackIds = selectedTracks.map((track) => track.id)
+    return {
+      durationSec: endSec - startSec,
+      trackIds,
+      clips: buildSectionClipFragments({ tracks: selectedTracks, section: { range: { startSec, endSec }, trackIds }, bpm: bpm() }),
+      automation: [],
+    }
+  }
+
   const copyTimelineSelection = () => {
     const range = selection.rangeSelection()
-    if (!range) return false
-    sectionClipboard.write(buildTimelineSectionClipboard(range))
-    return true
+    if (range) return writeTimelineClipboard(buildTimelineSectionClipboard(range))
+    const clipIds = getWritableSelectedClipIds(selectedClipIds())
+    if (clipIds.size === 0) return false
+    return writeTimelineClipboard(buildSelectedClipsClipboard(clipIds))
+  }
+
+  const writableTimelineClipEntries = () => {
+    const entries = tracks().flatMap((track) => track.clips.map((clip) => ({ trackId: track.id, clipId: clip.id })))
+    const writableIds = getWritableSelectedClipIds(new Set(entries.map((entry) => entry.clipId)))
+    return entries.filter((entry) => writableIds.has(entry.clipId))
+  }
+
+  const selectAllTimelineClips = () => {
+    const entries = writableTimelineClipEntries()
+    const first = entries[0]
+    if (!first) return
+    selection.selectClipGroup({
+      trackId: first.trackId,
+      clipIds: entries.map((entry) => entry.clipId),
+      primaryClipId: first.clipId,
+    })
   }
 
   const pasteTimelineSectionAt = async (clipboard: TimelineSectionClipboard | null, destinationStartSec: number) => {
@@ -504,9 +552,16 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
   }
 
+  // Synchronous, so a refused delete neither opens the confirmation nor stops the take.
+  const refuseLockedTrackDelete = (snapshot: readonly RuntimeTrack[], trackId: Track['id']) => {
+    const refusal = recordingTargetLock?.refuseDelete(collectTrackDeleteIds(snapshot, trackId))
+    if (refusal) notify(RECORDING_TARGET_LOCKED_BADGE, refusal)
+    return refusal !== undefined
+  }
+
   const performDeleteTrack = async (trackId: Track['id']) => {
     const rid = projectId()
-    if (!rid) return
+    if (!rid || refuseLockedTrackDelete(tracks(), trackId)) return
     await flushMidiProjectWrites(rid)
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
@@ -531,7 +586,6 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     }
 
     if (rid && isLocalId('project', rid)) {
-      await settleActiveRecording?.(deletedTrackIds)
       const historyEntries: ReturnType<typeof buildTrackDeleteHistoryEntry>[] = []
       try {
         for (const deletedTrack of snapshot.filter((entry) => deletedTrackIds.has(entry.id))) {
@@ -548,6 +602,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
         showTrackDeleteFailure(null)
         return
       }
+      if (refuseLockedTrackDelete(tracks(), trackId)) return
       for (const deletedTrackId of deletedTrackIds) {
         await createLocalTimelineRepository(rid).deleteTrack(deletedTrackId)
       }
@@ -577,6 +632,8 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
       return
     }
 
+    // A take can start while the delete is being prepared; the durable write must see the lock as it is now.
+    if (refuseLockedTrackDelete(tracks(), trackId)) return
     const result = await convexClient.mutation(
       convexApi.tracks.remove,
       buildTrackDeleteMutationInput({ trackId }),
@@ -591,7 +648,7 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
   const requestDeleteTrack = (trackId: Track['id']) => {
     const snapshot = tracks()
     const track = snapshot.find(entry => entry.id === trackId)
-    if (!track) return
+    if (!track || refuseLockedTrackDelete(snapshot, trackId)) return
 
     const deletedTrackIds = collectTrackDeleteIds(snapshot, trackId)
     const hasDeletedClips = snapshot.some((entry) => deletedTrackIds.has(entry.id) && entry.clips.length > 0)
@@ -614,5 +671,9 @@ export function useTimelineClipActions(options: TimelineClipActionsOptions): Tim
     pasteTimelineSelection,
     performDeleteTrack,
     requestDeleteTrack,
+    hasWritableSelectedClips: () => getWritableSelectedClipIds(selectedClipIds()).size > 0,
+    hasWritableClips: () => writableTimelineClipEntries().length > 0,
+    selectAllTimelineClips,
+    hasTimelineClipboard,
   }
 }

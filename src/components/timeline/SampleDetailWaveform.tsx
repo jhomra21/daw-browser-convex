@@ -1,4 +1,4 @@
-import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, type Component } from "solid-js";
+import { For, createEffect, createMemo, createSignal, on, onCleanup, onMount, untrack, type Component } from "solid-js";
 import { drawWaveformSignal } from "@daw-browser/waveforms/draw-waveform-signal";
 import { waveformCanvasSize } from "~/lib/waveform-canvas";
 import {
@@ -141,8 +141,9 @@ const SampleDetailWaveform: Component<SampleDetailWaveformProps> = (props) => {
     onCleanup(() => resizeObserver.disconnect());
   });
 
+  const onMarkerDragStateChange = untrack(() => props.onMarkerDragStateChange);
   onCleanup(() => {
-    if (dragMarker() || isDraggingMarker()) props.onMarkerDragStateChange?.(false);
+    if (dragMarker() || isDraggingMarker()) onMarkerDragStateChange?.(false);
   });
 
   const clipTimeFromPointer = (event: Pick<PointerEvent, "clientX">) => {

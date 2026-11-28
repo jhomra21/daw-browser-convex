@@ -1,0 +1,357 @@
+{
+ "name": "rc-p5c-final",
+ "sequence": 5,
+ "createdAt": "2026-11-11T16:08:50.060Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "66ce379d66a482172c62b26a3ef170b6e5f834704d856c278a575d55d838e270",
+   "to": "2f86cd7eef6f02e2eb29bf7acc8a2ba72cc221a6c1bdf68b44260eddc07c6faa"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "540bc44e010f144bb2a44719bfef331f1063201f7c6d1e894399258b10ef712c",
+   "to": "b54024913c4f41bffa6f1f22dc29df27fff4ec2ff7c5012336b35b8eea149dcf"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "ecc2126c0a123bac60e0c989a33666bc50fb58056545149064b958c3df8c2606",
+   "to": "f4d7cdf9e0850356f1cf96e8c6281308e9b32c02d966c707ab02153f0f3d3ea9"
+  },
+  {
+   "file": "tools/acceptance/analyze-ae-08-continuity.ts",
+   "from": "a5c4f5ff31104baa5ee4af9c7d6e88a0176d9ab8f6760f3e38d08aff3d4d7761",
+   "to": "c31a69951a01f22414a6b852ba3c92f6b0257fc4956dba4a022526c316af36eb"
+  },
+  {
+   "file": "tools/performance/30-track/native-spool-wav.test.ts",
+   "from": "0141dc0f07afbb0b01d375e574f034811df0656fc37a86582e76f1d3c156d2d7",
+   "to": "57807adefa6ee3c644ec0a66706fb0f52a15f741164f36a2bcdfa494df0cbfca"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "gates",
+    "name=g-spool-wav",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 7,
+   "new": 9
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 715,
+   "new": 720
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 713,
+   "new": 718
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 635,
+   "new": 640
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "030a7a9fb7982d6788d7faba3dce415cce055fb9bbc0c8119d9e1e4facec6ed4",
+   "new": "37a6c612f6da1a46b1d0e78c26ea5d648268d64ee777838a2304e8ba86f576bd"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 635,
+   "new": 640
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 650,
+   "new": 655
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 714,
+   "new": 719
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 634,
+   "new": 639
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "f65b8447dbd5592b89ed33e5582fea2468c412024065d51caac270ed589b7b67",
+   "new": "32d2a95947fd2f1d1dca8e72a9e5ddca6681821b905a62f427d00d0c8820723c"
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/media-pages.hash.test.ts",
+    "pass"
+   ],
+   "old": 1,
+   "new": 2
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/media-pages.hash.test.ts",
+    "pass"
+   ],
+   "old": 1,
+   "new": 2
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [
+   "hook:274:latency|cancelled|ending-transport-domain"
+  ],
+  "rejectionRuling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md",
+  "scope": "--full --base-commit HEAD --allow-rejection hook:274:latency|cancelled|ending-transport-domain",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--base-commit",
+    "HEAD",
+    "--allow-rejection",
+    "hook:274:latency|cancelled|ending-transport-domain"
+   ],
+   "head": "78e5734a653f034f3997dcf5b2ad9d3966a92ce7",
+   "gitStatusSha256": "63660618b75176372be6e299cafdc6eda63c6158b91d746efe0b62f30059b1c4",
+   "expectationsSha256": "605b51f016194c769f92503e2a6cb7306339b62e73c750cc90e8541ab8deac9c",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "605b51f016194c769f92503e2a6cb7306339b62e73c750cc90e8541ab8deac9c",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-rc-p5c-final-2026-11-11T15-53-30.943Z/live",
+   "resultSha256": "55362339b830432fb0f1f5db8c7161a00e7a2db83f7d5aaed4f5d1ee214120ea",
+   "seconds": 919.052080625,
+   "observations": 4902
+  },
+  "unreachedByOverlay": []
+ }
+}

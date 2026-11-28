@@ -116,6 +116,19 @@ export const commitClipFadesInHistoryModel = (
   }
 }
 
+export const commitClipMidiInHistoryModel = (
+  tracks: Track[],
+  clipId: string,
+  midi: Clip['midi'],
+) => {
+  for (const track of tracks) {
+    const clip = track.clips.find((entry) => entry.id === clipId)
+    if (!clip) continue
+    clip.midi = midi
+    return
+  }
+}
+
 export const applyTrackVolumeInHistoryModel = (tracks: Track[], trackId: string, volume: number) => {
   const track = tracks.find((entry) => entry.id === trackId)
   if (track) {

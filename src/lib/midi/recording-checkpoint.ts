@@ -14,7 +14,7 @@ type MidiRecordingCheckpointState = {
 type MidiRecordingCheckpointOptions<T> = {
   snapshot: () => MidiRecordingCheckpointSnapshot<T>
   state: () => MidiRecordingCheckpointState
-  persist: (checkpoint: T, final: boolean) => Promise<void>
+  persist: (checkpoint: T, final: boolean, signal: AbortSignal) => Promise<void>
   isActive: () => boolean
   delayMs?: number
   eventThreshold?: number
@@ -27,6 +27,7 @@ export type MidiRecordingCheckpointController<T> = {
   request: (final?: boolean) => Promise<void>
   schedule: () => void
   clear: () => void
+  cancel: () => Promise<void>
   last: () => T | null
   pendingEventCount: () => number
   shouldRequest: () => boolean
@@ -45,6 +46,8 @@ export const createMidiRecordingCheckpointController = <T>(
   let lastVersion = 0
   let lastCheckpoint: T | null = null
   let retryAttempts = 0
+  let cancelled = false
+  const abortController = new AbortController()
 
   const clear = () => {
     if (timer === null) return
@@ -54,6 +57,8 @@ export const createMidiRecordingCheckpointController = <T>(
 
   const schedule = () => {
     if (
+      cancelled
+      ||
       timer !== null
       || options.state().version <= lastVersion
       || retryAttempts >= (options.maxRetryAttempts ?? 3)
@@ -66,6 +71,7 @@ export const createMidiRecordingCheckpointController = <T>(
 
   const request = (final = false): Promise<void> => {
     clear()
+    if (cancelled) return Promise.resolve()
     if (!final && retryAttempts >= (options.maxRetryAttempts ?? 3)) return Promise.resolve()
     if (write) {
       pending = true
@@ -81,11 +87,12 @@ export const createMidiRecordingCheckpointController = <T>(
     const run = async () => {
       do {
         pending = false
+        if (cancelled) return
         const snapshot = options.snapshot()
         const isFinal = final || finalPending
         finalPending = false
         try {
-          await options.persist(snapshot.checkpoint, isFinal)
+          await options.persist(snapshot.checkpoint, isFinal, abortController.signal)
         } catch (error) {
           retryAttempts += 1
           throw error
@@ -103,10 +110,22 @@ export const createMidiRecordingCheckpointController = <T>(
     return write
   }
 
+  const cancel = async () => {
+    cancelled = true
+    pending = false
+    finalPending = false
+    clear()
+    // A checkpoint may be waiting on a cloud request that cannot be drained.
+    // Aborting it lets settlement continue; its inactive-take guard prevents a
+    // late completion from being projected, and clip deletion follows this call.
+    abortController.abort()
+  }
+
   return {
     request,
     schedule,
     clear,
+    cancel,
     last: () => lastCheckpoint,
     pendingEventCount: () => options.state().eventCount - lastEventCount,
     shouldRequest: () => (

@@ -1,9 +1,9 @@
-import { createEffect, onCleanup, type Accessor } from 'solid-js'
+import { createEffect, createSignal, onCleanup, type Accessor } from 'solid-js'
 
-import type { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import type { convexApi, convexClient } from '~/lib/convex'
 import { loadLocalHistory, saveLocalHistory } from '~/lib/local-history'
 import { isLocalId } from '@daw-browser/shared'
+import type { PlaybackAcceptanceObserver } from '~/lib/desktop/acceptance-observer'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import {
   buildOptimisticGrantScopeKey,
@@ -14,6 +14,7 @@ import { loadHistory, saveHistory, type LocalMixPatch } from '~/lib/timeline-sto
 import { createUndoManager, type UndoManager } from '~/lib/undo/manager'
 import type { HistoryEntry, PersistedHistory } from '~/lib/undo/types'
 import { execRedo, execUndo } from '~/lib/undo/exec'
+import { RECORDING_TARGET_LOCKED_BADGE, type RecordingTargetLock } from '~/lib/track-recording-target'
 import { createProjectControlClient } from '~/lib/project-control-client'
 import {
   applyTrackMixStateInHistoryModel,
@@ -23,6 +24,7 @@ import {
   cloneHistoryTracks,
   commitClipAudioWarpInHistoryModel,
   commitClipFadesInHistoryModel,
+  commitClipMidiInHistoryModel,
   commitClipMovesInHistoryModel,
   commitClipTimingInHistoryModel,
   insertClipIntoHistoryModel,
@@ -31,7 +33,6 @@ import {
   removeTrackFromHistoryModel,
 } from '~/lib/undo/history-model'
 import type { Track } from '@daw-browser/timeline-core/types'
-import type { createDrumRackBufferSync } from '~/lib/drum-rack-buffer-sync'
 import {
   attachClipDeletionRecoveriesToHistory,
   flushPendingSharedOutboxHistoryUpdates,
@@ -41,25 +42,30 @@ import {
 export type TimelineHistoryActions = Parameters<typeof execUndo>[1]['actions']
 
 type UseTimelineHistoryOptions = {
+  acceptance?: PlaybackAcceptanceObserver
   projectId: Accessor<string>
   userId: Accessor<string>
   getTracks: () => Track[]
   convexClient: typeof convexClient
   convexApi: typeof convexApi
-  audioEngine: AudioEngine
   replayInstanceEffectParams?: Parameters<typeof execUndo>[1]['replayInstanceEffectParams']
+  reserveInstanceEffectEdit?: Parameters<typeof execUndo>[1]['reserveInstanceEffectEdit']
+  releaseInstanceEffectEdit?: Parameters<typeof execUndo>[1]['releaseInstanceEffectEdit']
   ensureClipBuffer?: (clipId: string, sampleUrl?: string) => Promise<void>
   grantTrackWrite: (trackId: Track['id'] | null | undefined, scope?: OptimisticGrantScope | null) => void
   grantClipWrite: (clipId: string | null | undefined, scope?: OptimisticGrantScope | null) => void
   persistLocalMix: (projectId: string, trackId: Track['id'], patch: LocalMixPatch) => void
   getActions: () => TimelineHistoryActions
-  drumRackBufferSync: ReturnType<typeof createDrumRackBufferSync>
+  recordingTargetLock?: RecordingTargetLock
+  notify?: (title: string, message: string) => void
 }
 
 type UseTimelineHistoryReturn = {
   pushHistory: (entry: HistoryEntry, mergeKey?: string, mergeWindowMs?: number) => void
   handleUndo: () => void
   handleRedo: () => void
+  canUndo: Accessor<boolean>
+  canRedo: Accessor<boolean>
 }
 
 type HistoryScopeContext = {
@@ -93,6 +99,12 @@ export function useTimelineHistory(
   options: UseTimelineHistoryOptions,
 ): UseTimelineHistoryReturn {
   const scopeContexts = new Map<string, HistoryScopeContext>()
+  const [canUndo, setCanUndo] = createSignal(false)
+  const [canRedo, setCanRedo] = createSignal(false)
+  const publishAvailability = (manager?: UndoManager) => {
+    setCanUndo(manager?.canUndo() ?? false)
+    setCanRedo(manager?.canRedo() ?? false)
+  }
 
   const readCurrentScope = () => readOptimisticGrantScope({
     projectId: options.projectId(),
@@ -120,6 +132,7 @@ export function useTimelineHistory(
     let hydrating = false
     const manager = createUndoManager({
       onChange: (state) => {
+        if (scopeKey === readCurrentScopeKey()) publishAvailability(manager)
         if (hydrating) return
         if (localProject) {
           const context = scopeContexts.get(scopeKey)
@@ -229,6 +242,7 @@ export function useTimelineHistory(
     if (!scope) return
     const context = getScopeContext(scope)
     const scopeKey = buildOptimisticGrantScopeKey(scope)
+    options.acceptance?.ui(mode === 'undo' ? 'ui-undo' : 'ui-redo', () => scopeKey)
     const run = async () => {
       const manager = context.manager
       if (mode === 'undo' && !manager.canUndo()) return
@@ -236,6 +250,13 @@ export function useTimelineHistory(
 
       const entry = mode === 'undo' ? manager.reserveUndo() : manager.reserveRedo()
       if (!entry) return
+      const refusal = options.recordingTargetLock?.refuseHistory(entry, mode)
+      if (refusal) {
+        if (mode === 'undo') manager.restoreUndo(entry)
+        else manager.restoreRedo(entry)
+        options.notify?.(RECORDING_TARGET_LOCKED_BADGE, refusal)
+        return
+      }
       const initializeDeleteOperationId = (candidate: HistoryEntry): boolean => {
         if (candidate.type === 'section-edit') {
           return candidate.data.entries.reduce(
@@ -306,6 +327,10 @@ export function useTimelineHistory(
           commitClipFadesInHistoryModel(workingTracks, clipId, fades)
           runVisibleAction(scopeKey, () => sourceActions.commitClipFades(clipId, fades))
         },
+        commitClipMidi: (clipId, midi) => {
+          commitClipMidiInHistoryModel(workingTracks, clipId, midi)
+          runVisibleAction(scopeKey, () => sourceActions.commitClipMidi(clipId, midi))
+        },
         rescheduleChangedClips: (clipIds) => {
           runVisibleAction(scopeKey, () => sourceActions.rescheduleChangedClips(clipIds))
         },
@@ -359,14 +384,15 @@ export function useTimelineHistory(
           projectId: scope.projectId,
           userId: scope.userId,
           persistLocalMix: options.persistLocalMix,
-          audioEngine: options.audioEngine,
           isCurrentScope: () => readCurrentScopeKey() === scopeKey,
           replayInstanceEffectParams: options.replayInstanceEffectParams,
-          drumRackBufferSync: options.drumRackBufferSync,
+          reserveInstanceEffectEdit: options.reserveInstanceEffectEdit,
+          releaseInstanceEffectEdit: options.releaseInstanceEffectEdit,
           ensureClipBuffer: options.ensureClipBuffer,
           grantTrackWrite: options.grantTrackWrite,
           grantClipWrite: options.grantClipWrite,
           persistHistory: () => { manager.mutate(() => true) },
+          refuseStep: (child) => options.recordingTargetLock?.refuseHistory(child, mode),
           controlClient: createProjectControlClient({
             projectId: scope.projectId,
             userId: scope.userId,
@@ -382,6 +408,10 @@ export function useTimelineHistory(
         if (mode === 'undo') manager.restoreUndo(entry)
         else manager.restoreRedo(entry)
         console.error(`[Timeline] ${mode} failed`, error)
+        options.notify?.(
+          mode === 'undo' ? 'Undo failed' : 'Redo failed',
+          mode === 'undo' ? 'Undo could not be completed.' : 'Redo could not be completed.',
+        )
       }
     }
 
@@ -403,8 +433,13 @@ export function useTimelineHistory(
   createEffect(() => {
     const scope = readCurrentScope()
     const tracks = options.getTracks()
-    if (!scope) return
-    getScopeContext(scope).tracks = cloneHistoryTracks(tracks)
+    if (!scope) {
+      publishAvailability()
+      return
+    }
+    const context = getScopeContext(scope)
+    context.tracks = cloneHistoryTracks(tracks)
+    publishAvailability(context.manager)
   })
 
   onCleanup(() => {
@@ -417,5 +452,7 @@ export function useTimelineHistory(
     pushHistory,
     handleUndo,
     handleRedo,
+    canUndo,
+    canRedo,
   }
 }

@@ -1,0 +1,158 @@
+{
+ "name": "pr62-p34-publication-runner-2",
+ "sequence": 66,
+ "createdAt": "2026-11-17T18:19:34.369Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-69:0:mutant",
+    "spec",
+    "changes"
+   ],
+   "old": [
+    {
+     "file": "/src/lib/desktop/native-playback-controller.ts",
+     "from": "      } catch (error) {\n        if (!sessionAlive()) { await disposePublication(); return { record } }\n        if (error instanceof PublicationFailure) {",
+     "to": "      } catch (error) {\n        if (!sessionAlive()) {\n          if (binding) await revisions.rollback(binding)\n          await disposePublication(); return { record }\n        }\n        if (error instanceof PublicationFailure) {"
+    }
+   ],
+   "new": [
+    {
+     "file": "/src/lib/desktop/native-publication-transaction.ts",
+     "from": "  } catch (error) {\n    if (!tx.sessionAlive()) { await tx.disposePublication(); return { record } }\n",
+     "to": "  } catch (error) {\n    if (!tx.sessionAlive()) {\n      await tx.rollbackLost()\n      await tx.disposePublication(); return { record }\n    }\n"
+    },
+    {
+     "file": "/src/lib/desktop/native-publication-transaction.ts",
+     "from": "    disposePublication,\n    finish,\n",
+     "to": "    disposePublication,\n    rollbackLost: async () => { if (tx.binding) await revisions.rollback(tx.binding) },\n    finish,\n"
+    }
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-69:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-69:0:mutant",
+    "expect",
+    "applied"
+   ],
+   "old": 1,
+   "new": 2
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-89:0:mutant",
+    "spec",
+    "changes"
+   ],
+   "old": [
+    {
+     "file": "/src/lib/desktop/native-playback-controller.ts",
+     "from": "if (!resourcesPromoted) {\n          await discardAddedSources?.()",
+     "to": "if (resourcesPromoted) for (const mapping of installedAssets) await session.releaseAsset(mapping.sessionAssetId)\n        if (!resourcesPromoted) {\n          await discardAddedSources?.()"
+    }
+   ],
+   "new": [
+    {
+     "file": "/src/lib/desktop/native-publication-transaction.ts",
+     "from": "    if (!tx.resourcesPromoted) {\n      await tx.discardAddedSources?.()\n",
+     "to": "    if (tx.resourcesPromoted) await tx.releaseInstalledAssets?.()\n    if (!tx.resourcesPromoted) {\n      await tx.discardAddedSources?.()\n"
+    },
+    {
+     "file": "/src/lib/desktop/native-schedule-publication.ts",
+     "from": "        tx.resourcesPromoted = true\n",
+     "to": "        tx.resourcesPromoted = true\n        tx.releaseInstalledAssets = async () => { for (const mapping of host.installedAssets) await session.releaseAsset(mapping.sessionAssetId) }\n"
+    }
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-89:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts",
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-89:0:mutant",
+    "expect",
+    "applied"
+   ],
+   "old": 1,
+   "new": 2
+  },
+  {
+   "path": [
+    "fuzzSources",
+    "controller",
+    "src/lib/desktop/native-publication-transaction.ts"
+   ],
+   "old": null,
+   "new": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2"
+  },
+  {
+   "path": [
+    "fuzzSources",
+    "controller",
+    "src/lib/desktop/native-schedule-publication.ts"
+   ],
+   "old": null,
+   "new": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
+  },
+  {
+   "path": [
+    "fuzzSources",
+    "hook",
+    "src/lib/desktop/native-publication-transaction.ts"
+   ],
+   "old": null,
+   "new": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2"
+  },
+  {
+   "path": [
+    "fuzzSources",
+    "hook",
+    "src/lib/desktop/native-schedule-publication.ts"
+   ],
+   "old": null,
+   "new": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Anchor re-point after P34, second part. rc2:historical-69 and rc2:historical-89 kept their meaning by adding one wiring change each (applied 1 -> 2): 69 rolls the revision back on a lost session in the shared runner catch through a transaction hook; 89 releases the installed assets a second time in disposePublication after promotion through a hook the schedule strategy installs when it promotes. The two new modules hold code moved out of native-playback-controller.ts, so both fuzz harnesses list them in sourceHashes and fuzzSources records them at their current hashes for both fixtures; the full reference trace trees gain these two keys and are re-blessed with the full run.",
+  "expectationsSha256": "4cccc4acbc1f42dd6f41bf1d688bf5304f14d774e5bec8b05356de7f29d612d4"
+ }
+}

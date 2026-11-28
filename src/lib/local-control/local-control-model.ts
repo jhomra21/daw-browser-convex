@@ -41,14 +41,13 @@ import {
 import type { TimelineClipRow, TimelineTrackRow } from '~/lib/timeline-repository/types'
 import { parseExternalPluginJsonValue } from '~/lib/external-plugin-json'
 
-import { z } from 'zod'
 type LocalProjectStoredObject = { readonly [key: string]: LocalProjectStoredValue }
 
-const localProjectStoredJsonPrimitiveSchema = z.union([
-  z.string(),
-  z.boolean(),
-  z.number().finite(),
-])
+const isStoredString = (value: LocalProjectStoredValue): value is string => typeof value === 'string'
+const isStoredBoolean = (value: LocalProjectStoredValue): value is boolean => typeof value === 'boolean'
+const isStoredFiniteNumber = (value: LocalProjectStoredValue): value is number => (
+  typeof value === 'number' && Number.isFinite(value)
+)
 const isLocalProjectStoredObject = (
   value: LocalProjectStoredValue,
 ): value is LocalProjectStoredObject => {
@@ -61,8 +60,7 @@ export const parseLocalProjectStoredJsonValue = (
   value: LocalProjectStoredValue,
 ): JsonValue | undefined => {
   if (value === null) return null
-  const primitive = localProjectStoredJsonPrimitiveSchema.safeParse(value)
-  if (primitive.success) return primitive.data
+  if (isStoredString(value) || isStoredBoolean(value) || isStoredFiniteNumber(value)) return value
   if (Array.isArray(value)) {
     const result: JsonValue[] = []
     for (const entry of value) {

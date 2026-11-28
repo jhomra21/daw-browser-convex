@@ -1,0 +1,161 @@
+{
+ "name": "ae08-cert-repair",
+ "sequence": 9,
+ "createdAt": "2026-11-12T03:33:29.000Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") reportStopped(outcome.reason, { retainPlayback: true })",
+   "new": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") reportStopped(outcome.reason, { retainPlayback: true })",
+   "new": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-95:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          failure = { outcome: { status: \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)",
+   "new": "          failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:442:mutant:p1-controller",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        if (edited) rememberInstrumentParameters(node.id, edited)\n",
+   "new": "        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:442:mutant:p1-controller",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "P1 a live Synth drag is heard once per frame and its release does not rebuild",
+    "P1 a live Synth edit is accepted and the prepared portable snapshot follows it",
+    "P1 live then non-live Synth edits in one gesture keep the last live state and release rebuilds once"
+   ],
+   "new": [
+    "P1 a live Synth drag is heard once per frame and its release does not rebuild",
+    "P1 a live Synth edit is accepted and the prepared portable snapshot follows it",
+    "P1 live then non-live Synth edits in one gesture keep the last live state and release adopts once"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:442:mutant:p1-audiosync",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        if (edited) rememberInstrumentParameters(node.id, edited)\n",
+   "new": "        if (edited && prepared && isLiveEventOnlyInstrumentChange(prepared, edited)) rememberInstrumentParameters(node.id, edited)\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        return current() ? \"rebuild\" : \"unavailable\"\n      })",
+   "new": "        return failed()\n      })"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        return current() ? \"rebuild\" : \"unavailable\"\n      })",
+   "new": "        return failed()\n      })"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        activeSnapshot = withAcceptedInstruments({ ...next, revision: candidate.graph.revision }, activeSnapshot ?? previous)\n",
+   "new": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        activeSnapshot = withAcceptedInstruments({ ...next, revision: candidate.graph.revision }, activeSnapshot ?? previous)\n",
+   "new": "        activeSnapshot = { ...folded, revision: candidate.graph.revision }\n"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-host-plugin-tests",
+    "command",
+    "rc7Seconds"
+   ],
+   "old": 0,
+   "new": 7
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Re-pointed the exact-anchor from/to strings of arms ledger:442/472/473 (src/lib/portable-browser-playback-controller.ts) and rc2:110 / rc2:historical-95 (src/lib/desktop/native-playback-controller.ts) to the code that now carries the same behaviour after b3a835d4..e57302ef; ledger:442:mutant:p1-controller records the witness renamed by b3a835d4 (\"release rebuilds once\" -> \"release adopts once\"); x-host-plugin-tests rc7Seconds 0 -> 7 (measured 6.6 s). Each mutant was run alone and is killed, its control passes. See acceptance-reports/ae-08-phase-5-2026-10-18/CERT-REPAIR-REPORT.md.",
+  "expectationsSha256": "54d14f1e47a83c8d27303a589b0b9230b8af09bae57d7e9b03a478973ba5ed11"
+ }
+}

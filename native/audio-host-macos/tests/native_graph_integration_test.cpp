@@ -229,6 +229,74 @@ void AssertMultipleSourceGraphPublishes() {
   host.Stop();
 }
 
+void AssertIdenticalInstrumentRevisionRetainsLiveOutput() {
+  daw::audio_host_macos::AudioHost edited;
+  daw::audio_host_macos::AudioHost reference;
+  for (auto* host : {&edited, &reference}) {
+    assert(host->Configure({
+      .device_uid = "diagnostic", .sample_rate_hz = kSampleRate,
+      .max_frames_per_block = static_cast<std::uint32_t>(kFrames),
+      .channel_count = 2, .revision = 1,
+    }));
+    assert(host->PrepareGraphRevision(2, GraphSnapshot(true, false)).code
+      == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+    assert(host->PublishGraphRevision(2).code
+      == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+    assert(host->SetTransport(1, false, 0));
+    assert(host->StartDiagnosticMode());
+    assert(host->SetTransport(1, true, 0));
+    std::vector<std::uint8_t> event;
+    AppendLeU32(event, 1);
+    AppendLeU64(event, 1);
+    AppendLeU64(event, 1);
+    AppendLeU64(event, 1);
+    AppendLeU32(event, 1);
+    AppendLeU32(event, 0);
+    AppendLeU32(event, DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON);
+    AppendLeU32(event, 0);
+    AppendLeU32(event, 69);
+    AppendLeFloat(event, 0.9F);
+    assert(host->QueueInstrumentEvents(event));
+  }
+  const auto render = [](daw::audio_host_macos::AudioHost& host) {
+    std::array<std::array<float, kFrames>, 2> samples{};
+    const std::array<float, kFrames> silence{};
+    const std::array<const float*, 2> input{silence.data(), silence.data()};
+    const std::array<float*, 2> output{samples[0].data(), samples[1].data()};
+    assert(host.ProcessPlanar(input, output, static_cast<std::uint32_t>(kFrames)));
+    return samples;
+  };
+  assert(render(edited) == render(reference));
+  auto next = GraphSnapshot(true, false);
+  next[7] = 3;
+  next[16] = 3;
+  const auto prepared = edited.PrepareGraphRevision(3, next);
+  assert(prepared.code == daw::audio_host_macos::GraphRevisionStatusCode::kPrepared);
+  assert(prepared.continuity == daw::audio_host_macos::GraphRevisionContinuity::kAccepted);
+  assert(render(edited) == render(reference));
+  daw::audio_host_macos::GraphRevisionStatus published{};
+  std::atomic<bool> completed = false;
+  std::thread publication([&] {
+    published = edited.PublishGraphRevision(3);
+    completed.store(true, std::memory_order_release);
+  });
+  // Diagnostic mode has no device callback. Drive bounded blocks until the
+  // publication thread receives its existing boundary acknowledgement.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while (!completed.load(std::memory_order_acquire)
+    && std::chrono::steady_clock::now() < deadline) {
+    assert(render(edited) == render(reference));
+    std::this_thread::yield();
+  }
+  publication.join();
+  assert(published.code == daw::audio_host_macos::GraphRevisionStatusCode::kPublishPending);
+  assert(render(edited) == render(reference));
+  assert(edited.InspectGraphRevision(3).code == daw::audio_host_macos::GraphRevisionStatusCode::kPublished);
+  assert(render(edited) == render(reference));
+  edited.Stop();
+  reference.Stop();
+}
+
 std::vector<std::uint8_t> InstrumentEvents() {
   std::vector<std::uint8_t> payload;
   AppendLeU32(payload, 2);
@@ -419,6 +487,7 @@ double DifferenceRms(const std::vector<float>& left, const std::vector<float>& r
 }  // namespace
 
 int main() {
+  AssertIdenticalInstrumentRevisionRetainsLiveOutput();
   AssertMultipleSourceGraphPublishes();
   if (!std::filesystem::is_regular_file(kExecutablePath)) {
     std::cout << "SKIP: installed ValhallaSupermassive VST3 is unavailable\n";

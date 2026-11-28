@@ -1,0 +1,555 @@
+import path from "node:path"
+import { watch } from "node:fs"
+import { writeFile } from "node:fs/promises"
+import { z } from "zod"
+import type { ProjectSnapshotV2 } from "@daw-browser/control"
+import { assignSampleToDrumRackPad, createDefaultDrumRackParams, createDefaultGranularParams, createDefaultLimiterParams, createDefaultSamplerParams, createDefaultSaturatorParams, createDefaultSpectralParams,
+  createDefaultSynthParams, createDefaultUtilityParams, getSpectralLatencyFrames, type DrumRackPadSample } from "@daw-browser/shared"
+import { command } from "../performance/30-track/v3-import-workload"
+import { waitForAcceptanceEvent } from "../performance/30-track/native-acceptance-ui"
+import { browserCommandTimeoutMs } from "../performance/browser-harness"
+import { writeWav } from "./ae08-wav"
+
+export const phase5Rows = ["delete-clip", "move-trim", "unchanged-span", "add-paged-asset",
+  "remove-readd-track", "held-note", "raw-tempo", "rapid-burst", "effect-state"]
+export type Phase5Context = {
+  out: string
+  profile: string
+  row: string
+  snapshot: () => Promise<ProjectSnapshotV2>
+  // Resolves to the wall time at which the app received the commit (its own control-commit-received line).
+  mutate: (actions: z.infer<ReturnType<typeof z.json>>[]) => Promise<number>
+  interact: (args: string[]) => Promise<void>
+  evaluate: (script: string) => Promise<void>
+  read: <Value>(script: string, schema: z.ZodType<Value>) => Promise<Value>
+  reload: () => Promise<void>
+  mark: (event: string, fields?: Record<string, string | number | boolean>) => Promise<void>
+  // Phase 9 only: how long the playing content must last, since a burst outlasts phase 5's own 17 s. Phase 5 leaves it unset.
+  contentSeconds?: number
+}
+export const liveMidiTrack = "Live MIDI"
+// The tracks of the held-instrument rows (phase 9): the instrument that sounds, and the silent tracks their edits land on.
+export const heldInstrumentTrack = "Held instrument"
+export const heldSynthTrack = "Held phase 5"
+export const insertTargetTrack = "Insert target"
+export const reorderTargetTrack = "Reorder target"
+export const heldInstrumentRows = ["held-sampler", "held-drum-rack", "held-granular", "held-swap"]
+// The 440 Hz sine synth of the held rows, held as it is by a clip, with the polyphony an edit changes.
+export const sineSynthParams = (polyphony = createDefaultSynthParams().polyphony) => {
+  const base = createDefaultSynthParams()
+  return { ...base, polyphony, oscillators: [
+    { ...base.oscillators[0], enabled: true, wave: "sine", level: 0.2 },
+    { ...base.oscillators[1], enabled: false },
+  ],
+  filter: { ...base.filter, enabled: false },
+  ampEnvelope: { attackSec: 0.005, decaySec: 0.01, sustain: 1, releaseSec: 0.05 } }
+}
+export type SampleAsset = { id: string; name: string; durationSec: number; sampleRate: number; channelCount: number }
+// One sample over the whole keyboard (the drum rack: its pad on note 36), played as a one-shot so a held note keeps sounding for the asset's length.
+// `gain` is the zone's (the pad's) and `densityHz` the granular's, the two values the rows edit under the note.
+export const sampledInstrumentParams = (kind: "sampler" | "drum-rack" | "granular", asset: SampleAsset, change: { gain?: number; densityHz?: number } = {}) => {
+  const sample: DrumRackPadSample = { assetKey: asset.id, url: `local-asset:${asset.id}`, name: asset.name, sourceKind: "upload",
+    source: { durationSec: asset.durationSec, sampleRate: asset.sampleRate, channelCount: asset.channelCount } }
+  const zone = { id: "held-zone", sample, keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60, tuneCents: 0, gain: change.gain ?? 1, pan: 0,
+    roundRobinGroup: 0, roundRobinIndex: 0, playbackMode: "one-shot", startSec: 0, endSec: asset.durationSec, crossfadeSec: 0, chokeGroup: 0 }
+  if (kind === "sampler") return { ...createDefaultSamplerParams(), zones: [zone] }
+  // Frozen at the middle of the sample and dense enough that the grains overlap: a gap between grains would read as the note dropping out.
+  if (kind === "granular") return { ...createDefaultGranularParams(), position: 0.5, spray: 0, reverseProbability: 0, freeze: true, densityHz: change.densityHz ?? 40, zone }
+  const rack = assignSampleToDrumRackPad(createDefaultDrumRackParams(), "pad-36", sample)
+  return { ...rack, pads: rack.pads.map((pad) => pad.id === "pad-36" ? { ...pad, startSec: 0, endSec: asset.durationSec, gain: change.gain ?? 1 } : pad) }
+}
+// What the UI helpers use of the context.
+type UiContext = Pick<Phase5Context, "evaluate" | "interact">
+const ref = (id: string) => ({ source: "persisted", id })
+export const required = <Value>(value: Value | undefined, what: string) => {
+  if (value === undefined) throw new Error(`${what} missing`)
+  return value
+}
+const record = z.record(z.string(), z.json())
+// browserCommand aborts an eval after browserCommandTimeoutMs; every page-side
+// deadline fires first, so the page's named error, not the abort, reports a stall.
+export const pageDeadlineMs = browserCommandTimeoutMs([]) - 5_000
+// Observe the UI commit, not an arbitrary delay. The deadline is failure-only.
+export const waitForUi = (context: Pick<Phase5Context, "evaluate">, failure: string, ready: string) => context.evaluate(`new Promise((resolve,reject)=>{
+  const ready=()=>(${ready});
+  const observer=new MutationObserver(()=>{if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}});
+  const timer=setTimeout(()=>{observer.disconnect();reject(new Error(${JSON.stringify(failure)}))},${pageDeadlineMs});
+  observer.observe(document.body,{childList:true,subtree:true,characterData:true,attributes:true});
+  if(ready()){observer.disconnect();clearTimeout(timer);resolve(true)}
+})`)
+export const waitImportedClip = (context: Pick<Phase5Context, "evaluate">, name: string) => waitForUi(context, `Import UI deadline: ${name}`,
+  `[...document.querySelectorAll('[data-timeline-clip]')].some(e=>e.getAttribute('title')?.includes(${JSON.stringify(name)}))`)
+
+// The Spectral device's FFT size buttons on the selected track.
+export const selectFftSize = async (context: Pick<Phase5Context, "evaluate">, fftSize: 512 | 4096) => {
+  await context.evaluate(`(()=>{
+    const button=[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])].find(b=>b.textContent?.trim()===${JSON.stringify(String(fftSize))});
+    if(!button||button.disabled)throw new Error("FFT button unavailable");button.click();return true;
+  })()`)
+  await waitForUi(context, `Spectral FFT ${fftSize} not selected`, `[...(document.querySelector('.device-spectral')?.querySelectorAll('button')??[])]
+    .find(b=>b.textContent?.trim()===${JSON.stringify(String(fftSize))})?.getAttribute('aria-pressed')==='true'`)
+}
+
+// The product's undo and redo shortcuts (Ctrl+Z, Ctrl+Shift+Z) on the timeline window.
+export const pressHistoryKey = (context: Pick<Phase5Context, "evaluate">, redo: boolean) => context.evaluate(`(()=>{
+  document.activeElement?.blur();
+  window.dispatchEvent(new KeyboardEvent('keydown',{key:${redo ? "'Z'" : "'z'"},code:'KeyZ',ctrlKey:true,shiftKey:${redo},bubbles:true}));return true;
+})()`)
+
+// Deletes the track whose selector ends in `: ${name}` through its context menu and the confirmation dialog.
+export const deleteTrackThroughUi = async (context: UiContext, name: string) => {
+  await context.evaluate(`(()=>{
+    const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(${JSON.stringify(`: ${name}`)}));
+    if(!button)throw new Error("Delete track selector missing");
+    button.dispatchEvent(new MouseEvent('contextmenu',{bubbles:true,clientX:250,clientY:250}));return true;
+  })()`)
+  await context.interact(["find", "text", "Delete track", "click", "--exact"])
+  await context.interact(["find", "role", "button", "click", "--name", "Delete Track", "--exact"])
+}
+
+// Nonperiodic envelope plus DC prevents a single missing sample from landing
+// on a sine zero and makes a block shift observably wrong at every seam.
+export const phase5AssetSample = (frame: number, right: boolean) => 0.08 + 0.025 * Math.sin(frame * (right ? 0.039 : 0.027))
+  + 0.015 * Math.sin(frame * frame * (right ? 1.7e-8 : 1e-8))
+export const writePhase5Asset = async (file: string, seconds: number, right: boolean, scale = 1) => {
+  const sampleRate = 48000
+  const frames = Math.round(seconds * sampleRate)
+  const samples = new Float32Array(frames * 2)
+  for (let frame = 0; frame < frames; frame++) samples[frame * 2 + (right ? 1 : 0)] = scale * phase5AssetSample(frame, right)
+  await writeWav(file, { sampleRate, channels: 2, samples })
+}
+
+// The Utility Gain knob on the selected track. Exactly one must exist.
+const utilityGainKnob = `(()=>{const knobs=[...document.querySelectorAll('.effect-shell')]
+  .filter(shell=>shell.querySelector('[data-effect-shell-header]')?.textContent?.includes('Utility'))
+  .flatMap(shell=>[...shell.querySelectorAll('[role="slider"][aria-label="Gain"]')]);
+  if(knobs.length!==1)throw new Error("Utility gain knob missing");return knobs[0]})()`
+const readKnobDb = async (context: Pick<Phase5Context, "read">) =>
+  context.read(`Number(${utilityGainKnob}.getAttribute('aria-valuenow'))`, z.number())
+// A knob gate's failure carries the pointer record: which press the knob took, and whether a capture or the window was lost.
+const waitForKnob = async (context: Phase5Context, failure: string, ready: string) => {
+  try { await waitForUi(context, failure, ready) } catch (cause) {
+    const drag = await context.read("JSON.stringify((({listeners:_listeners,...drag})=>drag)(window.__ae08EffectState.drag))", z.json())
+    throw new Error(`${failure}: ${JSON.stringify(drag)}`, { cause })
+  }
+}
+// One manual drag of the Utility Gain knob: press, one move of `pixels` down, release. Each step waits for the knob's own state.
+export const dragUtilityGainKnob = async (context: Pick<Phase5Context, "evaluate" | "interact" | "read">, pixels: number) => {
+  const before = await readKnobDb(context)
+  const knob = await context.read(`JSON.stringify((()=>{
+    const box=${utilityGainKnob}.getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)};
+  })())`, z.object({ x: z.number(), y: z.number() }))
+  await context.interact(["mouse", "move", String(knob.x), String(knob.y)])
+  await context.interact(["mouse", "down"])
+  await waitForUi(context, "Utility gain press did not start a drag", "document.body.classList.contains('select-none')")
+  await context.interact(["mouse", "move", String(knob.x), String(knob.y + pixels)])
+  await waitForUi(context, "Utility gain did not move", `Number(${utilityGainKnob}.getAttribute('aria-valuenow'))!==${before}`)
+  await context.interact(["mouse", "up"])
+  await waitForUi(context, "Utility gain drag did not end", "!document.body.classList.contains('select-none')")
+}
+const latestFrame = async (context: Phase5Context) =>
+  context.read("Number(window.__ae08EffectState.progress.at(-1)?.renderedThroughFrame)", z.number().int())
+const utilityGainDb = (state: ProjectSnapshotV2, trackId: string) => {
+  for (const entry of state.processors)
+    if ("trackId" in entry.target && entry.target.trackId === trackId && entry.processor.kind === "utility")
+      return entry.processor.params.state.gainDb
+}
+
+// Processor state through the product UI only: an FFT size click while
+// playing, then a Gain knob drag whose release dispatches the keyboard pause in
+// the same task, so the pause always lands while the release is flushing.
+// Native progress frames are lower bounds that place the analyzer's windows.
+const runEffectStateEdit = async (context: Phase5Context, input: {
+  trackId: string; waitFrame: (frame: number) => Promise<void>; snapshot: () => Promise<ProjectSnapshotV2>
+  resume: () => Promise<void>
+}) => {
+  const fftAfterFrame = 48000 * 2, dragAfterFrame = 48000 * 5
+  const before = await readKnobDb(context)
+  await context.mark("effect-fft-edit")
+  await selectFftSize(context, 4096)
+  await input.waitFrame(dragAfterFrame)
+  const knob = await context.read(`JSON.stringify((()=>{
+    const box=${utilityGainKnob}.getBoundingClientRect();return {x:Math.round(box.x+box.width/2),y:Math.round(box.y+box.height/2)};
+  })())`, z.object({ x: z.number(), y: z.number() }))
+  await context.mark("effect-gain-drag")
+  // A returned input command proves only that it was sent. Each step waits for the knob's own state (useDrag's drag,
+  // then aria-valuenow), so no step runs before the page consumed the one before it, and a press the knob never took
+  // fails here by name instead of releasing an unmoved knob. The recorder names a miss, a lost capture or a blur.
+  await context.evaluate(`(()=>{
+    const knob=${utilityGainKnob}, hit=document.elementFromPoint(${knob.x},${knob.y});
+    if(!hit||!knob.contains(hit))throw new Error("Utility gain knob is not under the press point");
+    const drag={downs:[],captures:0,lost:0,blurs:0,listeners:new AbortController()}, signal=drag.listeners.signal;
+    knob.addEventListener('pointerdown',e=>drag.downs.push({x:e.clientX,y:e.clientY}),{capture:true,signal});
+    knob.addEventListener('gotpointercapture',()=>{drag.captures++},{signal});
+    knob.addEventListener('lostpointercapture',()=>{drag.lost++},{signal});
+    window.addEventListener('blur',()=>{drag.blurs++},{signal});
+    window.__ae08EffectState.drag=drag;
+    return true;
+  })()`)
+  await context.interact(["mouse", "move", String(knob.x), String(knob.y)])
+  await context.interact(["mouse", "down"])
+  await waitForKnob(context, "Utility gain press did not start a drag", "document.body.classList.contains('select-none')")
+  // Registered after useDrag's own capture listener, so the release runs first.
+  await context.evaluate(`(()=>{
+    const state=window.__ae08EffectState;
+    window.addEventListener('pointerup',()=>{
+      state.release={wallMs:Date.now(),dragEnded:!document.body.classList.contains('select-none'),
+        knobDb:Number(${utilityGainKnob}.getAttribute('aria-valuenow'))};
+      window.dispatchEvent(new KeyboardEvent('keydown',{key:' ',code:'Space',bubbles:true}));
+      state.pause={wallMs:Date.now()};
+      state.drag.listeners.abort();
+    },{capture:true,once:true});
+    return true;
+  })()`)
+  // 40 px down a 240 px traversal of the 84 dB range previews -14 dB in four ticks of -3.5 dB.
+  for (let step = 1; step <= 4; step++) {
+    await context.interact(["mouse", "move", String(knob.x), String(knob.y + step * 10)])
+    await waitForKnob(context, `Utility gain preview did not reach tick ${step}`,
+      `Math.abs(Number(${utilityGainKnob}.getAttribute('aria-valuenow'))-(${before - 3.5 * step}))<0.05`)
+  }
+  const previewFromFrame = await latestFrame(context)
+  const releaseAfterFrame = previewFromFrame + 48000
+  await input.waitFrame(releaseAfterFrame)
+  await context.interact(["mouse", "up"])
+  await context.evaluate(`new Promise((resolve,reject)=>{
+    const state=window.__ae08EffectState, session=window.dawDesktop.audioHost.session;
+    const last=state.progress.at(-1);
+    if(last&&!last.running&&last.wallMs>=state.release.wallMs)return resolve(true);
+    // Deadline only. Native progress, not wall time, reports the pause.
+    const timer=setTimeout(()=>{unsubscribe();reject(new Error("Native pause deadline"))},${pageDeadlineMs});
+    const unsubscribe=session.onScheduleProgress(progress=>{if(!progress.running){unsubscribe();clearTimeout(timer);resolve(true)}});
+  })`)
+  const pausedFrame = await latestFrame(context)
+  const paused = await readKnobDb(context)
+  const pausedSnapshot = await input.snapshot()
+  await writeFile(path.join(context.out, "paused-snapshot.json"), JSON.stringify(pausedSnapshot, null, 2))
+  await context.mark("effect-resume")
+  await input.resume()
+  await input.waitFrame(pausedFrame + 48000)
+  const spectral = createDefaultSpectralParams()
+  return { trackId: input.trackId, fromLatencyFrames: getSpectralLatencyFrames(512, spectral.overlap),
+    toLatencyFrames: getSpectralLatencyFrames(4096, spectral.overlap), fftAfterFrame, dragAfterFrame, previewFromFrame,
+    releaseAfterFrame, pausedFrame, pausedSnapshotGainDb: utilityGainDb(pausedSnapshot, input.trackId) ?? null,
+    knob: { before, paused, resumed: await readKnobDb(context) } }
+}
+
+// A whole-project offline mixdown from 0 to `seconds`: the reference of one project state.
+export const exportReference = async (context: Phase5Context, name: string, seconds = 24) => {
+  const destination = path.join(context.out, `${name}.wav`)
+  // The filesystem notifies completion/progress. No status polling or fixed
+  // sleep; the deadline is failure-only and the watcher always closes.
+  let jobId: string | undefined
+  let complete: () => void = () => undefined
+  let reject: (error: Error) => void = () => undefined
+  const terminal = new Promise<void>((resolve, fail) => { complete = resolve; reject = fail })
+  const inspect = async () => {
+    if (!jobId) return
+    const status = z.object({ status: z.string(), job: z.object({ id: z.string() }).nullable().optional() })
+      .passthrough().parse(await command(context.profile, ["host", "export-status"]))
+    if (status.job?.id !== jobId) return
+    if (status.status === "completed") complete()
+    else if (["failed", "canceled"].includes(String(status.status))) reject(new Error(JSON.stringify(status)))
+  }
+  const watcher = watch(context.out, (_event, filename) => {
+    if (filename === path.basename(destination)) void inspect().catch(reject)
+  })
+  try {
+    const request = { mode: "mixdown", format: "wav", destination: { kind: "file", path: destination },
+      range: { mode: "custom", startSec: 0, endSec: seconds },
+      render: { sampleRate: 48000, channels: 2, normalization: { mode: "none" }, tail: { mode: "none" } },
+      encoding: { wav: { codec: "pcm-f32", dither: "none" } } }
+    const result = record.parse(await command(context.profile, ["host", "export", "--request", "-"], JSON.stringify(request)))
+    jobId = z.string().parse(result.jobId)
+    await inspect()
+    if (await waitForAcceptanceEvent(terminal.then(() => true), 120000) !== true)
+      throw new Error(`Offline ${name} reference did not complete`)
+    await writeFile(path.join(context.out, `${name}-export.json`), JSON.stringify({ jobId, request }, null, 2))
+  } finally { watcher.close() }
+}
+
+// Deadline only. Audio progress, not wall time, advances the fixture.
+export const waitNativeFrame = (context: Phase5Context, frame: number) => context.evaluate(`new Promise((resolve,reject)=>{
+  const session=window.dawDesktop.audioHost.session;
+  const timer=setTimeout(()=>{unsubscribe();reject(new Error("Native progress deadline"))},${pageDeadlineMs});
+  const unsubscribe=session.onScheduleProgress(progress=>{
+    if(progress.running&&Number(progress.renderedThroughFrame)>=${frame}){
+      unsubscribe();clearTimeout(timer);resolve(true);
+    }
+  });
+})`)
+
+// Builds the row's project (retained 180 s source, "Changed right" track and its clip, the row's devices or notes) and
+// reloads it. It plays nothing and captures nothing, so phase 9 reuses it as the start state of a burst.
+export const setupPhase5Fixture = async (context: Phase5Context) => {
+  const { out, profile, mutate, snapshot } = context
+  const { contentSeconds } = context
+  // "held-swap:<MiB>:<copies>" sizes the swapped samples (stereo 48 kHz float, 8 bytes a frame) and gives the swap that many never-loaded copies.
+  const [row = "", swapMiB, swapCopies] = context.row.split(":")
+  const swapSeconds = swapMiB === undefined ? undefined : Number(swapMiB) * 1048576 / 8 / 48000
+  if (swapSeconds !== undefined && (!(swapSeconds > 0) || !Number.isInteger(Number(swapCopies)) || Number(swapCopies) < 1)) throw new Error(`Fixture ${context.row} needs a size in MiB and a copy count`)
+  const runtime = (args: string[]) => command(profile, ["host", ...args])
+  const retainedFile = path.join(out, "retained.wav")
+  const changedFile = path.join(out, "changed.wav")
+  await writePhase5Asset(retainedFile, Math.max(180, contentSeconds ?? 0), false)
+  await writePhase5Asset(changedFile, row === "add-paged-asset" ? 180 : swapSeconds ?? (contentSeconds ?? 24) + 6, true)
+  await runtime(["import", "--path", retainedFile])
+  await waitImportedClip(context, "retained")
+  let state = await snapshot()
+  const retained = state.clips.find((clip) => clip.name.includes("retained"))
+  if (!retained?.source) throw new Error("Retained fixture import missing")
+  await mutate([{ kind: "clip.move", clip: ref(retained.id), track: ref(retained.trackId), startSec: 0 },
+    { kind: "clip.timing.set", clip: ref(retained.id), duration: Math.max(180, contentSeconds ?? 0) },
+    { kind: "project.settings.set", tempoBpm: 120, loopEnabled: false }])
+  await mutate([{ kind: "track.create", name: "Changed right", trackKind: "audio" }])
+  state = await snapshot()
+  const changedTrack = state.tracks.find((track) => track.name === "Changed right")
+  if (!changedTrack) throw new Error("Changed track missing")
+  const selectTrack = (name: string) => context.evaluate(`(()=>{
+    const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': ${name}'));
+    if(!button)throw new Error("${name} track selector missing");button.click();return true;
+  })()`)
+  await selectTrack("Changed right")
+  let changedId: string | undefined
+  if (row !== "add-paged-asset") {
+    await runtime(["import", "--path", changedFile])
+    await waitImportedClip(context, "changed")
+    state = await snapshot()
+    const clip = state.clips.find((item) => item.name.includes("changed"))
+    if (!clip) throw new Error("Changed fixture import missing")
+    changedId = clip.id
+    await mutate([{ kind: "clip.move", clip: ref(clip.id), track: ref(changedTrack.id), startSec: 0 },
+      { kind: "clip.timing.set", clip: ref(clip.id), duration: contentSeconds ?? 24 }])
+  }
+  // "held-swap" swaps the instrument's sample for another one: its clip sits on the muted Changed right track with the changed one. A
+  // byte-identical copy is an import the app deduplicates (no clip), so the swap sample is the same signal 1 % louder: the note switches to it at
+  // the same playback position, and the step (under 1.2 % of the level) stays under the held judge's 2 % jump bound. An import lands on the
+  // selected track after its last clip, which on Changed right is past the visible timeline (its clips are not in the DOM), so the swap sample
+  // is imported onto the empty Track 1 (the retained clip is on Track 2) at the playhead and moved.
+  // The sized copies differ in level by 0.2 % each, so every one is a distinct sample and the largest step (1 %) stays under the same bound.
+  if (row === "held-swap") {
+    const copies = swapSeconds === undefined ? [{ name: "swap", scale: 1.01 }]
+      : Array.from({ length: Number(swapCopies) }, (_, index) => ({ name: `swap-${index + 1}`, scale: 1 + 0.002 * (index + 1) }))
+    for (const { name, scale } of copies) {
+      const swapFile = path.join(out, `${name}.wav`)
+      await writePhase5Asset(swapFile, swapSeconds ?? (contentSeconds ?? 24) + 6, true, scale)
+      await selectTrack("Track 1")
+      await runtime(["import", "--path", swapFile])
+      await waitImportedClip(context, name)
+      const copy = required((await snapshot()).clips.find((item) => item.name.includes(name)), "Swap fixture import")
+      await mutate([{ kind: "clip.move", clip: ref(copy.id), track: ref(changedTrack.id), startSec: 0 }])
+    }
+    await selectTrack("Changed right")
+  }
+  // Phase 9 only: "raise-state" has the effect-state devices but never arms the track for monitoring, so the Spectral stays on the
+  // master path and its declared latency moves reach it (the monitored effect-state row keeps its Spectral out of compensation).
+  const spectralRow = row === "effect-state" || row === "raise-state"
+  if (spectralRow) {
+    // Spectral then Utility on the right-only source: the FFT size is audible
+    // as content delay and the gain as level. No DC block, so gain stays pure.
+    const target = { kind: "track", track: ref(changedTrack.id) }
+    await mutate([
+      { kind: "effect.upsert", target, effectKind: "spectral",
+        params: { version: 1, state: { ...createDefaultSpectralParams(), fftSize: 512, mix: 1 } } },
+      { kind: "effect.upsert", target, effectKind: "utility",
+        params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: 0, dcBlock: false } } },
+    ])
+  }
+  // A sine synth on the right channel only, so the left channel stays the retained source's.
+  const addSineSynthTrack = async (name: string) => {
+    await mutate([{ kind: "track.create", name, trackKind: "instrument" }])
+    const synth = (await snapshot()).tracks.find((track) => track.name === name)
+    if (!synth) throw new Error(`${name} missing`)
+    await mutate([
+      { kind: "instrument.set", target: { kind: "track", track: ref(synth.id) }, instrumentKind: "synth", params: sineSynthParams() },
+      { kind: "effect.upsert", target: { kind: "track", track: ref(synth.id) }, effectKind: "utility",
+        params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
+    ])
+    return synth
+  }
+  if (row === "held-note") {
+    const synth = await addSineSynthTrack("Held phase 5")
+    await mutate([{ kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+      notes: [{ id: "phase5-held", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: 69, velocity: 0.4 }] }])
+  }
+  // Phase 9 only, the held-instrument rows: the Changed right track is muted, so the right channel is the instrument alone and the note's gaps and
+  // jumps are its own. "held-insert" and "held-reorder" hold the synth while an unrelated track is edited, "held-chord" holds three of its notes,
+  // and the sampled rows hold the changed asset through the instrument under test ("held-swap" adds a 1 % louder copy of it to swap to).
+  const heldRow = row === "held-insert" || row === "held-reorder" || row === "held-chord" || heldInstrumentRows.includes(row)
+  if (heldRow) await mutate([{ kind: "track.mix.set", track: ref(changedTrack.id), muted: true }])
+  if (row === "held-insert" || row === "held-reorder" || row === "held-chord") {
+    const synth = await addSineSynthTrack(heldSynthTrack)
+    const chord = row === "held-chord" ? [57, 61, 64] : [69]
+    await mutate([{ kind: "clip.midi.create", track: ref(synth.id), name: "Held finite note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+      notes: chord.map((pitch) => ({ id: `phase9-held-${pitch}`, beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch, velocity: 0.4 })) }])
+  }
+  if (row === "held-insert") {
+    await mutate([{ kind: "track.create", name: insertTargetTrack, trackKind: "instrument" }])
+    const target = (await snapshot()).tracks.find((track) => track.name === insertTargetTrack)
+    if (!target) throw new Error(`${insertTargetTrack} missing`)
+    await mutate([{ kind: "instrument.set", target: { kind: "track", track: ref(target.id) }, instrumentKind: "synth", params: sineSynthParams() }])
+  }
+  if (row === "held-reorder") {
+    await mutate([{ kind: "track.create", name: reorderTargetTrack, trackKind: "audio" }])
+    const target = { kind: "track", track: ref(required((await snapshot()).tracks.find((track) => track.name === reorderTargetTrack), reorderTargetTrack).id) }
+    await mutate([{ kind: "effect.upsert", target, effectKind: "utility", params: { version: 1, state: createDefaultUtilityParams() } },
+      { kind: "effect.upsert", target, effectKind: "saturator", params: createDefaultSaturatorParams() }])
+  }
+  if (heldInstrumentRows.includes(row)) {
+    const assetOf = async (name: string): Promise<SampleAsset> => {
+      const asset = required((await snapshot()).assets.find((entry) => entry.name.includes(name)), `${name} asset`)
+      return { id: asset.id, name: asset.name, durationSec: required(asset.durationSec, `${name} duration`), sampleRate: required(asset.sampleRate, `${name} sample rate`),
+        channelCount: required(asset.channelCount, `${name} channel count`) }
+    }
+    await mutate([{ kind: "track.create", name: heldInstrumentTrack, trackKind: "instrument" }])
+    const held = required((await snapshot()).tracks.find((track) => track.name === heldInstrumentTrack), heldInstrumentTrack)
+    const kind = row === "held-drum-rack" ? "drum-rack" : row === "held-granular" ? "granular" : "sampler"
+    await mutate([
+      { kind: "instrument.set", target: { kind: "track", track: ref(held.id) }, instrumentKind: kind, params: sampledInstrumentParams(kind, await assetOf("changed")) },
+      { kind: "effect.upsert", target: { kind: "track", track: ref(held.id) }, effectKind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), balance: 1 } } },
+      { kind: "clip.midi.create", track: ref(held.id), name: "Held sampled note", startSec: 0, duration: contentSeconds ?? 16, wave: "sine", gain: 0.1,
+        notes: [{ id: "phase9-held-sample", beat: 0, length: contentSeconds === undefined ? 24 : contentSeconds * 2, pitch: kind === "drum-rack" ? 36 : 60, velocity: 0.9 }] },
+    ])
+  }
+  // Phase 9 only: the same synth, played live from a MIDI input instead of from a clip.
+  if (row === "live-midi") await addSineSynthTrack(liveMidiTrack)
+  // Setup is outside the measured interval. A normal product reload makes
+  // the offline reference independent of any stale mounted projection.
+  await context.reload()
+  await waitImportedClip(context, "retained")
+  // Phase 9 only: "limiter-state" is the Limiter at its default lookahead; "lane-state" is a Utility whose Gain follows an enabled
+  // automation lane (constant at the knob's own value), so a manual drag of the knob overrides it.
+  if (row === "limiter-state") await mutate([{ kind: "effect.upsert", target: { kind: "track", track: ref(changedTrack.id) }, effectKind: "limiter",
+    params: { version: 1, state: createDefaultLimiterParams() } }])
+  if (row === "lane-state") {
+    const target = { kind: "track", track: ref(changedTrack.id) }
+    await mutate([{ kind: "effect.upsert", target, effectKind: "utility", params: { version: 1, state: { ...createDefaultUtilityParams(), gainDb: 0, dcBlock: false } } }])
+    const utility = (await snapshot()).processors.find((entry) => "trackId" in entry.target && entry.target.trackId === changedTrack.id && entry.processor.kind === "utility")
+    if (!utility) throw new Error("Lane fixture's Utility missing")
+    await mutate([{ kind: "automation.set", target, effect: ref(utility.id), parameterId: "utility.gainDb", enabled: true,
+      points: [{ id: "lane-start", timeSec: 0, value: 0, interpolation: "linear" }, { id: "lane-end", timeSec: contentSeconds ?? 24, value: 0, interpolation: "linear" }] }])
+    // A lane written through the control protocol reaches the effects panel on a product reload (its knob shows the automation dot and a
+    // manual drag overrides it); a panel opened before the reload does not know the lane.
+    await context.reload()
+    await waitImportedClip(context, "retained")
+  }
+  if (spectralRow || row === "lane-state") {
+    await context.evaluate(`(()=>{
+      const button=[...document.querySelectorAll('button[aria-label]')].find(b=>b.getAttribute('aria-label')?.endsWith(': Changed right'));
+      if(!button)throw new Error("Effect-state track selector missing");button.click();return true;
+    })()`)
+    await waitForUi(context, "Effect-state devices missing",
+      `${spectralRow ? "document.querySelectorAll('.device-spectral').length===1&&" : ""}(()=>{try{return !!${utilityGainKnob}}catch{return false}})()`)
+  }
+  if (row === "effect-state") {
+    const index = (await snapshot()).tracks.findIndex((track) => track.id === changedTrack.id) + 1
+    // Monitoring keeps the edited FFT path out of compensation (phase 4 Keep
+    // Latency), so the left source keeps zero latency and nulls exactly.
+    await context.evaluate(`(()=>{
+      const button=document.querySelector(${JSON.stringify(`button[aria-label="Arm track ${index} for recording"]`)});
+      if(!button)throw new Error("Record arm unavailable");button.click();return true;
+    })()`)
+    await waitForUi(context, "Record arm not pressed",
+      `document.querySelector(${JSON.stringify(`button[aria-label="Disarm track ${index} for recording"]`)})?.getAttribute('aria-pressed')==='true'`)
+    await context.evaluate(`(()=>{
+      const session=window.dawDesktop.audioHost.session, state={progress:[]};
+      state.unsubscribe=session.onScheduleProgress(progress=>state.progress.push({wallMs:Date.now(),revision:progress.revision,
+        epoch:progress.epoch,running:progress.running,renderedThroughFrame:String(progress.renderedThroughFrame),
+        appliedProcessorSequence:String(progress.appliedProcessorSequence)}));
+      window.__ae08EffectState=state;return true;
+    })()`)
+  }
+  return { changedTrack, changedId, changedFile }
+}
+
+export const runPhase5Fixture = async (context: Phase5Context) => {
+  const { out, profile, row, mutate, snapshot, mark } = context
+  const runtime = (args: string[]) => command(profile, ["host", ...args])
+  const waitFrame = (frame: number) => waitNativeFrame(context, frame)
+  const { changedTrack, changedId, changedFile } = await setupPhase5Fixture(context)
+  await writeFile(path.join(out, "initial-snapshot.json"), JSON.stringify(await snapshot(), null, 2))
+  await exportReference(context, "initial-reference")
+  await runtime(["seek", "0"])
+  await mark("capture-start")
+  await runtime(["play"])
+  await waitFrame(48000 * 2)
+  const editStart = Date.now()
+  await mark("phase5-edit-start", { row })
+  const commits: { wallMs: number; revision: number }[] = []
+  let sameTrackId = true
+  let effectState: Awaited<ReturnType<typeof runEffectStateEdit>> | undefined
+  const edit = async (actions: z.infer<ReturnType<typeof z.json>>[]) => {
+    await mutate(actions)
+    const state = await snapshot()
+    commits.push({ wallMs: Date.now(), revision: state.project.revision })
+    await writeFile(path.join(out, `commit-${commits.length}-snapshot.json`), JSON.stringify(state, null, 2))
+  }
+  if (row === "delete-clip") {
+    if (!changedId) throw new Error("Delete clip missing")
+    await edit([{ kind: "clip.delete", clip: ref(changedId) }])
+  } else if (row === "move-trim") {
+    if (!changedId) throw new Error("Move clip missing")
+    await edit([{ kind: "clip.move", clip: ref(changedId), track: ref(changedTrack.id), startSec: 0.25 },
+      { kind: "clip.timing.set", clip: ref(changedId), bufferOffsetSec: 1.125, duration: 22 }])
+  } else if (row === "add-paged-asset") {
+    await runtime(["import", "--path", changedFile])
+    await waitImportedClip(context, "changed")
+    const fresh = await snapshot()
+    const clip = fresh.clips.find((item) => item.name.includes("changed"))
+    if (!clip?.source || !fresh.assets.some((asset) => asset.id === clip.source?.assetId && asset.durationSec === 180))
+      throw new Error("Live page-prepared new asset missing")
+    commits.push({ wallMs: Date.now(), revision: fresh.project.revision })
+  } else if (row === "remove-readd-track") {
+    // Public recovery remaps IDs. UI deletion records local history, whose
+    // undo restores the original ID; an external deletion has no UI undo entry.
+    await deleteTrackThroughUi(context, "Changed right")
+    const deleted = await snapshot()
+    if (deleted.tracks.some((track) => track.id === changedTrack.id)) throw new Error("UI track deletion did not commit")
+    commits.push({ wallMs: Date.now(), revision: deleted.project.revision })
+    await writeFile(path.join(out, `commit-${commits.length}-snapshot.json`), JSON.stringify(deleted, null, 2))
+    await waitFrame(48000 * 5)
+    await pressHistoryKey(context, false)
+    await waitImportedClip(context, "changed")
+    const restored = await snapshot()
+    sameTrackId = restored.tracks.some((track) => track.id === changedTrack.id)
+    commits.push({ wallMs: Date.now(), revision: restored.project.revision })
+    await writeFile(path.join(out, `commit-${commits.length}-snapshot.json`), JSON.stringify(restored, null, 2))
+    await writeFile(path.join(out, "restored-snapshot.json"), JSON.stringify(restored, null, 2))
+    const restoredClip = restored.clips.find((clip) => clip.trackId === changedTrack.id && clip.name.includes("changed"))
+    if (!restoredClip || !sameTrackId) throw new Error("UI undo did not restore the same track ID and clip")
+    await edit([{ kind: "clip.timing.set", clip: ref(restoredClip.id), bufferOffsetSec: 2.125, duration: 21 }])
+  } else if (row === "held-note" || row === "unchanged-span") {
+    await edit([{ kind: "track.create", name: "Silent publication target", trackKind: "audio" }])
+  } else if (row === "rapid-burst") {
+    if (!changedId) throw new Error("Burst clip missing")
+    // The first four topology intents are audio-neutral; the last deletes the
+    // sounding source. Coalescing is legal, but stale final audio cannot pass.
+    // No publication wait separates these five distinct keyed commits.
+    for (let index = 0; index < 4; index++)
+      await edit([{ kind: "track.create", name: `Burst ${index + 1}`, trackKind: "audio" }])
+    await edit([{ kind: "clip.delete", clip: ref(changedId) }])
+  } else if (row === "effect-state") {
+    effectState = await runEffectStateEdit(context, { trackId: changedTrack.id, waitFrame, snapshot,
+      resume: async () => { await runtime(["play"]) } })
+  } else {
+    // Raw tempo is deliberately independent of asset cursor.
+    await edit([{ kind: "project.settings.set", tempoBpm: 137 }])
+  }
+  await waitFrame(48000 * 18)
+  await mark("capture-end")
+  const finalEffectState = effectState && { ...effectState, knob: { ...effectState.knob, end: await readKnobDb(context) } }
+  if (finalEffectState) {
+    await writeFile(path.join(out, "effect-state-progress.json"), JSON.stringify(await context.read(`JSON.stringify((()=>{
+      const state=window.__ae08EffectState;state.unsubscribe();
+      const {listeners:_listeners,...drag}=state.drag;return {progress:state.progress,release:state.release,pause:state.pause,drag};
+    })())`, z.json()), null, 2))
+  }
+  await writeFile(path.join(out, "diagnostics-active.json"), JSON.stringify(await runtime(["diagnostics-v2"]), null, 2))
+  await runtime(["stop"])
+  await writeFile(path.join(out, "final-snapshot.json"), JSON.stringify(await snapshot(), null, 2))
+  // Reload ONLY after capture-end/Stop. Never repair or retry live audio.
+  await context.reload()
+  await waitImportedClip(context, "retained")
+  await exportReference(context, "final-reference")
+  await writeFile(path.join(out, "phase5-edits.json"), JSON.stringify({ phase: 5, row, editStart, commits,
+    sameTrackId, unchangedChannel: 0, sampleRate: 48000, endFrame: 48000 * 17, ...(finalEffectState && { effectState: finalEffectState }) }, null, 2))
+}

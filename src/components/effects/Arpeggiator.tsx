@@ -5,6 +5,7 @@ import type {
   ArpeggiatorParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { formatDevicePercent } from '~/lib/device-value-format'
 
 
 type ArpeggiatorProps = {
@@ -116,7 +117,7 @@ export default function Arpeggiator(props: ArpeggiatorProps) {
         />
         <Knob
           label="Gate"
-          valueLabel={`${(props.params.gate * 100).toFixed(0)}%`}
+          valueLabel={formatDevicePercent(props.params.gate)}
           value={props.params.gate}
           min={0.1}
           max={1.0}

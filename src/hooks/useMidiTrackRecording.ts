@@ -32,7 +32,8 @@ export const useMidiTrackRecording = (options: Options) => {
     setRecordingTrackId,
   }, midiAccess)
 
-  onCleanup(() => { void controller.stopRecording() })
+  // The controller reports cleanup failures itself and mutes notices after disposal.
+  onCleanup(() => { controller.stopRecording().catch(() => undefined) })
 
   return controller
 }

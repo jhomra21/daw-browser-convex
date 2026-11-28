@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { NativeExternalAttachmentPlan } from '@daw-browser/plugin-host-protocol'
-import { externalAutomationParameterId, type AutomationEnvelope } from '@daw-browser/shared'
+import { createDefaultSamplerParams, createDefaultGranularParams, createDefaultDrumRackParams, createDefaultLimiterParams, externalAutomationParameterId, type AutomationEnvelope, type SamplerZone } from '@daw-browser/shared'
+import type { ExportFx } from '@daw-browser/audio-engine/export-mixdown'
 import type { Clip, Track } from '@daw-browser/timeline-core/types'
 import type { PortablePreparedStretchAsset } from '@daw-browser/audio-engine/portable-stretch-preparation'
 import type { NativePreparedStretchAsset } from '@daw-browser/audio-engine/native-stretch-preparation'
@@ -229,7 +230,7 @@ const automationSegmentsFromSchedule = (payload: Uint8Array): DecodedAutomationS
   const sourceCount = view.getUint32(48, true)
   const automationCount = view.getUint32(52, true)
   const decoder = new TextDecoder()
-  let offset = 60 + instrumentCount * 48 + sourceCount * 112
+  let offset = 72 + instrumentCount * 48 + sourceCount * 112
   return Array.from({ length: automationCount }, () => {
     const instanceLength = view.getUint32(offset, true)
     offset += 4
@@ -256,7 +257,7 @@ const sourceEventsFromSchedule = (payload: Uint8Array) => {
   const instrumentCount = view.getUint32(44, true)
   const sourceCount = view.getUint32(48, true)
   return Array.from({ length: sourceCount }, (_, index) => {
-    const offset = 60 + instrumentCount * 48 + index * 112
+    const offset = 72 + instrumentCount * 48 + index * 112
     return {
       assetSessionId: view.getUint32(offset + 20, true),
       sequence: Number(view.getBigUint64(offset + 4, true)),
@@ -277,7 +278,7 @@ const sourceEventFromSchedule = (payload: Uint8Array) => {
 }
 
 test('compiles a native plan that remains directly structured-cloneable', () => {
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -308,7 +309,7 @@ test('chunks long stereo assets for a custom offline export range', () => {
       ]),
     } satisfies Clip<AudioBuffer>],
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [longTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -335,7 +336,7 @@ test('projects the mixed-rate raw mono and stereo precision matrix at exact outp
         () => new Float32Array(sourceSampleRate),
       )
       channels[0]![Math.floor(sourceSampleRate / 4)] = 1
-      const plan = compileNativeOfflineRenderPlan({
+      const { plan } = compileNativeOfflineRenderPlan({
         tracks: [{
           ...track,
           clips: [{
@@ -377,7 +378,7 @@ test('projects the mixed-rate raw mono and stereo precision matrix at exact outp
 test('projects raw trim and source offsets at exact output frames', () => {
   const sourceSampleRate = 96_000
   const outputSampleRate = 48_000
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [{
       ...track,
       clips: [{
@@ -425,7 +426,7 @@ test('accepts prepared Stretch PCM with custom range timing', () => {
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
     } satisfies Clip<AudioBuffer>],
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [warpedTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -491,7 +492,7 @@ test('deduplicates repeated native Stretch artifact placements while retaining b
     startSec: 4 / 48_000,
     audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [{ ...track, clips: [first, second] }],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -521,7 +522,7 @@ test('rebases prepared Stretch source timing and offsets for a custom range', ()
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
     } satisfies Clip<AudioBuffer>],
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [warpedTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -553,7 +554,7 @@ test('chunks long prepared Stretch PCM instead of rejecting the asset', () => {
       audioWarp: { enabled: true, mode: 'stretch', sourceBpm: 120 },
     } satisfies Clip<AudioBuffer>],
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [warpedTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -573,7 +574,7 @@ test('chunks long prepared Stretch PCM instead of rejecting the asset', () => {
 })
 
 test('preserves the existing no-warp native source projection', () => {
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -595,6 +596,63 @@ test('preserves the existing no-warp native source projection', () => {
   })
 })
 
+test('maps complete instrument-only regions without changing portable PCM defaults', () => {
+  const frameCount = 8 * 48_000
+  const buffer = new TestAudioBuffer([new Float32Array(frameCount).fill(0.25), new Float32Array(frameCount).fill(-0.5)])
+  const zone: SamplerZone = {
+    id: 'zone', sample: { assetKey: 'instrument-only', url: 'https://example.test/sample.wav', sourceKind: 'url',
+      source: { durationSec: 8, sampleRate: 48_000, channelCount: 2 } },
+    keyLow: 0, keyHigh: 127, velocityLow: 1, velocityHigh: 127, rootNote: 60,
+    tuneCents: 0, gain: 1, pan: 0, roundRobinGroup: 0, roundRobinIndex: 0,
+    playbackMode: 'one-shot', startSec: 0, crossfadeSec: 0, chokeGroup: 0,
+  }
+  const drum = createDefaultDrumRackParams()
+  const entries: NonNullable<ExportFx['trackFx']>[string][] = [
+    { instances: [], instrument: { kind: 'sampler', instanceId: 'sampler', params: { ...createDefaultSamplerParams(), zones: [zone, { ...zone, id: 'shared' }] } },
+      samplerBuffers: new Map([['zone', { buffer, sourceStartFrame: 0 }], ['shared', { buffer, sourceStartFrame: 0 }]]) },
+    { instances: [], instrument: { kind: 'granular', instanceId: 'granular', params: { ...createDefaultGranularParams(), zone } },
+      granularBuffer: { assetKey: zone.sample.assetKey, buffer, sourceStartFrame: 0 } },
+    { instances: [], instrument: { kind: 'drum-rack', instanceId: 'drums', params: { ...drum, pads: drum.pads.map((pad, index) => index < 2 ? { ...pad, sample: zone.sample } : pad) } },
+      drumRackBuffers: new Map(drum.pads.slice(0, 2).map((pad) => [pad.id, { buffer, sourceStartFrame: 0 }])) },
+  ]
+  for (const entry of entries) {
+    const fx: ExportFx = { trackFx: { 'track-1': entry }, masterFxInstances: [], masterVolume: 1 }
+    const tracks: Track<AudioBuffer>[] = [{ ...track, kind: 'instrument', clips: [] }]
+    const sources = new Map<string, AudioBuffer>()
+    const { plan } = compileNativeOfflineRenderPlan({
+      tracks, fx, automationEnvelopes: [], sidechainRoutes: [], bpm: 120,
+      range: { mode: 'custom', startSec: 2, endSec: 3 }, sampleRateHz: 48_000,
+      channelCount: 2, tailFrames: 123, projectGeneration: 1,
+      onInstrumentRegionSources: (regions) => { for (const region of regions) sources.set(region.sourceAssetKey, region.buffer) },
+    })
+    expect(plan.assets).toEqual([])
+    expect(plan.mappedAssets).toHaveLength(1)
+    expect(plan.mappedAssets?.[0]?.ranges).toEqual([{ startFrame: 0, frameCount }])
+    expect(plan.totalFrames).toBe(48_123)
+    expect(sources.get(plan.mappedAssets?.[0]?.sourceAssetKey ?? '')).toBe(buffer)
+    expect(structuredClone(plan)).toEqual(plan)
+    const portable = compilePortableExportSnapshot({
+      tracks, fx, bpm: 120, range: { mode: 'custom', startSec: 2, endSec: 3 },
+      sampleRateHz: 48_000, revision: 1, epoch: 1, firstSequence: 1, allowInstruments: true,
+    })
+    if (!portable.supported) throw new Error(portable.reasons.join(' '))
+    expect(portable.assets[0]?.pcm?.planes[0]?.length).toBe(frameCount)
+    expect(portable.assets[0]?.transferables).toHaveLength(2)
+    const sourceAssetKey = plan.mappedAssets?.[0]?.sourceAssetKey
+    if (!sourceAssetKey) throw new Error('Expected regional identity.')
+    const { plan: shared } = compileNativeOfflineRenderPlan({
+      tracks: [{ ...track, clips: [{ ...track.clips[0]!, sourceAssetKey, buffer, duration: 8,
+        sourceDurationSec: 8, sourceSampleRate: 48_000, sourceChannelCount: 2 }] }],
+      fx, automationEnvelopes: [], sidechainRoutes: [], bpm: 120,
+      range: { mode: 'custom', startSec: 2, endSec: 3 }, sampleRateHz: 48_000,
+      channelCount: 2, tailFrames: 0, projectGeneration: 1,
+    })
+    expect(shared.assets).toEqual([])
+    expect(shared.mappedAssets).toHaveLength(1)
+    expect(shared.mappedAssets?.[0]?.ranges).toEqual([{ startFrame: 0, frameCount }])
+  }
+})
+
 test('maps a six-minute mono local asset instead of retaining its full PCM', () => {
   const frameCount = 6 * 60 * 48_000
   const localTrack: Track<AudioBuffer> = {
@@ -610,7 +668,7 @@ test('maps a six-minute mono local asset instead of retaining its full PCM', () 
       buffer: new TestAudioBuffer([new Float32Array(frameCount)]),
     } satisfies Clip<AudioBuffer>],
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [localTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -636,7 +694,7 @@ test('maps a six-minute mono local asset instead of retaining its full PCM', () 
 })
 
 test('represents an unhydrated source as a bounded mapped asset', () => {
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [{
       ...track,
       clips: [{
@@ -730,7 +788,7 @@ test('re-sequences offline source events in chronological enqueue order across c
       } satisfies Clip<AudioBuffer>)),
     },
   ]
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: traversalOrderTracks,
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -869,7 +927,7 @@ test('keeps VST and native processor automation with prepared Stretch', () => {
     } satisfies Clip<AudioBuffer>],
   }
   const parameterId = externalAutomationParameterId(attachment.attachments[0]!.instanceId, 7)
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [warpedTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [
@@ -896,7 +954,7 @@ test('keeps VST and native processor automation with prepared Stretch', () => {
 test('renders VST parameter automation into native offline schedule windows', () => {
   const plan = attachmentPlan()
   const parameterId = externalAutomationParameterId(plan.attachments[0]!.instanceId, 7)
-  const exportPlan = compileNativeOfflineRenderPlan({
+  const { plan: exportPlan } = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [automationEnvelope(parameterId, [
@@ -921,13 +979,21 @@ test('renders VST parameter automation into native offline schedule windows', ()
     startValue: 0.25,
     endValue: 0.75,
     interpolation: 'linear',
+  }, {
+    instanceId: plan.attachments[0]!.instanceId,
+    parameterId: 7,
+    startFrame: 48,
+    endFrame: 48 + 544,
+    startValue: 0.75,
+    endValue: 0.75,
+    interpolation: 'hold',
   }])
 })
 
 test('rebases VST automation to frame zero for a custom export range', () => {
   const plan = attachmentPlan()
   const parameterId = externalAutomationParameterId(plan.attachments[0]!.instanceId, 7)
-  const exportPlan = compileNativeOfflineRenderPlan({
+  const { plan: exportPlan } = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [automationEnvelope(parameterId, [
@@ -953,6 +1019,7 @@ test('rebases VST automation to frame zero for a custom export range', () => {
   }))).toEqual([
     { startFrame: 0, endFrame: 24_000, interpolation: 'hold' },
     { startFrame: 24_000, endFrame: 48_000, interpolation: 'linear' },
+    { startFrame: 48_000, endFrame: 48_000 + 544, interpolation: 'hold' },
   ])
 })
 
@@ -986,7 +1053,7 @@ test('rejects VST automation that exceeds the worker callback event capacity', (
 })
 
 test('renders track volume automation into native processor schedule events', () => {
-  const exportPlan = compileNativeOfflineRenderPlan({
+  const { plan: exportPlan } = compileNativeOfflineRenderPlan({
     tracks: [track],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [automationEnvelope('volume', [
@@ -1003,7 +1070,7 @@ test('renders track volume automation into native processor schedule events', ()
   })
   const view = new DataView(exportPlan.schedule.buffer, exportPlan.schedule.byteOffset, exportPlan.schedule.byteLength)
   expect(view.getUint32(56, true)).toBe(1)
-  const processorOffset = 60 + view.getUint32(48, true) * 112
+  const processorOffset = 72 + view.getUint32(48, true) * 112
   expect(Number(view.getBigUint64(processorOffset, true))).toBeGreaterThan(0)
   expect(view.getUint32(processorOffset + 8, true)).toBe(26)
   expect(view.getUint32(processorOffset + 12, true)).toBe(0)
@@ -1044,7 +1111,7 @@ test('partitions many uniquely timed source events without rescanning earlier ev
       buffer: new TestAudioBuffer(),
     } satisfies Clip<AudioBuffer>)),
   }
-  const plan = compileNativeOfflineRenderPlan({
+  const { plan } = compileNativeOfflineRenderPlan({
     tracks: [sourceTrack],
     fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
     automationEnvelopes: [],
@@ -1058,4 +1125,108 @@ test('partitions many uniquely timed source events without rescanning earlier ev
   })
 
   expect(plan.scheduleWindows?.length).toBe(2)
+})
+
+test('clips a native volume ramp to each export window so it renders as it plays', () => {
+  const sourceTrack: Track<AudioBuffer> = {
+    id: track.id,
+    name: 'Source Track',
+    volume: 1,
+    clips: Array.from({ length: 300 }, (_, index) => ({
+      id: `source-clip-${index}`,
+      name: 'Source Clip',
+      color: '#fff',
+      startSec: index * 0.01,
+      duration: 4 / 48_000,
+      sourceAssetKey: 'asset-1',
+      buffer: new TestAudioBuffer(),
+    } satisfies Clip<AudioBuffer>)),
+  }
+  const { plan } = compileNativeOfflineRenderPlan({
+    tracks: [sourceTrack],
+    fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+    automationEnvelopes: [automationEnvelope('volume', [
+      { id: 'start', timeSec: 0, value: 0, interpolation: 'linear' },
+      { id: 'end', timeSec: 2, value: 1, interpolation: 'hold' },
+    ])],
+    sidechainRoutes: [],
+    bpm: 120,
+    range: { mode: 'whole' },
+    sampleRateHz: 48_000,
+    channelCount: 2,
+    tailFrames: 0,
+    projectGeneration: 1,
+  })
+  const windows = (plan.scheduleWindows ?? []).map((payload) => {
+    const view = new DataView(payload.buffer, payload.byteOffset, payload.byteLength)
+    const offset = 72 + view.getUint32(44, true) * 48 + view.getUint32(48, true) * 112
+    return {
+      startFrame: Number(view.getBigUint64(16, true)),
+      endFrame: Number(view.getBigUint64(24, true)),
+      ramps: Array.from({ length: view.getUint32(56, true) }, (_, index) => ({
+        linear: view.getUint32(offset + index * 40 + 12, true) === 1,
+        frame: Number(view.getBigUint64(offset + index * 40 + 16, true)),
+        endFrame: Number(view.getBigUint64(offset + index * 40 + 24, true)),
+        value: view.getFloat32(offset + index * 40 + 32, true),
+        endValue: view.getFloat32(offset + index * 40 + 36, true),
+      })),
+    }
+  })
+  expect(windows.length).toBe(2)
+  // The ramp is one segment per window, ending where the window ends, and the second picks up its value.
+  const [first, second] = windows
+  expect(first?.ramps).toMatchObject([{ linear: true, frame: 0, endFrame: first!.endFrame, value: 0 }])
+  expect(second?.ramps[0]).toMatchObject({ linear: true, frame: second!.startFrame, endFrame: 96_000, endValue: 1 })
+  expect(second?.ramps[0]?.value).toBeCloseTo(first!.ramps[0]!.endValue, 6)
+})
+
+const limiterOnMaster = (): ExportFx => ({
+  trackFx: {},
+  masterFxInstances: [{ id: 'master-limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }],
+  masterVolume: 1,
+})
+
+const RANGE_FRAMES = 96
+
+const compileWithLatency = (patch: Partial<Parameters<typeof compileNativeOfflineRenderPlan>[0]>) => compileNativeOfflineRenderPlan({
+  tracks: [track],
+  fx: { trackFx: {}, masterFxInstances: [], masterVolume: 1 },
+  automationEnvelopes: [],
+  sidechainRoutes: [],
+  bpm: 120,
+  range: { mode: 'custom', startSec: 0, endSec: RANGE_FRAMES / 48_000 },
+  sampleRateHz: 48_000,
+  channelCount: 2,
+  tailFrames: 0,
+  projectGeneration: 1,
+  ...patch,
+})
+
+test('renders one graph latency past the range and the tail so the export can start on the timeline', () => {
+  const { plan, latencyFrames } = compileWithLatency({
+    fx: limiterOnMaster(),
+    externalAttachments: attachmentPlan(),
+    tailFrames: 10,
+  })
+
+  // Master Limiter lookahead (5 ms) plus the VST3's declared 32 frames and 512 transport frames.
+  expect(latencyFrames).toBe(240 + 32 + 512)
+  expect(plan.totalFrames).toBe(RANGE_FRAMES + 10 + latencyFrames)
+})
+
+test('a graph without latency renders exactly the range and the tail', () => {
+  const { plan, latencyFrames } = compileWithLatency({ tailFrames: 10 })
+
+  expect(latencyFrames).toBe(0)
+  expect(plan.totalFrames).toBe(RANGE_FRAMES + 10)
+})
+
+test('a bypassed VST3 adds no latency to the render', () => {
+  const attachments = attachmentPlan()
+  const { plan, latencyFrames } = compileWithLatency({
+    externalAttachments: { ...attachments, attachments: attachments.attachments.map((attachment) => ({ ...attachment, bypassed: true })) },
+  })
+
+  expect(latencyFrames).toBe(0)
+  expect(plan.totalFrames).toBe(RANGE_FRAMES)
 })

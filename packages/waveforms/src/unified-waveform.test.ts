@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import type { AudioPcmSourceDescriptor, DecodedAudioPage } from '@daw-browser/audio-engine/media-pages'
+import type { AudioPcmSourceDescriptor, DecodedAudioPage } from '@daw-browser/shared'
 import {
   createPeakLevels,
   decodePeakByte,

@@ -1,0 +1,468 @@
+{
+ "name": "ae08-phase8-states-bind",
+ "sequence": 57,
+ "createdAt": "2026-11-16T23:14:22.024Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 787,
+   "new": 790
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 706,
+   "new": 709
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 705,
+   "new": 708
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-388",
+    "expect",
+    "exit"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-388",
+    "expect",
+    "fuzz",
+    "status"
+   ],
+   "old": "pass",
+   "new": "fail"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-388",
+    "expect",
+    "fuzz",
+    "failures"
+   ],
+   "old": [],
+   "new": [
+    {
+     "invariant": "I1",
+     "detail": "Refused latency edit never reached native: native fft 2048, desired 512",
+     "class": "latency-before-publish-lost-edit",
+     "domain": "live",
+     "step": null
+    }
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-399",
+    "expect",
+    "exit"
+   ],
+   "old": 0,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-399",
+    "expect",
+    "fuzz",
+    "status"
+   ],
+   "old": "pass",
+   "new": "fail"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:390:390-plus-399",
+    "expect",
+    "fuzz",
+    "failures"
+   ],
+   "old": [],
+   "new": [
+    {
+     "invariant": "I1",
+     "detail": "Refused latency edit never reached native: native fft 2048, desired 512",
+     "class": "latency-before-publish-lost-edit",
+     "domain": "live",
+     "step": null
+    }
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 789,
+   "new": 792
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 788,
+   "new": 791
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:mutant",
+    "expect",
+    "exit"
+   ],
+   "old": 1,
+   "new": 0
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:mutant",
+    "expect",
+    "fuzz",
+    "status"
+   ],
+   "old": "fail",
+   "new": "pass"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:1:mutant",
+    "expect",
+    "fuzz",
+    "failures"
+   ],
+   "old": [
+    {
+     "invariant": "I1",
+     "detail": "Native differs from desired",
+     "class": "retained-override",
+     "domain": "live",
+     "step": null
+    },
+    {
+     "invariant": "I4",
+     "detail": "Unsettled controller request at logical drain bound",
+     "class": "latency-starvation",
+     "domain": "live",
+     "step": null
+    }
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#0",
+    "#1"
+   ],
+   "old": 205,
+   "new": 203
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#1",
+    "#1"
+   ],
+   "old": 209,
+   "new": 207
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:394:0:mutant",
+    "expect",
+    "rejection",
+    "#2",
+    "#1"
+   ],
+   "old": 214,
+   "new": 212
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:268:0:mutant",
+    "expect",
+    "fuzz",
+    "failures",
+    "#0",
+    "step"
+   ],
+   "old": 124,
+   "new": 120
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 states and bind-to-armed round worker (hand record 57, no --bless). Tree: 5392cb24 plus c63c3947 (14d1aaec, a prepare settles the instrument flags and the renderer skips the empty states call; native-playback-controller.test.ts 706 to 709, the fuzz host fixture models the host's prepare), e89c9279 (lint) and 3113556f (four armed-* marks). Measured with `fast-cert.ts --only <422 jobs> --jobs 1 --base-commit 5392cb24 --measure`: every non-retired arm whose targets or witnesses touch audio-host.cpp, native-playback-controller.ts and its test, ipc-channels.ts, ae-08-processor-state-fuzz-host.ts or ae-08-prepare-split.ts, with every row sibling and control: tier T2n verdict PASS, freeze held, 0 failing. Moved: 22 pass counts (controller file 706 to 709 and the desktop files 789 to 792, each arm that runs the whole file). The skipped states call (and the host fixture change) shift the fake host's call sequence, so four fuzz seeds observe different schedules: hook seed 498 under mutants 390+388 and 390+399 (diag arms) now fails I1 `latency-before-publish-lost-edit` (a mutant combination detected, was a pass); hook seed 570 under the 384:1 mutant now passes (the mutant is no longer detected by that seed; row 384 stays killed by 384:0 and 384:2, so the arm joins test-debt.md and retiredArms); the 394:0 mutant's rejection records move by 2 steps (205, 209, 214 to 203, 207, 212); the 268:0 mutant's failing step moves 124 to 120 (class and detail unchanged).",
+  "expectationsSha256": "8945d7b3189fd224f87691b3333d79f10f639d0aee6f4d465d40e8c6a52498bd"
+ }
+}

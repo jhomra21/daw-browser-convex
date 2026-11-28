@@ -1,5 +1,6 @@
-export type RecordingTerminationCause = "native-fatal" | "writer-failure" | "lifecycle-cancellation" | "controller-cleanup" | "explicit-stop" | "start-failure" | "capture-failure"
+import type { RecordingTerminationCause } from "./recording-delivery-trace"
 import type { WriterTiming } from "../../../packages/audio-engine/src/recording/recording-protocol"
+export type { RecordingTerminationCause } from "./recording-delivery-trace"
 
 type RecordingDiagnostics = {
   requestedFormat: "pcm" | "compressed"
@@ -8,7 +9,7 @@ type RecordingDiagnostics = {
   activeChannels: number | null
   requestedSampleRate: number | null
   activeSampleRate: number | null
-  transport: "sab" | "transferable" | null
+  transport: "sab" | "transferable" | "native-spool" | null
   capturedFrames: number | null
   overrunFrames: number | null
   droppedFrames: number | null

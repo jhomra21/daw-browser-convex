@@ -16,6 +16,7 @@ type ProjectDeleteDialogProps = {
   open: boolean
   project: ProjectDialogProject | null
   busy: boolean
+  error?: string | null
   onOpenChange: (open: boolean) => void
   onConfirm: (project: ProjectDialogProject) => void
 }
@@ -59,6 +60,7 @@ export default function ProjectDeleteDialog(props: ProjectDeleteDialogProps) {
             <TextFieldLabel>Project name</TextFieldLabel>
             <TextFieldInput value={confirmation()} onInput={(event) => setConfirmation(event.currentTarget.value)} />
           </TextField>
+          {props.error && <div class="mt-3 text-sm text-destructive" role="alert">{props.error}</div>}
           <DialogFooter class="mt-6">
             <Button variant="outline" type="button" onClick={() => props.onOpenChange(false)} disabled={props.busy}>
               Cancel

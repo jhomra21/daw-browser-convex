@@ -393,6 +393,8 @@ export default defineSchema({
     instanceId: v.optional(v.string()),
     params: v.any(),
     createdAt: v.number(),
+    // Project revision of the transaction that last wrote this row. Rows written before stamping have none.
+    revision: v.optional(v.number()),
   })
     .index("by_track", ["trackId"])
     .index("by_room", ["projectId"])

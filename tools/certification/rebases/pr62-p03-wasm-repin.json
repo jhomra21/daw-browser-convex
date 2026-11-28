@@ -1,0 +1,58 @@
+{
+ "name": "pr62-p03-wasm-repin",
+ "sequence": 64,
+ "createdAt": "2026-11-17T17:52:17.119Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "53ba8eb67e2462edf0cbf0c4757dfa7c995906b9be6a05759b39ce81af8c2325",
+   "new": "931fa016dbd6242a609ef6750c266a174ef1cc1c4ce618d82003e729a3c01a94"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "5b5b058089e2c3b3f6defc6d6b9a1c78576e17814ddc1d667121356b7fe37aec",
+   "new": "a3b818f87a882eea493691d491289d3e406090077f0909a8fdce086d7b0708d8"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "5b5b058089e2c3b3f6defc6d6b9a1c78576e17814ddc1d667121356b7fe37aec",
+   "new": "a3b818f87a882eea493691d491289d3e406090077f0909a8fdce086d7b0708d8"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "a6983c49764bff7391aeca9ebafa97ea16c15df4f5501ceeb9cfbd03baa9345f",
+   "new": "4a9bf72bcdcdf09e4efe95c42ac812d8b14e4dccd8904877c83125872539ba30"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P03 (pr62-cleanup 7616e44b; hand record, no --bless). audio_core.cpp now applies the validator's path-latency capacity check (validate_graph_path_latency) to compensated paths and to running and stopped read-head delays in prepare_latency_heads, so a prepare whose path exceeds the tap history once spectral compensation is added is rejected. The portable wasm was rebuilt in the main checkout with `bun run build:portable-wasm`; the rebuilt artifact is byte-identical to the committed one. x-wasm-source-hash re-pinned to `bun native/audio-core/scripts/portable-wasm-source-hash.ts` output and the three artifact hashes. The watched manifest entries for audio_core.cpp, the wasm and its manifest stay for the final bless.",
+  "expectationsSha256": "b1f6d45e6c22b945ade947e3a0bc3c760b7d5d83652fc55b9bb4736be09cbd0e"
+ }
+}

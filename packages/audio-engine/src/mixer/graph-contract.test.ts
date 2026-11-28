@@ -270,6 +270,24 @@ describe('mixer routing plan', () => {
     }
   })
 
+  test('compensates sends stored without a tap like post-fader sends', () => {
+    // Two sends that name no tap reach one return: the delayed source arrives through a limiter's lookahead, the other has no
+    // latency. The core accepts a graph only when each edge carries the convergence latency minus its own arrival.
+    const graph = resolveMixerGraph({
+      channels: createMixerChannels([
+        { id: 'slow', kind: 'audio', name: 'Slow', clips: [], volume: 1, sends: [{ targetId: 'space', amount: 0.5 }] },
+        { id: 'fast', kind: 'audio', name: 'Fast', clips: [], volume: 1, sends: [{ targetId: 'space', amount: 0.5 }] },
+        { id: 'space', kind: 'audio', name: 'Space', clips: [], volume: 1, channelRole: 'return' },
+      ]),
+      trackFx: { slow: { instances: [{ id: 'limiter', kind: 'limiter', params: { version: 1, state: createDefaultLimiterParams() } }] } },
+    })
+    const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
+    const lookahead = snapshot.nodes.find((node) => node.id === 'slow')?.latencyFrames ?? 0
+    expect(lookahead).toBeGreaterThan(0)
+    expect(snapshot.edges.filter((edge) => edge.toNodeId === 'space').map((edge) => [edge.fromNodeId, edge.tap, edge.pdcDelayFrames]))
+      .toEqual([['slow', 'post-fader', 0], ['fast', 'post-fader', lookahead]])
+  })
+
   test('projects portable Saturator and fixed eight-band EQ state without legacy fallback', () => {
     const graph = resolveMixerGraph({
       channels: createMixerChannels([

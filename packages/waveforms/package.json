@@ -18,6 +18,6 @@
     "check": "bun --bun tsc --noEmit"
   },
   "dependencies": {
-    "@daw-browser/audio-engine": "workspace:*"
+    "@daw-browser/shared": "workspace:*"
   }
 }

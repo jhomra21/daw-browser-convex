@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildGroupClipOverview, buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, wouldCreateCycle } from './timeline-track-layout'
+import { buildGroupClipOverview, buildTimelineTrackLayout, buildTimelineTrackLayoutRows, buildTrackTree, computeDepthMap, flattenVisibleTracks, trackIdsInYRange, trackIndexAtY, trackLayoutRowAtY, reuseTimelineTrackLayout, wouldCreateCycle } from './timeline-track-layout'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { COLLAPSED_LANE_HEIGHT, LANE_HEIGHT } from '~/lib/timeline-utils'
 
@@ -99,6 +99,25 @@ describe('timeline track layout grouping', () => {
     expect(layout.returnRows[0]?.topPx).toBe(0)
     expect(layout.returnRows[0]?.automationHeightPx).toBe(0)
     expect(layout.returnHeightPx).toBe(COLLAPSED_LANE_HEIGHT)
+  })
+
+  test('keeps the row objects of tracks whose layout did not move when another track is added', () => {
+    const layoutFor = (tracks: Track[], automated = false) => buildTimelineTrackLayout({
+      tracks,
+      visibleTrackIds: tracks.map((entry) => entry.id),
+      visibleByTrackId: automated ? { a: true } : {},
+      heightsByLaneOwnerKey: automated ? { a: 48 } : {},
+      visibleParameterIdsByTrackId: automated ? { a: ['volume'] } : {},
+    })
+    const before = layoutFor([track('a'), track('b')])
+    const added = reuseTimelineTrackLayout(before, layoutFor([track('a'), track('b'), track('c')]))
+    expect(added.scrollingRows.map((row) => row.trackId)).toEqual(['a', 'b', 'c'])
+    expect(added.scrollingRows[0]).toBe(before.scrollingRows[0])
+    expect(added.scrollingRows[1]).toBe(before.scrollingRows[1])
+    expect(reuseTimelineTrackLayout(added, layoutFor([track('a'), track('b'), track('c')]))).toBe(added)
+    const moved = reuseTimelineTrackLayout(added, layoutFor([track('a'), track('b'), track('c')], true))
+    expect(moved.scrollingRows[1]).not.toBe(added.scrollingRows[1])
+    expect(moved.scrollingRows[1]?.topPx).toBeGreaterThan(added.scrollingRows[1]?.topPx ?? 0)
   })
 
   test('keeps expanded Return automation in the sticky layout', () => {

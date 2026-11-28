@@ -6,6 +6,7 @@ import {
   type StreamingExportAnalysis,
 } from '@daw-browser/audio-engine/streaming-export-fidelity'
 import { createStreamingTruePeakLimiter } from '@daw-browser/audio-engine/streaming-true-peak-limiter'
+import { dbFromLinear, linearFromDb } from '@daw-browser/shared'
 
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
 import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
@@ -26,8 +27,6 @@ type Pipeline = {
   limiters: ReturnType<typeof createStreamingTruePeakLimiter>[]
 }
 
-const linearFromDb = (value: number) => 10 ** (value / 20)
-const dbFromLinear = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
 async function* applyGainToChunks(
   chunks: AsyncIterable<AudioBuffer>,
@@ -51,37 +50,48 @@ async function* applyGainToChunks(
 
 export const processNativeOfflinePcmSpool = async (input: {
   spool: NativeOfflinePcmSpoolSession
+  /** Frames the graph delays its output by; they are rendered, then dropped so the file starts on the timeline. */
+  latencyFrames?: number
   sourceDurationSec: number
   render: ExportRenderSettings
   signal: AbortSignal
 }): Promise<ProcessedNativeOfflinePcmSpool> => {
   input.signal.throwIfAborted()
   const descriptor = await input.spool.finalize()
+  const latencyFrames = input.latencyFrames ?? 0
   if (descriptor.sampleRate !== input.render.sampleRate
     || descriptor.channelCount !== input.render.numberOfChannels
     || !Number.isFinite(input.sourceDurationSec)
-    || input.sourceDurationSec < 0) {
+    || input.sourceDurationSec < 0
+    || !Number.isSafeInteger(latencyFrames)
+    || latencyFrames < 0
+    || latencyFrames >= descriptor.totalFrames) {
     throw new Error('Native offline PCM spool does not match export settings.')
   }
   const metadata = {
     sampleRate: descriptor.sampleRate,
     channelCount: descriptor.channelCount,
   }
+  const alignedFrames = descriptor.totalFrames - latencyFrames
   const sourceEndFrame = Math.min(
-    descriptor.totalFrames,
+    alignedFrames,
     Math.ceil(input.sourceDurationSec * descriptor.sampleRate),
   )
   const endFrame = input.render.tail.mode === 'automatic'
-    ? await findAutomaticTailEndFrameInChunks(input.spool.replay({ signal: input.signal }), {
+    ? await findAutomaticTailEndFrameInChunks(input.spool.replay({ startFrame: latencyFrames, signal: input.signal }), {
       ...metadata,
       sourceEndFrame,
       policy: input.render.tail,
       signal: input.signal,
     })
-    : descriptor.totalFrames
+    : alignedFrames
 
   const createPipeline = (stages: readonly ProcessingStage[]): Pipeline => {
-    let chunks: AsyncIterable<AudioBuffer> = input.spool.replay({ endFrame, signal: input.signal })
+    let chunks: AsyncIterable<AudioBuffer> = input.spool.replay({
+      startFrame: latencyFrames,
+      endFrame: latencyFrames + endFrame,
+      signal: input.signal,
+    })
     const limiters: ReturnType<typeof createStreamingTruePeakLimiter>[] = []
     for (const stage of stages) {
       chunks = applyGainToChunks(chunks, stage.gain, input.signal)

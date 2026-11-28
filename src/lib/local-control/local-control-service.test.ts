@@ -5,6 +5,7 @@ import type { JsonValue } from '@daw-browser/shared'
 import { createLocalProject, createLocalProjectEntityRow, openLocalProjectDb } from '~/lib/local-project-db'
 import { registerPendingLocalProjectWriteFlusher } from '~/lib/local-project-pending-writes'
 import { createLocalControlService, LocalControlServiceError } from './local-control-service'
+import { createRecordingTargetLock, RECORDING_TARGET_LOCKED_REASON } from '~/lib/track-recording-target'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 
 const actor = { subject: 'local:00000000-0000-4000-8000-000000000000' }
@@ -249,6 +250,56 @@ test('execution guards prevent transaction reads and writes after availability i
   expect(await db.count('controlCommits')).toBe(0)
 })
 
+test('refuses a commit that deletes the recording target and still applies an unrelated one', async () => {
+  const project = await createLocalProject(`Recording lock ${crypto.randomUUID()}`)
+  const track = (await createLocalControlService({ actor }).snapshot({ projectId: project.id })).tracks[0]
+  if (!track) throw new Error('Expected local project track.')
+  const lock = createRecordingTargetLock(() => [{ id: track.id }])
+  lock.start(track.id)
+  const service = createLocalControlService({ actor, refuseRecordingTargetChange: lock.refuseTransition })
+  await expect(service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'locked-delete',
+    actions: [{ kind: 'track.delete', track: { source: 'persisted', id: track.id } }],
+  })).rejects.toMatchObject({ data: { code: 'validation', message: RECORDING_TARGET_LOCKED_REASON } })
+  expect((await service.snapshot({ projectId: project.id })).tracks.map((entry) => entry.id)).toContain(track.id)
+  await expect(service.commit({
+    version: 'v1',
+    projectId: project.id,
+    idempotencyKey: 'unrelated-rename',
+    actions: [{ kind: 'project.rename', name: 'Renamed during take' }],
+  })).resolves.toMatchObject({ applied: true })
+})
+
+test('refuses a commit whose take started after preview and approval', async () => {
+  const project = await createLocalProject(`Recording lock after approval ${crypto.randomUUID()}`)
+  const track = (await createLocalControlService({ actor }).snapshot({ projectId: project.id })).tracks[0]
+  if (!track) throw new Error('Expected local project track.')
+  const lock = createRecordingTargetLock(() => [{ id: track.id }])
+  const service = createLocalControlService({ actor, refuseRecordingTargetChange: lock.refuseTransition })
+  const request = {
+    version: 'v1' as const,
+    projectId: project.id,
+    actions: [{ kind: 'track.delete' as const, track: { source: 'persisted' as const, id: track.id } }],
+  }
+  await service.preview(request)
+  const approval = await service.requestApproval(request)
+  lock.start(track.id)
+  await expect(service.commit({
+    ...request,
+    idempotencyKey: 'delete-after-take-started',
+    approvalToken: approval.approvalToken,
+  })).rejects.toMatchObject({ data: { code: 'validation', message: RECORDING_TARGET_LOCKED_REASON } })
+  expect((await service.snapshot({ projectId: project.id })).tracks.map((entry) => entry.id)).toContain(track.id)
+  lock.release()
+  await expect(service.commit({
+    ...request,
+    idempotencyKey: 'delete-after-take-finished',
+    approvalToken: approval.approvalToken,
+  })).resolves.toMatchObject({ applied: true })
+})
+
 test('replays only the original semantic request for an idempotency key', async () => {
   const project = await createLocalProject(`Idempotency ${crypto.randomUUID()}`)
   const service = createLocalControlService({ actor })
@@ -349,19 +400,24 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
     updatedAt: 1,
   })))
   const service = createLocalControlService({ actor })
-  for (let index = 0; index < 128; index += 1) {
+  const deleteRange = async (start: number, end: number, idempotencyKey: string) => {
     const request = {
       version: 'v1' as const,
       projectId: project.id,
-      actions: [{ kind: 'asset.delete' as const, asset: { source: 'persisted' as const, id: `protected-${index}` } }],
+      actions: Array.from({ length: end - start }, (_, offset) => ({
+        kind: 'asset.delete' as const,
+        asset: { source: 'persisted' as const, id: `protected-${start + offset}` },
+      })),
     }
     const approval = await service.requestApproval(request)
     await service.commit({
       ...request,
-      idempotencyKey: `protected-${index}`,
+      idempotencyKey,
       approvalToken: approval.approvalToken,
     })
   }
+  await deleteRange(0, 100, 'protected-0-99')
+  await deleteRange(100, 128, 'protected-100-127')
   const request = {
     version: 'v1' as const,
     projectId: project.id,
@@ -389,11 +445,12 @@ test('rejects a 129th protected asset recovery without orphaning its GC job', as
     actions: balancedActions,
   }
   const balancedApproval = await service.requestApproval(balancedRequest)
-  await expect(service.commit({
+  const balancedCommit = await service.commit({
     ...balancedRequest,
     idempotencyKey: 'protected-balanced-replace',
     approvalToken: balancedApproval.approvalToken,
-  })).resolves.toMatchObject({ applied: true })
+  })
+  expect(balancedCommit).toMatchObject({ applied: true })
   expect(await db.count('controlRecoveries')).toBe(129)
   expect(await db.count('controlAssetGc')).toBe(128)
 })

@@ -53,11 +53,15 @@ type AppPreferencesContextValue = {
     setDefaultGroupColor: (color: string) => void
     resetDefaultTrackColor: () => void
     resetDefaultGroupColor: () => void
+    follow: () => boolean
+    setFollow: (enabled: boolean) => void
   }
   audio: {
     preferences: () => AudioPreferences
     setInputDeviceId: (deviceId: string) => void
     setOutputDeviceId: (deviceId: string) => void
+    setNativeInputDeviceId: (deviceId: string) => void
+    setNativeOutputDeviceId: (deviceId: string) => void
     setSampleRate: (sampleRate: AudioSampleRatePreference) => void
     setLatencyMode: (latencyMode: AudioLatencyMode) => void
     setEchoCancellation: (enabled: boolean) => void
@@ -190,6 +194,11 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
     setPreferences("timeline", "defaultGroupColor", TIMELINE_DEFAULT_GROUP_COLOR)
   }
 
+  const setFollow = (enabled: boolean) => {
+    if (preferences.timeline.follow === enabled) return
+    setPreferences("timeline", "follow", enabled)
+  }
+
   const resolveDefaultTimelineColor = (color: string) => {
     if (color === TIMELINE_DEFAULT_TRACK_COLOR) return `var(--${TIMELINE_DEFAULT_TRACK_COLOR})`
     if (color === TIMELINE_DEFAULT_GROUP_COLOR) return `var(--${TIMELINE_DEFAULT_GROUP_COLOR})`
@@ -230,12 +239,16 @@ export const AppPreferencesProvider: ParentComponent<AppPreferencesProviderProps
           setDefaultTrackColor,
           setDefaultGroupColor,
           resetDefaultTrackColor,
-          resetDefaultGroupColor
+          resetDefaultGroupColor,
+          follow: () => preferences.timeline.follow,
+          setFollow,
         },
         audio: {
           preferences: () => preferences.audio,
           setInputDeviceId: (deviceId) => setPreferences("audio", "inputDeviceId", deviceId),
           setOutputDeviceId: (deviceId) => setPreferences("audio", "outputDeviceId", deviceId),
+          setNativeInputDeviceId: (deviceId) => setPreferences("audio", "nativeInputDeviceId", deviceId),
+          setNativeOutputDeviceId: (deviceId) => setPreferences("audio", "nativeOutputDeviceId", deviceId),
           setSampleRate: (sampleRate) => setPreferences("audio", "sampleRate", sampleRate),
           setLatencyMode: (latencyMode) => setPreferences("audio", "latencyMode", latencyMode),
           setEchoCancellation: (enabled) => setPreferences("audio", "echoCancellation", enabled),

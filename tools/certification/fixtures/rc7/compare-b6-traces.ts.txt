@@ -1,0 +1,158 @@
+// Scratch B6c1 trace-determinism verifier (contract: B6-PLAN.md §5.4, line 340).
+// Walks identical file sets of two --trace all campaign trees and compares every JSON leaf and every
+// ordered events.jsonl record. Raw bytes are compared first; only differing files are normalized.
+// Normalizations, and nothing else:
+//   1. the two exact output roots (argv[2] in tree A, argv[3] in tree B) -> "<out>";
+//   2. the named wall-clock keys in WALL_CLOCK_KEYS are dropped;
+//   3. random edit/gesture UUIDs -> "<uuid:k>", k = first occurrence over the whole tree in sorted file
+//      order and document order. Each side gets its own first-occurrence map, so equal canonical output
+//      holds exactly when a bijection A<->B exists that preserves reuse, distinctness and every
+//      surrounding (target/order) field, which stays uncanonicalized.
+// Every application of a normalization is counted by field and listed in the report.
+import { createHash } from "node:crypto";
+import { readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { basename, join, relative, resolve } from "node:path";
+
+type Json = null | boolean | number | string | Json[] | { [key: string]: Json };
+type Side = { label: "A" | "B"; root: string; uuids: Map<string, number>; fields: Map<string, number> };
+type LeafDiff = { path: string; a: Json | "<absent>"; b: Json | "<absent>" };
+type FileResult = {
+  file: string; status: "identical-bytes" | "equal-after-normalization" | "mismatch";
+  rawSha256A: string; rawSha256B: string; normalizedSha256A: string; normalizedSha256B: string;
+  records?: { a: number; b: number }; diffs?: LeafDiff[]; lineDiffs?: { line: number; diffs: LeafDiff[] }[];
+};
+
+const [argA, argB] = process.argv.slice(2);
+if (!argA || !argB) throw new Error("usage: compare-b6-traces.ts <trace-a> <trace-b>");
+const WALL_CLOCK_KEYS = new Set(["elapsedMs"]);
+const UUID = /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g;
+const sides: [Side, Side] = [
+  { label: "A", root: resolve(argA), uuids: new Map(), fields: new Map() },
+  { label: "B", root: resolve(argB), uuids: new Map(), fields: new Map() },
+];
+const reportPath = `/tmp/dv01-b6/rc7/trace-compare-${basename(sides[0].root)}-vs-${basename(sides[1].root)}.json`;
+const sha = (data: string | Buffer) => createHash("sha256").update(data).digest("hex");
+const listFiles = (root: string, directory = root): string[] => readdirSync(directory).flatMap((name) => {
+  const path = join(directory, name);
+  return statSync(path).isDirectory() ? listFiles(root, path) : [relative(root, path)];
+});
+const fieldKey = (kind: string, file: string, path: string) =>
+  `${kind}\t${file.replace(/\d+/g, "N")}\t${path.replace(/\[\d+\]/g, "[]")}`;
+const count = (side: Side, key: string) => side.fields.set(key, (side.fields.get(key) ?? 0) + 1);
+const uuidToken = (side: Side, id: string) => {
+  const known = side.uuids.get(id);
+  const index = known ?? side.uuids.size;
+  if (known === undefined) side.uuids.set(id, index);
+  return `<uuid:${index}>`;
+};
+const normalizeString = (side: Side, value: string, file: string, path: string) => {
+  let out = value;
+  if (out.includes(side.root)) { out = out.split(side.root).join("<out>"); count(side, fieldKey("output-root", file, path)); }
+  if (UUID.test(out)) { out = out.replace(UUID, (id) => uuidToken(side, id)); count(side, fieldKey("uuid", file, path)); }
+  UUID.lastIndex = 0;
+  return out;
+};
+const normalize = (side: Side, value: Json, file: string, path: string): Json => {
+  if (typeof value === "string") return normalizeString(side, value, file, path);
+  if (Array.isArray(value)) return value.map((entry, index) => normalize(side, entry, file, `${path}[${index}]`));
+  if (value !== null && typeof value === "object") {
+    const out: { [key: string]: Json } = {};
+    for (const [key, entry] of Object.entries(value)) {
+      if (WALL_CLOCK_KEYS.has(key)) { count(side, fieldKey("wall-clock", file, `${path}.${key}`)); continue; }
+      out[normalizeString(side, key, file, `${path}.<key>`)] = normalize(side, entry, file, `${path}.${key}`);
+    }
+    return out;
+  }
+  return value;
+};
+const diffLeaves = (a: Json | undefined, b: Json | undefined, path: string, out: LeafDiff[]) => {
+  if (a === undefined || b === undefined) { out.push({ path, a: a ?? "<absent>", b: b ?? "<absent>" }); return; }
+  if (Array.isArray(a) && Array.isArray(b)) {
+    for (let index = 0; index < Math.max(a.length, b.length); index++) diffLeaves(a[index], b[index], `${path}[${index}]`, out);
+    return;
+  }
+  if (a !== null && b !== null && typeof a === "object" && typeof b === "object" && !Array.isArray(a) && !Array.isArray(b)) {
+    for (const key of new Set([...Object.keys(a), ...Object.keys(b)])) diffLeaves(a[key], b[key], `${path}.${key}`, out);
+    return;
+  }
+  if (a !== b) out.push({ path, a, b });
+};
+const parseLines = (text: string): Json[] => text.split("\n").filter((line, index, all) => line !== "" || index < all.length - 1).map((line) => JSON.parse(line));
+
+const filesA = listFiles(sides[0].root).sort();
+const filesB = listFiles(sides[1].root).sort();
+const setB = new Set(filesB);
+const setA = new Set(filesA);
+const missing = filesA.filter((file) => !setB.has(file));
+const extra = filesB.filter((file) => !setA.has(file));
+const results: FileResult[] = [];
+let eventRecordsA = 0;
+let eventRecordsB = 0;
+for (const file of filesA.filter((entry) => setB.has(entry))) {
+  const rawA = readFileSync(join(sides[0].root, file));
+  const rawB = readFileSync(join(sides[1].root, file));
+  const base = { file, rawSha256A: sha(rawA), rawSha256B: sha(rawB) };
+  if (file.endsWith(".jsonl")) {
+    const records = (raw: Buffer) => raw.toString("utf8").split("\n").filter((line) => line !== "").length;
+    eventRecordsA += records(rawA); eventRecordsB += records(rawB);
+  }
+  if (rawA.equals(rawB)) {
+    // Same bytes: register UUIDs in text order on both sides so later first-occurrence indices stay aligned.
+    const text = rawA.toString("utf8");
+    const canonicalA = text.replace(UUID, (id) => uuidToken(sides[0], id));
+    const canonicalB = text.replace(UUID, (id) => uuidToken(sides[1], id));
+    results.push({ ...base, status: canonicalA === canonicalB ? "identical-bytes" : "mismatch", normalizedSha256A: sha(canonicalA), normalizedSha256B: sha(canonicalB) });
+    continue;
+  }
+  if (file.endsWith(".jsonl")) {
+    const a = parseLines(rawA.toString("utf8")).map((record, index) => normalize(sides[0], record, file, `#${index + 1}`));
+    const b = parseLines(rawB.toString("utf8")).map((record, index) => normalize(sides[1], record, file, `#${index + 1}`));
+    const lineDiffs: { line: number; diffs: LeafDiff[] }[] = [];
+    for (let index = 0; index < Math.max(a.length, b.length); index++) {
+      const diffs: LeafDiff[] = [];
+      diffLeaves(a[index], b[index], "", diffs);
+      if (diffs.length) lineDiffs.push({ line: index + 1, diffs });
+    }
+    const textA = a.map((record) => JSON.stringify(record)).join("\n");
+    const textB = b.map((record) => JSON.stringify(record)).join("\n");
+    results.push({ ...base, status: lineDiffs.length ? "mismatch" : "equal-after-normalization", normalizedSha256A: sha(textA), normalizedSha256B: sha(textB), records: { a: a.length, b: b.length }, lineDiffs });
+    continue;
+  }
+  if (file.endsWith(".json")) {
+    const a = normalize(sides[0], JSON.parse(rawA.toString("utf8")), file, "$");
+    const b = normalize(sides[1], JSON.parse(rawB.toString("utf8")), file, "$");
+    const diffs: LeafDiff[] = [];
+    diffLeaves(a, b, "$", diffs);
+    results.push({ ...base, status: diffs.length ? "mismatch" : "equal-after-normalization", normalizedSha256A: sha(JSON.stringify(a)), normalizedSha256B: sha(JSON.stringify(b)), diffs });
+    continue;
+  }
+  const a = normalizeString(sides[0], rawA.toString("utf8"), file, "<text>");
+  const b = normalizeString(sides[1], rawB.toString("utf8"), file, "<text>");
+  results.push({ ...base, status: a === b ? "equal-after-normalization" : "mismatch", normalizedSha256A: sha(a), normalizedSha256B: sha(b), diffs: a === b ? [] : [{ path: "<text>", a: "<differs>", b: "<differs>" }] });
+}
+const treeHash = (key: "normalizedSha256A" | "normalizedSha256B") => sha(results.map((result) => `${result.file}\t${result[key]}\n`).join(""));
+const mismatches = results.filter((result) => result.status === "mismatch");
+const fields = (side: Side) => [...side.fields].sort().map(([key, applications]) => {
+  const [kind, file, path] = key.split("\t");
+  return { kind, file, path, applications };
+});
+const pass = !missing.length && !extra.length && !mismatches.length && eventRecordsA === eventRecordsB;
+const report = {
+  tool: "compare-b6-traces", contract: "B6-PLAN.md §5.4 line 340", treeA: sides[0].root, treeB: sides[1].root,
+  normalization: { wallClockKeys: [...WALL_CLOCK_KEYS], outputRoots: [sides[0].root, sides[1].root], uuidPattern: UUID.source },
+  pass, files: results.length, missing, extra,
+  identicalBytes: results.filter((result) => result.status === "identical-bytes").length,
+  equalAfterNormalization: results.filter((result) => result.status === "equal-after-normalization").length,
+  mismatchCount: mismatches.length, eventRecords: { a: eventRecordsA, b: eventRecordsB },
+  distinctUuids: { a: sides[0].uuids.size, b: sides[1].uuids.size },
+  normalizedTreeSha256: { a: treeHash("normalizedSha256A"), b: treeHash("normalizedSha256B") },
+  normalizedFields: { a: fields(sides[0]), b: fields(sides[1]) },
+  mismatches, perFile: results.map(({ diffs: _diffs, lineDiffs: _lineDiffs, ...rest }) => rest),
+};
+writeFileSync(reportPath, `${JSON.stringify(report, null, 1)}\n`);
+console.log(JSON.stringify({ pass, report: reportPath, reportSha256: sha(readFileSync(reportPath)), files: report.files, missing: missing.length, extra: extra.length,
+  identicalBytes: report.identicalBytes, equalAfterNormalization: report.equalAfterNormalization, mismatchCount: report.mismatchCount,
+  eventRecords: report.eventRecords, distinctUuids: report.distinctUuids, normalizedTreeSha256: report.normalizedTreeSha256,
+  normalizedFields: report.normalizedFields.a.map((field) => `${field.kind} ${field.file} ${field.path} x${field.applications}`) }));
+for (const mismatch of mismatches.slice(0, 5)) console.log("MISMATCH", JSON.stringify({ file: mismatch.file, diffs: mismatch.diffs?.slice(0, 3), lineDiffs: mismatch.lineDiffs?.slice(0, 2) }).slice(0, 1200));
+process.exit(pass ? 0 : 1);

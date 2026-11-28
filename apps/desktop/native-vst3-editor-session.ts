@@ -1,10 +1,10 @@
 import type {
   NativeVstEditorAnchor,
   NativeVstEditorCommand,
-  NativeVstEditorStatus,
   NativeAudioHostSupervisor,
   NativeWorkerNotification,
 } from "./audio-host"
+import type { NativeVstEditorStatus } from "./native-request-broker"
 import { coordinateNativeVst3Attachments } from "./native-vst3-coordinator"
 import type { PluginCatalogData } from "./plugin-catalog"
 
@@ -27,6 +27,9 @@ type EditorSessionInput = {
   workerPath: string
   catalogStore: { load(): Promise<PluginCatalogData> }
   createSupervisor: () => EditorSessionSupervisor
+  // An instance a live playback session holds is owned by the playback worker. This session's own copy of it
+  // never saw the control-path commits, so its state is never read or persisted.
+  playbackOwns: (instanceId: string) => boolean
   coordinate?: typeof coordinateNativeVst3Attachments
   onEditorInteraction?: (input: { projectId: string; instanceId: string }) => void
   onEditorOpenState?: (input: { projectId: string; instanceId: string; open: boolean }) => void
@@ -113,6 +116,7 @@ export const createNativeVst3EditorSessionManager = (
   }
   const captureEntryState = async (instanceId: string, entry: EditorSessionEntry) => {
     if (!entry.supervisor || (!entry.requiresState && !entry.captureState) || !entry.supervisor.getVstState || !entry.projectId) return
+    if (input.playbackOwns(instanceId)) return
     if (entry.stateCaptured) return
     const state = await entry.supervisor.getVstState(instanceId)
     await input.onCapturedState?.({ projectId: entry.projectId, instanceId, state })
@@ -197,6 +201,15 @@ export const createNativeVst3EditorSessionManager = (
         }
         if (notification.kind === "editor-state") {
           input.onEditorOpenState?.({ projectId, instanceId, open: notification.value === 1 })
+          // A window closed by the user never runs the close command. Queued behind a close command in
+          // flight, this finds the session already torn down and does nothing.
+          if (notification.value !== 1) {
+            void enqueue(instanceId, generation, (queued) => captureEntryState(instanceId, queued)).catch((error) => {
+              console.error("[native-vst3] editor close state capture failed", {
+                error: error instanceof Error ? error.message : "The native VST editor state capture failed.",
+              })
+            })
+          }
         }
         if (notification.kind === "parameter-edit") {
           entry.stateCaptured = false
@@ -265,6 +278,7 @@ export const createNativeVst3EditorSessionManager = (
                 ...nativeCommand
               } = inputCommand
               const capturedState = (entry.requiresState || entry.captureState || inputCommand.captureState === true)
+                && !input.playbackOwns(inputCommand.instanceId)
                 && entry.supervisor.getVstState
                 ? await entry.supervisor.getVstState(inputCommand.instanceId)
                 : undefined

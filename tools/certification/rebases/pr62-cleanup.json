@@ -1,0 +1,9254 @@
+{
+ "name": "pr62-cleanup",
+ "sequence": 79,
+ "createdAt": "2026-11-18T02:38:04.955Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "apps/desktop/audio-host.ts",
+   "from": "37804a699b89703780cf853731cfd0732d5ebedbecd78e8a091b4b406b4e184f",
+   "to": "d2ed3b877d8a50e0edb7ca064fd8c1109483d594a3438fbd65c6c04751b2a4e4"
+  },
+  {
+   "file": "native/audio-core/src/audio_core.cpp",
+   "from": "72afdd0eb686a5ba617b797e82d98267f07e74d28db7602b800c8e06befaa8dc",
+   "to": "8c900edcf84080378ee37b07bd844fd5f05e7f7b07a88f2f9fbf2fd78c92c213"
+  },
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "1141a3e82d799cb434386347c28608262876b481e3fbe77c55b1fe661acd52e1",
+   "to": "542c599298ee998a9326ff6cfc9fe38873bfc3d93bf0b0a289569e66320b41dc"
+  },
+  {
+   "file": "native/audio-host-macos/src/audio-host.cpp",
+   "from": "dd90c36e616010d0abe5932d518da2071840a5ffce98c29a8bd25bc22de4adb1",
+   "to": "e980c760e06847a08f370085f2ae1a3f7f35544ca9296a9f750dc603bb53789e"
+  },
+  {
+   "file": "native/audio-host-macos/tests/audio_host_test.cpp",
+   "from": "107b27ec3d2fa63e4c6ef78f14284cc01ad13721a076852aa0a55381806d52e7",
+   "to": "3106d995958b0fa5ee3d7190c262590a07a1de4087098fa02a1bd97b388b0a6d"
+  },
+  {
+   "file": "native/audio-host-macos/tests/realtime_callback_guard.test.ts",
+   "from": "90b37f15da3ae94908b6d7ed0abadeb4f22e6d75851d5a4be2a9f25b54834a6c",
+   "to": "f6e9fe362ce3e10d1d1b7dbf8aa7164a613ff08248ed57af98bdce824f2e0a89"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.test.ts",
+   "from": "586d06916c7caa630003d88940403d5b356aa57f39965f624693fe34078917d1",
+   "to": "66687e823918211b1551e160d0442caba5196c923ba26c1fabad209a7d6a5cbb"
+  },
+  {
+   "file": "packages/audio-engine/src/native-host-wire.ts",
+   "from": "51f4a8812d9ce87af3a55114fa2a0650c0b06135f01baf8960c431d39bb58434",
+   "to": "db562f34edfd51dca19b52fadeba8ab5bf15ec1b0f65f36eb5438da2651c694f"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-worklet.test.ts",
+   "from": "a9f7c704ad8fb2ccc7cad73a2524a346d278178388ba0b5380716722da207e6b",
+   "to": "6ea584caa447e9408125e0a0171edf305443e656f1b42b2c85545a444ee6e14f"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "a6983c49764bff7391aeca9ebafa97ea16c15df4f5501ceeb9cfbd03baa9345f",
+   "to": "b4cd51eedabe5ae048a2bdda489b10edd03b4a74d1161a23861f904eb9f100ca"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "5b5b058089e2c3b3f6defc6d6b9a1c78576e17814ddc1d667121356b7fe37aec",
+   "to": "860d5056e615a5433a8a2fcea7882a7f6a74fe70b554a61f6580729e1b55a0bc"
+  },
+  {
+   "file": "src/components/Timeline.test.ts",
+   "from": "433c7416061d61d5a3c80426d4030d970993320ddaa439dfe27fe4dc9f0a5b13",
+   "to": "205f93a63b10432da31c2245e9916686734b2e3ed96c32c42ca6398efa0a7feb"
+  },
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "d1f5fe20eb22e965a673d4cd48842a8a40b22099e31b140f74c7a04193c312f5",
+   "to": "9ebab6feb470600f0642766d0b2a36427b4186444515aa41f268595f4f6b6664"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.test.ts",
+   "from": "267562137157e2c20b0e807286ed3cea5f8b9c61130933f9b32c2bb416470a6e",
+   "to": "41a9a2627451f3007fd7c1d03e794218282bb7e97e172a02a9e341ef31b9f52f"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "3cf85e14cbf254b3cd1abb193bf660bf1a42ca978ae51a19f6b076ed0f73a6c9",
+   "to": "056f15fdfc8dff5bbe77be3be25a84e705c070bf5104ab316e32f1b794bdeceb"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-controller.ts",
+   "from": "0950cb6702bd2acbb29493902881d0e83d7444493e7214b0acc45477dbacaf0f",
+   "to": "bce1fe2c11516522b05f92b968e6fc06486cb3c256946117f93ba4ec117790b8"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-state.ts",
+   "from": "7957d4fa526d62171e472de0b0e307bb154cc654bb8a9acf037ee5dfc9687a9d",
+   "to": "b279d747ebf6aef10f1eb77e2fce2bf8a1e17808d078c4b09d31a7aea79df200"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.test.ts",
+   "from": "5d3ae312c861ac660a4a81b47d18d223397a7b473dca0ac73168f1cce0086fa7",
+   "to": "f9b2e8202f8969d6b76d81e4d3e9f7dc54db7e056ca96dc4893bde7798a5b81d"
+  },
+  {
+   "file": "src/components/timeline/create-persisted-effect-state.ts",
+   "from": "bc910f28f18592cdfed542608750b1e71f4325eeedcd05fd2aa0d415b6ff1d89",
+   "to": "8a94bf7fd598d47b33cd28c509ea1e9100d6bfe622342f791c25bc9c01a48686"
+  },
+  {
+   "file": "src/components/timeline/create-processor-edit-registry.ts",
+   "from": "9df2fbd896a2e99d1fafac0bce8cb4a1c936af04126c7afe086fdfa30bf3733b",
+   "to": "5fe45c0d8f68639a7d6a7517cb11b87964531f9f08fb2c0a2bbbf98ea4e7dfb1"
+  },
+  {
+   "file": "src/components/timeline/parameter-gesture-owner.ts",
+   "from": "72733156f94affd25ba19e11dbe6ebe074c758a52e392f55d25af260422fc9d9",
+   "to": "4dd194ddb7ff0a988b19c15715f55876cc2ea65a661dbdb03308100ab4e64fc9"
+  },
+  {
+   "file": "src/hooks/pointer-gesture-ownership.browser.test.ts",
+   "from": "3366804e569ebe038988bf2c57ca39b1e9fd6fabb52d7e79cd337d3a6d50422b",
+   "to": "97de152a03d38f7a859db24def1097eede4735d1d606667175197a3d2163b6dc"
+  },
+  {
+   "file": "src/hooks/useEffectsPanelAudioSync.test.ts",
+   "from": "12f028b72e38b8badf8233a60363ae1f03a57119d7c01e2e3ecde0cfd38d8beb",
+   "to": "8e1b3461865537cc810225d15d4055fb14c3166c14e99ad1f850f5a1922aa1f1"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "797d132d9a8896bbcb7e7df25c2f972d708da757af92efb7a7abfb82f4ac222f",
+   "to": "d1168e77cf8f87c89cff3ca837f13ad78de78952690ba866e818402528ecbbe2"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.ts",
+   "from": "4e1e1bdae209a4cb6cc41ad8040322871e0364af7e7a6bd4c9504ab55f7d33dd",
+   "to": "21e5b471cc645c2a0243d8751b80f2574570773d3c0b6220505d349e53083690"
+  },
+  {
+   "file": "src/lib/desktop/native-built-in-parameter-mapper.ts",
+   "from": "21aadde284da527746d3c1463caaa0f92cec9674d70289e0b5e352e0dc850e43",
+   "to": "dff45138f0e19ddbe4d77a90a06dab3343013bdda6d6d804b1c502aadd6e423b"
+  },
+  {
+   "file": "src/lib/desktop/native-graph-targets.ts",
+   "from": "032dea1cfca1da5b69b0e3367d5179d66158213280e061cfe919141d156bc8a5",
+   "to": "f239fc94953b808a8b8500bb09a5f18aab48d51f5ec11ee6eef546b50fe4ca45"
+  },
+  {
+   "file": "src/lib/desktop/native-live-midi.ts",
+   "from": "2cb2e3211c16f0446acabed09917afeaad6a572641c827f8c455ee2575b4595b",
+   "to": "41b4119ea3cd2bbdeb4ff5f9e50e0d17985a90aeeaaf5a25a9b9ec97a7c602f2"
+  },
+  {
+   "file": "src/lib/desktop/native-observation.ts",
+   "from": "c597fbf0ad9eb5fec2c6620f30b31220cb78a8c4f9fc487ae0d5f314d7b602a1",
+   "to": "24c6fa76d3592cb1c1b5e5bcdcf748606e12344ab23147c4c75d46b8e8570505"
+  },
+  {
+   "file": "src/lib/desktop/native-parameter-events.ts",
+   "from": "6e968a429b26e266be323a513c24a9efbf98908bd43c80f92730c786d27736e5",
+   "to": "ecda290f936f834041c565fa3ad1657395a9a0aad3d51e11ad9856c1fd4d6aac"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "f1dea2733f60d5f25bdf390d71d317ee2eb173252ba9e2b31e70f60138c2bc57",
+   "to": "464429cdce5cd22a90ff9889314bc3d46ceca6e94c5b25b6e6bfbb5e8d55d7c6"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.ts",
+   "from": "a05de9362a9fc9cb23dc0afebe27db9f62058c0af76190f8f455e536fc7b7199",
+   "to": "b5e1fc2049df5d6c48a23da1698fa4f2436a9c27d5f24c7b5272b6e0fc72b414"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-lifecycle.browser.test.ts",
+   "from": "af37dd7afc52c9612ede1c1f53833caf9126f4a2e69f85cb8b5634ae821df805",
+   "to": "6346028eb5c5c93ef7cac32ddb6ac55f0831138a0d4caa82751c415429a36186"
+  },
+  {
+   "file": "src/lib/desktop/native-processor-state-owner.ts",
+   "from": "af33462c069274afb7203d48ef4c73d89a03fb94df61b15e70fc02aeb4d54679",
+   "to": "53750681a61f1fada917534a649b3bb299699c9e0c775656f421a9defaaabf48"
+  },
+  {
+   "file": "src/lib/desktop/native-publication-transaction.ts",
+   "from": "8db74b542bfbe8377fdfadcedebc2e17c54552fcf6236e4f58a64840361733f2",
+   "to": "8a2cdf786ddf3e4afe276d39a23bf20ea87cdc020953eaf5b881780b42b1e5bf"
+  },
+  {
+   "file": "src/lib/desktop/native-recording-session.ts",
+   "from": "524b6b0177fc0d7fac634134ac24c49ee8c3f49958354fa70c6564ffcac97adf",
+   "to": "e4b827bd74b74f02a20f33ca3858f7e46b387189bd668d6574958710c6155180"
+  },
+  {
+   "file": "src/lib/desktop/native-retirement.ts",
+   "from": "ebc0078b313567ffd7d8b48234825dcfe1ccff8dede80dbb32249e31ba1cdf3d",
+   "to": "cf0d6b0b4d8f72ee715475185405c6eb5e93ea65bdf5b3092c2e9c4386fef953"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-coordinator.ts",
+   "from": "6e841788b5b320bfa8019406466392c07c7717666c565f4ec10e5f98dd835f4d",
+   "to": "aa2875b872dbb75c3f0504889d8d95b582c5b5bebcd8df32655382073fbb3978"
+  },
+  {
+   "file": "src/lib/desktop/native-schedule-publication.ts",
+   "from": "dd2d49f630ff87ecee803d47f374b22be6a5cfd2cfb44bb47715d290f2c068ee",
+   "to": "b64c14ace9ea4f823ceec5ace6a6620d199556ad8b23b441fe7ef4d60bbae87e"
+  },
+  {
+   "file": "src/lib/desktop/native-state-patches.ts",
+   "from": "0c29a514246416c6332788f6bb01910f4e6de33df337a0336ced5c165cae3afd",
+   "to": "22f05e3f3215f1844d3703ef869612d1e471f1b1338adf38a5696c790cdca1ba"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "b1ba7ddea4b6f995ef22104e7552fea7b8de86a1176d43e2b35d0d5172bc05b1",
+   "to": "46e2fcb58ae61834f0f58ea1f57044f5733a04849f678e44ac68a85fea28477a"
+  },
+  {
+   "file": "src/lib/live-playback-snapshot.ts",
+   "from": "486f6524d05e9a7e7d500d0f60b395e41e9ec2961b67b4eca2e9003f6db01d95",
+   "to": "a91045f04e9c1cf5cc2569ec9e1acef0300c86b2e8983adcbad963f95d20874d"
+  },
+  {
+   "file": "src/lib/live-processor-control.ts",
+   "from": "841375ec42695eaf9f5fe1669fb1011e109f95b3ea5bf857bc2192dd0978dc0d",
+   "to": "690e6414550836e6b20fe001095a01e4bb25f5c531e836a506e8a1c9c910bdcb"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.test.ts",
+   "from": "941bf0e8416b88522a10cd0a96c377bb2b5a207d82cd900a5edad00f944d0dc4",
+   "to": "722f3a2dfb4f9fad9a1b4430a0159cbbed57aeef9f37307a8a629f0c5113c8a5"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.ts",
+   "from": "bc3220c5bc5f82d7d77a52378eb30c96011b018f3d197257eedacc43d70df90b",
+   "to": "f02a0d0f80490c1f9883b91348c40a568b474281f349a8f1d60a0ce6bcd2a83c"
+  },
+  {
+   "file": "tools/acceptance/ae-08-live-graph.ts",
+   "from": "2cb7a9cb3e13e9deb246827fc693fd57813d15536722df07079e2a5080cae35b",
+   "to": "b9cf38d7d364a108ba24ebe58453d3ce32db071d77cdeeb96118de78dca50ab1"
+  },
+  {
+   "file": "tools/acceptance/ae-08-phase-5-fixture.ts",
+   "from": "064907792ae215db35287942d46a38131b199b7523b2fb863240ca10b1dd450b",
+   "to": "ec1afc30ce457e8d4db4be2a5324583dd1c7db3e1349f0723359f664d8a1ec98"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-edit.ts",
+   "from": "781b5bff0fc34645b34144be0b7fe1d5287c50d323e3741ef9f57583c4f04452",
+   "to": "447452df6e1d848f00de7c9bfb1b25a5b4182607d2011fe25f6a8f80e932e7e7"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-fixture.ts",
+   "from": "b735161b21b836e516a20f296252fa413af63296167ccfc26af58485eb15810a",
+   "to": "88fdbcaeb4873a76e9d267bf907388fd970e1064bcd994176df6c196f1d839dd"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-edits.ts",
+   "from": "54c7bad602710c3ff799e36e58ea435e30b13019e69ef2ddb12bcd51fb96d1df",
+   "to": "55f149daade8923d30ff69ef02b8980c3299cb5d46c486e944abbce78f450f1f"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-history.ts",
+   "from": "f52737fb50b8f6dacba094ce44553943841c5838b3ad2fb70358228daa718b31",
+   "to": "0b4ad5c66deafc6b84653d2d609e70a64be89ad3541cc1fb0f2ff7ac564e49a3"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook-runner.ts",
+   "from": "7f45e3103c2bdf98467bcb6de030a6971cbd6182729f77bf974907c9a1024ef0",
+   "to": "cc425e8e63ca4a699494120e580dc059652519d97aad660215f92fdacf3b21ee"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-hook.ts",
+   "from": "7b28afccdbc4c77e1b34262d7e3d521e67461a448954deb205b1acfbbd4c0079",
+   "to": "45812b888a956f3e705848a27de914bedcb956ec728e5bd2f6ec86a07cd3acd0"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz-host.ts",
+   "from": "d142311c67f051ff62243d144309162bc35aab8ee217f4c38fdbf836edb33cfa",
+   "to": "6dd9c727cec1d33ae59f9ea84ee9dcb9e58b4d50a6f439e7c8a80eed854cdaf9"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz.ts",
+   "from": "1b5d13a6b5c74d82c4df31c6365ae600e6a935dab4cbfacdb0467292e696ca16",
+   "to": "c524fa77cf555056ba1b4d2f935930916dea19bd2b773e8d9d3696cc702f3f65"
+  },
+  {
+   "file": "tools/acceptance/analyze-ae-08-continuity.ts",
+   "from": "3fea84e6f23fedaa711b6a04c113ee0ca7467634b4265780464c697427442a2f",
+   "to": "c142ac7336932fe4833eb82bb334063587da9e8245737d72566d9f28228831b0"
+  },
+  {
+   "file": "tools/acceptance/b5c-playback-witness-support.ts",
+   "from": "0908bca8135182b7a66032cf8da00ff1e434aa1b1277128d2fc7ec88892b8c02",
+   "to": "150d326d412a89e9bf2ee6a61a799de287db8683507361e161022b45bf443137"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser-runtime.tsx",
+   "from": "d083d15afca9269323ebdba5c886b2707e3f9e7bec53f5305c2b38e89edb7f07",
+   "to": "00b35b36c9932e396b05304ddea7c4dd8d75ec2c768088680cc34848b38983fb"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "c6e19c1db802f5b0eca7573cf1b5f4eb584f9bf15b210a9001f5b1b6b8f2c13c",
+   "to": "6a9acd3f2f391531e58e0981a6424ab67152de8aa8d8fa32da46031317919f40"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "campaigns",
+    "name=trace-controller-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b",
+   "new": "6e5c85c591758db0c5d605aeb2e2aca861520739d74ea0b09d183d22f949c57d"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-controller-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "1a8bb302fb199750340c1e6ee058554f82c861c95ab4abb7ad7fb63402077a0b",
+   "new": "6e5c85c591758db0c5d605aeb2e2aca861520739d74ea0b09d183d22f949c57d"
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#0"
+   ],
+   "old": 205,
+   "new": 200
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#1"
+   ],
+   "old": 209,
+   "new": 204
+  },
+  {
+   "path": [
+    "seeds",
+    "hook206",
+    "ids",
+    "#2"
+   ],
+   "old": 214,
+   "new": 209
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "logSha256"
+   ],
+   "old": "7adfca8cf6e4d235b4e84472bf32717bf2048ce310a4d3a8b904efb1989ed411",
+   "new": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-a",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "2e9186ea14c3ee2fb3fd170eb3b13a8518efbfa4f74cf417e26d3cdac8a7c407",
+   "new": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "logSha256"
+   ],
+   "old": "7adfca8cf6e4d235b4e84472bf32717bf2048ce310a4d3a8b904efb1989ed411",
+   "new": "01eb80205d16beb604c7f3d1f04f7a9a6ab3d96df6e884bde8c714cbfc64e417"
+  },
+  {
+   "path": [
+    "campaigns",
+    "name=trace-hook-b",
+    "judge",
+    "summarySha256"
+   ],
+   "old": "2e9186ea14c3ee2fb3fd170eb3b13a8518efbfa4f74cf417e26d3cdac8a7c407",
+   "new": "ba5146c2289dfaab9aab6099651b183c79b243c7926699b6a59d0eff26146fc6"
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-panel-audiohost",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 141,
+   "new": 145
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i6-desktop",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 430,
+   "new": 449
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:383:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:424:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:385:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:384:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:405:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:411:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:382:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 794,
+   "new": 797
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 713,
+   "new": 715
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:412:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 688,
+   "new": 715
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-controller",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 704,
+   "new": 731
+  },
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "cf624e55538c74184677efd991badb26422ec5bb297a59a55297ecee19112ba2",
+   "new": "ebb432bb9c6bbcdc6d560972df40da9b06fcade7131af99a44ffb2029f6a92a9"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:275:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 712,
+   "new": 714
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:418-repeat-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:418-plus-427-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 255,
+   "new": 260
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:418:427-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 257,
+   "new": 262
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-423",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-424",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-425",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "b746f0805f98acf624d2e7e5f89cf764cea3d939e5b5e19f161a188a2c7cbbf1",
+   "new": "b1f8b7945d1fd7783d20475f4a035ed55dc7f2e7a9fa28ed4ab2851781ccfc47"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-426",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-427",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 257,
+   "new": 262
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:427-alone",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 257,
+   "new": 262
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-428",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-429",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-433",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-434",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-432",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-436",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-435",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:437-alone",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:428:control-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:428:428-repeat",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-repeat-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-436-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-435-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:436-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:435-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:434-plus-437-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:434:437-alone-playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=diag:419:419-plus-437",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-coordinator",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 112,
+   "new": 116
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:467:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-g-playback",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 263,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:417:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:464:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:468:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 271,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:464:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:460:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:459:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:481:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:413:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:414:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:415:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:414:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:428:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:433:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:428:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:504:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:504:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:467:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:479:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:471:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 259,
+   "new": 264
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:503:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:503:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:439:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 271,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:439:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 268,
+   "new": 273
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:440:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:440:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:461:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:463:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:463:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 796,
+   "new": 799
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 263,
+   "new": 267
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:404:1:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6d3 a paused structural replacement prepares at the playhead a Stop published while it waited",
+    "B6d3 a seek made while Play waits on a structural replacement preview leaves the hook and native in agreement",
+    "B6d4 a Play superseded by a locate on a structural replacement preview keeps playing from the locate",
+    "B6d4 a Stop in the same tick as a paused structural edit reports no fault",
+    "B6d4 a Stop while the paused replacement is starting keeps a live graph at the start",
+    "B6d5 a Stop after a locate during an uncommitted paused preview still returns it to the start",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits",
+    "B6d5 a locate during an uncommitted paused preview reaches native once it commits while Stop waits on it",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f5 renaming a track while paused on native does not recompile the paused preview; a volume edit does",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "fingerprints all playback-relevant audio clip compiler fields for paused preview",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:406:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:406:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:407:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:408:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:410:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:415:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 270,
+   "new": 275
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:420:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:421:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:425:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:421:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 267,
+   "new": 272
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:429:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:427:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 257,
+   "new": 262
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:434:1:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:454:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:435:2:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:450:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:451:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:435:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:478:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:483:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:478:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 271,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 270,
+   "new": 275
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:451:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:407:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:410:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 270,
+   "new": 275
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:413:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 259,
+   "new": 264
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:420:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 271,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:417:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:429:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:433:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:434:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:436:2:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:437:3:control",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:437:3:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:465:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:480:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 271,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:control:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 275,
+   "new": 280
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:480:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:453:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:461:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:425:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 278
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:460:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 273,
+   "new": 277
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 2,
+   "new": 3
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:509:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key"
+   ],
+   "new": [
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "fingerprints all playback-relevant audio clip compiler fields for paused preview"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:408:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 274,
+   "new": 279
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 272,
+   "new": 276
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 3,
+   "new": 4
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:502:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key"
+   ],
+   "new": [
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G the clip fingerprint names every clip field a playback compile reads, and no name, colour or waveform key",
+    "fingerprints all playback-relevant audio clip compiler fields for paused preview"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-playback",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 263,
+   "new": 280
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i3-sync",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 326,
+   "new": 328
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:279:1:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 795,
+   "new": 798
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-audiosync",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 326,
+   "new": 328
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 260,
+   "new": 265
+  },
+  {
+   "path": [
+    "gates",
+    "name=rc1-i4-consumers",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 396,
+   "new": 402
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-portable",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:490:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 113,
+   "new": 114
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:474:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:474:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 155,
+   "new": 156
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:491:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 156,
+   "new": 157
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:476:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 150,
+   "new": 151
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:mutant:portable",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:499:mutant:portable",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+    "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
+    "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
+    "W-C9-asset-1 a clip asset swapped while playing is registered and paged before the publish; the old one is released once the position reaches the seam",
+    "W-C9-asset-2 a release answered asset-in-use is asked again at the next position report until the core lets go",
+    "W-C9-asset-3 a refused publish keeps the registered asset for the resubmit, which registers nothing again",
+    "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
+    "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
+    "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+    "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
+    "W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the new tempo before the publish and releases the old leases after the seam",
+    "W-C9-warp-2 a publish that answers late is retried on the Stretch artifact the first attempt prepared, which nothing prepares again",
+    "W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset and the Stretch artifact at the seam",
+    "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and extends in place from the arrangement position",
+    "W-F20e toggling the loop while playing keeps the session, continues linearly and keeps a passed loop off"
+   ],
+   "new": [
+    "B6f5 D6 an adoption during portable recording keeps the take and its capture blocks continuous",
+    "B6f5 step5b R6 a recording refresh after a structural edit skips without a fault and the follow adopts it during the take",
+    "C9a-2 the preparations of the old sources are released once the position reaches the seam, the candidate's stay, and teardown releases all",
+    "C9a-3 a refused publish keeps the old sources and their preparations, and a resubmit reuses the candidate preparations it still matches",
+    "W-C9-asset-1 a clip asset swapped while playing is registered and paged before the publish; the old one is released once the position reaches the seam",
+    "W-C9-asset-2 a release answered asset-in-use is asked again at the next position report until the core lets go",
+    "W-C9-asset-2 a thrown asset release remains due for the next position report",
+    "W-C9-asset-3 a refused publish keeps the registered asset for the resubmit, which registers nothing again",
+    "W-C9-asset-6 a Drum Rack pad sample swapped while a note is held registers the asset before the publish and is adopted without a rebuild",
+    "W-C9-asset-7 a Granular sample changed, and a Granular track added and deleted, while playing are adopted with the asset registered before the publish",
+    "W-C9-clip-R an audio clip move during a take is adopted and the take refresh schedules the moved clip once",
+    "W-C9-track-3 an audio track deleted while playing leaves no source or node, and its asset is released once the position reaches the seam",
+    "W-C9-warp-1 a tempo edit with a Stretch clip prepares its artifact at the new tempo before the publish and releases the old leases after the seam",
+    "W-C9-warp-2 a publish that answers late is retried on the Stretch artifact the first attempt prepared, which nothing prepares again",
+    "W-C9-warp-4 warp turned on or off while playing swaps the ordinary asset and the Stretch artifact at the seam",
+    "W-F20c a loop edit after a wrap maps positions across the seam, compiles the loop shifted and extends in place from the arrangement position",
+    "W-F20e toggling the loop while playing keeps the session, continues linearly and keeps a passed loop off"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:489:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 155,
+   "new": 156
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:498:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 151,
+   "new": 152
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 155,
+   "new": 156
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:488:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 152,
+   "new": 153
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:473:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 139,
+   "new": 140
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:control:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 157,
+   "new": 158
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:472:mutant:portable",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 142,
+   "new": 143
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-hookwit",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 31,
+   "new": 34
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 2,
+   "new": 1
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 6,
+   "new": 7
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "W51 latency exact shared budget survives changed-desired",
+    "W51 latency exact shared budget survives own-rollback",
+    "W51 latency exact shared budget survives prepared",
+    "W51 latency resubmit budget counts initial plus eight, opportunities=12",
+    "W51 schedule rebase shares initial plus eight with 0 admission recoveries",
+    "W51 schedule rebase shares initial plus eight with 3 admission recoveries"
+   ],
+   "new": [
+    "W51 latency exact shared budget survives changed-desired",
+    "W51 latency exact shared budget survives negative-status",
+    "W51 latency exact shared budget survives own-rollback",
+    "W51 latency exact shared budget survives prepared",
+    "W51 latency resubmit budget counts initial plus eight, opportunities=12",
+    "W51 schedule rebase shares initial plus eight with 0 admission recoveries",
+    "W51 schedule rebase shares initial plus eight with 3 admission recoveries"
+   ]
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-persisted",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 44,
+   "new": 45
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wire",
+    "judge",
+    "counts",
+    "pass"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:482:mutant:playback",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 219,
+   "new": 224
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/native-host-wire.test.ts",
+    "pass"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/media-pages.test.ts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/master-fx-runtime.test.ts",
+    "pass"
+   ],
+   "old": 57,
+   "new": 60
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/live-mixer-runtime.test.ts",
+    "pass"
+   ],
+   "old": 67,
+   "new": 70
+  },
+  {
+   "path": [
+    "gates",
+    "name=f-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts",
+    "pass"
+   ],
+   "old": 2,
+   "new": 4
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/native-host-wire.test.ts",
+    "pass"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/media-pages.test.ts",
+    "pass"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/master-fx-runtime.test.ts",
+    "pass"
+   ],
+   "old": 57,
+   "new": 60
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/live-mixer-runtime.test.ts",
+    "pass"
+   ],
+   "old": 67,
+   "new": 70
+  },
+  {
+   "path": [
+    "gates",
+    "name=last-engine",
+    "judge",
+    "files",
+    "packages/audio-engine/src/mixer/apply-live-routing.test.ts",
+    "pass"
+   ],
+   "old": 2,
+   "new": 4
+  }
+ ],
+ "seedRecordChanges": [
+  {
+   "path": [
+    "hook",
+    "#101",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#102",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#103",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#103",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#108",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#111",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#112",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#113",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#114",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#115",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#117",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#120",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#120",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#122",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#123",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#124",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#126",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#127",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#129",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#130",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#132",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#133",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#136",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#137",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#138",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#146",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#148",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#149",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 26
+  },
+  {
+   "path": [
+    "hook",
+    "#150",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#150",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#152",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#154",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#157",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#158",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#160",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#163",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#164",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#166",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#167",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#169",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#171",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#174",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#175",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#176",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#182",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#183",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#184",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#184",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#189",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#190",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#190",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#191",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#192",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#193",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#196",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#200",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#203",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#204",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#204",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#207",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#208",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#210",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#211",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#214",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#220",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#222",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#222",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#223",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#229",
+    "rejections"
+   ],
+   "old": [
+    "flush|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#229",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#230",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#236",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#238",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#239",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#243",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#245",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#247",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#249",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#249",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#250",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#253",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#257",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#259",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#260",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#261",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#263",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#267",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#268",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#273",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#274",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#275",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#279",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#1",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#2",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 9
+  },
+  {
+   "path": [
+    "hook",
+    "#3",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#5",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#6",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#7",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#9",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#10",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#11",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#13",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#14",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#15",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#18",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#19",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#20",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#20",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#23",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#24",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#27",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#30",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#30",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#31",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#32",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#35",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#35",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#36",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#38",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#39",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#41",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#42",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#43",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#44",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#45",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#47",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#48",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#50",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#51",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#53",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#54",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#56",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#59",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#60",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#62",
+    "rejections"
+   ],
+   "old": [
+    "flush|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#63",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#69",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#69",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#72",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#73",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#78",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#80",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#82",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#85",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#86",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#95",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#99",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#280",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#285",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#286",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#291",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#293",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#294",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-incarnation"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#294",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#295",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#296",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#300",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#300",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#304",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#306",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#306",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#307",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#308",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#310",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#312",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#314",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#317",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#317",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#318",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#319",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#320",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#321",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#321",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#323",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#323",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#324",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#326",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#329",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#331",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#331",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#333",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#334",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#335",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#335",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#336",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#337",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#340",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#342",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#343",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#344",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#345",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#346",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#347",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#348",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#354",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#360",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#364",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#365",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#366",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#368",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#369",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#371",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#372",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#373",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#375",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 10,
+   "new": 9
+  },
+  {
+   "path": [
+    "hook",
+    "#379",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#380",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#380",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#383",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#383",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#386",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#387",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#388",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#391",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#392",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#392",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#396",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#397",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#398",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#401",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#404",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#406",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#407",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#408",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#411",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#414",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#415",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#415",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#422",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#423",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#423",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#427",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#429",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#430",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#432",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#435",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#438",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#439",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#442",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#444",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#444",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#445",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 10,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#446",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#447",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#448",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#449",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#451",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#456",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#459",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#461",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#463",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#466",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#467",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#470",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#471",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#472",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#474",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#475",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#476",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#478",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#480",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#481",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#484",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#485",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#486",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#487",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#487",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#489",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#490",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#492",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#492",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#493",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#497",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#498",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#501",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#502",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#507",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#510",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#511",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#512",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#513",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#513",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#514",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 10,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#515",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#515",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#517",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#518",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#519",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#551",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#551",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#552",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#552",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#554",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#555",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#556",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 7,
+   "new": 6
+  },
+  {
+   "path": [
+    "hook",
+    "#557",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#562",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#563",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#566",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#569",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#570",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "flush|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#573",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#574",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#576",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#520",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#521",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#524",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#525",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#527",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#529",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#535",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#539",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#541",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#543",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#544",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#548",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#584",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#586",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#587",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#589",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#592",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#596",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#597",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#597",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#598",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#599",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#601",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#602",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#603",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#604",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 10,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#606",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#606",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 26
+  },
+  {
+   "path": [
+    "hook",
+    "#607",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#610",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#611",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#615",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#616",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#617",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#621",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#622",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#623",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#624",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#625",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#628",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#630",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#630",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#631",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#632",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#636",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#637",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#638",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 9
+  },
+  {
+   "path": [
+    "hook",
+    "#639",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#641",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#643",
+    "exercised"
+   ],
+   "old": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8"
+   ],
+   "new": [
+    "I1",
+    "I10",
+    "I2",
+    "I3",
+    "I4",
+    "I5",
+    "I6",
+    "I7",
+    "I8",
+    "I9"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#643",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 10,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#644",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#647",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#650",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#650",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#651",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#655",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#657",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#659",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#660",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#660",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#661",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#663",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#665",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#666",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#668",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#673",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#674",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#677",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#678",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#682",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#682",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#683",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#685",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#686",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#687",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#690",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#693",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#695",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#696",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#697",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#697",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#699",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#701",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#706",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#707",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#709",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#711",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#713",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#715",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#719",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#720",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#721",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#722",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#723",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#724",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#725",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#725",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#729",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#730",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#735",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#741",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#742",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#743",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#743",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#744",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#746",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#747",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": [
+    "latency|cancelled|ending-transport-domain",
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#747",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#748",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#749",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#752",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#753",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#754",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#756",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#757",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#758",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#759",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#761",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#764",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#765",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#766",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#766",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 25
+  },
+  {
+   "path": [
+    "hook",
+    "#767",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#769",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#770",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#771",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#772",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#773",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#774",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#774",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 25
+  },
+  {
+   "path": [
+    "hook",
+    "#778",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#779",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#780",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#784",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#785",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#786",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#788",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#788",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#789",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#790",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#791",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#795",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#796",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#799",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#806",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#807",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#808",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#809",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#810",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#811",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#814",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#815",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#816",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#817",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#818",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#819",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#820",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#821",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#825",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#835",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 23,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#837",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#840",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#842",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#843",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#844",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#845",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#846",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#847",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#850",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#854",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#857",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#860",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#862",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#863",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 21
+  },
+  {
+   "path": [
+    "hook",
+    "#865",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#866",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#867",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#869",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#872",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#877",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#878",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 9,
+   "new": 10
+  },
+  {
+   "path": [
+    "hook",
+    "#880",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#884",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#885",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#887",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#887",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#889",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#891",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#895",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#897",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#897",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#900",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#902",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#905",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#905",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#906",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#907",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#909",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#910",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#911",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#913",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#914",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#915",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 22,
+   "new": 23
+  },
+  {
+   "path": [
+    "hook",
+    "#916",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#918",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#920",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#925",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#927",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#929",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#930",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#931",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 15
+  },
+  {
+   "path": [
+    "hook",
+    "#934",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#937",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#942",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 27,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#943",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#944",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#945",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 21,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#947",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#951",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#953",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#955",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#956",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 12,
+   "new": 13
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#957",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#958",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#961",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#965",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#967",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#967",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 11
+  },
+  {
+   "path": [
+    "hook",
+    "#969",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 17
+  },
+  {
+   "path": [
+    "hook",
+    "#970",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#974",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#977",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 15,
+   "new": 16
+  },
+  {
+   "path": [
+    "hook",
+    "#980",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 20,
+   "new": 22
+  },
+  {
+   "path": [
+    "hook",
+    "#982",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#983",
+    "rejections"
+   ],
+   "old": [],
+   "new": [
+    "latency|cancelled|ending-transport-domain"
+   ]
+  },
+  {
+   "path": [
+    "hook",
+    "#983",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 18,
+   "new": 19
+  },
+  {
+   "path": [
+    "hook",
+    "#988",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 13,
+   "new": 14
+  },
+  {
+   "path": [
+    "hook",
+    "#989",
+    "rejections"
+   ],
+   "old": [
+    "latency|cancelled|ending-transport-domain"
+   ],
+   "new": []
+  },
+  {
+   "path": [
+    "hook",
+    "#989",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 17,
+   "new": 24
+  },
+  {
+   "path": [
+    "hook",
+    "#990",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 19,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#994",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 20
+  },
+  {
+   "path": [
+    "hook",
+    "#995",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 11,
+   "new": 12
+  },
+  {
+   "path": [
+    "hook",
+    "#996",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 16,
+   "new": 18
+  },
+  {
+   "path": [
+    "hook",
+    "#997",
+    "ceilings",
+    "compileCount"
+   ],
+   "old": 14,
+   "new": 16
+  }
+ ],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [
+   "hook:21:latency|cancelled|ending-transport-domain",
+   "hook:31:latency|cancelled|ending-transport-domain",
+   "hook:36:latency|cancelled|ending-transport-domain",
+   "hook:63:flush|cancelled|ending-transport-domain",
+   "hook:63:latency|cancelled|ending-transport-domain",
+   "hook:70:latency|cancelled|ending-transport-domain",
+   "hook:79:latency|cancelled|ending-transport-domain",
+   "hook:104:latency|cancelled|ending-transport-domain",
+   "hook:121:latency|cancelled|ending-transport-domain",
+   "hook:149:latency|cancelled|ending-transport-domain",
+   "hook:151:latency|cancelled|ending-transport-domain",
+   "hook:185:latency|cancelled|ending-transport-domain",
+   "hook:191:latency|cancelled|ending-transport-domain",
+   "hook:205:latency|cancelled|ending-transport-domain",
+   "hook:230:flush|cancelled|ending-transport-domain",
+   "hook:230:latency|cancelled|ending-transport-domain",
+   "hook:250:latency|cancelled|ending-transport-domain",
+   "hook:286:latency|cancelled|ending-transport-domain",
+   "hook:295:latency|cancelled|ending-incarnation",
+   "hook:296:latency|cancelled|ending-transport-domain",
+   "hook:301:latency|cancelled|ending-transport-domain",
+   "hook:307:latency|cancelled|ending-transport-domain",
+   "hook:315:latency|cancelled|ending-transport-domain",
+   "hook:318:latency|cancelled|ending-transport-domain",
+   "hook:324:latency|cancelled|ending-transport-domain",
+   "hook:332:latency|cancelled|ending-transport-domain",
+   "hook:336:latency|cancelled|ending-transport-domain",
+   "hook:381:latency|cancelled|ending-transport-domain",
+   "hook:384:latency|cancelled|ending-transport-domain",
+   "hook:393:latency|cancelled|ending-transport-domain",
+   "hook:397:latency|cancelled|ending-transport-domain",
+   "hook:416:latency|cancelled|ending-transport-domain",
+   "hook:424:latency|cancelled|ending-transport-domain",
+   "hook:445:latency|cancelled|ending-transport-domain",
+   "hook:457:latency|cancelled|ending-transport-domain",
+   "hook:482:latency|cancelled|ending-transport-domain",
+   "hook:488:latency|cancelled|ending-transport-domain",
+   "hook:493:latency|cancelled|ending-transport-domain",
+   "hook:514:latency|cancelled|ending-transport-domain",
+   "hook:516:latency|cancelled|ending-transport-domain",
+   "hook:545:latency|cancelled|ending-transport-domain",
+   "hook:553:latency|cancelled|ending-transport-domain",
+   "hook:556:latency|cancelled|ending-transport-domain",
+   "hook:571:flush|cancelled|ending-transport-domain",
+   "hook:585:latency|cancelled|ending-transport-domain",
+   "hook:598:latency|cancelled|ending-transport-domain",
+   "hook:607:latency|cancelled|ending-transport-domain",
+   "hook:631:latency|cancelled|ending-transport-domain",
+   "hook:651:latency|cancelled|ending-transport-domain",
+   "hook:661:latency|cancelled|ending-transport-domain",
+   "hook:664:latency|cancelled|ending-transport-domain",
+   "hook:683:latency|cancelled|ending-transport-domain",
+   "hook:698:latency|cancelled|ending-transport-domain",
+   "hook:700:latency|cancelled|ending-transport-domain",
+   "hook:726:latency|cancelled|ending-transport-domain",
+   "hook:744:latency|cancelled|ending-transport-domain",
+   "hook:748:latency|cancelled|ending-transport-domain",
+   "hook:766:latency|cancelled|ending-transport-domain",
+   "hook:767:latency|cancelled|ending-transport-domain",
+   "hook:775:latency|cancelled|ending-transport-domain",
+   "hook:789:latency|cancelled|ending-transport-domain",
+   "hook:791:latency|cancelled|ending-transport-domain",
+   "hook:812:latency|cancelled|ending-transport-domain",
+   "hook:822:latency|cancelled|ending-transport-domain",
+   "hook:888:latency|cancelled|ending-transport-domain",
+   "hook:898:latency|cancelled|ending-transport-domain",
+   "hook:906:latency|cancelled|ending-transport-domain",
+   "hook:935:latency|cancelled|ending-transport-domain",
+   "hook:952:latency|cancelled|ending-transport-domain",
+   "hook:958:latency|cancelled|ending-transport-domain",
+   "hook:968:latency|cancelled|ending-transport-domain",
+   "hook:984:latency|cancelled|ending-transport-domain",
+   "hook:990:latency|cancelled|ending-transport-domain"
+  ],
+  "rejectionRuling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-SEED-274.md",
+  "allowedUnexercised": [
+   "hook:223:I9",
+   "hook:552:I9"
+  ],
+  "unexercisedRuling": "acceptance-reports/ae-08-phase-5-2026-10-18/PARENT-RULING-P8-BLESS-BLOCKERS.md",
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full --allow-rejection hook:21:latency|cancelled|ending-transport-domain --allow-rejection hook:31:latency|cancelled|ending-transport-domain --allow-rejection hook:36:latency|cancelled|ending-transport-domain --allow-rejection hook:63:flush|cancelled|ending-transport-domain --allow-rejection hook:63:latency|cancelled|ending-transport-domain --allow-rejection hook:70:latency|cancelled|ending-transport-domain --allow-rejection hook:79:latency|cancelled|ending-transport-domain --allow-rejection hook:104:latency|cancelled|ending-transport-domain --allow-rejection hook:121:latency|cancelled|ending-transport-domain --allow-rejection hook:149:latency|cancelled|ending-transport-domain --allow-rejection hook:151:latency|cancelled|ending-transport-domain --allow-rejection hook:185:latency|cancelled|ending-transport-domain --allow-rejection hook:191:latency|cancelled|ending-transport-domain --allow-rejection hook:205:latency|cancelled|ending-transport-domain --allow-unexercised hook:223:I9 --allow-rejection hook:230:flush|cancelled|ending-transport-domain --allow-rejection hook:230:latency|cancelled|ending-transport-domain --allow-rejection hook:250:latency|cancelled|ending-transport-domain --allow-rejection hook:286:latency|cancelled|ending-transport-domain --allow-rejection hook:295:latency|cancelled|ending-incarnation --allow-rejection hook:296:latency|cancelled|ending-transport-domain --allow-rejection hook:301:latency|cancelled|ending-transport-domain --allow-rejection hook:307:latency|cancelled|ending-transport-domain --allow-rejection hook:315:latency|cancelled|ending-transport-domain --allow-rejection hook:318:latency|cancelled|ending-transport-domain --allow-rejection hook:324:latency|cancelled|ending-transport-domain --allow-rejection hook:332:latency|cancelled|ending-transport-domain --allow-rejection hook:336:latency|cancelled|ending-transport-domain --allow-rejection hook:381:latency|cancelled|ending-transport-domain --allow-rejection hook:384:latency|cancelled|ending-transport-domain --allow-rejection hook:393:latency|cancelled|ending-transport-domain --allow-rejection hook:397:latency|cancelled|ending-transport-domain --allow-rejection hook:416:latency|cancelled|ending-transport-domain --allow-rejection hook:424:latency|cancelled|ending-transport-domain --allow-rejection hook:445:latency|cancelled|ending-transport-domain --allow-rejection hook:457:latency|cancelled|ending-transport-domain --allow-rejection hook:482:latency|cancelled|ending-transport-domain --allow-rejection hook:488:latency|cancelled|ending-transport-domain --allow-rejection hook:493:latency|cancelled|ending-transport-domain --allow-rejection hook:514:latency|cancelled|ending-transport-domain --allow-rejection hook:516:latency|cancelled|ending-transport-domain --allow-rejection hook:545:latency|cancelled|ending-transport-domain --allow-unexercised hook:552:I9 --allow-rejection hook:553:latency|cancelled|ending-transport-domain --allow-rejection hook:556:latency|cancelled|ending-transport-domain --allow-rejection hook:571:flush|cancelled|ending-transport-domain --allow-rejection hook:585:latency|cancelled|ending-transport-domain --allow-rejection hook:598:latency|cancelled|ending-transport-domain --allow-rejection hook:607:latency|cancelled|ending-transport-domain --allow-rejection hook:631:latency|cancelled|ending-transport-domain --allow-rejection hook:651:latency|cancelled|ending-transport-domain --allow-rejection hook:661:latency|cancelled|ending-transport-domain --allow-rejection hook:664:latency|cancelled|ending-transport-domain --allow-rejection hook:683:latency|cancelled|ending-transport-domain --allow-rejection hook:698:latency|cancelled|ending-transport-domain --allow-rejection hook:700:latency|cancelled|ending-transport-domain --allow-rejection hook:726:latency|cancelled|ending-transport-domain --allow-rejection hook:744:latency|cancelled|ending-transport-domain --allow-rejection hook:748:latency|cancelled|ending-transport-domain --allow-rejection hook:766:latency|cancelled|ending-transport-domain --allow-rejection hook:767:latency|cancelled|ending-transport-domain --allow-rejection hook:775:latency|cancelled|ending-transport-domain --allow-rejection hook:789:latency|cancelled|ending-transport-domain --allow-rejection hook:791:latency|cancelled|ending-transport-domain --allow-rejection hook:812:latency|cancelled|ending-transport-domain --allow-rejection hook:822:latency|cancelled|ending-transport-domain --allow-rejection hook:888:latency|cancelled|ending-transport-domain --allow-rejection hook:898:latency|cancelled|ending-transport-domain --allow-rejection hook:906:latency|cancelled|ending-transport-domain --allow-rejection hook:935:latency|cancelled|ending-transport-domain --allow-rejection hook:952:latency|cancelled|ending-transport-domain --allow-rejection hook:958:latency|cancelled|ending-transport-domain --allow-rejection hook:968:latency|cancelled|ending-transport-domain --allow-rejection hook:984:latency|cancelled|ending-transport-domain --allow-rejection hook:990:latency|cancelled|ending-transport-domain",
+  "provenance": {
+   "scope": [
+    "--full",
+    "--allow-rejection",
+    "hook:21:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:31:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:36:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:63:flush|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:63:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:70:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:79:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:104:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:121:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:149:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:151:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:185:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:191:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:205:latency|cancelled|ending-transport-domain",
+    "--allow-unexercised",
+    "hook:223:I9",
+    "--allow-rejection",
+    "hook:230:flush|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:230:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:250:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:286:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:295:latency|cancelled|ending-incarnation",
+    "--allow-rejection",
+    "hook:296:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:301:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:307:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:315:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:318:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:324:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:332:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:336:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:381:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:384:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:393:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:397:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:416:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:424:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:445:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:457:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:482:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:488:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:493:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:514:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:516:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:545:latency|cancelled|ending-transport-domain",
+    "--allow-unexercised",
+    "hook:552:I9",
+    "--allow-rejection",
+    "hook:553:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:556:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:571:flush|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:585:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:598:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:607:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:631:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:651:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:661:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:664:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:683:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:698:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:700:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:726:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:744:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:748:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:766:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:767:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:775:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:789:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:791:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:812:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:822:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:888:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:898:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:906:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:935:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:952:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:958:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:968:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:984:latency|cancelled|ending-transport-domain",
+    "--allow-rejection",
+    "hook:990:latency|cancelled|ending-transport-domain"
+   ],
+   "head": "08243faa210928eec260e95495f66a99590f3843",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "7ba417ca4a6c52e45efc73d7b9e4a9e7957a51eb06740dfdd944fb5458c70c6d",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "7ba417ca4a6c52e45efc73d7b9e4a9e7957a51eb06740dfdd944fb5458c70c6d",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/bless-pr62b/live",
+   "resultSha256": "6e926d2028606edd9dc879a60f4f1286da619dfda8f6c9496aea4e549055ba7a",
+   "seconds": 1248.3098548750002,
+   "observations": 3086
+  },
+  "unreachedByOverlay": []
+ }
+}

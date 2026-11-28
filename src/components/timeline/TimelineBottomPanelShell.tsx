@@ -1,6 +1,7 @@
-import { createEffect, createSignal, onCleanup, type Component, type JSX } from "solid-js";
+import type { Component, JSX } from "solid-js";
 import { BOTTOM_PANEL_DEFAULT_HEIGHT_PX } from "~/lib/bottom-panel-preferences";
 import { BOTTOM_PANEL_EDGE_PADDING_PX, BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX } from "~/lib/bottom-panel-layout";
+import { useDrag } from "~/hooks/useDrag";
 
 export type TimelineBottomPanelShellControls = {
   heightPx: number;
@@ -16,35 +17,17 @@ type TimelineBottomPanelShellProps = {
 };
 
 const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (props) => {
-  const [dragStart, setDragStart] = createSignal<{ y: number; height: number }>();
+  let dragStartY = 0;
+  let dragStartHeight = 0;
 
-  createEffect(() => {
-    const start = dragStart();
-    if (!start) return;
-    const onMove = (event: PointerEvent) => {
-      props.controls.onHeightPreview(start.height + start.y - event.clientY);
-    };
-    const onUp = () => {
-      props.controls.onHeightCommit(props.controls.heightPx);
-      setDragStart(undefined);
-    };
-    const onKey = (event: KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      props.controls.onHeightPreview(start.height);
-      setDragStart(undefined);
-    };
-    window.addEventListener("pointermove", onMove);
-    window.addEventListener("pointerup", onUp, { once: true });
-    window.addEventListener("pointercancel", onUp, { once: true });
-    window.addEventListener("blur", onUp, { once: true });
-    window.addEventListener("keydown", onKey);
-    onCleanup(() => {
-      window.removeEventListener("pointermove", onMove);
-      window.removeEventListener("pointerup", onUp);
-      window.removeEventListener("pointercancel", onUp);
-      window.removeEventListener("blur", onUp);
-      window.removeEventListener("keydown", onKey);
-    });
+  const resizeDrag = useDrag({
+    onDragStart: (pos) => {
+      dragStartY = pos.y;
+      dragStartHeight = props.controls.heightPx;
+    },
+    onDragMove: (pos) => props.controls.onHeightPreview(dragStartHeight + dragStartY - pos.y),
+    onDragEnd: () => props.controls.onHeightCommit(props.controls.heightPx),
+    onDragCancel: () => props.controls.onHeightPreview(dragStartHeight),
   });
 
   return (
@@ -58,10 +41,7 @@ const TimelineBottomPanelShell: Component<TimelineBottomPanelShellProps> = (prop
         class="group absolute left-0 right-0 top-0 z-40 -translate-y-1/2 cursor-ns-resize"
         style={{ height: `${BOTTOM_PANEL_RESIZE_HANDLE_OVERHANG_PX * 2}px` }}
         onDblClick={() => props.controls.onHeightCommit(BOTTOM_PANEL_DEFAULT_HEIGHT_PX)}
-        onPointerDown={(event) => {
-          event.preventDefault();
-          setDragStart({ y: event.clientY, height: props.controls.heightPx });
-        }}
+        onPointerDown={resizeDrag.onPointerDown}
       >
         <div class="pointer-events-none absolute left-0 right-0 top-1/2 h-1 -translate-y-1/2 bg-transparent group-hover:bg-sky-500/20 group-active:bg-sky-500/20" />
       </button>

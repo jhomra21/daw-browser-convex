@@ -1,0 +1,518 @@
+{
+ "name": "ae08-e3-anchors",
+ "sequence": 16,
+ "createdAt": "2026-11-12T16:56:11.328Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:452:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first compile is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f a Pause or Stop during a resuming rebuild leaves a live paused portable session of the edit",
+    "B6f a Pause or Stop that cancels a pending Play leaves a live paused portable session",
+    "B6f a Stop while playing or paused leaves a live paused portable session at the start",
+    "B6f a mixer edit without a Timeline rebuild leaves a live paused portable session carrying it",
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f2 an unmount during the Stop re-prepare leaves no portable session behind",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:455:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 two paused locates while the first compile is pending end at the second",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate whose re-prepare settles after a Play committed keeps the Play running",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 two paused locates while the first compile is pending end at the second",
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f a paused locate moves the live paused portable session to the locate",
+    "B6f2 a paused locate during a pending Pause moves the live paused portable session to the locate",
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:mutant:b6f2",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f2 two paused locates while the first compile is pending end at the second"
+   ],
+   "new": [
+    "B6f2 two paused locates while the first seek is pending end at the second"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:462:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f2 two paused locates while the first compile is pending end at the second",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f2 two paused locates while the first seek is pending end at the second",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:469:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a resume after an adoption plays the newest state",
+    "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+    "B6f5c a take ended by a device fault follows the edit it held",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "native-required play retries failed recovery and stays stopped while recovery runs",
+    "pauses Web Audio transport before disposing active portable playback on cleanup",
+    "pauses Web Audio transport before disposing portable playback on project generation change",
+    "preserves an explicitly captured native owner across queued generation rebuilds",
+    "rebuilds active portable playback into compatibility playback for a loop"
+   ],
+   "new": [
+    "B6f a project switch leaves a live paused portable session of the new project at the start",
+    "B6f2 a project switch that moves the generation, then the project id, with unchanged tracks leaves a live paused portable session at the start",
+    "B6f3 a portable session fault while playing leaves a live paused portable session, native playback off or on",
+    "B6f4 a mixer edit with native playback off leaves a live paused portable session carrying it",
+    "B6f4 a paused-preview re-run with native playback off and no edit keeps the paused portable session",
+    "B6f5 A a mixer, master, automation or instrument edit while playing is adopted by the playing portable session",
+    "B6f5 A an edit the playing portable session cannot carry live rebuilds it once",
+    "B6f5 B an edit during a Play whose compile has run reaches the session that Play commits",
+    "B6f5 C an edit during a resuming rebuild reaches the session the rebuild commits",
+    "B6f5 D a structural edit during a warm Play keeps the Play and reaches its session",
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "B6f5 a mute or solo edit while playing is adopted by the playing portable session",
+    "B6f5 a rename coalesced with an edit and its undo is neither adopted nor rebuilt",
+    "B6f5 a resume after an adoption plays the newest state",
+    "B6f5 renaming and recolouring a track while playing is neither adopted nor rebuilt",
+    "B6f5 twenty settled volume commits while playing are twenty adoptions and no rebuild; a burst coalesces",
+    "B6f5c a failed take followed by the caller stop or cancel adopts or rebuilds each edit once",
+    "B6f5c a group colour cascading to its clips while playing is neither adopted nor rebuilt",
+    "B6f5c a send, output target, channel role or group edit while playing reaches the playing session",
+    "B6f5c a structural edit held by a portable take reaches the playing session once the take stops or is cancelled",
+    "B6f5c a take ended by a device fault follows the edit it held",
+    "B6f5c an instrument or unrelated edit during a portable take is adopted and keeps the take",
+    "B6f5c recolouring or renaming a clip while playing is neither adopted nor rebuilt; a MIDI clip move is adopted at a seam",
+    "C0G a clip waveform key or key order change while playing is neither adopted nor rebuilt",
+    "failed lifecycle transition cancels delayed native startup",
+    "keeps a paused portable session compatible when enabling a loop",
+    "native-required play retries failed recovery and stays stopped while recovery runs",
+    "pauses Web Audio transport before disposing active portable playback on cleanup",
+    "pauses Web Audio transport before disposing portable playback on project generation change",
+    "preserves an explicitly captured native owner across queued generation rebuilds",
+    "rebuilds active portable playback into compatibility playback for a loop"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits"
+   ],
+   "new": [
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:matrix",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
+    "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-off rebuild-before-commit proc-live",
+    "B6F5PROBE native-off rebuild-before-commit synth-live",
+    "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
+    "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-on rebuild-before-commit proc-live",
+    "B6F5PROBE native-on rebuild-before-commit synth-live"
+   ],
+   "new": [
+    "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-off rebuild-before-commit proc-live",
+    "B6F5PROBE native-off rebuild-before-commit synth-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-on rebuild-before-commit proc-live",
+    "B6F5PROBE native-on rebuild-before-commit synth-live"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:matrix",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 224,
+   "new": 228
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:matrix",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 12,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:484:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:b6f5",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits"
+   ],
+   "new": [
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:matrix",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6F5PROBE native-off paused-reprepare-postcompile proc-live",
+    "B6F5PROBE native-off paused-reprepare-postcompile synth-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-off rebuild-before-commit proc-live",
+    "B6F5PROBE native-off rebuild-before-commit synth-live",
+    "B6F5PROBE native-on paused-reprepare-postcompile proc-live",
+    "B6F5PROBE native-on paused-reprepare-postcompile synth-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-on rebuild-before-commit proc-live",
+    "B6F5PROBE native-on rebuild-before-commit synth-live"
+   ],
+   "new": [
+    "B6F5PROBE native-off pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-off pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-off rebuild-before-commit proc-live",
+    "B6F5PROBE native-off rebuild-before-commit synth-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile proc-live",
+    "B6F5PROBE native-on pending-cold-play-postcompile synth-live",
+    "B6F5PROBE native-on rebuild-before-commit proc-live",
+    "B6F5PROBE native-on rebuild-before-commit synth-live"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:matrix",
+    "expect",
+    "counts",
+    "pass"
+   ],
+   "old": 224,
+   "new": 228
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:matrix",
+    "expect",
+    "counts",
+    "fail"
+   ],
+   "old": 12,
+   "new": 8
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:485:mutant:playback",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 F a live processor edit during a Play or re-prepare in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ],
+   "new": [
+    "B6f5 F a live processor edit during a Play or a paused locate in flight reaches the session it commits",
+    "failed lifecycle transition cancels delayed native startup",
+    "preserves an explicitly captured native owner across queued generation rebuilds"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:step5b",
+    "expect",
+    "fails"
+   ],
+   "old": [
+    "B6f5 a warm resume after an adoption plays the newest state without another compile"
+   ],
+   "new": [
+    "B6f5 a resume after an adoption and a paused locate plays the newest state on the same session"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
+   "new": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:playback",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n",
+   "new": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
+   "new": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:portable",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n",
+   "new": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "    // A paused session is prepared only where it stands: another playhead seeks it or prepares it again.\n    const context = input.getAudioContext()\n    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)\n      && context && positionFrame === Math.round(transport.playheadSec * context.sampleRate)) {\n",
+   "new": "    // A paused session is prepared only where it stands: another playhead seeks it in place.\n    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused && positionFrame === Math.round(transport.playheadSec * keptPaused.sampleRate)) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:458:mutant:b6f",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "    if (active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0)) {\n",
+   "new": "    const context = input.getAudioContext()\n    const keptPaused = active && !playing && activeProjectGeneration === (input.getProjectGeneration?.() ?? 0) && context\n    if (keptPaused) {\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:step5b",
+    "command",
+    "argv",
+    "#10"
+   ],
+   "old": "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields",
+   "new": "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields|B6f5 a resume after an adoption and a paused locate"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:control:step5b",
+    "command",
+    "argv",
+    "#10"
+   ],
+   "old": "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields",
+   "new": "B6f5 step5b |B6f5 D6 |B6f5 renaming|B6f5 a warm resume|B6f5 a rename coalesced|fingerprints all playback-relevant audio clip compiler fields|B6f5 a resume after an adoption and a paused locate"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 8 step 6b (E3, in-place portable seek): a paused locate moves the kept session in place, so ensurePrepared keeps the position check on a three-line prelude (arm 458 anchors move with it; the mutant keeps its meaning: answer started at the old position without a seek). The witnesses that held a compile or a re-prepare for the paused locate are renamed to what they now hold: B6f5 F (a paused locate in flight instead of a re-prepare), B6f2 two paused locates (the first seek held at its stop transport instead of a held compile). The matrix arms 484 and 485 lose the paused-reprepare-postcompile cells, which the paused locate no longer reaches. Arm 497 (liveAdoption fingerprint write) is reachable again through a seek: its witness is B6f5 a resume after an adoption and a paused locate plays the newest state on the same session, and its test filter includes it. See PHASE8-STEP6B-E3.md.",
+  "expectationsSha256": "499a810b8ca8921c7024968b1b95c50fffde15167f3fe397bada102b9355d5ec"
+ }
+}

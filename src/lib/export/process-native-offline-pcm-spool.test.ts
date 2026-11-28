@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test'
 
+import { dbFromLinear } from '@daw-browser/shared'
+
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
 import { processNativeOfflinePcmSpool } from '~/lib/export/process-native-offline-pcm-spool'
 import { processRenderedExport } from '~/lib/export/process-rendered-export'
@@ -103,7 +105,7 @@ const createFakeSpool = (source: TestAudioBuffer): NativeOfflinePcmSpoolSession 
       const endFrame = options.endFrame ?? source.length
       const gain = options.gain ?? 1
       const chunkFrames = 997
-      for (let startFrame = 0; startFrame < endFrame; startFrame += chunkFrames) {
+      for (let startFrame = options.startFrame ?? 0; startFrame < endFrame; startFrame += chunkFrames) {
         options.signal?.throwIfAborted()
         const frameCount = Math.min(chunkFrames, endFrame - startFrame)
         const chunk = new TestAudioBuffer({
@@ -273,5 +275,79 @@ describe('native offline PCM spool processing', () => {
     const replay = await collectReplay(actual.replay())
     expect(replay.getChannelData(0)[7_500]).toBeCloseTo(expected.buffer.getChannelData(0)[7_500] ?? 0, 7)
     expect(replay.getChannelData(1)[7_500]).toBeCloseTo(expected.buffer.getChannelData(1)[7_500] ?? 0, 7)
+  })
+})
+
+describe('native offline PCM spool processing with graph latency', () => {
+  const LATENCY_FRAMES = 1_234
+  const delayed = (aligned: TestAudioBuffer) => {
+    const buffer = new TestAudioBuffer({
+      numberOfChannels: 2,
+      length: aligned.length + LATENCY_FRAMES,
+      sampleRate: SAMPLE_RATE,
+    })
+    for (let channel = 0; channel < 2; channel += 1) {
+      buffer.getChannelData(channel).fill(0.9, 0, LATENCY_FRAMES)
+      buffer.getChannelData(channel).set(aligned.getChannelData(channel), LATENCY_FRAMES)
+    }
+    return buffer
+  }
+
+  test('drops the leading latency frames and keeps the range length', async () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const aligned = createProgram()
+    const actual = await processNativeOfflinePcmSpool({
+      spool: createFakeSpool(delayed(aligned)),
+      latencyFrames: LATENCY_FRAMES,
+      sourceDurationSec: SOURCE_DURATION_SEC,
+      render: renderSettings(),
+      signal: new AbortController().signal,
+    })
+
+    const replay = await collectReplay(actual.replay())
+    expect(actual.endFrame).toBe(aligned.length)
+    expect(replay.length).toBe(aligned.length)
+    expect(Array.from(replay.getChannelData(0))).toEqual(Array.from(aligned.getChannelData(0)))
+    expect(actual.analysis.samplePeakDbfs).toBeCloseTo(dbFromLinear(getSamplePeak(aligned)), 6)
+  })
+
+  test('measures the automatic tail from the aligned start', async () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const aligned = createProgram()
+    const render = renderSettings({
+      tail: { mode: 'automatic', thresholdDbfs: -40, holdSec: 0.05, maximumSec: 0.35 },
+    })
+    const expected = await processNativeOfflinePcmSpool({
+      spool: createFakeSpool(aligned),
+      sourceDurationSec: SOURCE_DURATION_SEC,
+      render,
+      signal: new AbortController().signal,
+    })
+    const actual = await processNativeOfflinePcmSpool({
+      spool: createFakeSpool(delayed(aligned)),
+      latencyFrames: LATENCY_FRAMES,
+      sourceDurationSec: SOURCE_DURATION_SEC,
+      render,
+      signal: new AbortController().signal,
+    })
+
+    expect(actual.endFrame).toBe(expected.endFrame)
+    expect(actual.endFrame).toBeLessThan(aligned.length)
+    const replay = await collectReplay(actual.replay())
+    expect(Array.from(replay.getChannelData(0))).toEqual(Array.from((await collectReplay(expected.replay())).getChannelData(0)))
+  })
+
+  test('rejects latency that leaves no audio', async () => {
+    Object.defineProperty(globalThis, 'AudioBuffer', { configurable: true, value: TestAudioBuffer })
+    const program = createProgram()
+    for (const latencyFrames of [program.length, -1, 1.5]) {
+      await expect(processNativeOfflinePcmSpool({
+        spool: createFakeSpool(program),
+        latencyFrames,
+        sourceDurationSec: SOURCE_DURATION_SEC,
+        render: renderSettings(),
+        signal: new AbortController().signal,
+      })).rejects.toThrow('does not match export settings')
+    }
   })
 })

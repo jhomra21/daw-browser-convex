@@ -11,10 +11,12 @@ import {
   type NativeReleaseArtifactPaths,
 } from "./release.config"
 import {
+  getPackagedNativeReleaseArtifacts,
   nativeAudioHostArtifactName,
   nativeVst3ScannerArtifactName,
 } from "./native-release-artifacts"
 import { nativeVst3WorkerArtifactId } from "@daw-browser/plugin-host-protocol"
+import { jobLimit } from "../../tools/jobs"
 
 const artifactPaths: NativeReleaseArtifactPaths = {
   scannerPath: `/build/${nativeVst3ScannerArtifactName}`,
@@ -67,6 +69,22 @@ test("resolves release artifact candidates with the release audio host preferred
   })
 })
 
+test("never builds or packages the AE-08 failure-injection test plug-in", () => {
+  const calls: string[] = []
+  rebuildNativePackageArtifacts(
+    "/project",
+    (command, arguments_) => {
+      calls.push([command, ...arguments_].join(" "))
+      return { status: 0 }
+    },
+    { VST3_SDK_PATH: "/sdk" },
+  )
+  expect(calls.length).toBeGreaterThan(0)
+  expect(calls.filter((call) => /ae08|AE08/.test(call))).toEqual([])
+  expect(getPackagedNativeReleaseArtifacts("/resources").map(({ name }) => name))
+    .toEqual([nativeVst3ScannerArtifactName, nativeVst3WorkerArtifactId, nativeAudioHostArtifactName])
+})
+
 test("rebuilds every native artifact used by desktop packaging", () => {
   const calls: Array<{ command: string; arguments_: readonly string[] }> = []
   rebuildNativePackageArtifacts(
@@ -102,6 +120,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "daw-vst3-scanner",
         "daw-vst3-worker",
         "--parallel",
+        String(jobLimit()),
       ],
     },
     {
@@ -126,6 +145,7 @@ test("rebuilds every native artifact used by desktop packaging", () => {
         "--target",
         "daw-audio-host-macos",
         "--parallel",
+        String(jobLimit()),
       ],
     },
   ])

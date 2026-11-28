@@ -6,6 +6,7 @@ import {
   gatedHistogramMean,
   type LoudnessAnalysis,
 } from './loudness-analyzer'
+import { linearFromDb } from '@daw-browser/shared'
 import { createStreamingTruePeakScanner } from './streaming-true-peak-scanner'
 
 type BiquadCoefficients = {
@@ -39,7 +40,7 @@ const createHighShelf = (sampleRate: number): BiquadCoefficients => {
   const gainDb = 3.999843853973347
   const q = 0.7071752369554196
   const k = Math.tan(Math.PI * frequency / sampleRate)
-  const vh = 10 ** (gainDb / 20)
+  const vh = linearFromDb(gainDb)
   const vb = vh ** 0.4996667741545416
   const a0 = 1 + k / q + k * k
   return {

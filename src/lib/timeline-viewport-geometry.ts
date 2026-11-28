@@ -41,7 +41,7 @@ export type TimelineViewport = {
   runwayWidth: number
 }
 
-export const TIMELINE_VIEWPORT_OVERSCAN_PX = 512
+const TIMELINE_VIEWPORT_OVERSCAN_PX = 512
 export const TIMELINE_PHYSICAL_RUNWAY_WIDTH_PX = 200_000
 
 const finiteNonNegative = (value: number) => Number.isFinite(value) && value >= 0

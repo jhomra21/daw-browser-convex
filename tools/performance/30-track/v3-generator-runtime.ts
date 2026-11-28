@@ -115,7 +115,7 @@ const run = async () => {
       await setLocalEffect(project.id, track.id, "instrument", {
         kind: "synth",
         instanceId: `instrument:v3-${instrument.index}`,
-        params: createDefaultSynthParams(),
+        params: { ...createDefaultSynthParams(), polyphony: 1 },
       })
       await repository.createClip({
         trackId: track.id,

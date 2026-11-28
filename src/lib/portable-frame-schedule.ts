@@ -8,7 +8,7 @@ import {
 import { getAutomationEnvelopeSchedulePlan } from '@daw-browser/audio-engine/automation'
 import { getScheduledMidiEvents } from '@daw-browser/audio-engine/audio-scheduling'
 import { resolveTrackMidiExpressionSchedule } from '@daw-browser/audio-engine/midi-expression-scheduling'
-import { getAutomationParameterDescriptor, type ArpParams, type AutomationEnvelope } from '@daw-browser/shared'
+import { getAutomationParameterDescriptor, normalizeLegacyMidiClip, type ArpParams, type AutomationEnvelope } from '@daw-browser/shared'
 import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import {
   loopFramesForTransport, splitLoopScheduleRange, type LoopTransport,
@@ -32,7 +32,8 @@ export type PortableFrameScheduleAdapterInput = {
   noteScheduleStartSec?: number
   clipSpanningNoteOn?: boolean
   loop?: LoopTransport
-  loopIteration?: number
+  // The raw frame the loop pass began at: the same in every compile of a run, whatever its origin or its shifted loop.
+  loopPassFrame?: number
 }
 
 type PendingEventPayload =
@@ -78,7 +79,7 @@ const stableNoteId = (trackId: string, clipId: string, identity: string) => {
 }
 
 const noteIdentity = (input: PortableFrameScheduleAdapterInput, identity: string) => (
-  input.loopIteration === undefined ? identity : `${identity}:loop:${input.loopIteration}`
+  input.loopPassFrame === undefined ? identity : `${identity}:loop:${input.loopPassFrame}`
 )
 
 const parameterTarget = (envelope: AutomationEnvelope): PortableParameterTarget => (
@@ -137,6 +138,15 @@ const eventPriorityAtFrame = (event: PortableFrameScheduleEvent) => (
   event.type === 'note-off' ? 0 : event.type === 'note-on' ? 1 : 2
 )
 
+type PreparedMidiClip = {
+  notes: Array<ReturnType<typeof getScheduledMidiEvents>[number] & { noteId: number }>
+}
+type ScheduledMidiNote = ReturnType<typeof getScheduledMidiEvents>[number] & { noteId?: number }
+type PreparedMidiSchedule = {
+  clips: ReadonlyMap<RuntimeTrack['clips'][number], PreparedMidiClip>
+  expressionTracks: ReadonlySet<RuntimeTrack>
+}
+
 /**
  * App-owned projection from the hydrated timeline snapshot to the engine's
  * frame contract. Timing and interpolation remain delegated to engine
@@ -144,6 +154,7 @@ const eventPriorityAtFrame = (event: PortableFrameScheduleEvent) => (
  */
 const compileSinglePortableFrameSchedule = (
   input: PortableFrameScheduleAdapterInput,
+  prepared?: PreparedMidiSchedule,
 ): PortableFrameSchedule => {
   const pending: PendingEvent[] = []
   let ordinal = 0
@@ -184,7 +195,7 @@ const compileSinglePortableFrameSchedule = (
   }
 
   for (const track of input.tracks) {
-    for (const expression of resolveTrackMidiExpressionSchedule({
+    const expressions = prepared && !prepared.expressionTracks.has(track) ? [] : resolveTrackMidiExpressionSchedule({
       clips: track.clips,
       trackId: track.id,
       trackVolume: track.volume,
@@ -192,7 +203,8 @@ const compileSinglePortableFrameSchedule = (
       bpm: input.bpm,
       rangeStartSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
       rangeEndSec: input.rangeEndSec,
-    })) {
+    })
+    for (const expression of expressions) {
       append(expression.timeSec, {
         type: expression.phase === 'restore' ? 'parameter-restore' : 'parameter-set',
         target: midiExpressionTarget(track.id, expression.target.parameterId, expression.target.effectInstanceId),
@@ -201,14 +213,24 @@ const compileSinglePortableFrameSchedule = (
     }
     for (const clip of track.clips) {
       if (!clip.midi) continue
-      for (const note of getScheduledMidiEvents({
-        clip,
-        bpm: input.bpm,
-        notes: clip.midi.notes,
-        rangeStartSec: input.noteScheduleStartSec ?? input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
-        rangeEndSec: input.rangeEndSec,
-        arp: input.arpeggiators.get(track.id),
-      })) {
+      const preparedClip = prepared?.clips.get(clip)
+      const notes: ScheduledMidiNote[] = preparedClip
+        ? preparedClip.notes
+          .filter((note) => note.startSec < input.rangeEndSec
+            && note.endSec >= input.timeOrigin.timelineSec - 0.5 / input.sampleRateHz)
+          .map((note) => ({ ...note, endSec: Math.min(note.endSec, input.rangeEndSec) }))
+        : getScheduledMidiEvents({
+          clip,
+          bpm: input.bpm,
+          notes: clip.midi.notes,
+          rangeStartSec: input.noteScheduleStartSec ?? input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
+          rangeEndSec: input.rangeEndSec,
+          arp: input.arpeggiators.get(track.id),
+        })
+      for (const note of notes) {
+        const noteId = input.stableNoteIds
+          ? note.noteId ?? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
+          : nextNoteId
         if (
           input.clipSpanningNoteOn === true
           && note.startSec < input.timeOrigin.timelineSec
@@ -217,30 +239,23 @@ const compileSinglePortableFrameSchedule = (
           append(input.timeOrigin.timelineSec, {
             type: 'note-on',
             target: { kind: 'instrument', trackId: track.id },
-            noteId: input.stableNoteIds
-              ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
-              : nextNoteId,
+            noteId,
             pitch: note.pitch,
             velocity: note.velocity ?? 1,
           })
         }
-        const noteId = nextNoteId
         nextNoteId += 1
         append(note.startSec, {
           type: 'note-on',
           target: { kind: 'instrument', trackId: track.id },
-          noteId: input.stableNoteIds
-            ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
-            : noteId,
+          noteId,
           pitch: note.pitch,
           velocity: note.velocity ?? 1,
         })
         append(note.endSec, {
           type: 'note-off',
           target: { kind: 'instrument', trackId: track.id },
-          noteId: input.stableNoteIds
-            ? stableNoteId(track.id, clip.id, noteIdentity(input, note.identity))
-            : noteId,
+          noteId,
           pitch: note.pitch,
         })
       }
@@ -275,7 +290,7 @@ export const compilePortableFrameSchedule = (
     loopStartSec: 0,
     loopEndSec: 0,
   }, input.sampleRateHz)
-  if (!loop || input.loopIteration === -1) return compileSinglePortableFrameSchedule(input)
+  if (!loop) return compileSinglePortableFrameSchedule(input)
   const startFrame = input.timeOrigin.frame
   const endFrame = portableFrameAtTimelineTime(
     { sampleRateHz: input.sampleRateHz, timeOrigin: input.timeOrigin },
@@ -286,7 +301,7 @@ export const compilePortableFrameSchedule = (
     const schedule = compileSinglePortableFrameSchedule({
     ...input,
     loop: undefined,
-    loopIteration: slice.iteration,
+    loopPassFrame: slice.iteration === 0 ? 0 : slice.nativeStartFrame - (slice.arrangementStartFrame - loop.startFrame),
     timeOrigin: {
       timelineSec: input.timeOrigin.timelineSec
         + (slice.arrangementStartFrame - startFrame) / input.sampleRateHz,
@@ -351,4 +366,49 @@ export const compilePortableFrameScheduleWindow = (
     eventRangeStartSec: input.eventRangeStartSec ?? input.timeOrigin.timelineSec,
     rangeEndSec: endSec,
   })
+}
+
+/**
+ * Native coordinators own an immutable snapshot. Prepare range-independent MIDI
+ * once per coordinator, not once per callback. Mapped-expression tracks retain
+ * the authority's window-specific restore/seed semantics; no global cache can
+ * survive a snapshot, tempo, arp, or transport replacement.
+ */
+export const createPortableFrameScheduleWindowCompiler = (
+  input: Pick<PortableFrameScheduleAdapterInput,
+    'revision' | 'transportEpoch' | 'sampleRateHz' | 'bpm' | 'tracks' | 'automationEnvelopes' | 'arpeggiators'>,
+) => {
+  const clips = new Map<RuntimeTrack['clips'][number], PreparedMidiClip>()
+  const expressionTracks = new Set<RuntimeTrack>()
+  for (const track of input.tracks) {
+    for (const clip of track.clips) {
+      if (!clip.midi) continue
+      // Preserve MIDI schema validation even on tracks without mappings.
+      if (normalizeLegacyMidiClip(clip.midi).mappings.length > 0) expressionTracks.add(track)
+      clips.set(clip, {
+        notes: getScheduledMidiEvents({
+          clip, bpm: input.bpm, notes: clip.midi.notes, rangeStartSec: 0,
+          arp: input.arpeggiators.get(track.id),
+        }).map((note) => ({ ...note, noteId: stableNoteId(track.id, clip.id, note.identity) })),
+      })
+    }
+  }
+  return (window: {
+    timeOrigin: PortableFrameScheduleAdapterInput['timeOrigin']
+    rangeStartFrame: number
+    rangeEndFrame: number
+  }) => {
+    if (!Number.isSafeInteger(window.rangeStartFrame) || window.rangeStartFrame < 0
+      || !Number.isSafeInteger(window.rangeEndFrame) || window.rangeEndFrame <= window.rangeStartFrame) {
+      throw new Error('Portable frame schedule window bounds are invalid.')
+    }
+    const startSec = window.timeOrigin.timelineSec
+      + (window.rangeStartFrame - window.timeOrigin.frame) / input.sampleRateHz
+    const endSec = startSec + (window.rangeEndFrame - window.rangeStartFrame) / input.sampleRateHz
+    return compileSinglePortableFrameSchedule({
+      ...input, timeOrigin: { timelineSec: startSec, frame: window.rangeStartFrame },
+      rangeEndSec: endSec, eventRangeStartSec: startSec, noteScheduleStartSec: 0,
+      stableNoteIds: true, clipSpanningNoteOn: true,
+    }, { clips, expressionTracks })
+  }
 }

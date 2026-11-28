@@ -1,3 +1,5 @@
+import { clamp } from '@daw-browser/shared'
+
 export type BpmDetectionAlternative = {
   bpm: number
   confidence: number
@@ -19,8 +21,6 @@ const MAX_BPM = 200
 const ANALYSIS_SAMPLE_RATE = 200
 const MIN_DURATION_SEC = 1
 const MAX_ANALYSIS_SEC = 24
-
-const clamp = (value: number, min: number, max: number) => Math.max(min, Math.min(max, value))
 
 const roundBpm = (value: number) => Math.round(value * 100) / 100
 

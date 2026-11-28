@@ -11,7 +11,6 @@ import {
   type SharedUngroupRestoreAutomation,
   type SharedUngroupRestoreEffect,
   type AutomationEnvelope,
-  type JsonObject,
   type JsonValue,
 } from '@daw-browser/shared'
 
@@ -40,14 +39,12 @@ type SharedUngroupResult = {
   sidechainRoutes: ExternalSidechainRoute[]
 }
 
-const isRecord = (value: JsonValue): value is JsonObject => isJsonObject(value)
-
 const readSendTap = (value: JsonValue): 'pre-fx' | 'pre-fader' | 'post-fader' | undefined => (
   value === 'pre-fx' || value === 'pre-fader' || value === 'post-fader' ? value : undefined
 )
 
 export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult | null => {
-  if (!isRecord(value) || value.status !== 'applied' || !isRecord(value.group) || !Array.isArray(value.children)) return null
+  if (!isJsonObject(value) || value.status !== 'applied' || !isJsonObject(value.group) || !Array.isArray(value.children)) return null
   const group = value.group
   if (
     (group.name !== undefined && !isJsonString(group.name))
@@ -58,12 +55,12 @@ export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult |
     || !Array.isArray(group.sends)
   ) return null
   const children = value.children.flatMap((child) => (
-    isRecord(child) && isJsonString(child.trackId)
+    isJsonObject(child) && isJsonString(child.trackId)
       ? [{ trackId: child.trackId, nextOutputTargetId: isJsonString(child.nextOutputTargetId) ? child.nextOutputTargetId : undefined }]
       : []
   ))
   const sends = group.sends.flatMap((send) => (
-    isRecord(send) && isJsonString(send.targetId) && isJsonNumber(send.amount)
+    isJsonObject(send) && isJsonString(send.targetId) && isJsonNumber(send.amount)
       && (send.tap === undefined || send.tap === 'pre-fx' || send.tap === 'pre-fader' || send.tap === 'post-fader')
       ? [{ targetId: send.targetId, amount: send.amount, tap: readSendTap(send.tap) }]
       : []
@@ -73,7 +70,7 @@ export const readSharedUngroupResult = (value: JsonValue): SharedUngroupResult |
   const sidechainRouteInput = value.sidechainRoutes === undefined ? [] : value.sidechainRoutes
   if (!Array.isArray(sidechainRouteInput)) return null
   const sidechainRoutes = sidechainRouteInput.flatMap((route) => (
-    isRecord(route)
+    isJsonObject(route)
     && isJsonString(route.sourceTrackId)
     && isJsonString(route.targetTrackId)
     && isJsonString(route.effectInstanceId)

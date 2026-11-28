@@ -6,9 +6,12 @@ import { automationTargetKey, externalAutomationParameterId } from "@daw-browser
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { NativeVstParameterQueue } from "~/lib/desktop/native-vst-parameter-queue";
 import { externalProcessorStatusLabel } from "~/lib/external-plugin-ui";
+import { vstInstanceFailed } from "~/lib/desktop/vst-instance-failures";
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer";
 import {
   nativeEditorAnchorFromElement,
   nativeEditorAvailabilityMessage,
+  nativeEditorCommand,
   nativeEditorCommandAvailable,
 } from "~/components/timeline/external-plugin-editor";
 import { isDeviceHeaderTarget, isDeviceInteractiveTarget } from "~/components/timeline/device-interaction";
@@ -26,6 +29,7 @@ type ExternalPluginParametersProps = {
   onSelectAutomationParameter?: (parameterId: string, effectInstanceId: string) => void;
   onManualAutomationOverride?: (parameterId: string, effectInstanceId: string) => void;
   onParameterChange: (parameterId: number, value: number) => void;
+  onParameterGestureEnd?: () => void;
 };
 
 const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (props) => {
@@ -97,6 +101,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
                       disabled={!props.canWrite || parameter.readOnly}
                       class="accent-cyan-400 disabled:opacity-50"
                       onInput={(event) => updateParameter(parameter, Number(event.currentTarget.value))}
+                      onChange={() => props.onParameterGestureEnd?.()}
                     />
                     <button
                       type="button"
@@ -119,6 +124,7 @@ const ExternalPluginParameters: Component<ExternalPluginParametersProps> = (prop
 };
 
 export type ExternalPluginCardProps = {
+  acceptance?: PlaybackAcceptanceObserver;
   projectId?: string;
   processor: ExternalProcessor;
   enqueueParameter: NativeVstParameterQueue["enqueue"];
@@ -134,6 +140,7 @@ export type ExternalPluginCardProps = {
   onRemove: () => void;
   onBypassChange: (bypassed: boolean) => void;
   onParameterChange: (parameterId: number, value: number) => void;
+  onParameterGestureEnd?: () => void;
 };
 
 export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) => {
@@ -149,6 +156,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   const [autoOpenStarted, setAutoOpenStarted] = createSignal(false);
   let autoOpenFailed = false;
   let editorInstanceId: string | undefined;
+  const failed = () => vstInstanceFailed(props.processor.instanceId);
   const editorBridgeAvailable = () => Boolean(window.dawDesktop?.audioHost?.session.editor);
   const editorAvailable = () => nativeEditorCommandAvailable(
     editorBridgeAvailable(),
@@ -201,7 +209,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         }
         serializedPlan = encodeNativeExternalAttachmentPlan(compilation.plan);
       }
-      const result = await bridge.session.editor({
+      const result = await bridge.session.editor(nativeEditorCommand({
         projectId: props.projectId,
         instanceId: props.processor.instanceId,
         command,
@@ -212,7 +220,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
         ),
         captureState: props.processor.manifest.supportsState,
         anchor: command === "open" || command === "focus" ? props.editorAnchor?.() : undefined,
-      });
+      }));
       if (!result.ok) {
         setEditorMessage(result.error);
         return false;
@@ -274,8 +282,20 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
   });
   return (
     <EffectShell
+      class={failed() ? "opacity-60" : undefined}
       title={props.processor.manifest.identity.name}
       typeLabel={`${props.processor.manifest.identity.vendor} · VST3`}
+      titleActions={(
+        <Show when={failed()}>
+          <span
+            role="status"
+            class="shrink-0 text-[10px] text-amber-300"
+            title="This plug-in stopped working and is muted. Other audio keeps playing. Replace or remove it."
+          >
+            Plug-in failed
+          </span>
+        </Show>
+      )}
       enabled={!props.processor.bypassed}
       onToggleEnabled={(enabled) => updateBypass(!enabled)}
       disabled={!props.canWrite}
@@ -296,7 +316,11 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
               type="button"
               class="border-r border-border px-2 text-xs text-muted-foreground hover:bg-muted disabled:cursor-not-allowed disabled:opacity-50"
               disabled={!props.canWrite}
-              onClick={() => void editor("open")}
+              onClick={() => {
+                const { instanceId } = props.processor;
+                props.acceptance?.ui("ui-editor-open", () => instanceId);
+                void editor("open");
+              }}
             >
               Open UI
             </button>
@@ -323,7 +347,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
       )}
     >
       <div class="flex min-w-52 flex-1 flex-col gap-2 p-3 text-xs">
-        <div class="font-medium text-foreground">{externalProcessorStatusLabel(props.processor)}</div>
+        <div class="font-medium text-foreground">{externalProcessorStatusLabel(props.processor, failed())}</div>
         <ExternalPluginParameters
           processor={props.processor}
           enqueueParameter={props.enqueueParameter}
@@ -334,6 +358,7 @@ export const ExternalPluginCard: Component<ExternalPluginCardProps> = (props) =>
           onSelectAutomationParameter={props.onSelectAutomationParameter}
           onManualAutomationOverride={props.onManualAutomationOverride}
           onParameterChange={props.onParameterChange}
+          onParameterGestureEnd={props.onParameterGestureEnd}
         />
         <div class="text-muted-foreground">
           {nativeEditorAvailabilityMessage({

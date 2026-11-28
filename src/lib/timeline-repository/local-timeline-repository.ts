@@ -7,7 +7,11 @@ import {
 import { audioWarpEqual, canonicalTrackCreation, createLocalClipId, createLocalTrackId, hasTrackGroupCycle, hasValidReturnTrackPartition, isLocalProjectAssetKey, midiClipEquals, normalizeAudioWarp, normalizeLegacyMidiClip, normalizeMidiClip, normalizeTrackRouting, sanitizeAudioSourceKind } from '@daw-browser/shared'
 import { notifyLocalProjectChanged } from '~/lib/local-project-changes'
 import { flushRegisteredLocalProjectWrites } from '~/lib/local-project-write-flushers'
-import { LocalEntityWriteQueue } from '~/lib/local-write-queue'
+import {
+  getAllLocalEntityWriteQueues,
+  getLocalEntityWriteQueue,
+  getLocalEntityWriteQueueIfCreated,
+} from '~/lib/local-write-queue'
 import { normalizeClipFades, clipFadesEqual, transformClipFadesForDuration } from '@daw-browser/timeline-core/clip-fades'
 import type {
   CreateClipInput,
@@ -45,7 +49,6 @@ const AUTOMATION_KIND = 'automation-envelope'
 const SIDECHAIN_KIND = 'sidechain-route'
 const pendingLocalTimelineFlushers = new Map<string, Set<() => Promise<void>>>()
 const pendingRepositoryWritesByProject = new Map<string, Set<Promise<unknown>>>()
-const entityWriteQueuesByProject = new Map<string, LocalEntityWriteQueue>()
 const projectMutationTails = new Map<string, Promise<void>>()
 let lifecycleFlushAttached = false
 
@@ -355,17 +358,9 @@ const requireValidReorderAndGroupUpdates = (
   }
 }
 
-const getEntityWriteQueue = (projectId: string) => {
-  const existing = entityWriteQueuesByProject.get(projectId)
-  if (existing) return existing
-  const queue = new LocalEntityWriteQueue(projectId)
-  entityWriteQueuesByProject.set(projectId, queue)
-  return queue
-}
-
 const flushEntityWriteQueues = async (projectId?: string) => {
-  const queue = projectId ? entityWriteQueuesByProject.get(projectId) : undefined
-  const queues = projectId ? (queue ? [queue] : []) : Array.from(entityWriteQueuesByProject.values())
+  const queue = projectId ? getLocalEntityWriteQueueIfCreated(projectId) : undefined
+  const queues = projectId ? (queue ? [queue] : []) : getAllLocalEntityWriteQueues()
   await Promise.all(queues.map((queue) => queue.flush()))
 }
 
@@ -374,8 +369,7 @@ const readEntityRow = async (
   kind: string,
   id: string,
 ): Promise<LocalProjectEntityRow | undefined> => {
-  const queue = getEntityWriteQueue(projectId)
-  const pending = queue.getPending(kind, id)
+  const pending = getLocalEntityWriteQueueIfCreated(projectId)?.getPending(kind, id)
   if (pending !== undefined) return pending ?? undefined
   const db = await openLocalProjectDb(projectId)
   return db.get('entities', [kind, id])
@@ -384,7 +378,7 @@ const readEntityRow = async (
 const readEntityRowsByKind = async (projectId: string, kind: string): Promise<LocalProjectEntityRow[]> => {
   const db = await openLocalProjectDb(projectId)
   const rows = await db.getAllFromIndex('entities', 'by-kind', kind)
-  return getEntityWriteQueue(projectId).applyPendingRows(kind, rows)
+  return getLocalEntityWriteQueueIfCreated(projectId)?.applyPendingRows(kind, rows) ?? rows
 }
 
 const attachLifecycleFlush = () => {
@@ -456,15 +450,16 @@ const trackRepositoryWrite = <T>(projectId: string, write: () => Promise<T>): Pr
 export const createLocalTimelineRepository = (projectId: string): TimelineRepository => {
   attachLifecycleFlush()
   const markChanged = () => notifyLocalProjectChanged(projectId)
-  const entityQueue = getEntityWriteQueue(projectId)
 
   const loadSnapshot = async (): Promise<TimelineSnapshot> => {
     await flushLocalTimelineWrites(projectId)
     const db = await openLocalProjectDb(projectId)
+    // One transaction: each separate read waits for its own transaction slot, which is the cost of a reload after a commit.
+    const kinds = db.transaction('entities', 'readonly').store.index('by-kind')
     const [trackRows, clipRows, sidechainRows] = await Promise.all([
-      db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
-      db.getAllFromIndex('entities', 'by-kind', CLIP_KIND),
-      db.getAllFromIndex('entities', 'by-kind', SIDECHAIN_KIND),
+      kinds.getAll(TRACK_KIND),
+      kinds.getAll(CLIP_KIND),
+      kinds.getAll(SIDECHAIN_KIND),
     ])
     const tracks = trackValues(trackRows).sort((left, right) => left.index - right.index)
     const clips = clipValues(clipRows).sort((left, right) => left.startSec - right.startSec)
@@ -616,8 +611,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     if (trackPersistenceFieldsEqual(row.value, track)) return row.value
     markChanged()
-    entityQueue.schedulePut(toEntityRow(TRACK_KIND, track.id, track, timestamp))
-    await entityQueue.flush()
+    getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(TRACK_KIND, track.id, track, timestamp))
+    await flushEntityWriteQueues(projectId)
     return track
   }
 
@@ -701,20 +696,16 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
 
   const deleteClips = async (clipIds: TimelineClipId[]): Promise<void> => {
     if (clipIds.length === 0) return
-    for (const clipId of clipIds) entityQueue.scheduleDelete(CLIP_KIND, clipId)
+    const queue = getLocalEntityWriteQueue(projectId)
+    for (const clipId of clipIds) queue.scheduleDelete(CLIP_KIND, clipId)
     markChanged()
-    await entityQueue.flush()
+    await flushEntityWriteQueues(projectId)
   }
 
   const moveClips = async (moves: MoveClipInput[]): Promise<void> => {
     if (moves.length === 0) return
     const timestamp = now()
-    const db = await openLocalProjectDb(projectId)
-    const allRows = getEntityWriteQueue(projectId).applyPendingRows(
-      TRACK_KIND,
-      await db.getAllFromIndex('entities', 'by-kind', TRACK_KIND),
-    )
-    const tracks = trackValues(allRows)
+    const tracks = trackValues(await readEntityRowsByKind(projectId, TRACK_KIND))
     requireTrackIds(moves.map((move) => move.trackId), tracks)
     const rows = await Promise.all(moves.map((move) => readEntityRow(projectId, CLIP_KIND, move.clipId)))
     const updates = rows.flatMap((row, index) => {
@@ -733,8 +724,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     })
     if (updates.length === 0) return
     markChanged()
-    for (const clip of updates) entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
-    await entityQueue.flush()
+    for (const clip of updates) getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
+    await flushEntityWriteQueues(projectId)
   }
 
   const updateClip = async (input: UpdateClipInput): Promise<TimelineClipRow | null> => {
@@ -792,8 +783,8 @@ export const createLocalTimelineRepository = (projectId: string): TimelineReposi
     }
     if (clipPersistenceFieldsEqual(current, clip)) return current
     markChanged()
-    entityQueue.schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
-    await entityQueue.flush()
+    getLocalEntityWriteQueue(projectId).schedulePut(toEntityRow(CLIP_KIND, clip.id, clip, timestamp))
+    await flushEntityWriteQueues(projectId)
     return clip
   }
 

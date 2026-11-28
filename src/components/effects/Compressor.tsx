@@ -28,6 +28,7 @@ import {
   type CompressorParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { formatDeviceDb, formatDeviceMilliseconds, formatDevicePercent } from '~/lib/device-value-format'
 
 type CompressorProps = {
   params: CompressorParams
@@ -49,9 +50,9 @@ const ENVELOPE_CURVES: CompressorEnvelopeCurve[] = ['log', 'linear']
 const VIEW_MODES: ViewMode[] = ['transfer', 'gain-reduction', 'output']
 const HISTORY_SIZE = 96
 
-const formatDb = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`
-const formatMs = (value: number) => `${value.toFixed(value < 10 ? 1 : 0)} ms`
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`
+const formatDb = (value: number) => formatDeviceDb(value, 1, true)
+const formatMs = (value: number) => formatDeviceMilliseconds(value, value < 10 ? 1 : 0)
+const formatPercent = formatDevicePercent
 const formatRatio = (value: number) => value >= 100 ? 'inf:1' : `${value.toFixed(value < 10 ? 1 : 0)}:1`
 const label = (value: string) => value[0].toUpperCase() + value.slice(1)
 

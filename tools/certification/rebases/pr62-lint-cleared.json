@@ -1,0 +1,122 @@
+{
+ "name": "pr62-lint-cleared",
+ "sequence": 83,
+ "createdAt": "2026-11-19T04:01:07.322Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "gates",
+    "name=g-lint",
+    "judge"
+   ],
+   "old": {
+    "kind": "lint",
+    "exit": 1,
+    "found": "Found 17 warnings and 5 errors.",
+    "signature": [
+     [
+      "! eslint(no-unused-vars): Variable 'range' is declared but never used. Unused variables should start with a '_'.",
+      "packages/audio-engine/src/prepared-stretch-store.ts:1192:11"
+     ],
+     [
+      "! solid(reactivity): The reactive variable 'props.onMarkerDragStateChange' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+      "src/components/timeline/SampleDetailWaveform.tsx:144:35"
+     ],
+     [
+      "! solid(reactivity): The reactive variable 'props.owner' should be used within JSX, a tracked scope (like createEffect), or inside an event handler function, or else changes will be ignored.",
+      "src/components/effects/effect-parameter-interaction.tsx:10:46"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:44:167"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:45:179"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:46:170"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:47:161"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:48:181"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:49:189"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:50:176"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Granular.tsx:51:155"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:51:235"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:67:161"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:68:164"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:69:176"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:70:179"
+     ],
+     [
+      "! solid(reactivity): This function should be passed to a tracked scope (like createEffect) or an event handler because it contains reactivity, or else changes will be ignored.",
+      "src/components/effects/Sampler.tsx:71:167"
+     ],
+     [
+      "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+      "src/lib/local-effects.ts:110:9"
+     ],
+     [
+      "x anti-slop(no-conditional-empty-object-spread): This conditional spread hides property omission behind an empty object. Build the object in separate statements and add the property only when present.",
+      "src/lib/local-effects.ts:111:9"
+     ],
+     [
+      "x anti-slop(no-runtime-typeof): A `typeof` check narrows a representation without establishing its contract. Parse input at its I/O boundary, then branch on the domain value.",
+      "src/lib/structured-clone-json.ts:5:7"
+     ],
+     [
+      "x anti-slop(no-unknown-parameters): Parameter `value` leaves input unparsed. Accept a named domain type; run the expected schema or parser at the I/O boundary before calling this function.",
+      "src/lib/structured-clone-json.ts:1:49"
+     ],
+     [
+      "x anti-slop(no-unknown-returns): This function exposes `unknown` to its caller. Parse the value at its boundary and return a named domain type.",
+      "src/lib/structured-clone-json.ts:1:59"
+     ]
+    ]
+   },
+   "new": {
+    "kind": "lint",
+    "exit": 0,
+    "found": "Found 0 warnings and 0 errors.",
+    "signature": []
+   }
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "U15 (pr62-cleanup c4847f0e and 1706c4b4, acceptance-reports/pr62-cleanup/PARENT-RULING-PR62-TEST-CLEANUP.md; hand record, no --bless). The phase 5 commit 22321b83 left `bun run lint` (oxlint --deny-warnings) failing with 5 errors and 17 warnings, which the g-lint judge recorded as the known set (exit 1). Those 22 findings are fixed, so lint exits 0 with an empty signature. Rule B2 refuses any exit move outside --allow-now-passing, which names tests, not lint findings, so the gate's judge moves by hand to the observation of the bless run /tmp/fast-cert/bless-pr62-song-fixes/live (FAST-CERT --full PASS, freeze held): exit 0, \"Found 0 warnings and 0 errors.\", no signature. That is a stronger gate: any finding now fails g-lint, and the scoped oxlint job, which allows only g-lint's signature, now allows none."
+ }
+}

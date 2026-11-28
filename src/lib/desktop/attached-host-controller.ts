@@ -34,6 +34,7 @@ import {
   createDirectControlInvoker,
   type ControlInvoker,
 } from "@daw-browser/control"
+import type { PlaybackAcceptanceObserver } from "~/lib/desktop/acceptance-observer"
 import { getRecordingDiagnostics } from "~/lib/recording/recording-diagnostics"
 import { flushLocalProjectPendingWrites } from "~/lib/local-project-pending-writes"
 import { resetAudioEngine } from "~/lib/audio-engine-singleton"
@@ -44,6 +45,7 @@ import { createLocalControlHandlers } from "~/lib/local-control/local-control-ha
 import { LocalControlServiceError } from "~/lib/local-control/local-control-service"
 import type { AudioEngine } from "@daw-browser/audio-engine/audio-engine"
 import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-serialization"
+import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-parameter-queue"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
 import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
@@ -91,6 +93,10 @@ const cancelled = (id: string): HostResponse => ({
 const mountedProjectRequired = () => hostError("unavailable", "A mounted local project is required.")
 const controlUnavailable = () => hostError("cancelled", "The local control request was cancelled.")
 const controlFailure = () => hostError("internal", "The local control request could not be completed.")
+const committedButNotReconciled = () => hostError(
+  "internal",
+  "The change was saved, but the open project could not refresh. Read a fresh snapshot before making another change.",
+)
 const safeRuntimeFaults = (runtime: ReturnType<AudioEngine["getRuntimeSnapshot"]>["runtimeFaults"]) => ({
   ...runtime,
   last: runtime.last === null
@@ -269,12 +275,42 @@ const safeImportStatus = (job: ReturnType<ImportJobQueue["status"]>) => {
     id: job.id,
     name: job.name,
   }
+  const safeMessage = (message: string) => {
+    const structuredMessage = job.summary?.outcomes
+      .reduce((safe, outcome) => {
+        const fileName = outcome.fileName.split(/[/\\]/u).at(-1)
+        return fileName && outcome.fileName !== fileName
+          ? safe.replaceAll(outcome.fileName, fileName)
+          : safe
+      }, message) ?? message
+    return structuredMessage
+      .replace(/https?:\/\/\S+/gu, "[url]")
+      // Multiple paths on one line may redact intervening text too, conservatively preventing directory leaks.
+      .replace(/(?:^|(?<=[\s("'=:]))(?:\\\\|file:\/\/|~\/|[A-Za-z]:[\\/]|\/)[^\r\n]*[\\/]/gu, "[path]/")
+      .replace(/[\r\n\t]+/gu, " ")
+      .trim()
+      .slice(0, 512)
+  }
   if (job.summary) {
     safeJob.count = job.summary.outcomes.filter((outcome) => (
       outcome.status === "created" || outcome.status === "queued"
     )).length
+    const failures = job.summary.outcomes
+      .filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped")
+      .slice(0, 8)
+      .flatMap((outcome) => {
+        const message = safeMessage(outcome.message ?? "Audio import failed.")
+        const fileName = outcome.fileName.split(/[/\\]/u).at(-1)?.slice(0, 256)
+        return fileName && message ? [`${fileName} (${message})`] : []
+      })
+    if (failures.length > 0) {
+      const failureCount = job.summary.outcomes.filter((outcome) => outcome.status === "failed" || outcome.status === "local-save-failed" || outcome.status === "skipped").length
+      const remaining = failureCount - failures.length
+      const summary = `${failureCount} files failed or skipped: ${failures.join("; ")}${remaining > 0 ? `; and ${remaining} more` : ""}`
+      safeJob.error = summary.slice(0, 512)
+    }
   }
-  if (job.error) safeJob.error = job.error.slice(0, 512)
+  if (job.error && safeJob.error === undefined) safeJob.error = safeMessage(job.error) || "Audio import failed."
   return { status: job.status, job: safeJob }
 }
 
@@ -317,6 +353,7 @@ export const registerAttachedHostController = (controller: TimelineHostControlle
 }
 
 export const createAttachedHostController = (input: {
+  acceptance?: PlaybackAcceptanceObserver
   projectId: Accessor<string>
   mountedProjectGeneration: Accessor<number>
   isPlaying: Accessor<boolean>
@@ -328,13 +365,18 @@ export const createAttachedHostController = (input: {
   pause: () => Promise<void>
   stop: () => Promise<void>
   finishRecording: () => Promise<void>
+  refuseRecordingTargetChange?: Parameters<typeof createLocalControlHandlers>[0]['refuseRecordingTargetChange']
   captureNativeVstStates?: (capture?: { projectId: string; instanceIds: readonly string[] }) => Promise<void>
   exportService: TimelineExportService
   exportQueue: ExportQueue
   importQueue?: ImportJobQueue
   importFiles: (files: readonly File[], signal?: AbortSignal, binding?: ImportProjectBinding) => Promise<ImportSummary>
   setPlayhead: (seconds: number) => void
-  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<boolean>
+  enqueueNativeVstParameter?: (event: { instanceId: string; id: number; value: number }) => Promise<NativeVstParameterQueueResult>
+  // The host refused a committed parameter (or its delivery failed). The value is saved and replays on the next prepare.
+  reportUndeliveredNativeVstParameters?: () => void
+  requestNativeVstStateCapture?: (instanceId: string) => void
+  hasReflectableOverlays?: () => boolean
   reconcileMountedLocalTimeline?: (guard: {
     projectId: string;
     mountedProjectGeneration: number;
@@ -373,14 +415,15 @@ export const createAttachedHostController = (input: {
       capabilities: { playback: true, diagnostics: true },
     }
   }
+  const isMountedLocalProject = (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => (
+    !signal.aborted
+    && activeController === controller
+    && input.projectId() === mountedProjectId
+    && input.mountedProjectGeneration() === mountedGeneration
+    && isLocalId("project", mountedProjectId)
+  )
   const ensureMountedLocalProject = async (mountedProjectId: string, mountedGeneration: number, signal: AbortSignal) => {
-    if (
-      signal.aborted
-      || activeController !== controller
-      || input.projectId() !== mountedProjectId
-      || input.mountedProjectGeneration() !== mountedGeneration
-      || !isLocalId("project", mountedProjectId)
-    ) return false
+    if (!isMountedLocalProject(mountedProjectId, mountedGeneration, signal)) return false
     const project = await findMountedLocalProject(mountedProjectId)
     if (project === undefined || !input.ensureMountedLocalMedia) {
       return !signal.aborted
@@ -404,6 +447,11 @@ export const createAttachedHostController = (input: {
       && input.mountedProjectGeneration() === mountedGeneration
   }
   const control = async (request_: HostRequest & { operation: DesktopControlOperationV1 }): Promise<HostResponse> => {
+    const commitKey = () => {
+      const commit = request_.operation === "control.commit" ? controlCommitRequestSchemaV1.safeParse(request_.input) : undefined
+      return commit?.success ? commit.data.idempotencyKey : undefined
+    }
+    input.acceptance?.mark("control-handler-entry", commitKey)
     if (!request_.trustedActorSubject) {
       return {
         id: request_.id,
@@ -424,6 +472,7 @@ export const createAttachedHostController = (input: {
       const handlers = createLocalControlHandlers({
         projectId: mountedProjectId,
         actor: { subject: request_.trustedActorSubject, issuer: "daw-browser-desktop-host" },
+        refuseRecordingTargetChange: input.refuseRecordingTargetChange,
         assertAvailable: () => {
           if (
             request_.signal.aborted
@@ -444,7 +493,20 @@ export const createAttachedHostController = (input: {
           },
         },
       })
+      if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline && input.hasReflectableOverlays?.()) {
+        // Retire reflected UI overlays before this commit can supersede their
+        // persisted values. A post-commit snapshot alone can miss that echo.
+        // Without overlays there is nothing to retire; the commit flushes pending writes itself.
+        await flushLocalProjectPendingWrites(mountedProjectId)
+        await input.reconcileMountedLocalTimeline({
+          projectId: mountedProjectId,
+          mountedProjectGeneration: mountedGeneration,
+          signal: request_.signal,
+        })
+        input.acceptance?.mark("control-reload-before-done", commitKey)
+      }
       const result = await invokeCanonicalControl(invoker, request_.operation, requestInput)
+      input.acceptance?.mark("control-commit-done", commitKey)
       if (!await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
         return { id: request_.id, error: request_.signal.aborted ? controlUnavailable() : mountedProjectError(request_, mountedProjectId) }
       }
@@ -460,41 +522,60 @@ export const createAttachedHostController = (input: {
               const postCommitSnapshot = projectSnapshotSchemaV2.parse(await invoker.invoke("control.snapshot", { projectId: mountedProjectId }))
               const processorsById = new Map(postCommitSnapshot.processors.map((processor) => [processor.id, processor]))
               if (await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
-                const deliveries: Promise<boolean>[] = []
+                const deliveries: Promise<{ instanceId: string; delivery: NativeVstParameterQueueResult }>[] = []
                 for (const [actionIndex, action] of commitRequest.actions.entries()) {
                   if (action.kind !== "external-plugin.parameters.set" || !changedActionIndexes.has(actionIndex)) continue
                   const processor = processorsById.get(action.processor.id)
                   if (processor?.processor.kind !== "external-vst3" || processor.instanceId === undefined) continue
                   for (const change of action.changes) {
                     try {
+                      const instanceId = processor.instanceId
                       deliveries.push(input.enqueueNativeVstParameter({
-                        instanceId: processor.instanceId,
+                        instanceId,
                         id: change.parameterId,
                         value: change.normalizedValue,
-                      }))
+                      }).then((delivery) => ({ instanceId, delivery })))
                     } catch (error) {
                       deliveries.push(Promise.reject(error))
                     }
                   }
                 }
-                await Promise.all(deliveries)
+                // Native refuses a parameter event it cannot queue (no attachment, playback off, queue full) and the
+                // commit still succeeds: the mark tells a refused delivery from one that never ran, and the refusal
+                // is reported. A superseded delivery was replaced by a newer value for the same parameter.
+                const results = await Promise.all(deliveries)
+                const refused = results.some((result) => result.delivery === "rejected")
+                input.acceptance?.mark(refused ? "control-parameters-undelivered" : "control-parameters-delivered", commitKey)
+                if (refused) input.reportUndeliveredNativeVstParameters?.()
+                // The plug-in's live state moved; persist it like any other committed edit.
+                for (const instanceId of new Set(results.filter((result) => result.delivery === "delivered").map((result) => result.instanceId))) {
+                  input.requestNativeVstStateCapture?.(instanceId)
+                }
               }
             }
           }
-        } catch {}
+        } catch {
+          input.acceptance?.mark("control-parameters-undelivered", commitKey)
+          input.reportUndeliveredNativeVstParameters?.()
+        }
       }
       if (request_.operation === "control.commit" && input.reconcileMountedLocalTimeline) {
-        try {
-          const commitResult = controlCommitResultSchemaV1.safeParse(result)
-          if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
-            && await ensureMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+        const commitResult = controlCommitResultSchemaV1.safeParse(result)
+        // The project row was just confirmed above; only the mount can have moved since, which needs no storage read.
+        if (commitResult.success && commitResult.data.applied && !commitResult.data.idempotencyReplay
+          && isMountedLocalProject(mountedProjectId, mountedGeneration, request_.signal)) {
+          try {
             await input.reconcileMountedLocalTimeline({
               projectId: mountedProjectId,
               mountedProjectGeneration: mountedGeneration,
               signal: request_.signal,
             })
+          } catch {
+            if (request_.signal.aborted) return { id: request_.id, error: controlUnavailable() }
+            return { id: request_.id, error: committedButNotReconciled() }
           }
-        } catch {}
+          input.acceptance?.mark("control-store-emitted", commitKey)
+        }
       }
       const rendererProtocolVersion = (
         request_.operation === "control.capabilities"
@@ -709,6 +790,9 @@ export const createAttachedHostController = (input: {
             }
           } catch (error) {
             if (prepared) releasePreparedExport(prepared)
+            // The export service refuses with messages written for the user, such as a format or stem mode
+            // the native renderer cannot produce, so the client gets the same reason the export dialog shows.
+            if (error instanceof Error) return { id: request_.id, error: hostError("invalid-request", error.message) }
             throw error
           }
           return { id: request_.id, result: { status: "canceled" } }
@@ -814,6 +898,11 @@ export const createAttachedHostController = (input: {
       } else {
         const runtime = input.audioEngine.getRuntimeSnapshot()
         const recording = getRecordingDiagnostics()
+        // V1 cannot represent native spool ownership. Preserve its existing
+        // schema rather than disguising native capture as SAB or transferable.
+        if (recording.transport === "native-spool") {
+          return { id: request_.id, error: hostError("unavailable", "Native recording diagnostics require diagnostics.snapshot.v2.") }
+        }
         result = {
           audio: { state: runtime.state, sampleRate: runtime.sampleRate ?? null },
           recording: { transport: recording.transport, capturedFrames: recording.capturedFrames, droppedFrames: recording.droppedFrames, deviceLost: recording.deviceLost },

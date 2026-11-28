@@ -1,0 +1,2050 @@
+{
+ "name": "pr62-p34-publication-runner",
+ "sequence": 65,
+ "createdAt": "2026-11-17T18:06:08.613Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:105:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        const proof = await inspect(binding, releaseLane)",
+   "new": "    const proof = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:105:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        if (record.kind === \"latency\" && record.cancelled && publishSent) { await finish({ status: \"superseded\" }, \"cancelled\"); return false }\n        const proof = await inspect(binding, releaseLane)",
+   "new": "    if (record.kind === \"latency\" && record.cancelled && tx.publishSent) { await finish({ status: \"superseded\" }, \"cancelled\"); return false }\n    const proof = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:105:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:105:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:119:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        const proof = await inspect(binding, releaseLane)",
+   "new": "    const proof = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:119:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        const proof = await inspect(binding, releaseLane)\n        if (proof?.ok && proof.revision.status === \"published\" && binding) await revisions.rollback(binding)",
+   "new": "    const proof = await inspect(tx.binding, releaseLane)\n    if (proof?.ok && proof.revision.status === \"published\" && tx.binding) await revisions.rollback(tx.binding)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:119:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:119:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n      }\n      const inspect = (",
+   "new": "    } catch (error) { return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) } }\n  }\n  const inspect = ("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        } catch (error) {\n          if (record.kind === \"latency\") { binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n          return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n        }\n      }\n      const inspect = (",
+   "new": "    } catch (error) {\n      if (record.kind === \"latency\") { tx.binding = undefined; await finish({ status: \"failed\", reason: \"Lost Inspect\" }, \"failed\") }\n      return { status: \"failed\", error: error instanceof Error ? error : new Error(String(error)) }\n    }\n  }\n  const inspect = ("
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:107:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        progressVersion++\n        notify()",
+   "new": "    tx.progressVersion++\n    notify()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        progressVersion++\n        record.resubmits = 0\n        notify()",
+   "new": "    tx.progressVersion++\n    record.resubmits = 0\n    notify()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:118:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:126:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        if (processorState.fence().kind === \"claimed\") {",
+   "new": "    if (processorState.fence().kind === \"claimed\") {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:126:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        if (false) {",
+   "new": "    if (false) {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:126:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:126:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)",
+   "new": "    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n          const held = processorState.retirement()\n          if (held) {\n            const cleanup = await revisions.retire(held.binding)\n            if (!cleanup.ok) throw new Error(cleanup.error)\n          }\n        }\n        await disposePublication()\n        if (outcome.status === \"failed\" && record.kind === \"schedule\") logFailedAdoption(outcome.reason)",
+   "new": "    if (record.kind === \"latency\" && outcome.status === \"adopted\") {\n      const held = processorState.retirement()\n      if (held) {\n        const cleanup = await revisions.retire(held.binding)\n        if (!cleanup.ok) throw new Error(cleanup.error)\n      }\n    }\n    await disposePublication()\n    if (outcome.status === \"failed\" && record.kind === \"schedule\") session.logFailedAdoption(outcome.reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:110:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
+   "new": "    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "else await finish({ status: \"superseded\" }, \"cancelled\")",
+   "new": "    else await finish({ status: \"superseded\" }, \"cancelled\")"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-60:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
+   "new": "    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n        else if (record.cancelled) record.awaitingTransport()\n        else record.resolving()",
+   "new": "    else if (!rolledBack?.ok) await finish({ status: \"superseded\" }, \"cancelled\")\n    else if (record.cancelled) record.awaitingTransport()\n    else record.resolving()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-63:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-62:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          const resolved = await inspect(binding, releaseLane)",
+   "new": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      const resolved = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-62:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          await notTaken(); return false\n          const resolved = await inspect(binding, releaseLane)",
+   "new": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      await notTaken(); return false\n      const resolved = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-62:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-62:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-65:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          const resolved = await inspect(binding, releaseLane)",
+   "new": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      const resolved = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-65:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n          await revisions.rollback(binding)\n          const resolved = await inspect(binding, releaseLane)",
+   "new": "    if (rolledBack?.ok && rolledBack.revision.status === \"stale-revision\") {\n      await revisions.rollback(tx.binding)\n      const resolved = await inspect(tx.binding, releaseLane)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-65:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-65:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-64:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok) await notTaken()",
+   "new": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok) await notTaken()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-64:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok && proof.revision.status === \"stale-revision\") return false\n          if (proof?.ok) await notTaken()",
+   "new": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok && proof.revision.status === \"stale-revision\") return false\n      if (proof?.ok) await notTaken()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-64:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-64:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-66:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok) await notTaken()",
+   "new": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok) await notTaken()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-66:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (acknowledgedEpoch !== undefined) {\n          if (proof?.ok && proof.revision.status === \"publish-pending\") return false\n          if (proof?.ok) await notTaken()",
+   "new": "    if (acknowledgedEpoch !== undefined) {\n      if (proof?.ok && proof.revision.status === \"publish-pending\") return false\n      if (proof?.ok) await notTaken()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-66:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-66:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-70:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "const sessionAlive = () => generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()",
+   "new": "  const sessionAlive = () => session.owned() && record.phase !== \"ended\""
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-70:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "const sessionAlive = () => current() && generation === lifecycleGeneration && prepared && !hasNativeHostConnectionLoss()",
+   "new": "  const sessionAlive = () => session.current() && session.owned() && record.phase !== \"ended\""
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-70:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-70:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-71:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "const notTaken = () => finish(failure?.outcome ?? (record.cancelled",
+   "new": "  const notTaken = () => finish(tx.failure?.outcome ?? (record.cancelled"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-71:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "const notTaken = () => finish(record.phase === \"resolving\" ? { status: \"superseded\" } : failure?.outcome ?? (record.cancelled",
+   "new": "  const notTaken = () => finish(record.phase === \"resolving\" ? { status: \"superseded\" } : tx.failure?.outcome ?? (record.cancelled"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-71:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-71:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-101:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "        if (!binding || !sessionAlive()) return false",
+   "new": "    if (!tx.binding || !sessionAlive()) return false"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-101:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "        if (failure) { await notTaken(); return false }\n        if (!binding || !sessionAlive()) return false",
+   "new": "    if (tx.failure) { await notTaken(); return false }\n    if (!tx.binding || !sessionAlive()) return false"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-101:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-101:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "if (reply.kind === \"refused\") failure = {",
+   "new": "      if (reply.kind === \"refused\") tx.failure = {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "if (false && reply.kind === \"refused\") failure = {",
+   "new": "      if (false && reply.kind === \"refused\") tx.failure = {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (publishReply && !publishReply.ok) checked(publishReply)",
+   "new": "        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          // Mutant discards typed negative Publish replies.",
+   "new": "        // Mutant discards typed negative Publish replies."
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-96:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts",
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:125:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (status.revision.status === \"published\") {\n            if (!adoptPublication(status))",
+   "new": "      if (status.ok && status.revision.status === \"published\") {\n        if (!tx.adoptPublication?.(status)) throw"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:125:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (failure) return await finish(failure.outcome, \"failed\", failure.reason)\n          if (status.revision.status === \"published\") {\n            if (!adoptPublication(status))",
+   "new": "      if (record.kind === \"schedule\" && status.ok && tx.failure) return await tx.finish(tx.failure.outcome, \"failed\", tx.failure.reason)\n      if (status.ok && status.revision.status === \"published\") {\n        if (!tx.adoptPublication?.(status)) throw"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:125:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:125:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-59:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "detached = record.phase !== \"ended\"\n          return { record }",
+   "new": "      if (tx.detached) strategy.onDetached?.()\n      return { record }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-59:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "detached = record.phase !== \"ended\"\n          await record.terminal\n          return { record }",
+   "new": "      if (tx.detached) strategy.onDetached?.()\n      if (record.kind === \"schedule\") await record.terminal\n      return { record }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-59:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-59:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          classifyPublication(publishReply)\n          if (status.ok)",
+   "new": "      tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (status.ok)",
+   "new": "      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)\n      if (prepared.hostChanged?.(status)) return { record }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "await publishCompletion\n          classifyPublication(publishReply)",
+   "new": "      await (strategy.releasesLane ? tx.withoutLane(tx.publishCompletion) : tx.publishCompletion)\n      tx.classifyPublication(tx.publishReply)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "await publishCompletion",
+   "new": "      await (strategy.releasesLane ? tx.withoutLane(tx.publishCompletion) : tx.publishCompletion)\n      if (record.kind === \"latency\") tx.classifyPublication(tx.publishReply)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-publication-transaction.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-99:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-publication-transaction.ts",
+    "src/lib/desktop/native-publication-transaction.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:109:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          holdRetirement(proof, projectId, async () => {\n            await pageManager?.removeSources(removedAssetIds)\n            await predecessorStretchLease?.()\n          })",
+   "new": "        host.holdRetirement(proof, projectId, async () => {\n          await pageManager?.removeSources(removedAssetIds)\n          await predecessorStretchLease?.()\n        })"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:109:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          void (async () => {\n            await pageManager?.removeSources(removedAssetIds)\n            await predecessorStretchLease?.()\n          })()",
+   "new": "        void (async () => {\n          await pageManager?.removeSources(removedAssetIds)\n          await predecessorStretchLease?.()\n        })()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:109:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:109:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-61:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "publishCompletion = revisions.publish(request).then((reply) => {",
+   "new": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-61:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!reply.ok) { void finish({ status: \"failed\", reason: reply.error }, \"failed\"); return }",
+   "new": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!reply.ok) { void finish({ status: \"failed\", reason: reply.error }, \"failed\"); return }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-61:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-61:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-72:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!sessionAlive()) return\n              publishReply = reply\n              notify()\n            }, () => { if (sessionAlive()) notify() })",
+   "new": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!sessionAlive()) return\n            tx.publishReply = reply\n            notify()\n          }, () => { if (sessionAlive()) notify() })"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-72:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "publishCompletion = revisions.publish(request).then((reply) => {\n              if (!sessionAlive()) return\n              publishReply = reply\n              notify()\n            }, () => { if (sessionAlive()) void finish({ status: \"failed\", reason: \"Publish reply lost\" }, \"failed\") })",
+   "new": "          tx.publishCompletion = revisions.publish(binding).then((reply) => {\n            if (!sessionAlive()) return\n            tx.publishReply = reply\n            notify()\n          }, () => { if (sessionAlive()) void finish({ status: \"failed\", reason: \"Publish reply lost\" }, \"failed\") })"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-72:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-72:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-88:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "if (!proof.ok || !binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration\n            || proof.hostPid !== ready.hostPid",
+   "new": "        if (!proof.ok || !tx.binding || !sessionAlive() || proof.hostGeneration !== ready.hostGeneration\n          || proof.hostPid !== ready.hostPid"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-88:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "if (!proof.ok || !binding || !sessionAlive()",
+   "new": "        if (!proof.ok || !tx.binding || !sessionAlive()"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-88:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-88:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-95:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n          throw new Error(reason)",
+   "new": "        tx.failure = { outcome: { status: takeLocked ? \"blocked\" : \"failed\", reason }, reason: \"native-refused\" }\n        throw new Error(reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-95:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          throw new Error(reason)",
+   "new": "        throw new Error(reason)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-95:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-95:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-97:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "              const inspection = await inspect()\n              if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
+   "new": "            const inspection = await inspect()\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-97:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "              const inspection = await revisions.inspect(binding)\n              if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error",
+   "new": "            const inspection = await revisions.inspect(tx.binding)\n            if (!inspection?.ok || inspection.revision.status !== \"rebase-required\") throw error"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-97:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-97:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-100:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "            classifyPublication(published)\n            checked(published)",
+   "new": "          classifyPublication(published)\n          tx.checked(published)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-100:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "            checked(published)",
+   "new": "          tx.checked(published)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-100:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-100:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (failure && \"reason\" in failure.outcome) throw new Error(failure.outcome.reason)\n          if (fill)",
+   "new": "        if (tx.failure && \"reason\" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)\n        const binding = tx.binding"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (fill)",
+   "new": "        const binding = tx.binding"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "          if (publishReply && !publishReply.ok) checked(publishReply)",
+   "new": "        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "          if (failure && \"reason\" in failure.outcome) throw new Error(failure.outcome.reason)\n          if (publishReply && !publishReply.ok) checked(publishReply)",
+   "new": "        if (tx.failure && \"reason\" in tx.failure.outcome) throw new Error(tx.failure.outcome.reason)\n        if (tx.publishReply && !tx.publishReply.ok) tx.checked(tx.publishReply)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-103:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts",
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-144:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (ready.revision.status === \"publish-pending\"\n            && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n            // Prepare's pending reply owns no bank. Resolve admission before\n            // spending a retry, then wait on completion/terminal/control facts,\n            // not ordinary frames while a latency transition is still running.\n            prepareAdmissionWake = notify\n            try {\n              let admission: NativeRevisionReply | undefined\n              let inspected = false\n              let completion = nativeLatencyCompletionGeneration\n              let settled = scheduleSettledEpoch\n              let applied = latestScheduleProgress\n              do {\n                await waitForOpportunity(observed)\n                observed = sequence\n                if (inspected && completion === nativeLatencyCompletionGeneration && settled === scheduleSettledEpoch\n                  && applied?.appliedProcessorSequence === latestScheduleProgress?.appliedProcessorSequence\n                  && applied?.appliedUrgentSequence === latestScheduleProgress?.appliedUrgentSequence\n                  && applied?.appliedTransportTransitionId === latestScheduleProgress?.appliedTransportTransitionId) continue\n                completion = nativeLatencyCompletionGeneration\n                settled = scheduleSettledEpoch\n                applied = latestScheduleProgress\n                inspected = true\n                admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                  hostGeneration: ready.hostGeneration })\n                if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                  throw new NativePlaybackAbortError(\"ownership-invalidated\")\n              } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n              checked(admission)\n            } finally { prepareAdmissionWake = undefined }\n            progress = BigInt(coordinator.currentFrame())\n          } else if (ready.revision.status === \"publish-pending\") {\n            // With no retained/prepared publication, the pending admission is\n            // the ordinary queued-control opportunity, not a latency wait.\n            await waitForOpportunity(observed)\n            progress = BigInt(coordinator.currentFrame())\n          }\n",
+   "new": "        if (ready.revision.status === \"publish-pending\"\n          && (ready.revision.retiredRevision !== 0 || ready.revision.preparedRevision !== 0)) {\n          // Prepare's pending reply owns no bank. Resolve admission before\n          // spending a retry, then wait on completion/terminal/control facts,\n          // not ordinary frames while a latency transition is still running.\n          host.prepareAdmissionWake = notify\n          try {\n            let admission: NativeRevisionReply | undefined\n            let inspected = false\n            let completion = host.nativeLatencyCompletionGeneration\n            let settled = host.scheduleSettledEpoch\n            let applied = host.latestScheduleProgress\n            do {\n              await waitForOpportunity(observed)\n              observed = tx.sequence\n              if (inspected && completion === host.nativeLatencyCompletionGeneration && settled === host.scheduleSettledEpoch\n                && applied?.appliedProcessorSequence === host.latestScheduleProgress?.appliedProcessorSequence\n                && applied?.appliedUrgentSequence === host.latestScheduleProgress?.appliedUrgentSequence\n                && applied?.appliedTransportTransitionId === host.latestScheduleProgress?.appliedTransportTransitionId) continue\n              completion = host.nativeLatencyCompletionGeneration\n              settled = host.scheduleSettledEpoch\n              applied = host.latestScheduleProgress\n              inspected = true\n              admission = await inspect({ projectId, revision: ready.revision.requestedRevision,\n                hostGeneration: ready.hostGeneration })\n              if (admission?.ok && (admission.hostPid !== ready.hostPid || admission.hostGeneration !== ready.hostGeneration))\n                throw new NativePlaybackAbortError(\"ownership-invalidated\")\n            } while (!admission?.ok || admission.revision.status === \"publish-pending\")\n            tx.checked(admission)\n          } finally { host.prepareAdmissionWake = undefined }\n          progress = BigInt(coordinator.currentFrame())\n        } else if (ready.revision.status === \"publish-pending\") {\n          // With no retained/prepared publication, the pending admission is\n          // the ordinary queued-control opportunity, not a latency wait.\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-144:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (ready.revision.status === \"publish-pending\") {\n            await waitForOpportunity(observed)\n            progress = BigInt(coordinator.currentFrame())\n          }\n",
+   "new": "        if (ready.revision.status === \"publish-pending\") {\n          await waitForOpportunity(observed)\n          progress = BigInt(coordinator.currentFrame())\n        }\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-144:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:historical-144:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:260:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedGraph = { ...graph, revision: binding.revision }\n          structuralGraphGeneration++",
+   "new": "        host.preparedGraph = { ...graph, revision: tx.binding.revision }\n        host.structuralGraphGeneration++"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:260:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedGraph = { ...graph, revision: binding.revision }",
+   "new": "        host.preparedGraph = { ...graph, revision: tx.binding.revision }"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:260:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:260:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "src/lib/desktop/native-playback-controller.ts",
+   "new": "src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = snapshot\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)",
+   "new": "        host.preparedSnapshot = { ...snapshot, revision: tx.binding.revision }\n        host.preparedInstrumentTrackIds = host.sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "src/lib/desktop/native-playback-controller.ts",
+   "new": "src/lib/desktop/native-schedule-publication.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-schedule-publication.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:114:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds\n          nativeMeterRevision = runtimeRevision",
+   "new": "      preparedKeepLatencyNodeIds = serializedKeepLatencyNodeIds\n      nativeMeterRevision = runtimeRevision"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:114:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)\n          nativeMeterRevision = runtimeRevision",
+   "new": "      preparedKeepLatencyNodeIds = new Set(desiredKeepLatencyNodeIds)\n      nativeMeterRevision = runtimeRevision"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:114:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-playback-controller.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:114:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          runtimeRevision = binding.revision\n          resumeSafe = true",
+   "new": "      runtimeRevision = tx.binding.revision\n      resumeSafe = true"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          const latestCapture = captureLatencyInputs()\n          snapshot = latestCapture.snapshot\n          graph = latestCapture.graph\n          runtimeRevision = binding.revision\n          resumeSafe = true",
+   "new": "      const latestCapture = captureLatencyInputs()\n      snapshot = latestCapture.snapshot\n      graph = latestCapture.graph\n      runtimeRevision = tx.binding.revision\n      resumeSafe = true"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-playback-controller.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:115:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)",
+   "new": "      if (acknowledgedEpoch === undefined) coordinator.resumeGraphPublication(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)",
+   "new": "      if (acknowledgedEpoch === undefined && proof.revision.retiredRevision === 0) coordinator.resumeGraphPublication(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-playback-controller.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:120:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          processorState.published(runtimeRevision)",
+   "new": "      processorState.published(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          structuralGraphGeneration++\n          processorState.published(runtimeRevision)",
+   "new": "      structuralGraphGeneration++\n      processorState.published(runtimeRevision)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "spec",
+    "changes",
+    "#0",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-playback-controller.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:259:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-playback-controller.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "from"
+   ],
+   "old": "          resourcesPromoted = true\n          binding = undefined\n",
+   "new": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "to"
+   ],
+   "old": "          resourcesPromoted = true\n          binding = undefined\n          Object.assign(record, { nativeResult: { handled: true } })\n",
+   "new": "      tx.resourcesPromoted = true\n      tx.binding = undefined\n      Object.assign(record, { nativeResult: { handled: true } })\n"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "spec",
+    "changes",
+    "#1",
+    "file"
+   ],
+   "old": "/src/lib/desktop/native-playback-controller.ts",
+   "new": "/src/lib/desktop/native-playback-controller.ts"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=rc2:273:0:mutant",
+    "targets"
+   ],
+   "old": [
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts"
+   ],
+   "new": [
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts",
+    "src/lib/desktop/native-playback-controller.ts"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "Publication code left native-playback-controller.ts: the shared runner (runPublication), the proof loop and resolvePublication/finish/inspect/classify/notTaken/quietPublicationLane now live in native-publication-transaction.ts, and the schedule strategy (prepare, adoptPublication, step) in native-schedule-publication.ts; the latency strategy and its adoption stay in the controller. The code was re-indented and its references renamed (tx. prefixes for the transaction facts, host. prefixes for controller state, destructured facts such as mergedSequence). Each re-pointed arm keeps its mutation: same condition, same changed statement, names translated, file and targets moved to the file the code is in. Arms whose old text sat in one of the two former per-strategy loop or catch copies (rc2:125, historical-59, historical-99) now target the shared loop, so the mutation is gated on record.kind (and, for 125, status.ok) to change only the strategy it changed before. Arms on the shared resolvePublication/finish/inspect/classify/notTaken/sessionAlive/quietPublicationLane (105, 107, 110, 118, 119, 126, historical-60..66, 70, 71, 96 change 1, 101) are the same text in the transaction. Schedule arms (109, 260, historical-61, 72, 88, 95, 96 change 0, 97, 100, 103, 144, c0:m511-mutant-ct/ht) moved to native-schedule-publication.ts. Latency adoption arms (114, 115, 120, 259, 273 change 1) stay in the controller with tx. prefixes. Unresolved and left untouched: historical-69 (needs revisions.rollback in the runner catch, which the transaction handed to runPublication does not expose) and historical-89 (needs the installed-asset list and session.releaseAsset inside disposePublication, which the transaction session does not have). A second change to reach that state would move expect.applied, which this record must not change.",
+  "expectationsSha256": "e85b84bd9324b63507cdfff6c8661ac5f5f4f6a207b8d509a679a2aeff2ccdd7"
+ }
+}

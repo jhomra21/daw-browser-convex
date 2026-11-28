@@ -1,0 +1,67 @@
+{
+ "name": "511-reanchor",
+ "sequence": 4,
+ "createdAt": "2026-11-11T15:51:13.794Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedSnapshot = snapshot",
+   "new": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ct",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedSnapshot = { ...snapshot, revision: binding.revision }",
+   "new": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "from"
+   ],
+   "old": "          preparedSnapshot = snapshot",
+   "new": "          preparedSnapshot = snapshot\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=c0:m511-mutant-ht",
+    "spec",
+    "changes",
+    "#0",
+    "to"
+   ],
+   "old": "          preparedSnapshot = { ...snapshot, revision: binding.revision }",
+   "new": "          preparedSnapshot = { ...snapshot, revision: binding.revision }\n          preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P1-B1 inserted `preparedInstrumentTrackIds = sampledInstrumentTrackIds(snapshot)` directly after `preparedSnapshot = snapshot` in src/lib/desktop/native-playback-controller.ts, so the 511-mutant overlay's exact-anchor from/to strings (arms c0:m511-mutant-ct and c0:m511-mutant-ht) carry that line too. Hand-edited by the parent, recorded here; no run measured it.",
+  "expectationsSha256": "56c8df2a5e51ce5cc3922ff5ec59f430520c4d2a996abdd8f93d79b28af0be46"
+ }
+}

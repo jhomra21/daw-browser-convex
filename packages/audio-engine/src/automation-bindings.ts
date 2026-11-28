@@ -1,4 +1,4 @@
-import { parseEqBandParameterId } from '@daw-browser/shared'
+import { linearFromDb, parseEqBandParameterId } from '@daw-browser/shared'
 import type { AutomationAudioBinding } from './automation'
 import type { DelayNodeChain, ReverbNodeChain, SaturatorNodeChain } from './effects/chain'
 
@@ -25,8 +25,8 @@ export const resolveSaturatorAutomationBindings = (
 ): AutomationAudioBinding[] => {
   const saturator = chain && 'chain' in chain ? chain.chain() : chain
   if (!saturator) return []
-  if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
-  if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: (value) => 10 ** (value / 20) }]
+  if (parameterId === 'saturator.driveDb') return [{ param: saturator.driveGain.gain, valueToAudioValue: linearFromDb }]
+  if (parameterId === 'saturator.outputDb') return [{ param: saturator.outputGain.gain, valueToAudioValue: linearFromDb }]
   if (parameterId === 'saturator.dryWet') return [
     { param: saturator.dryGain.gain, valueToAudioValue: (value) => 1 - value },
     { param: saturator.wetGain.gain, valueToAudioValue: (value) => value },

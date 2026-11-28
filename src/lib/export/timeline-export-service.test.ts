@@ -18,7 +18,8 @@ import type { ExportFx } from "@daw-browser/audio-engine/export-mixdown"
 import { createExportQueue } from "~/lib/export/export-queue"
 import type { ExportOutputTargetFactory } from "~/lib/export/export-output-targets"
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region"
-import { createExportRenderStateSnapshot, type ExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import { createExportRenderStateSnapshot } from "~/lib/export/run-export-job"
+import type { ExportRenderStateSnapshot } from "~/lib/desired-playback-state"
 import { createTimelineExportService, type TimelineExportInput } from "~/lib/export/timeline-export-service"
 import { createCapturedClipMediaLoader } from "~/hooks/useClipBuffers"
 import { setLocalAutomationEnvelope } from "~/lib/local-automation"
@@ -26,6 +27,7 @@ import { setLocalEffect, setLocalEffectInstance } from "~/lib/local-effects"
 import { setLocalExternalProcessor } from "~/lib/external-plugins"
 import { importLocalProject, LOCAL_PROJECT_SCHEMA_VERSION } from "~/lib/local-project-db"
 import { registerPendingLocalProjectWriteFlusher } from "~/lib/local-project-pending-writes"
+import type { PendingWriteKind } from "~/lib/local-project-write-flushers"
 import type { RuntimeTrack } from "~/lib/timeline-runtime-types"
 import { externalProcessorSchema } from "@daw-browser/external-plugins"
 
@@ -171,6 +173,24 @@ test('blocks export for a restored cloud project with a persisted live external 
     masterVolume: 1,
     cloudRows: undefined,
   })).rejects.toThrow('must be frozen or bypassed')
+})
+
+test('a native playback render state flushes no pending write when the effects draft is projected, and every write kind otherwise', async () => {
+  const projectId = `project:native-no-flush-${crypto.randomUUID()}`
+  const flushed: string[] = []
+  const kinds: PendingWriteKind[] = ["effects", "history", "midi", "project-state"]
+  const unregister = kinds.map((kind) => (
+    registerPendingLocalProjectWriteFlusher(kind, projectId, async () => { flushed.push(kind) })
+  ))
+  const render = (projected: boolean) => createExportRenderStateSnapshot({
+    projectId, userId: undefined, masterVolume: 1, cloudRows: undefined, externalPluginPolicy: 'native-playback',
+    effectsProjection: projected ? { replaceAudioEffectTargets: [], upsertDeviceRows: [] } : undefined,
+  })
+  await render(true)
+  expect(flushed).toEqual([])
+  await render(false)
+  expect(flushed.toSorted()).toEqual(kinds.toSorted())
+  unregister.forEach((release) => release())
 })
 
 test('allows native playback snapshots to retain live external plugins', async () => {
@@ -384,6 +404,7 @@ test("detaches Solid-wrapped local runtime domains before export submission", as
     getCloudRenderRows: () => createMutable({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => automation,
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [{
           targetId: "track-solid-runtime",
@@ -455,6 +476,7 @@ test("uses one hydrated sampled render state for native planning and queued rend
     getCloudRenderRows: () => undefined,
     getAutomationPatches: () => [],
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [],
         upsertDeviceRows: [],
@@ -784,6 +806,7 @@ test("captures effects projection and routes after flushing effect persistence",
     getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => automation.map((envelope) => ({ targetKey: envelope.targetKey, envelope })),
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({
         replaceAudioEffectTargets: [{ targetId: trackId, rows: effects }],
         upsertDeviceRows: [],
@@ -841,6 +864,7 @@ test("rejects when effects flushing switches projects before capturing remaining
     getCloudRenderRows: () => ({ effects: [], automationEnvelopes: [] }),
     getAutomationPatches: () => [],
     getEffectsExportSnapshot: () => ({
+      awaitInstrumentReadiness: async () => undefined,
       snapshotEffectsProjection: () => ({ replaceAudioEffectTargets: [], upsertDeviceRows: [] }),
       snapshotSidechainRoutes: () => [],
       flushPending: async () => {

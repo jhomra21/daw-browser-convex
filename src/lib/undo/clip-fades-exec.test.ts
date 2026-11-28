@@ -1,7 +1,6 @@
 import { expect, test } from 'bun:test'
 import 'fake-indexeddb/auto'
 
-import { AudioEngine } from '@daw-browser/audio-engine/audio-engine'
 import { convexApi, convexClient } from '~/lib/convex'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import type { Track } from '@daw-browser/timeline-core/types'
@@ -64,7 +63,6 @@ test('undo and redo persist directional clip fades, update the projection, and r
     projectId,
     userId: 'user',
     persistLocalMix: () => {},
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions: {
@@ -76,6 +74,7 @@ test('undo and redo persist directional clip fades, update the projection, and r
       commitClipMoves: () => {},
       commitClipTiming: () => {},
       commitClipAudioWarp: () => {},
+      commitClipMidi: () => {},
       commitClipFades: (clipId, fades) => {
         committed.push({ clipId, fades })
         tracks = tracks.map((track) => ({
@@ -138,7 +137,6 @@ test('timing history persists transformed fades atomically', async () => {
     projectId,
     userId: 'user',
     persistLocalMix: () => {},
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions: {
@@ -151,6 +149,7 @@ test('timing history persists transformed fades atomically', async () => {
       commitClipTiming: (_clipId, timing) => timingCommits.push(timing),
       commitClipAudioWarp: () => {},
       commitClipFades: () => {},
+      commitClipMidi: () => {},
       rescheduleChangedClips: () => {},
       cancelTrackVolumeWrite: () => {},
       cancelTrackRoutingWrite: () => {},
@@ -209,7 +208,6 @@ test('undo recreates deleted legacy clips in the local repository without strict
     projectId,
     userId: 'user',
     persistLocalMix: () => {},
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions: {
@@ -222,6 +220,7 @@ test('undo recreates deleted legacy clips in the local repository without strict
       commitClipTiming: () => {},
       commitClipAudioWarp: () => {},
       commitClipFades: () => {},
+      commitClipMidi: () => {},
       rescheduleChangedClips: () => {},
       cancelTrackVolumeWrite: () => {},
       cancelTrackRoutingWrite: () => {},
@@ -276,7 +275,6 @@ test('undo recreates faded clips inside deleted local tracks', async () => {
     projectId,
     userId: 'user',
     persistLocalMix: () => {},
-    audioEngine: new AudioEngine(),
     grantTrackWrite: () => {},
     grantClipWrite: () => {},
     actions: {
@@ -291,6 +289,7 @@ test('undo recreates faded clips inside deleted local tracks', async () => {
       commitClipTiming: () => {},
       commitClipAudioWarp: () => {},
       commitClipFades: () => {},
+      commitClipMidi: () => {},
       rescheduleChangedClips: () => {},
       cancelTrackVolumeWrite: () => {},
       cancelTrackRoutingWrite: () => {},

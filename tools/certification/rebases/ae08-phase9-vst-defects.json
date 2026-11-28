@@ -1,0 +1,14 @@
+{
+ "name": "ae08-phase9-vst-defects",
+ "sequence": 39,
+ "createdAt": "2026-11-14T09:00:00.000Z",
+ "revert": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "AE-08 phase 9 VST live-edit defects V1 and V2 (hand record, no --bless). V1: the VST ledger releases a removed instance (detach, parked) before the revision that drops it is prepared, and main.ts no longer awaits the now synchronous published(). V2: native-playback-controller.ts adoptPublication registers the paused re-prime so a Play that waits on a paused insertion finds it. The runner's vst-remove-undo row brings the plug-in back by a new insert, because removing an external plug-in is not a history entry (vst-undo performer and waitTestPluginCard removed). The host's kVstDetach request detaches through control_session (the staged host, else the live one) instead of the staged host alone, as every other VST request does; the ledger treats a refused detach as an instance the host already retired. No arm's code is deleted and no recorded expectation moves, so no arm is retired or re-pointed. The 244 live arms whose targets include native-playback-controller.ts, native-vst3-coordinator, apps/desktop/main.ts or the ae-08-phase-9 launch, rows and vst files ran one at a time with --only --jobs 1 in 3 chunks (100, 101, 44 jobs): all PASS unchanged (the controller and hook counts differ from RC7 only by the new witnesses: C 669/1/0, HT 256/1/2 with the 2 known reds). Gates f-controller (669/1/0), rc1-g-controller (685/1/0), rc1-i6-desktop (426/1/0), f-hookwit and x-host-plugin-tests PASS with --only --jobs 1. x-host-ctest cannot run here (its build directory native/build/audio-host-macos-debug does not exist); ctest 17-24 passed 8/8 on a fresh /tmp debug build of the same sources. Controller and hook fuzz passed seeds 1-1000 in chunks of 100. No watched hash moves here.",
+  "expectationsSha256": "cff0d5d995f2b9b9ca38de3ee7ef2ded30c9b51758efb08647d48d456f6a75ae"
+ },
+ "watched": [],
+ "changes": [],
+ "seedRecordChanges": []
+}

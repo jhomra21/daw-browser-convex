@@ -19,6 +19,7 @@ import {
   type SaturatorParams,
 } from '@daw-browser/shared'
 import { cn } from '~/lib/utils'
+import { formatDeviceDb, formatDeviceFrequency, formatDevicePercent } from '~/lib/device-value-format'
 
 type SaturatorProps = {
   params: SaturatorParams
@@ -34,9 +35,9 @@ type SaturatorProps = {
 const DEFAULT_PARAMS = createDefaultSaturatorParams()
 const CURVES: SaturatorCurve[] = ['soft', 'medium', 'hard', 'clip']
 
-const formatDb = (value: number) => `${value > 0 ? '+' : ''}${value.toFixed(1)} dB`
-const formatPercent = (value: number) => `${Math.round(value * 100)}%`
-const formatFrequency = (value: number) => value >= 1000 ? `${(value / 1000).toFixed(1)} kHz` : `${Math.round(value)} Hz`
+const formatDb = (value: number) => formatDeviceDb(value, 1, true)
+const formatPercent = formatDevicePercent
+const formatFrequency = (value: number) => formatDeviceFrequency(value, 1)
 const formatCurve = (curve: SaturatorCurve) => curve[0].toUpperCase() + curve.slice(1)
 
 const createSaturatorCurvePoints = (curve: SaturatorCurve) => {

@@ -4,6 +4,7 @@ import { loadWorkletModule } from './worklet-loader'
 import { granularWorklet, resolveWorkletModuleUrl } from './worklet-manifest'
 import { scheduleAutomationEnvelope } from './automation'
 import type { SampledInstrumentBuffer } from './sampled-instrument-region'
+import type { EngineDisposition } from './engine-disposition'
 
 export type GranularInstalledBuffer = {
   assetKey: string
@@ -131,7 +132,10 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
       options.onFault?.(code)
     }
   }
-  node.onprocessorerror = () => options.onFault?.('processor-error')
+  node.onprocessorerror = () => {
+    rejectPending(new Error('Granular sample installation failed: processor-error'))
+    options.onFault?.('processor-error')
+  }
 
   const setParam = (name: string, value: number) => node.parameters.get(name)?.setValueAtTime(value, options.context.currentTime)
   setParam('grainSizeMs', params.grainSizeMs)
@@ -145,9 +149,9 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
 
   return {
     node,
-    installSample: ({ assetKey, buffer, sourceStartFrame }: GranularInstalledBuffer): Promise<void> => {
+    installSample: async ({ assetKey, buffer, sourceStartFrame }: GranularInstalledBuffer): Promise<EngineDisposition> => {
       if (closed) return Promise.reject(new Error('Granular runtime is closed.'))
-      if (buffer === installedBuffer && assetKey === installedAssetKey) return Promise.resolve()
+      if (buffer === installedBuffer && assetKey === installedAssetKey) return 'skipped'
       const bytes = bufferBytes(buffer)
       if (bytes > params.maxDecodedBytes) {
         const error = new Error(`Granular sample exceeds the ${params.maxDecodedBytes} byte limit.`)
@@ -177,7 +181,8 @@ export async function createGranularRuntime(options: GranularRuntimeOptions) {
         sampleRate: buffer.sampleRate,
         channels,
       }, transfer)
-      return promise
+      await promise
+      return 'applied'
     },
     releaseSample: () => {
       if (closed) return

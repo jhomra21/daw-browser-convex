@@ -1,3 +1,4 @@
+import { dbFromLinear, linearFromDb } from '@daw-browser/shared'
 import type {
   ExportAnalysisReport,
   ExportTailPolicy,
@@ -21,9 +22,6 @@ type StreamingExportMetadata = {
   sampleRate: number
   channelCount: number
 }
-
-const linearFromDb = (value: number) => 10 ** (value / 20)
-const dbFromLinear = (value: number) => value > 0 ? 20 * Math.log10(value) : Number.NEGATIVE_INFINITY
 
 const validateMetadata = (metadata: StreamingExportMetadata) => {
   if (!Number.isFinite(metadata.sampleRate) || metadata.sampleRate <= 0

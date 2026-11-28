@@ -2,7 +2,7 @@ import type { AudioEffectRuntimeInstance } from './runtime-instance'
 import { PROCESSOR_RESOURCE_LIMITS } from './processor-release-contract'
 import type { StaticWorkletKind } from './static-worklet-chain'
 
-export type LiveWorkletTransaction = {
+type LiveWorkletTransaction = {
   owner: string
   id: number
 }
@@ -75,3 +75,8 @@ export function createLiveWorkletBudget(limit: number = PROCESSOR_RESOURCE_LIMIT
     pendingCount,
   }
 }
+
+export type LiveWorkletBudget = Pick<
+  ReturnType<typeof createLiveWorkletBudget>,
+  'begin' | 'commit' | 'isCurrent' | 'rollback' | 'releaseOwner'
+>

@@ -1,0 +1,1223 @@
+{
+ "name": "pr62-p39-reconciliation-arms",
+ "sequence": 74,
+ "createdAt": "2026-11-17T21:36:51.275Z",
+ "revert": [],
+ "watched": [],
+ "changes": [
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:b6f",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:457:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f3",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:b6f",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:466:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          previewProjectionBaseline = nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            previewProjectionBaseline = nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "          if (result !== \"started\") return ensureLivePortableSession()\n          if (token !== nativeLifecycleToken || nativePlayback.isActive()) return\n          schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n          adoptEditsPastBaseline()\n",
+    "to": "          if (result === \"started\" && token === nativeLifecycleToken && !nativePlayback.isActive()) {\n            schedule.previewProjectionBaseline = schedule.nativePreviewCompiledFingerprint\n            adoptEditsPastBaseline()\n          }\n          return result\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:b6f4",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n",
+    "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") schedule.previewProjectionBaseline = key\n",
+    "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") previewProjectionBaseline = key\n",
+    "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "        if (outcome === \"adopted\" || outcome === \"unchanged\") schedule.previewProjectionBaseline = key\n",
+    "to": "        if (outcome === \"adopted\" || outcome === \"unchanged\") void key\n"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
+    "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "schedule.previewProjectionBaseline = backend === 'portable-browser' ? schedule.portableCompiledFingerprint : desiredAtStart",
+    "to": "schedule.previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:matrix",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
+    "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "schedule.previewProjectionBaseline = backend === 'portable-browser' ? schedule.portableCompiledFingerprint : desiredAtStart",
+    "to": "schedule.previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:477:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "previewProjectionBaseline = backend === 'portable-browser' ? portableCompiledFingerprint : desiredAtStart",
+    "to": "previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "schedule.previewProjectionBaseline = backend === 'portable-browser' ? schedule.portableCompiledFingerprint : desiredAtStart",
+    "to": "schedule.previewProjectionBaseline = readDesiredScheduleFingerprint()"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, name, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:493:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, color, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, color, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, color, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, color, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:matrix",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:496:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "    // The resolved mixer graph is compiled from the tracks and fx above (compileLivePlaybackSnapshot); it also carries\n    // each channel's label.\n    mixer: { ...snapshot.mixer, graph: undefined },\n",
+    "to": ""
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "    // The resolved mixer graph is compiled from the tracks and fx above (compileLivePlaybackSnapshot); it also carries\n    // each channel's label.\n    mixer: { ...snapshot.mixer, graph: undefined },\n",
+    "to": ""
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "      portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())",
+    "to": "      if (!context?.liveAdoption) portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "      schedule.portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())",
+    "to": "      if (!context?.liveAdoption) schedule.portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:497:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "      portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())",
+    "to": "      if (!context?.liveAdoption) portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())"
+   },
+   "new": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "      schedule.portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())",
+    "to": "      if (!context?.liveAdoption) schedule.portableCompiledFingerprint = untrack(() => readDesiredScheduleFingerprint())"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:mutant:b6f5",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:501:mutant:step5b",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:b6f5c",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:b6f5c",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:b6f5c",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, groupId, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, groupId, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, groupId, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, groupId, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:b6f5c",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:playback",
+    "spec",
+    "changes",
+    "#0"
+   ],
+   "old": {
+    "file": "src/hooks/useTimelinePlayback.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, volume, muted, soloed, sends, outputTargetId,"
+   },
+   "new": {
+    "file": "src/hooks/playback-session-reconciliation.ts",
+    "from": "tracks.map(({ id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, groupId, volume, muted, soloed, sends, outputTargetId,",
+    "to": "tracks.map(({ id, kind, channelRole, volume, muted, soloed, sends, outputTargetId, clips }) => ({\n      id, kind, channelRole, volume, muted, soloed, sends, outputTargetId,"
+   }
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:b6f4",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:control:b6f4",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:470:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:control:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:492:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:493:mutant:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:493:control:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:control:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:mutant:matrix",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:494:control:matrix",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:control:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:495:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:496:mutant:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:496:control:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:mutant:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:control:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:mutant:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:500:control:b6f5",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:501:mutant:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:501:control:step5b",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:control:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:505:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:control:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:506:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:control:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:507:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:control:b6f5c",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:mutant:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  },
+  {
+   "path": [
+    "mutations",
+    "arms",
+    "id=ledger:508:control:playback",
+    "targets"
+   ],
+   "old": [
+    "src/hooks/useTimelinePlayback.ts"
+   ],
+   "new": [
+    "src/hooks/playback-session-reconciliation.ts"
+   ]
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "anchor",
+  "reason": "P39 (pr62-cleanup picks of 57ac4bd3, 1a401d92, 7b2cc942, 2e43d760, b2799259; hand record, no --bless). Schedule reconciliation moved out of src/hooks/useTimelinePlayback.ts (2,522 -> 2,005 lines) into createScheduleReconciliation in src/hooks/playback-session-reconciliation.ts, which owns previewProjectionBaseline, nativePreviewCompiledFingerprint and portableCompiledFingerprint as `schedule.<name>` and reads the hook's transport tokens through `host.<name>()`. 31 ledger mutants anchored on the moved or renamed lines are re-pointed: 8 (rows 457, 466, 477, 497) stay in the hook with only the `schedule.` rename; 23 (rows 470, 492-496, 500, 501, 505-508) move to playback-session-reconciliation.ts, with mutant and control targets following. Each new mutation is the old one with the same renames applied to its anchor and its replacement (checked mechanically against the recorded spec: the line-level renames that map old `from` to new `from` map old `to` to new `to`; five sub-line anchors were checked by eye), and every new anchor occurs exactly once. All 31 run under the archived b6f overlay, which patches the file each change names. Counts and fails are unchanged; the full certification run after the merge judged every re-pointed arm against its recorded fails.",
+  "expectationsSha256": "356b75f36b8591b0d15dee26351a5f55610d246a66326f55bb8e7393aae06fdc"
+ }
+}

@@ -389,6 +389,7 @@ bool daw::audio_core::CompleteAssetReaders(daw_audio_core_handle handle, uint64_
     const auto &instrument = core->instrument_runtime[node];
     for (uint32_t zone = 0; zone < instrument.sampler.zone_count; ++zone) retain(instrument.zones[zone].asset);
     for (const auto &voice : instrument.sample_voices) if (voice.active) retain(voice.asset);
+    for (const auto &voice : instrument.dying_sample_voices) if (voice.active) retain(voice.asset);
     retain(instrument.granular.asset);
   }
   for (uint32_t index = 0; index < core->config.max_assets; ++index) {

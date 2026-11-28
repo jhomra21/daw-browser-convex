@@ -4961,6 +4961,61 @@ void test_instrument_reindex_retains_sustain_and_live_parameter_override() {
   daw_audio_core_destroy(reference);
 }
 
+// Decay and release take their knob time even when the sustain is not 0: the level falls
+// by (1 - sustain) over the decay and from the level at note-off to 0 over the release.
+void test_synth_envelope_stage_times() {
+  const daw_audio_synth_state synth{
+    .version = 1, .seed = 1,
+    .oscillators = {{.enabled = 1, .waveform = DAW_AUDIO_SYNTH_WAVEFORM_SINE, .level = 1.0F}},
+    .filter_cutoff_hz = 1000.0F, .filter_resonance = 0.707F, .filter_sustain = 1.0F,
+    .amp_attack_ms = 1.0F, .amp_decay_ms = 100.0F, .amp_sustain = 0.5F, .amp_release_ms = 100.0F,
+    .lfo_rate_hz = 1.0F, .output_gain = 1.0F,
+  };
+  const std::array<daw_audio_graph_node_descriptor, 2> nodes{{
+    {.id = 1, .kind = DAW_AUDIO_GRAPH_NODE_INSTRUMENT, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .instrument = {.kind = DAW_AUDIO_INSTRUMENT_KIND_SYNTH, .version = 1, .voice_capacity = 1}},
+    {.id = 2, .kind = DAW_AUDIO_GRAPH_NODE_MASTER, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
+      .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO},
+  }};
+  const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
+    {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER},
+  }};
+  daw_audio_core_handle core = create_core(480, 2, 1);
+  prepare_graph(core, 1, nodes.data(), nodes.size(), edges.data(), edges.size());
+  expect(daw_audio_core_configure_synth(core, 1, &synth), DAW_AUDIO_CORE_OK);
+  const daw_audio_transport_state transport{.epoch = 1, .running = 1, .frame = 0};
+  expect(daw_audio_core_set_transport(core, &transport), DAW_AUDIO_CORE_OK);
+  const daw_audio_instrument_event note_on{
+    .node_id = 1, .note_id = 1, .sequence = 1, .epoch = 1, .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_ON, .note = 69, .value = 1.0F};
+  const daw_audio_instrument_event note_off{
+    .node_id = 1, .note_id = 1, .sequence = 2, .epoch = 1, .type = DAW_AUDIO_INSTRUMENT_EVENT_NOTE_OFF, .note = 69};
+  // 17 blocks of 480 frames (170 ms) with the note held, then 12 (120 ms) after the note-off.
+  std::array<float, 29 * 480> output{};
+  for (uint32_t block = 0; block < 29; ++block) {
+    float *left = output.data() + block * 480;
+    std::array<float, 480> right{};
+    float *outputs[]{left, right.data()};
+    const daw_audio_instrument_event *event = block == 0 ? &note_on : block == 17 ? &note_off : nullptr;
+    const daw_audio_core_process_block process{
+      .abi_version = DAW_AUDIO_CORE_ABI_VERSION, .frame_count = 480, .channel_count = 2, .outputs = outputs,
+      .graph_revision = 1, .transport_epoch = 1, .instrument_event_count = event == nullptr ? 0U : 1U, .instrument_events = event,
+    };
+    expect(daw_audio_core_process(core, &process), DAW_AUDIO_CORE_OK);
+  }
+  // The peak over one 440 Hz period (109 frames) is the envelope at the start of that window.
+  const auto level_at = [&](uint32_t frame) {
+    float peak = 0.0F;
+    for (uint32_t index = frame; index < frame + 109; ++index) peak = std::fmax(peak, std::abs(output[index]));
+    return peak;
+  };
+  const uint32_t decay_start = 48;
+  assert(std::abs(level_at(decay_start + 2400) - 0.75F) < 0.03F);
+  assert(std::abs(level_at(decay_start + 4800 + 480) - 0.5F) < 0.01F);
+  const uint32_t release_start = 17 * 480;
+  assert(std::abs(level_at(release_start + 2400) - 0.25F) < 0.03F);
+  assert(level_at(release_start + 4800 + 480) == 0.0F);
+  daw_audio_core_destroy(core);
+}
 void test_instrument_synthesis_lifecycle_determinism_and_boundaries() {
   const daw_audio_synth_state synth{
     .version = 1, .seed = 0x12345678U,
@@ -5030,15 +5085,28 @@ void test_instrument_synthesis_lifecycle_determinism_and_boundaries() {
   std::array<float, 64> replacement_right{};
   expect(render(steal_reference, 64, replacement.data(), replacement.size(), replacement_left.data(), replacement_right.data()), DAW_AUDIO_CORE_OK);
   bool has_audio = false;
+  bool stolen_note_fading = false;
   for (uint32_t frame = 0; frame < first_left.size(); ++frame) {
     assert(std::isfinite(first_left[frame]) && std::isfinite(first_right[frame]));
     assert(first_left[frame] == second_left[frame] && first_right[frame] == second_right[frame]);
-    if (frame >= 32) {
-      assert(first_left[frame] == replacement_left[frame] && first_right[frame] == replacement_right[frame]);
-    }
+    stolen_note_fading = stolen_note_fading || (frame >= 32 && first_left[frame] != replacement_left[frame]);
     has_audio = has_audio || std::abs(first_left[frame]) > 1e-5F || std::abs(first_right[frame]) > 1e-5F;
   }
   assert(has_audio);
+  // The stolen note is not cut: it fades out over 5 ms (240 frames) beside the new one, then only the new one sounds.
+  assert(stolen_note_fading);
+  std::array<float, 320> fade_left{};
+  std::array<float, 320> fade_right{};
+  std::array<float, 320> fade_reference_left{};
+  std::array<float, 320> fade_reference_right{};
+  expect(render(second, 320, nullptr, 0, fade_left.data(), fade_right.data()), DAW_AUDIO_CORE_OK);
+  expect(render(steal_reference, 320, nullptr, 0, fade_reference_left.data(), fade_reference_right.data()), DAW_AUDIO_CORE_OK);
+  bool still_fading = false;
+  for (uint32_t frame = 0; frame < fade_left.size(); ++frame) {
+    if (frame < 209) still_fading = still_fading || fade_left[frame] != fade_reference_left[frame];
+    else assert(fade_left[frame] == fade_reference_left[frame] && fade_right[frame] == fade_reference_right[frame]);
+  }
+  assert(still_fading);
   const std::array<daw_audio_instrument_event, 1> silence{{
     {.node_id = 1, .note_id = 0, .sequence = 3, .epoch = 1, .frame_offset = 0, .type = DAW_AUDIO_INSTRUMENT_EVENT_PARAMETER, .channel = 0, .note = DAW_AUDIO_SYNTH_PARAMETER_OUTPUT_GAIN, .value = 0.0F},
   }};
@@ -11651,6 +11719,7 @@ int main(int argc, char **argv) {
   test_instrument_graph_epoch_events_and_voice_capacity();
   test_repeated_identical_instrument_revision_preserves_continuity();
   test_instrument_reindex_retains_sustain_and_live_parameter_override();
+  test_synth_envelope_stage_times();
   test_instrument_synthesis_lifecycle_determinism_and_boundaries();
   test_synth_filter_modes_and_partition_invariance();
   test_synth_saw_and_square_are_band_limited();

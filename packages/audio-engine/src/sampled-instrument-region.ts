@@ -12,27 +12,6 @@ export type GranularInstalledBuffer = {
   assetKey: string
 } & SampledInstrumentBuffer
 
-export type SamplerNoteMiss = {
-  trackId: string
-  zoneId: string
-  assetKey: string
-  url: string
-}
-
-export type SamplerRegionUse = {
-  trackId: string
-  regionKey: string
-  voiceId: number
-  active: boolean
-}
-
-export type DrumRackRegionUse = {
-  trackId: string
-  regionKey: string
-  hitId: number
-  active: boolean
-}
-
 export type SampledInstrumentSource = {
   durationSec: number
   sampleRate: number

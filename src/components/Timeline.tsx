@@ -808,14 +808,14 @@ const Timeline: Component<TimelineProps> = (props) => {
     captureStructuralPlaybackIntent,
   });
 
-  // A prepared session, native or browser, adopts a clip or structural edit through the hook's follow.
-  function rescheduleChangedClips(clipIds: string[]) {
-    if (clipIds.length > 0) setFollowPaused(true);
-  }
-
-  function rescheduleTimeline() {
+  // A prepared session, native or browser, adopts edits through the hook's follow.
+  const pauseTimelineFollow = () => {
     setFollowPaused(true);
   }
+
+  const rescheduleChangedClips = (clipIds: string[]) => {
+    if (clipIds.length > 0) pauseTimelineFollow();
+  };
 
   const automation = useTimelineAutomationController({
     acceptance,
@@ -966,7 +966,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     commitClipFades: (clipId, fades) => projection.commitClipFades(clipId, fades),
     commitClipMidi: (clipId, midi) => handleLocalMidiSaved(clipId, midi),
     rescheduleChangedClips,
-    rescheduleTimeline,
+    pauseTimelineFollow,
     refreshLocalTimeline: async () => {
       await mediaRecovery.reloadLocalTimeline();
       await Promise.resolve();

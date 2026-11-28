@@ -1,13 +1,6 @@
 import type { ArpParams, SynthParamsInput, TrackInstrumentParams } from '@daw-browser/shared'
 import type { EngineDisposition } from './engine-disposition'
-import type {
-  DrumRackRegionUse,
-  DrumRackResolvedBuffers,
-  GranularInstalledBuffer,
-  SamplerNoteMiss,
-  SamplerRegionUse,
-  SamplerResolvedBuffers,
-} from './sampled-instrument-region'
+import type { DrumRackResolvedBuffers, GranularInstalledBuffer, SamplerResolvedBuffers } from './sampled-instrument-region'
 
 export type SetTrackInstrumentInput =
   | { instrument: Pick<Extract<TrackInstrumentParams, { kind: 'synth' }>, 'kind' | 'params'> & { instanceId?: string } }
@@ -15,16 +8,9 @@ export type SetTrackInstrumentInput =
   | { instrument: Extract<TrackInstrumentParams, { kind: 'sampler' }>; buffers?: SamplerResolvedBuffers }
   | { instrument: Extract<TrackInstrumentParams, { kind: 'granular' }>; installedBuffer?: GranularInstalledBuffer }
 
-type InstrumentRuntimeListeners = {
-  onNoteMiss?: (miss: SamplerNoteMiss) => void
-  onAssetUse?: (use: SamplerRegionUse) => void
-  onDrumRackAssetUse?: (use: DrumRackRegionUse) => void
-}
-
 // The browser engine plays no instrument voices: the portable session renders them. This registry only records each
 // track's declared instrument kind and arpeggiator so the editor and the portable compiler read one source.
 export function createInstrumentRuntime() {
-  const additionalListeners = new Set<InstrumentRuntimeListeners>()
   const activeKinds = new Map<string, TrackInstrumentParams['kind']>()
   const arpeggiators = new Map<string, ArpParams>()
 
@@ -58,11 +44,6 @@ export function createInstrumentRuntime() {
       arpeggiators.delete(trackId)
     },
     getTrackInstrumentKind: (trackId: string) => activeKinds.get(trackId),
-    addSamplerRuntimeListeners: (listeners: InstrumentRuntimeListeners) => {
-      additionalListeners.add(listeners)
-
-      return () => additionalListeners.delete(listeners)
-    },
     disposeTrack: (trackId: string) => {
       activeKinds.delete(trackId)
       arpeggiators.delete(trackId)

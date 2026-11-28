@@ -386,8 +386,8 @@ export function useTimelineHistory(
         rescheduleChangedClips: (clipIds) => {
           runVisibleAction(scopeKey, () => sourceActions.rescheduleChangedClips(clipIds))
         },
-        rescheduleTimeline: () => {
-          runVisibleAction(scopeKey, () => sourceActions.rescheduleTimeline?.())
+        pauseTimelineFollow: () => {
+          runVisibleAction(scopeKey, () => sourceActions.pauseTimelineFollow?.())
         },
         refreshLocalTimeline: () => (
           readCurrentScopeKey() === scopeKey

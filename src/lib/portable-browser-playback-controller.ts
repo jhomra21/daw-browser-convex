@@ -188,8 +188,7 @@ type PortableRecordingSession = {
 /**
  * Activates the browser portable renderer only after its immutable payload,
  * worklet, graph, assets, source schedule, and running transport are all
- * acknowledged. A failure before activation leaves the caller on legacy;
- * a fault after activation disconnects the portable node without fallback.
+ * acknowledged. A fault after activation disconnects the portable node.
  */
 export const createPortableBrowserPlaybackController = (input: {
   compileSnapshot: (transport: LivePlaybackTransport, context?: LivePlaybackCompileContext) => Promise<LivePlaybackSnapshotCompilation>

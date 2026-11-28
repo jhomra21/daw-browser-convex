@@ -94,7 +94,7 @@ export type Deps = {
     commitClipFades: (clipId: string, fades: NonNullable<Track['clips'][number]['fades']>) => void
     commitClipMidi: (clipId: string, midi: NonNullable<Track['clips'][number]['midi']>) => void
     rescheduleChangedClips: (clipIds: string[]) => void
-    rescheduleTimeline?: () => void
+    pauseTimelineFollow?: () => void
     refreshLocalTimeline?: () => Promise<void>
     cancelTrackVolumeWrite: (trackId: Track['id']) => void
     cancelTrackRoutingWrite: (trackId: Track['id']) => void
@@ -796,7 +796,7 @@ async function applyControlRangeDeleteEntry(
     deps.persistHistory?.()
 
     if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
-    deps.actions.rescheduleTimeline?.()
+    deps.actions.pauseTimelineFollow?.()
 
     return
   }
@@ -884,7 +884,7 @@ async function applyControlRangeDeleteEntry(
   deps.persistHistory?.()
 
   if (isLocalHistoryProject(deps)) await deps.actions.refreshLocalTimeline?.()
-  deps.actions.rescheduleTimeline?.()
+  deps.actions.pauseTimelineFollow?.()
 }
 
 async function applySectionEditEntry(entry: HistoryEntryOf<'section-edit'>, deps: Deps, direction: HistoryDirection) {

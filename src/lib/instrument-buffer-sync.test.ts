@@ -102,7 +102,6 @@ afterEach(() => {
 type Instruments = AudioEngine["instruments"];
 
 class TestAudioEngine extends AudioEngine {
-  private samplerRuntimeListeners: Parameters<Instruments["addSamplerRuntimeListeners"]>[0] = {};
   private readonly samplerBuffers = new Map<string, ReadonlyMap<string, SampledInstrumentBuffer>>();
   private readonly drumRackBuffers = new Map<string, ReadonlyMap<string, SampledInstrumentBuffer>>();
   private readonly granularBuffers = new Map<string, Parameters<Instruments["setTrackGranular"]>[2]>();
@@ -124,16 +123,6 @@ class TestAudioEngine extends AudioEngine {
 
         return Promise.resolve("applied");
       },
-      addSamplerRuntimeListeners: (listeners: Parameters<Instruments["addSamplerRuntimeListeners"]>[0]) => {
-        const previous = this.samplerRuntimeListeners;
-        this.samplerRuntimeListeners = { ...previous, ...listeners };
-
-        return () => {
-          this.samplerRuntimeListeners = previous;
-
-          return true;
-        };
-      },
     });
   }
 
@@ -149,13 +138,6 @@ class TestAudioEngine extends AudioEngine {
   override clearTrackInstrument(trackId: string) {
     this.samplerBuffers.delete(trackId);
   }
-  emitSamplerRegionUse(use: Parameters<NonNullable<Parameters<Instruments["addSamplerRuntimeListeners"]>[0]["onAssetUse"]>>[0]) {
-    this.samplerRuntimeListeners.onAssetUse?.(use);
-  }
-  emitDrumRackRegionUse(use: Parameters<NonNullable<Parameters<Instruments["addSamplerRuntimeListeners"]>[0]["onDrumRackAssetUse"]>>[0]) {
-    this.samplerRuntimeListeners.onDrumRackAssetUse?.(use);
-  }
-
   samplerBufferIds(trackId: string) {
     return [...(this.samplerBuffers.get(trackId)?.keys() ?? [])];
   }
@@ -168,9 +150,6 @@ class TestAudioEngine extends AudioEngine {
     return this.granularBuffers.get(trackId);
   }
 
-  emitSamplerNoteMiss(miss: Parameters<NonNullable<Parameters<Instruments["addSamplerRuntimeListeners"]>[0]["onNoteMiss"]>>[0]) {
-    this.samplerRuntimeListeners.onNoteMiss?.(miss);
-  }
 }
 
 const createEngine = (buffer: AudioBuffer) => {
@@ -212,7 +191,6 @@ test("B5c sampled to synth clears the old cache, local track, closed and unselec
           runtime.setTrackSampler(...args);
         },
         clearTrackDrumRack: (id: string) => { runtime.clearTrackDrumRack(id); },
-        addSamplerRuntimeListeners: (...args: Parameters<Instruments["addSamplerRuntimeListeners"]>) => runtime.addSamplerRuntimeListeners(...args),
       });
     }
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
@@ -463,7 +441,6 @@ const createB5c2Fixture = async (local: boolean, initial: TrackInstrumentParams,
           return disposition;
         },
         clearTrackDrumRack: (id: string) => { runtime.clearTrackDrumRack(id); },
-        addSamplerRuntimeListeners: (...args: Parameters<Instruments["addSamplerRuntimeListeners"]>) => runtime.addSamplerRuntimeListeners(...args),
       });
     }
     override setTrackInstrument(...args: Parameters<AudioEngine["setTrackInstrument"]>) {
@@ -3153,117 +3130,6 @@ test("isolates sampled instrument buffers by project identity", async () => {
   drumSync.dispose();
 });
 
-test("pins active sampler regions and releases them after the final voice ends", async () => {
-  const bufferForRegion = (_channels: number, frames: number, sampleRate: number): AudioBuffer => Object.assign(Object.create(null), {
-    duration: frames / sampleRate,
-    length: frames,
-    numberOfChannels: 2,
-    sampleRate,
-    getChannelData: () => new Float32Array(frames),
-  });
-
-  const engine = new TestAudioEngine(bufferForRegion(2, 1, 48_000));
-  const source = { durationSec: 3, sampleRate: 48_000, channelCount: 2 };
-  const firstZone = { ...zone, id: "zone-first", sample: { ...sample, assetKey: "asset-first", source }, startSec: 0, endSec: 1.5 };
-  const secondZone = { ...zone, id: "zone-second", sample: { ...sample, assetKey: "asset-second", source }, startSec: 1.5, endSec: 3 };
-
-  const params: SamplerParams = {
-    ...createDefaultSamplerParams(),
-    cachePolicy: "lazy",
-    maxDecodedBytes: 1 * 1024 * 1024,
-    zones: [firstZone, secondZone],
-  };
-
-  const sync = createSamplerBufferSync({
-    decodePages: decodeTestPages,
-    createBuffer: bufferForRegion,
-    resolveUrl: (url) => url,
-  });
-
-  await sync.syncTrack(engine, "sampler-cache", params, "sampler-instance");
-  await sync.retryZone(engine, "sampler-cache", firstZone.id);
-  const firstRegionKey = sampledInstrumentRegionIdentity(firstZone.sample, sampledInstrumentRegion(firstZone.sample.source, 0, 1.5));
-  engine.emitSamplerRegionUse({ trackId: "sampler-cache", regionKey: firstRegionKey, voiceId: 1, active: true });
-  engine.emitSamplerRegionUse({ trackId: "sampler-cache", regionKey: firstRegionKey, voiceId: 2, active: true });
-  await sync.retryZone(engine, "sampler-cache", secondZone.id);
-
-  expect(sync.snapshotSamplerBuffers("sampler-cache", {
-    kind: "sampler",
-    instanceId: "sampler-instance",
-    params,
-  })).toBeDefined();
-
-  engine.emitSamplerRegionUse({ trackId: "sampler-cache", regionKey: firstRegionKey, voiceId: 1, active: false });
-  expect(sync.snapshotSamplerBuffers("sampler-cache", {
-    kind: "sampler",
-    instanceId: "sampler-instance",
-    params,
-  })?.has(firstZone.id)).toBe(true);
-  engine.emitSamplerRegionUse({ trackId: "sampler-cache", regionKey: firstRegionKey, voiceId: 2, active: false });
-  await sync.retryZone(engine, "sampler-cache", secondZone.id);
-
-  expect(sync.getStatus("sampler-cache").totalBytes).toBe(576_000);
-  expect(sync.snapshotSamplerBuffers("sampler-cache", {
-    kind: "sampler",
-    instanceId: "sampler-instance",
-    params,
-  })?.has(firstZone.id)).toBe(false);
-  expect(sync.snapshotSamplerBuffers("sampler-cache", {
-    kind: "sampler",
-    instanceId: "sampler-instance",
-    params,
-  })?.has(secondZone.id)).toBe(true);
-  sync.dispose();
-});
-
-test("releases a retired sampler generation through the ending voice token", async () => {
-  const buffer = new TestAudioBuffer();
-  const regionBytes = 48_000 * 2 * 4;
-  const aggregate = createSampledInstrumentRegionBudget(regionBytes * 2);
-  const engine = createEngine(buffer);
-  const sync = createSamplerBufferSync({ aggregateBudget: aggregate, decodePages: decodeTestPages, createBuffer: () => buffer });
-  const params = { ...createDefaultSamplerParams(), maxDecodedBytes: regionBytes, zones: [zone] };
-  await sync.syncTrack(engine, "sampler-generation", params, "sampler-instance");
-  const regionKey = sampledInstrumentRegionIdentity(zone.sample, sampledInstrumentRegion(zone.sample.source, 0, 1));
-  const key = `sampler\u0000sampler-generation\u0000${regionKey}`;
-  engine.emitSamplerRegionUse({ trackId: "sampler-generation", regionKey, voiceId: 1, active: true });
-  aggregate.release(key);
-  aggregate.set(key, regionBytes, () => undefined, new TestAudioBuffer());
-  expect(aggregate.totalBytes()).toBe(regionBytes * 2);
-  engine.emitSamplerRegionUse({ trackId: "sampler-generation", regionKey, voiceId: 1, active: false });
-  expect(aggregate.totalBytes()).toBe(regionBytes);
-  sync.dispose();
-});
-
-test("releases a retired Drum Rack generation through the ending hit token", async () => {
-  const buffer = new TestAudioBuffer();
-  const regionBytes = 48_000 * 2 * 4;
-  const aggregate = createSampledInstrumentRegionBudget(regionBytes * 2);
-  const engine = createEngine(buffer);
-  const pad = createDefaultDrumRackParams().pads[0];
-
-  if (!pad) throw new Error("Missing default Drum Rack pad");
-
-  const params = {
-    ...createDefaultDrumRackParams(),
-    pads: createDefaultDrumRackParams().pads.map((candidate) => candidate.id === pad.id
-      ? { ...candidate, sample, startSec: 0, endSec: 1 }
-      : candidate),
-  };
-
-  const sync = createDrumRackBufferSync({ aggregateBudget: aggregate, decodePages: decodeTestPages, createBuffer: () => buffer });
-  await sync.syncTrack(engine, "drum-generation", params, "drum-instance");
-  const regionKey = sampledInstrumentRegionIdentity(sample, sampledInstrumentRegion(sample.source, 0, 1));
-  const key = `drum\u0000drum-generation\u0000${regionKey}`;
-  engine.emitDrumRackRegionUse({ trackId: "drum-generation", regionKey, hitId: 1, active: true });
-  aggregate.release(key);
-  aggregate.set(key, regionBytes, () => undefined, new TestAudioBuffer());
-  expect(aggregate.totalBytes()).toBe(regionBytes * 2);
-  engine.emitDrumRackRegionUse({ trackId: "drum-generation", regionKey, hitId: 1, active: false });
-  expect(aggregate.totalBytes()).toBe(regionBytes);
-  sync.dispose();
-});
-
 test("a superseded Drum Rack sync settles after its replacement", async () => {
   const buffer = new TestAudioBuffer();
   const engine = createEngine(buffer);
@@ -3533,185 +3399,6 @@ test("permits sampler replacement after obsolete unpinned cache entries are evic
     instanceId: "sampler-instance",
     params: replacement,
   })?.has(secondZone.id)).toBe(true);
-  sync.dispose();
-});
-
-test("refuses sampler replacement while an obsolete region is pinned", async () => {
-  const source = { durationSec: 2 / 48_000, sampleRate: 48_000, channelCount: 2 };
-  const firstZone = { ...zone, id: "pinned-first", sample: { ...sample, source }, startSec: 0, endSec: 1 / 48_000 };
-  const secondZone = { ...zone, id: "pinned-second", sample: { ...sample, source }, startSec: 1 / 48_000, endSec: 2 / 48_000 };
-  const params = { ...createDefaultSamplerParams(), maxDecodedBytes: 8, zones: [firstZone] };
-  const replacement = { ...params, zones: [secondZone] };
-  const engine = createEngine(new TestAudioBuffer());
-
-  const sync = createSamplerBufferSync({
-    decodePages: decodeTestPages,
-    createBuffer: (_channels, frames, sampleRate) => ({
-      duration: frames / sampleRate,
-      length: frames,
-      numberOfChannels: 2,
-      sampleRate,
-      copyFromChannel: () => {},
-      copyToChannel: () => {},
-      getChannelData: () => new Float32Array(frames),
-    }),
-    resolveUrl: (url) => url,
-  });
-
-  await sync.syncTrack(engine, "sampler-pinned", params, "sampler-instance");
-
-  const firstKey = sampledInstrumentRegionIdentity(
-    firstZone.sample,
-    sampledInstrumentRegion(firstZone.sample.source, firstZone.startSec, firstZone.endSec),
-  );
-
-  engine.emitSamplerRegionUse({ trackId: "sampler-pinned", regionKey: firstKey, voiceId: 1, active: true });
-  await expect(sync.syncTrack(engine, "sampler-pinned", replacement, "sampler-instance")).rejects.toThrow("byte limit");
-  sync.dispose();
-});
-
-test("refreshes the runtime sampler map when releasing pinned regions evicts them", async () => {
-  const source = { durationSec: 2, sampleRate: 1, channelCount: 2 };
-  const firstZone = { ...zone, id: "runtime-first", sample: { ...sample, assetKey: "runtime-first", source }, startSec: 0, endSec: 1 };
-  const secondZone = { ...zone, id: "runtime-second", sample: { ...sample, assetKey: "runtime-second", source }, startSec: 1, endSec: 2 };
-  const params = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, maxDecodedBytes: 16, zones: [firstZone, secondZone] };
-  const constrained = { ...params, maxDecodedBytes: 8 };
-
-  const decodePages = async function* (
-    _source: Blob | string | URL | Request,
-    options?: { startFrame?: number; endFrame?: number },
-  ): AsyncGenerator<DecodedAudioPage> {
-    const startFrame = options?.startFrame ?? 0;
-    const endFrame = options?.endFrame ?? startFrame + 1;
-    yield {
-      startFrame,
-      frameCount: endFrame - startFrame,
-      sampleRate: 1,
-      channelCount: 2,
-      planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
-    };
-  };
-
-  const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
-    duration: frames / sampleRate,
-    length: frames,
-    numberOfChannels: 2,
-    sampleRate,
-    copyFromChannel: () => {},
-    copyToChannel: () => {},
-    getChannelData: () => new Float32Array(frames),
-  });
-
-  const engine = createEngine(new TestAudioBuffer());
-  const sync = createSamplerBufferSync({ decodePages, createBuffer });
-
-  await sync.syncTrack(engine, "runtime-eviction", params, "sampler-instance");
-  await sync.retryZone(engine, "runtime-eviction", firstZone.id);
-  await sync.retryZone(engine, "runtime-eviction", secondZone.id);
-  const firstKey = sampledInstrumentRegionIdentity(firstZone.sample, sampledInstrumentRegion(firstZone.sample.source, 0, 1));
-  const secondKey = sampledInstrumentRegionIdentity(secondZone.sample, sampledInstrumentRegion(secondZone.sample.source, 1, 2));
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: firstKey, voiceId: 1, active: true });
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: firstKey, voiceId: 2, active: true });
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: secondKey, voiceId: 3, active: true });
-  await sync.syncTrack(engine, "runtime-eviction", constrained, "sampler-instance");
-  expect(engine.samplerBufferIds("runtime-eviction")).toEqual([firstZone.id, secondZone.id]);
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: firstKey, voiceId: 1, active: false });
-  expect(engine.samplerBufferIds("runtime-eviction")).toEqual([firstZone.id, secondZone.id]);
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: firstKey, voiceId: 2, active: false });
-  expect(engine.samplerBufferIds("runtime-eviction")).toEqual([secondZone.id]);
-  engine.emitSamplerRegionUse({ trackId: "runtime-eviction", regionKey: secondKey, voiceId: 3, active: false });
-  engine.emitSamplerNoteMiss({
-    trackId: "runtime-eviction",
-    zoneId: firstZone.id,
-    assetKey: firstZone.sample.assetKey,
-    url: firstZone.sample.url,
-  });
-  await sync.retryZone(engine, "runtime-eviction", firstZone.id);
-  expect(engine.samplerBufferIds("runtime-eviction")).toEqual([firstZone.id]);
-  sync.dispose();
-});
-
-test("records a sampler note-miss load failure without an unhandled rejection", async () => {
-  const buffer = new TestAudioBuffer();
-  const engine = createEngine(buffer);
-
-  const sync = createSamplerBufferSync({
-    decodePages: async function* () {
-      for (const page of [] satisfies readonly DecodedAudioPage[]) yield page;
-      throw new Error("decode failed");
-    },
-    createBuffer: () => buffer,
-  });
-
-  const params = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, zones: [zone] };
-  const unhandled: TestRejectionReason[] = [];
-  const onUnhandledRejection = (reason: TestRejectionReason) => unhandled.push(reason);
-  process.on("unhandledRejection", onUnhandledRejection);
-
-  try {
-    await sync.syncTrack(engine, "sampler-note-miss-error", params, "sampler-instance");
-
-    const failed = new Promise<void>((resolve) => {
-      const unsubscribe = sync.subscribe(() => {
-        if (sync.getStatus("sampler-note-miss-error").zones.get(zone.id) !== "error") return;
-        unsubscribe();
-        resolve();
-      });
-    });
-
-    engine.emitSamplerNoteMiss({
-      trackId: "sampler-note-miss-error",
-      zoneId: zone.id,
-      assetKey: zone.sample.assetKey,
-      url: zone.sample.url,
-    });
-    await failed;
-    expect(sync.getStatus("sampler-note-miss-error").zones.get(zone.id)).toBe("error");
-    expect(unhandled).toEqual([]);
-  } finally {
-    process.removeListener("unhandledRejection", onUnhandledRejection);
-    sync.dispose();
-  }
-});
-
-test("does not overwrite newer sampler state when a note-miss load is aborted", async () => {
-  const buffer = new TestAudioBuffer();
-  const engine = createEngine(buffer);
-
-  const sync = createSamplerBufferSync({
-    decodePages: async function* (
-      _source: Blob | string | URL | Request,
-      options?: { startFrame?: number; endFrame?: number; signal?: AbortSignal },
-    ) {
-      await new Promise<void>((resolve) => options?.signal?.addEventListener("abort", () => resolve(), { once: true }));
-      options?.signal?.throwIfAborted();
-      const startFrame = options?.startFrame ?? 0;
-      const endFrame = options?.endFrame ?? startFrame + 1;
-      yield {
-        startFrame,
-        frameCount: endFrame - startFrame,
-        sampleRate: 48_000,
-        channelCount: 2,
-        planes: [new Float32Array(endFrame - startFrame), new Float32Array(endFrame - startFrame)],
-      };
-    },
-    createBuffer: () => buffer,
-  });
-
-  const firstParams = { ...createDefaultSamplerParams(), cachePolicy: "lazy" as const, zones: [zone] };
-  const secondZone = { ...zone, id: "newer-zone" };
-  const secondParams = { ...firstParams, zones: [secondZone] };
-
-  await sync.syncTrack(engine, "sampler-note-miss-stale", firstParams, "sampler-instance");
-  engine.emitSamplerNoteMiss({
-    trackId: "sampler-note-miss-stale",
-    zoneId: zone.id,
-    assetKey: zone.sample.assetKey,
-    url: zone.sample.url,
-  });
-  await sync.syncTrack(engine, "sampler-note-miss-stale", secondParams, "sampler-instance");
-
-  expect(sync.getStatus("sampler-note-miss-stale").zones).toEqual(new Map([[secondZone.id, "missing"]]));
   sync.dispose();
 });
 
@@ -4413,51 +4100,6 @@ test("disposes pinned granular cache and aggregate handles before clearing entri
   expect(aggregate.totalBytes()).toBe(0);
 });
 
-test("rejects a pinned aggregate region until release makes capacity available", async () => {
-  const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
-  const firstZone = { ...zone, id: "aggregate-pinned-first", sample: { ...sample, assetKey: "aggregate-pinned-first", source }, startSec: 0, endSec: 1 };
-  const secondZone = { ...zone, id: "aggregate-pinned-second", sample: { ...sample, assetKey: "aggregate-pinned-second", source }, startSec: 1, endSec: 2 };
-
-  const decodePages = async function* (
-    _source: Blob | string | URL | Request,
-    options?: { startFrame?: number; endFrame?: number },
-  ): AsyncGenerator<DecodedAudioPage> {
-    const startFrame = options?.startFrame ?? 0;
-    const endFrame = options?.endFrame ?? startFrame + 1;
-    yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
-  };
-
-  const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
-    duration: frames / sampleRate,
-    length: frames,
-    numberOfChannels: 1,
-    sampleRate,
-    copyFromChannel: () => {},
-    copyToChannel: () => {},
-    getChannelData: () => new Float32Array(frames),
-  });
-
-  const engine = createEngine(new TestAudioBuffer());
-
-  const sync = createSamplerBufferSync({
-    aggregateBudget: createSampledInstrumentRegionBudget(4),
-    decodePages,
-    createBuffer,
-  });
-
-  const firstParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [firstZone] };
-  const secondParams = { ...createDefaultSamplerParams(), maxDecodedBytes: 4, zones: [secondZone] };
-  await sync.syncTrack(engine, "aggregate-pinned-a", firstParams, "instance-a");
-  const firstKey = sampledInstrumentRegionIdentity(firstZone.sample, sampledInstrumentRegion(source, 0, 1));
-  engine.emitSamplerRegionUse({ trackId: "aggregate-pinned-a", regionKey: firstKey, voiceId: 1, active: true });
-  await expect(sync.syncTrack(engine, "aggregate-pinned-b", secondParams, "instance-b")).rejects.toThrow("aggregate limit");
-  engine.emitSamplerRegionUse({ trackId: "aggregate-pinned-a", regionKey: firstKey, voiceId: 1, active: false });
-  await sync.syncTrack(engine, "aggregate-pinned-b", secondParams, "instance-b");
-  expect(engine.samplerBufferIds("aggregate-pinned-a")).toEqual([]);
-  expect(engine.samplerBufferIds("aggregate-pinned-b")).toEqual([secondZone.id]);
-  sync.dispose();
-});
-
 test("invalidates live sampler reuse when the persisted source descriptor changes", async () => {
   const source = { durationSec: 1, sampleRate: 1, channelCount: 1 };
   const oldSample = { ...sample, assetKey: "same-asset", url: "/old.wav", source };
@@ -4580,56 +4222,6 @@ test("shares the live aggregate budget across multiple Drum Racks and instrument
   samplerSync.dispose();
   drumSync.dispose();
   expect(aggregate.totalBytes()).toBe(0);
-});
-
-test("pins active Drum Rack regions in the shared aggregate budget", async () => {
-  const source = { durationSec: 2, sampleRate: 1, channelCount: 1 };
-  const firstSample = { ...sample, assetKey: "pinned-rack-a", source };
-  const secondSample = { ...sample, assetKey: "pinned-rack-b", source };
-
-  const makeDrum = (sampleValue: typeof firstSample) => ({
-    ...createDefaultDrumRackParams(),
-    pads: createDefaultDrumRackParams().pads.map((pad) => pad.id === "pad-36" ? { ...pad, sample: sampleValue, startSec: 0, endSec: 1 } : pad),
-  });
-
-  const decodePages = async function* (
-    _source: Blob | string | URL | Request,
-    options?: { startFrame?: number; endFrame?: number },
-  ): AsyncGenerator<DecodedAudioPage> {
-    const startFrame = options?.startFrame ?? 0;
-    const endFrame = options?.endFrame ?? startFrame + 1;
-    yield { startFrame, frameCount: endFrame - startFrame, sampleRate: 1, channelCount: 1, planes: [new Float32Array(endFrame - startFrame)] };
-  };
-
-  const createBuffer = (_channels: number, frames: number, sampleRate: number): AudioBuffer => ({
-    duration: frames / sampleRate,
-    length: frames,
-    numberOfChannels: 1,
-    sampleRate,
-    copyFromChannel: () => {},
-    copyToChannel: () => {},
-    getChannelData: () => new Float32Array(frames),
-  });
-
-  const aggregate = createSampledInstrumentRegionBudget(4);
-  const engine = createEngine(new TestAudioBuffer());
-  const sync = createDrumRackBufferSync({ aggregateBudget: aggregate, decodePages, createBuffer });
-  await sync.syncTrack(engine, "pinned-rack", makeDrum(firstSample), "instance");
-  const regionKey = sampledInstrumentRegionIdentity(firstSample, sampledInstrumentRegion(source, 0, 1));
-  engine.emitDrumRackRegionUse({ trackId: "pinned-rack", regionKey, hitId: 1, active: true });
-  engine.emitDrumRackRegionUse({ trackId: "pinned-rack", regionKey, hitId: 2, active: true });
-  await expect(sync.syncTrack(engine, "other-rack", makeDrum(secondSample), "other")).rejects.toThrow("aggregate limit");
-  engine.emitDrumRackRegionUse({ trackId: "pinned-rack", regionKey, hitId: 1, active: false });
-  await expect(sync.syncTrack(engine, "other-rack", makeDrum(secondSample), "other")).rejects.toThrow("aggregate limit");
-  engine.emitDrumRackRegionUse({ trackId: "pinned-rack", regionKey, hitId: 2, active: false });
-  expect(aggregate.totalBytes()).toBe(4);
-  await sync.syncTrack(engine, "other-rack", makeDrum(secondSample), "other");
-  expect(sync.snapshotBuffers("pinned-rack", {
-    kind: "drum-rack",
-    instanceId: "instance",
-    params: makeDrum(firstSample),
-  })).toBeUndefined();
-  sync.dispose();
 });
 
 test("joins an equal sampler sync that is still loading", async () => {

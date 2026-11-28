@@ -91,25 +91,25 @@ export const useDesktopApplicationMenu = (
     return {
       ready: true,
       canExportArchive: isLocalId("project", transport.projectMenu.currentProjectId),
-      canUndo: transport.canUndo || editable,
-      canRedo: transport.canRedo || editable,
+      canUndo: transport.edit.canUndo || editable,
+      canRedo: transport.edit.canRedo || editable,
       canCut: editable,
-      canCopy: editable || transport.canCopySelection,
-      canPaste: editable || transport.canPasteSelection,
-      canSelectAll: editable || transport.canSelectAllClips,
+      canCopy: editable || transport.edit.canCopySelection,
+      canPaste: editable || transport.edit.canPasteSelection,
+      canSelectAll: editable || transport.edit.canSelectAllClips,
       canDuplicateSelection: !editable && localOwner
         ? localOwner.getAttribute("data-timeline-keyboard-duplicate-enabled") === "true"
-        : !editable && transport.canDuplicateSelection,
+        : !editable && transport.edit.canDuplicateSelection,
       // A focused local editor owns the Delete key itself; the menu item would not reach it.
-      canDeleteSelection: !editable && !localOwner && transport.canDeleteSelection,
+      canDeleteSelection: !editable && !localOwner && transport.edit.canDeleteSelection,
       editableFocused: editable,
       signedIn: Boolean(transport.projectMenu.currentUserId),
-      metronomeEnabled: transport.metronomeEnabled,
-      loopEnabled: transport.loopEnabled,
-      gridEnabled: transport.gridEnabled,
-      followEnabled: transport.followEnabled,
+      metronomeEnabled: transport.timeline.metronomeEnabled,
+      loopEnabled: transport.timeline.loopEnabled,
+      gridEnabled: transport.timeline.gridEnabled,
+      followEnabled: transport.timeline.followEnabled,
       syncMix: transport.tracksMenu.syncMix,
-      gridDenominator: gridDenominatorForState(transport.gridDenominator),
+      gridDenominator: gridDenominatorForState(transport.timeline.gridDenominator),
       extensionContributions: [...(extensionMenu?.contributions() ?? [])],
     };
   }, undefined, { equals: sameMenuState });

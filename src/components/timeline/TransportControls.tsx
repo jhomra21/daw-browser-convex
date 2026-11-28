@@ -365,8 +365,8 @@ const MidiKeyboardToggle: Component<{ midiKeyboard: TransportControlsProps["midi
 
 const TransportControls: Component<TransportControlsProps> = (props) => {
   const tempo = useTransportTempoController({
-    bpm: () => props.bpm,
-    onChangeBpm: (bpm) => props.onChangeBpm(bpm),
+    bpm: () => props.timeline.bpm,
+    onChangeBpm: (bpm) => props.timeline.onChangeBpm(bpm),
   });
 
   return (
@@ -402,14 +402,9 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
 
       <TransportBar
         transport={{
-          isRecording: props.isRecording,
-          isRecordingPending: props.isRecordingPending,
-          onToggleRecord: props.onToggleRecord,
-          isPlaying: props.isPlaying,
-          isPlayPending: props.isPlayPending,
-          onPlay: props.onPlay,
-          onPause: props.onPause,
-          onStop: props.onStop,
+          ...props.recording,
+          ...props.playback,
+          ...props.timeline,
           tempoDraft: tempo.tempoDraft,
           setTempoDraft: tempo.setTempoDraft,
           tempoEditing: tempo.tempoEditing,
@@ -418,25 +413,14 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
           beginTempoDrag: tempo.beginTempoDrag,
           updateTempoDrag: tempo.updateTempoDrag,
           endTempoDrag: tempo.endTempoDrag,
-          metronomeEnabled: props.metronomeEnabled,
-          onToggleMetronome: props.onToggleMetronome,
-          loopEnabled: props.loopEnabled,
-          onToggleLoop: props.onToggleLoop,
-          gridEnabled: props.gridEnabled,
-          onToggleGrid: props.onToggleGrid,
-          followEnabled: props.followEnabled,
-          onToggleFollow: props.onToggleFollow,
-          gridDenominator: props.gridDenominator,
-          onChangeGridDenominator: props.onChangeGridDenominator,
-          bpm: props.bpm,
         }}
       />
 
       <div class="justify-self-end flex items-center gap-3">
-        <Show when={props.automationOverrideCount > 0}>
+        <Show when={props.automation.overrideCount > 0}>
           <TopRightIconButton
-            onClick={props.onReEnableAutomation}
-            tooltip={`Re-enable automation (${props.automationOverrideCount})`}
+            onClick={props.automation.onReEnable}
+            tooltip={`Re-enable automation (${props.automation.overrideCount})`}
             class="border-red-500/60 bg-red-500/20 text-red-200"
           >
             <AutomationReEnableIcon />
@@ -447,7 +431,7 @@ const TransportControls: Component<TransportControlsProps> = (props) => {
         <div class="flex items-center gap-2 text-xs">
           <span class="text-muted-foreground">Playhead</span>
           <span class="tabular-nums text-foreground">
-            {formatBarsBeatsSixteenths(props.playheadSec, props.bpm)}
+            {formatBarsBeatsSixteenths(props.playback.playheadSec, props.timeline.bpm)}
           </span>
         </div>
       </div>

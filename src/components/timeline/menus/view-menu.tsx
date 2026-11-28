@@ -17,6 +17,7 @@ const viewMenuItemClass = cn(nativeMenuItemClass, "flex w-full items-center gap-
 
 export const ViewMenu: Component<ViewMenuProps> = (props) => {
   const toolbar = () => props.toolbar;
+  const timeline = () => props.toolbar.timeline;
 
   const selectBrowserTab = (tab: (typeof timelineBrowserTabs)[number]) => {
     toolbar().browser.onSelectTab(tab);
@@ -37,15 +38,15 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
         </For>
         <MenubarSeparator />
         <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-metronome", toolbar())}>
-          <MenuCheckMark checked={toolbar().metronomeEnabled} />
+          <MenuCheckMark checked={timeline().metronomeEnabled} />
           <span>Metronome</span>
         </MenubarItem>
         <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-loop", toolbar())}>
-          <MenuCheckMark checked={toolbar().loopEnabled} />
+          <MenuCheckMark checked={timeline().loopEnabled} />
           <span>Loop</span>
         </MenubarItem>
         <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-grid", toolbar())}>
-          <MenuCheckMark checked={toolbar().gridEnabled} />
+          <MenuCheckMark checked={timeline().gridEnabled} />
           <span>Grid</span>
         </MenubarItem>
         <MenubarSeparator />
@@ -70,11 +71,11 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
             <MenubarItem
               class={cn(
                 viewMenuItemClass,
-                toolbar().gridDenominator === denominator && "text-green-400",
+                timeline().gridDenominator === denominator && "text-green-400",
               )}
-              onSelect={() => toolbar().onChangeGridDenominator(denominator)}
+              onSelect={() => timeline().onChangeGridDenominator(denominator)}
             >
-              <MenuCheckMark checked={toolbar().gridDenominator === denominator} />
+              <MenuCheckMark checked={timeline().gridDenominator === denominator} />
               <span>1/{denominator}</span>
             </MenubarItem>
           )}

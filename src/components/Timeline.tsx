@@ -571,6 +571,32 @@ const Timeline: Component<TimelineProps> = (props) => {
     },
   });
 
+  // Captures and persists the state of the local processors that `select` picks, in the order it returns them,
+  // from those that can save state.
+  const captureNativeVstStates = async (
+    capturedProjectId: string,
+    select: (processors: ExternalProcessor[]) => readonly ExternalProcessor[],
+  ) => {
+    const bridge = desktopBridge()?.audioHost?.session
+
+    if (!bridge || !isLocalId("project", capturedProjectId)) return
+
+    const processors = (await listLocalExternalProcessors(capturedProjectId))
+      .filter((processor) => processor.manifest.supportsState)
+
+    for (const { instanceId } of select(processors)) {
+      const capture = await bridge.captureVstState(instanceId)
+
+      if (!capture.ok) throw new Error(`Native VST3 state capture failed for "${instanceId}": ${capture.error}`)
+      await persistLocalExternalProcessorState(
+        capturedProjectId,
+        instanceId,
+        capture,
+        localVstStateOwnerId(capturedProjectId, userId()),
+      )
+    }
+  }
+
   const {
     isPlaying,
     isPlayPending,
@@ -660,27 +686,11 @@ const Timeline: Component<TimelineProps> = (props) => {
       // Local adoption replaces the snapshot even for automation/effect-only commits.
       playbackInputs: nativePlaybackInputs,
       captureNativeVstStates: async ({ projectId: capturedProjectId, instanceIds }) => {
-        const bridge = desktopBridge()?.audioHost?.session
+        if (instanceIds.length === 0) return
 
-        if (!bridge || instanceIds.length === 0) return
-
-        if (!isLocalId("project", capturedProjectId)) return
-        const processors = await listLocalExternalProcessors(capturedProjectId)
-
-        for (const instanceId of instanceIds) {
-          const processor = processors.find((candidate) => candidate.instanceId === instanceId)
-
-          if (!processor?.manifest.supportsState) continue
-          const capture = await bridge.captureVstState(instanceId)
-
-          if (!capture.ok) throw new Error(`Native VST3 state capture failed for "${instanceId}": ${capture.error}`)
-          await persistLocalExternalProcessorState(
-            capturedProjectId,
-            instanceId,
-            capture,
-            localVstStateOwnerId(capturedProjectId, userId()),
-          )
-        }
+        await captureNativeVstStates(capturedProjectId, (processors) => instanceIds.flatMap(
+          (instanceId) => processors.find((candidate) => candidate.instanceId === instanceId) ?? [],
+        ))
       },
       instrumentBudget: sampledInstrumentSession.aggregateBudget,
       onInstrumentPreparation: sampledInstrumentSession.setNativePreparation,
@@ -1670,21 +1680,18 @@ const Timeline: Component<TimelineProps> = (props) => {
   const handleTransportPause = recordingTransport.pause;
   const handleTransportStop = recordingTransport.stop;
 
-  const addAudioTrack = async () => {
-    await createTimelineTrack();
+  const addTrack = async (options?: Parameters<typeof createTimelineTrack>[0]) => {
+    try {
+      await createTimelineTrack(options);
+    } catch {
+      notify("Track not added", "The track could not be saved.");
+    }
   };
 
-  const addReturnTrack = async () => {
-    await createTimelineTrack({ channelRole: "return" });
-  };
-
-  const addGroupTrack = async () => {
-    await createTimelineTrack({ channelRole: "group" });
-  };
-
-  const addInstrumentTrack = async () => {
-    await createTimelineTrack({ kind: "instrument" });
-  };
+  const addAudioTrack = () => addTrack();
+  const addReturnTrack = () => addTrack({ channelRole: "return" });
+  const addGroupTrack = () => addTrack({ channelRole: "group" });
+  const addInstrumentTrack = () => addTrack({ kind: "instrument" });
 
   useTimelineKeyboard({
     enabled: () => props.dashboardView() === null,
@@ -1699,13 +1706,13 @@ const Timeline: Component<TimelineProps> = (props) => {
     onCopy: copyTimelineSelection,
     onPaste: pasteTimelineSelection,
     onAddAudioTrack: () => {
-      void addAudioTrack().catch(() => {});
+      void addAudioTrack();
     },
     onAddReturnTrack: () => {
-      void addReturnTrack().catch(() => {});
+      void addReturnTrack();
     },
     onAddGroupTrack: () => {
-      void addGroupTrack().catch(() => {});
+      void addGroupTrack();
     },
     onGroupSelectedTracks: () => {
       const rangeTrackIds = selection.rangeSelection()?.trackIds ?? [];
@@ -1736,7 +1743,7 @@ const Timeline: Component<TimelineProps> = (props) => {
       handleRedo();
     },
     onAddInstrumentTrack: () => {
-      void addInstrumentTrack().catch(() => {});
+      void addInstrumentTrack();
     },
     onOpenExport: () => setExportOpen(true),
     onToggleFollow: toggleFollow,
@@ -2144,41 +2151,19 @@ const Timeline: Component<TimelineProps> = (props) => {
     clearClipBufferCaches: clipBuffers.clearClipBufferCaches,
   });
 
-  const captureNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
-    const bridge = desktopBridge()?.audioHost?.session
+  // Without an argument: every active processor, and only while a native session is prepared.
+  const captureActiveNativeVstStates = async (capture?: { projectId: string; instanceIds: readonly string[] }) => {
+    if (capture === undefined && !isNativePlaybackPrepared()) return
 
-    if (!bridge || (capture === undefined && !isNativePlaybackPrepared())) return
-    const capturedProjectId = capture?.projectId ?? projectId()
-
-    if (!isLocalId("project", capturedProjectId)) return
-
-    const processors = (await listLocalExternalProcessors(capturedProjectId))
-      .filter((processor) => !processor.bypassed && processor.manifest.supportsState)
-
-    const selected = capture === undefined
-      ? processors
-      : processors.filter((processor) => capture.instanceIds.includes(processor.instanceId))
-
-    for (const processor of selected) {
-      const capture = await bridge.captureVstState(processor.instanceId)
-
-      if (!capture.ok) {
-        throw new Error(`Native VST3 state capture failed for "${processor.instanceId}": ${capture.error}`)
-      }
-
-      await persistLocalExternalProcessorState(
-        capturedProjectId,
-        processor.instanceId,
-        capture,
-        localVstStateOwnerId(capturedProjectId, userId()),
-      )
-    }
+    await captureNativeVstStates(capture?.projectId ?? projectId(), (processors) => processors.filter(
+      (processor) => !processor.bypassed && (capture === undefined || capture.instanceIds.includes(processor.instanceId)),
+    ))
   }
 
   // Only a live playback session can hold a parameter change the plug-in's saved state has not seen.
   const requestNativeVstStateCapture = createNativeVstStateCapture({
     capture: async (instanceId) => {
-      if (isNativePlaybackPrepared()) await captureNativeVstStates({ projectId: projectId(), instanceIds: [instanceId] })
+      if (isNativePlaybackPrepared()) await captureActiveNativeVstStates({ projectId: projectId(), instanceIds: [instanceId] })
     },
     report: (_instanceId, error) => notify("Plug-in state not saved", error.message),
   })
@@ -2216,7 +2201,7 @@ const Timeline: Component<TimelineProps> = (props) => {
         if (isRecording()) await stopRecording();
       },
       refuseRecordingTargetChange: recordingTargetLock.refuseTransition,
-      captureNativeVstStates,
+      captureNativeVstStates: captureActiveNativeVstStates,
       requestNativeVstStateCapture,
       exportQueue,
       importQueue,
@@ -2260,12 +2245,23 @@ const Timeline: Component<TimelineProps> = (props) => {
   });
 
   const transportProps = () => ({
-    isPlaying: isPlaying(),
-    isPlayPending: isPlayPending(),
-    playheadSec: playheadSec(),
-    onPlay: recordingTransport.play,
-    onPause: handleTransportPause,
-    onStop: handleTransportStop,
+    playback: {
+      isPlaying: isPlaying(),
+      isPlayPending: isPlayPending(),
+      playheadSec: playheadSec(),
+      onPlay: recordingTransport.play,
+      onPause: handleTransportPause,
+      onStop: handleTransportStop,
+    },
+    recording: {
+      isRecording: isRecording(),
+      isRecordingPending: audioRecordingStarting() || midiRecording.isStarting(),
+      onToggleRecord: toggleRecording,
+    },
+    automation: {
+      overrideCount: automation.overrideCount(),
+      onReEnable: automation.reEnable,
+    },
     onAddAudio: () => handleAddAudio(),
     tracksMenu: {
       syncMix: syncMix(),
@@ -2317,56 +2313,50 @@ const Timeline: Component<TimelineProps> = (props) => {
       onSelectTab: leftBrowser.setActiveTab,
     },
     midiKeyboard,
-    bpm: bpm(),
-    onChangeBpm: (next: number) => setBpm(clampBpm(next)),
-    metronomeEnabled: metronomeEnabled(),
-    onToggleMetronome: () => setMetronomeEnabled((prev) => !prev),
-    gridEnabled: gridEnabled(),
-    onToggleGrid: () => setGridEnabled((prev) => !prev),
-    followEnabled: appPreferences.timeline.follow(),
-    onToggleFollow: toggleFollow,
-    zoom: {
-      onIn: timelineViewport.zoomIn,
-      onOut: timelineViewport.zoomOut,
-      onFit: timelineViewport.zoomToFit,
+    timeline: {
+      bpm: bpm(),
+      onChangeBpm: (next: number) => setBpm(clampBpm(next)),
+      metronomeEnabled: metronomeEnabled(),
+      onToggleMetronome: () => setMetronomeEnabled((prev) => !prev),
+      gridEnabled: gridEnabled(),
+      onToggleGrid: () => setGridEnabled((prev) => !prev),
+      followEnabled: appPreferences.timeline.follow(),
+      onToggleFollow: toggleFollow,
+      zoom: {
+        onIn: timelineViewport.zoomIn,
+        onOut: timelineViewport.zoomOut,
+        onFit: timelineViewport.zoomToFit,
+      },
+      gridDenominator: gridDenominator(),
+      onChangeGridDenominator: setGridDenominator,
+      loopEnabled: loopEnabled(),
+      onToggleLoop: toggleLoopSafely,
     },
-    gridDenominator: gridDenominator(),
-    onChangeGridDenominator: setGridDenominator,
-    loopEnabled: loopEnabled(),
-    onToggleLoop: toggleLoopSafely,
-    isRecording: isRecording(),
-    isRecordingPending: audioRecordingStarting() || midiRecording.isStarting(),
-    onToggleRecord: toggleRecording,
-    onUndo: handleUndo,
-    onRedo: handleRedo,
-    canUndo: canUndo(),
-    canRedo: canRedo(),
-    canDuplicateSelection: canDuplicateSelection(),
-    canDeleteSelection: canDeleteSelection(),
-    // Copy uses the same predicate as duplicate: a range or a writable selected clip.
-    canCopySelection: canDuplicateSelection(),
-    canPasteSelection: hasTimelineClipboard(),
-    canSelectAllClips: canSelectAllClips(),
-    automationOverrideCount: automation.overrideCount(),
-    onReEnableAutomation: automation.reEnable,
-    onDeleteSelection: () => {
-      // Recording settlement already reported any failure before rejecting.
-      deleteTimelineSelectionSafely().catch(() => undefined);
-    },
-    onDuplicateSelection: () => {
-      void duplicateTimelineSelection();
-    },
-    onCopySelection: () => {
-      copyTimelineSelection();
-    },
-    onPasteSelection: () => {
-      pasteTimelineSelection();
-    },
-    onSelectAllClips: selectAllTimelineClips,
-    onJumpToClip: (clipId: string, trackId: string, startSec: number) =>
-      jumpToClip(trackId, clipId, startSec),
-    onInsertSample: (payload: Parameters<typeof handleInsertSample>[0]) => {
-      void handleInsertSample(payload);
+    edit: {
+      onUndo: handleUndo,
+      onRedo: handleRedo,
+      canUndo: canUndo(),
+      canRedo: canRedo(),
+      canDuplicateSelection: canDuplicateSelection(),
+      canDeleteSelection: canDeleteSelection(),
+      // Copy uses the same predicate as duplicate: a range or a writable selected clip.
+      canCopySelection: canDuplicateSelection(),
+      canPasteSelection: hasTimelineClipboard(),
+      canSelectAllClips: canSelectAllClips(),
+      onDeleteSelection: () => {
+        // Recording settlement already reported any failure before rejecting.
+        deleteTimelineSelectionSafely().catch(() => undefined);
+      },
+      onDuplicateSelection: () => {
+        void duplicateTimelineSelection();
+      },
+      onCopySelection: () => {
+        copyTimelineSelection();
+      },
+      onPasteSelection: () => {
+        pasteTimelineSelection();
+      },
+      onSelectAllClips: selectAllTimelineClips,
     },
   });
 

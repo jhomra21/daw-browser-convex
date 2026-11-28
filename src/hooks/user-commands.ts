@@ -63,20 +63,20 @@ export const userCommands: Readonly<Record<DesktopApplicationMenuCommand, UserCo
   "sign-in": (transport) => transport.projectMenu.onSignIn(),
   "open-account-dashboard": (transport) => transport.projectMenu.onOpenDashboard("account"),
   logout: (transport) => void transport.projectMenu.onLogout(),
-  undo: (transport) => runEditCommand("undo", () => transport.onUndo()),
-  redo: (transport) => runEditCommand("redo", () => transport.onRedo()),
-  duplicate: (transport) => runEditCommand("duplicate", () => transport.onDuplicateSelection()),
+  undo: (transport) => runEditCommand("undo", () => transport.edit.onUndo()),
+  redo: (transport) => runEditCommand("redo", () => transport.edit.onRedo()),
+  duplicate: (transport) => runEditCommand("duplicate", () => transport.edit.onDuplicateSelection()),
   // A focused field is handled by the menu click in the main process. These run the timeline only when no field or overlay owns focus.
   copy: (transport) => {
-    if (!editableOrOverlayFocused()) transport.onCopySelection();
+    if (!editableOrOverlayFocused()) transport.edit.onCopySelection();
   },
   paste: (transport) => {
-    if (!editableOrOverlayFocused()) transport.onPasteSelection();
+    if (!editableOrOverlayFocused()) transport.edit.onPasteSelection();
   },
   "select-all": (transport) => {
-    if (!editableOrOverlayFocused()) transport.onSelectAllClips();
+    if (!editableOrOverlayFocused()) transport.edit.onSelectAllClips();
   },
-  delete: (transport) => runEditCommand("delete", () => transport.onDeleteSelection()),
+  delete: (transport) => runEditCommand("delete", () => transport.edit.onDeleteSelection()),
   "keyboard-shortcuts": (transport) => transport.projectMenu.onOpenDashboard("keyboard"),
   "open-assets-browser": (transport) => {
     transport.browser.onSelectTab("assets");
@@ -90,18 +90,18 @@ export const userCommands: Readonly<Record<DesktopApplicationMenuCommand, UserCo
     transport.browser.onSelectTab("midi-instruments");
     transport.browser.onOpen();
   },
-  "toggle-metronome": (transport) => transport.onToggleMetronome(),
-  "toggle-loop": (transport) => transport.onToggleLoop(),
-  "toggle-grid": (transport) => transport.onToggleGrid(),
-  "toggle-follow": (transport) => transport.onToggleFollow(),
-  "zoom-in": (transport) => transport.zoom.onIn(),
-  "zoom-out": (transport) => transport.zoom.onOut(),
-  "zoom-to-fit": (transport) => transport.zoom.onFit(),
-  "set-grid-denominator-2": (transport) => transport.onChangeGridDenominator(2),
-  "set-grid-denominator-4": (transport) => transport.onChangeGridDenominator(4),
-  "set-grid-denominator-8": (transport) => transport.onChangeGridDenominator(8),
-  "set-grid-denominator-12": (transport) => transport.onChangeGridDenominator(12),
-  "set-grid-denominator-16": (transport) => transport.onChangeGridDenominator(16),
+  "toggle-metronome": (transport) => transport.timeline.onToggleMetronome(),
+  "toggle-loop": (transport) => transport.timeline.onToggleLoop(),
+  "toggle-grid": (transport) => transport.timeline.onToggleGrid(),
+  "toggle-follow": (transport) => transport.timeline.onToggleFollow(),
+  "zoom-in": (transport) => transport.timeline.zoom.onIn(),
+  "zoom-out": (transport) => transport.timeline.zoom.onOut(),
+  "zoom-to-fit": (transport) => transport.timeline.zoom.onFit(),
+  "set-grid-denominator-2": (transport) => transport.timeline.onChangeGridDenominator(2),
+  "set-grid-denominator-4": (transport) => transport.timeline.onChangeGridDenominator(4),
+  "set-grid-denominator-8": (transport) => transport.timeline.onChangeGridDenominator(8),
+  "set-grid-denominator-12": (transport) => transport.timeline.onChangeGridDenominator(12),
+  "set-grid-denominator-16": (transport) => transport.timeline.onChangeGridDenominator(16),
   "open-general-settings": (transport) => transport.projectMenu.onOpenDashboard("general"),
   "open-timeline-settings": (transport) => transport.projectMenu.onOpenDashboard("timeline"),
   "open-audio-settings": (transport) => transport.projectMenu.onOpenDashboard("audio"),

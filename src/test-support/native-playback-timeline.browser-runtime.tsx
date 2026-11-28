@@ -12,7 +12,7 @@ import { saveLocalProjectState, loadLocalProjectState } from '~/lib/local-projec
 import { createLocalControlService } from '~/lib/local-control/local-control-service'
 import { createLocalTimelineRepository } from '~/lib/timeline-repository/local-timeline-repository'
 import { controlApprovalResultSchemaV1, controlPreviewResultSchemaV1, projectSnapshotSchemaV2 } from '@daw-browser/control'
-import { hostControl, timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
+import { applicationMenuCommand, hostControl, timelineState, preparedInstrumentIdentity, instrumentPanel, instrumentEvidence, timelineSeek, closeTimeline, retireTimeline, loseTimelineHost } from './native-playback-lifecycle.browser-runtime'
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import type { PortableWasmBackendSelection } from '@daw-browser/audio-engine/wasm-audio-worklet-backend'
@@ -199,7 +199,27 @@ const portableLoopProbe = async (refreshProbe = false) => {
   }
 }
 
+// Fails every local entity write while armed so a track create rejects; the page records rejections nobody handled.
+const injectedWriteFailure = () => {
+  const put = IDBObjectStore.prototype.put
+  let armed = false
+  let failures = 0
+  const unhandled: string[] = []
+  window.addEventListener('unhandledrejection', (event) => unhandled.push(String(event.reason)))
+  IDBObjectStore.prototype.put = function (...args: Parameters<IDBObjectStore['put']>) {
+    if (armed && this.name === 'entities') {
+      failures += 1
+      throw new DOMException('Injected track write failure', 'QuotaExceededError')
+    }
+
+    return put.apply(this, args)
+  }
+
+  return { failWrites: (next: boolean) => { armed = next }, failures: () => failures, unhandled: () => unhandled }
+}
+
 export const mountTimeline = async () => {
+  const writeFailure = injectedWriteFailure()
   const project = await createLocalProject('Native loop production journey')
   const repository = createLocalTimelineRepository(project.id)
   await repository.createTrack({ name: 'Audio', kind: 'audio' })
@@ -298,6 +318,10 @@ export const mountTimeline = async () => {
         instrument.synth.change({ filter: { frequencyHz: 740 } })
         await instrument.flushPending()
       },
+      failWrites: writeFailure.failWrites,
+      applicationMenuCommand,
+      failedWrites: writeFailure.failures,
+      unhandledRejections: writeFailure.unhandled,
       portableLoopProbe,
       portableRefreshProbe: () => portableLoopProbe(true),
       seek: timelineSeek,

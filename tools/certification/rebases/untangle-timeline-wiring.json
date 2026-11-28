@@ -1,0 +1,44 @@
+{
+ "name": "untangle-timeline-wiring",
+ "sequence": 109,
+ "createdAt": "2026-11-21T22:19:26.622Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "src/components/Timeline.tsx",
+   "from": "af20135eaf01f71df381ec265bb486759503a84ab408b4672b6a7cd8f88b814d",
+   "to": "8a4835193da855bed7ee2c54af6852a58ed9ce152810c89b5522fd43ab4dbc26"
+  }
+ ],
+ "changes": [],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "448a782f1c82e83e2ceeafb3bcba1fe16b9947c6",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "c9701862142767ed5516c8a782487631c0b344cd34ee0aad4252924aa13e290a",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "c9701862142767ed5516c8a782487631c0b344cd34ee0aad4252924aa13e290a",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b16-bless/live",
+   "resultSha256": "84a541242d82cadddc9f7d456ad963876407f26156841d487b840f2a74dc252d",
+   "seconds": 1278.519008708,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

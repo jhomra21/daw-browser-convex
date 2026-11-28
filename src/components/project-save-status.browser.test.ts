@@ -58,12 +58,15 @@ window.saveFixture = {
       }
       surfaces.append(
         createComponent(TransportControls, {
-          projectMenu, isPlaying: false, isRecording: false, get playheadSec() { return playhead() },
-          onPlay: noop, onPause: noop, onStop: noop, onToggleRecord: noop,
-          onAddAudio: noop, tracksMenu: {}, bpm: 120, onChangeBpm: noop,
-          metronomeEnabled: false, onToggleMetronome: noop, gridEnabled: true, onToggleGrid: noop,
-          gridDenominator: 4, onChangeGridDenominator: noop, loopEnabled: false,
-          onToggleLoop: noop, automationOverrideCount: 0,
+          projectMenu,
+          playback: { isPlaying: false, get playheadSec() { return playhead() }, onPlay: noop, onPause: noop, onStop: noop },
+          recording: { isRecording: false, onToggleRecord: noop },
+          onAddAudio: noop, tracksMenu: {},
+          timeline: {
+            bpm: 120, onChangeBpm: noop, metronomeEnabled: false, onToggleMetronome: noop, gridEnabled: true,
+            onToggleGrid: noop, gridDenominator: 4, onChangeGridDenominator: noop, loopEnabled: false, onToggleLoop: noop,
+          },
+          automation: { overrideCount: 0 },
           browser: { open: false, onToggle: noop },
           midiKeyboard: { enabled: () => false, canPlay: () => false, targetLabel: () => null, octave: () => 0, toggle: noop },
         }),

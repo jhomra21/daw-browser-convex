@@ -9,11 +9,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "~/components/ui/dialog";
-
-export type CloudBackupDialogState =
-  | { type: "conflict"; message: string }
-  | { type: "restore" }
-  | { type: "message"; title: string; message: string };
+import type { CloudBackupDialogState } from "~/hooks/useLocalProjectActions";
 
 type CloudBackupDialogProps = {
   state: CloudBackupDialogState | null;

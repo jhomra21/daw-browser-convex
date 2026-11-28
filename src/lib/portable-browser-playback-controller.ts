@@ -43,7 +43,9 @@ import {
   type PreparedStretchArtifactRepository,
 } from "@daw-browser/audio-engine/prepared-stretch-store"
 import type { AudioPcmSourceResolver } from "~/lib/audio-pcm-source-resolver"
+/* oxlint-disable eslint/no-restricted-imports -- the live-parameter rules stay in the desktop mapper until the batch that owns the certification-pinned playback files moves it */
 import { isLiveEventOnlyInstrumentChange, isLiveParameterChange, nativeBuiltInLiveStateCovered } from "~/lib/desktop/native-built-in-parameter-mapper"
+/* oxlint-enable eslint/no-restricted-imports */
 import {
   mergeSynthParams, normalizeTrackInstrumentParams, parseJsonValue,
   type AudioPcmSourceDescriptor, type DecodedAudioPage, type TrackInstrumentParams,

@@ -3,7 +3,7 @@ import { render } from "solid-js/web";
 import { Menubar } from "~/components/ui/menubar";
 import { EditMenu } from "./edit-menu";
 import { ViewMenu } from "./view-menu";
-import type { TransportControlsProps } from "../transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { useTimelineKeyboard } from "~/hooks/useTimelineKeyboard";
 
 const calls: string[] = [];

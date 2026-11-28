@@ -1,7 +1,7 @@
 import { sha256 } from '@noble/hashes/sha2.js'
 import { z } from 'zod'
 import { controlLimitsV1, resumableUploadMaximumBytes } from '@daw-browser/control'
-import { isCapabilityFile } from '~/lib/desktop/capability-file'
+import { isCapabilityFile } from '~/lib/capability-file'
 
 const startResponseSchema = z.object({
   assetKey: z.string(),

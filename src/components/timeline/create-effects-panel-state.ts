@@ -58,7 +58,7 @@ import type { FunctionArgs, FunctionReturnType } from "convex/server";
 import type { AudioEngine, EngineDisposition } from "@daw-browser/audio-engine/audio-engine";
 import type { SampledInstrumentBuffer } from "@daw-browser/audio-engine/sampled-instrument-region";
 import type { Clip, Track } from "@daw-browser/timeline-core/types";
-import type { AddMidiClipOptions } from "~/components/timeline/timeline-device-insert-actions";
+import type { AddMidiClipOptions } from "~/lib/timeline-device-insert-actions";
 
 type RoomEffectRow = FunctionReturnType<typeof convexApi.effects.listByRoom>[number];
 

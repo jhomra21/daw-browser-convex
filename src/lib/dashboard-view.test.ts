@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test"
-import { parseDashboardView } from "./types"
+import { parseDashboardView } from "./dashboard-view"
 
 describe("parseDashboardView", () => {
   test("accepts the audio dashboard route", () => {

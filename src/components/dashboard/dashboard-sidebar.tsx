@@ -1,4 +1,4 @@
-import type { DashboardView } from "./types";
+import type { DashboardView } from "~/lib/dashboard-view";
 import { cn } from "~/lib/utils";
 
 export function DashboardSidebarItem(props: { view: DashboardView; label: string; active: boolean; onSelect: (view: DashboardView) => void }) {

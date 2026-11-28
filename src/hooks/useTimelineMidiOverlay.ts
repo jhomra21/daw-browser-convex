@@ -15,7 +15,7 @@ import { createDesktopAudioLifecycleReconciler } from '~/lib/desktop-audio-lifec
 import { createLiveMidiArpeggiator, type LiveMidiArpeggiatorRelease } from '~/lib/midi/live-midi-arpeggiator'
 import { createAuditionReleaseTimerOwnership } from '~/lib/audition-release-timer-ownership'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 import type { NativeLiveMidiNoteHandle } from '~/lib/desktop/native-live-midi'
 
 type UseTimelineMidiOverlayOptions = {

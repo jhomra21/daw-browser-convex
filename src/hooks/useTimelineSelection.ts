@@ -14,7 +14,7 @@ import {
 import type { Track } from "@daw-browser/timeline-core/types";
 
 import { useDrag } from "./useDrag";
-import type { TimelineSelectionController } from "./useTimelineSelectionState";
+import type { TimelineSelectionController } from "~/lib/timeline-selection";
 
 type TimelineSelectionOptions = {
   tracks: Accessor<Track[]>;

@@ -2,7 +2,7 @@ import type { Component } from "solid-js";
 import { MenubarContent, MenubarItem, MenubarMenu, MenubarSeparator, MenubarShortcut } from "~/components/ui/menubar";
 import { cn } from "~/lib/utils";
 import { NativeMenuTrigger } from "../toolbar-context";
-import type { TransportControlsProps } from "../transport-types";
+import type { TransportControlsProps } from "~/hooks/transport-types";
 import { MenuCheckMark } from "./menu-check-mark";
 import { nativeMenuItemClass } from "./menu-action-types";
 

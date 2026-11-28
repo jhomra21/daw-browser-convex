@@ -48,7 +48,7 @@ import { serializeNativeDiagnostics } from "~/lib/desktop/native-diagnostics-ser
 import type { NativeVstParameterQueueResult } from "~/lib/desktop/native-vst-parameter-queue"
 import type { ExportQueue } from "~/lib/export/export-queue"
 import { createImportJobQueue, type ImportJobQueue } from "~/lib/desktop/import-job-queue"
-import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineClipImport"
+import type { ImportProjectBinding, ImportSummary } from "~/lib/import-summary"
 
 export type {
   DesktopPluginCatalog,
@@ -56,7 +56,7 @@ export type {
 } from "~/types/desktop-bridge"
 
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"
-import { CapabilityFile } from "~/lib/desktop/capability-file"
+import { CapabilityFile } from "~/lib/capability-file"
 import { preflightExportResources } from "~/lib/export/export-resource-preflight"
 import { collectStemTracks } from "~/lib/export/run-export-job"
 import type { PreparedStemExport, PreparedTimelineExport, TimelineExportInput, TimelineExportService } from "~/lib/export/timeline-export-service"

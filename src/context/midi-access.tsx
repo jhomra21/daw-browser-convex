@@ -2,21 +2,11 @@ import { createContext, createEffect, createSignal, onCleanup, type ParentCompon
 import { assertDefined } from "@daw-browser/shared"
 import {
   createMidiAccessController,
+  type MidiAccessContextValue,
   type MidiAccessStatus,
   type MidiInputDescriptor,
 } from "~/lib/midi/midi-access"
-import type { MidiInputEvent, MidiSourceReset } from "~/lib/midi/midi-input"
 import { useAppPreferences } from "./app-preferences"
-
-export type MidiAccessContextValue = {
-  status: () => MidiAccessStatus
-  inputs: () => readonly MidiInputDescriptor[]
-  requestAccess: () => Promise<void>
-  setInputSelected: (id: string, selected: boolean) => void
-  subscribe: (subscriber: (event: MidiInputEvent) => void) => () => void
-  subscribeSourceReset: (subscriber: (event: MidiSourceReset) => void) => () => void
-  panic: () => void
-}
 
 const MidiAccessContext = createContext<MidiAccessContextValue | null>(null)
 

@@ -9,7 +9,9 @@ import {
   recordingSpoolSampleBytes,
 } from "@daw-browser/desktop-protocol"
 import type { NativeMainRecordingStatus } from "./audio-host"
+/* oxlint-disable eslint/no-restricted-imports -- the bridge types stay in src/types until the batch that owns the certification-pinned playback files moves it */
 import type { NativeRecordingTake, NativeRecordingRelease } from "../../src/types/desktop-bridge"
+/* oxlint-enable eslint/no-restricted-imports */
 
 type RecordingIntent = {
   userData: string

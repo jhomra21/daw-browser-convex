@@ -1,5 +1,5 @@
 import { Show, type Accessor, type Component } from "solid-js";
-import type { BrowserDragSession } from "./browser-drag-types";
+import type { BrowserDragSession } from "~/lib/timeline-browser/browser-drag-types";
 
 export const BrowserDragOverlay: Component<{ session: Accessor<BrowserDragSession | undefined> }> = (props) => (
   <Show when={props.session()}>

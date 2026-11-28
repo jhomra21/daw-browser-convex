@@ -1,7 +1,7 @@
-import type { RecordingTerminationCause } from "./recording-delivery-trace"
+import type { RecordingTerminationCause } from "@daw-browser/desktop-protocol/recording-delivery-trace"
 import type { WriterTiming } from "../../../packages/audio-engine/src/recording/recording-protocol"
 
-export type { RecordingTerminationCause } from "./recording-delivery-trace"
+export type { RecordingTerminationCause } from "@daw-browser/desktop-protocol/recording-delivery-trace"
 
 type RecordingDiagnostics = {
   requestedFormat: "pcm" | "compressed"

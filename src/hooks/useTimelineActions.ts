@@ -22,7 +22,7 @@ import type { RuntimeTrack } from '~/lib/timeline-runtime-types'
 import { publishDurableSharedTimelineOperation } from '~/lib/shared-outbox'
 import { buildCommittedSharedUngroupHistoryEntry, readSharedUngroupResult } from '~/lib/undo/shared-ungroup-history'
 
-import type { TimelineSelectionController } from './useTimelineSelectionState'
+import type { TimelineSelectionController } from '~/lib/timeline-selection'
 
 type TimelineTrackCreateOptions = {
   kind?: 'audio' | 'instrument'

@@ -1,5 +1,5 @@
 import { sampledInstrumentRetainedBytes, type SampledInstrumentBuffer } from '@daw-browser/audio-engine/sampled-instrument-region'
-import { nativeInstrumentDeviceDecodedBytes } from '~/lib/desktop/native-instrument-budget-policy'
+import { nativeInstrumentDeviceDecodedBytes } from '@daw-browser/desktop-protocol/native-instrument-budget-policy'
 import type { SampledInstrumentRegionBudgetScope } from '~/lib/sampled-instrument-region-budget'
 
 export type InstrumentExportRegionJob = {

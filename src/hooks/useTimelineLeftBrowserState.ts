@@ -1,5 +1,5 @@
 import { createEffect, createSignal, on, onCleanup, onMount, untrack, type Accessor } from "solid-js";
-import type { TimelineBrowserTab, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
+import type { TimelineBrowserTab, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
 import {
   clampTimelineLeftBrowserWidth,
   createDefaultTimelineLeftBrowserState,

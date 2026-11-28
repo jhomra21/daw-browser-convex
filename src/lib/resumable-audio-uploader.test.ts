@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import { sha256 } from '@noble/hashes/sha2.js'
 import { uploadAudioFile, type ResumableAudioUploadHttpError } from './resumable-audio-uploader'
-import { CapabilityFile } from './desktop/capability-file'
+import { CapabilityFile } from './capability-file'
 import { resumableUploadMaximumBytes } from '@daw-browser/control'
 
 test('resumable uploader resumes accepted parts and completes without client-owned part lists', async () => {

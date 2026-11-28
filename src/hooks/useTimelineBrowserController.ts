@@ -1,13 +1,13 @@
 import { createEffect, createMemo, createSignal, onCleanup, onMount, untrack, type Accessor } from "solid-js";
 import { useProjectAssetFolders, useProjectSamples, type ProjectAssetFolder } from "~/hooks/useProjectSamples";
-import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/components/timeline/browser/browser-types";
-import type { TimelineDeviceInsertActions } from "~/components/timeline/timeline-device-insert-actions";
+import type { BrowserFolderRow, BrowserItem, BrowserItemSource, BrowserSection, BrowserTreeRow, TimelineLeftBrowserModel, TimelineLeftBrowserState } from "~/lib/timeline-browser/browser-types";
+import type { TimelineDeviceInsertActions } from "~/lib/timeline-device-insert-actions";
 import { SAMPLE_DRAG_DATA_TYPE, serializeSampleDragData, type SampleDragData } from "~/lib/sample-drag-data";
-import { createBrowserDeviceDrag } from "~/components/timeline/browser/create-browser-device-drag";
-import type { BrowserDragPayload, BrowserDropTarget } from "~/components/timeline/browser/browser-drag-types";
+import { createBrowserDeviceDrag } from "~/hooks/create-browser-device-drag";
+import type { BrowserDragPayload, BrowserDropTarget } from "~/lib/timeline-browser/browser-drag-types";
 import type { Track } from "@daw-browser/timeline-core/types";
 import type { TimelineTrackLayoutRow } from "~/lib/timeline-track-layout";
-import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/components/timeline/browser/browser-tree";
+import { countBrowserTreeLeaves, createBrowserLeafRow, filterBrowserTreeRows } from "~/lib/timeline-browser/browser-tree";
 import { isLocalId } from "@daw-browser/shared";
 import { convexApi, convexClient } from "~/lib/convex";
 import { BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS, type AudioEffectChainPreset } from "~/lib/audio-effect-chain-presets";

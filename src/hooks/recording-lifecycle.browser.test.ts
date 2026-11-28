@@ -11,7 +11,7 @@ import { render } from 'solid-js/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
 import { createRecordingTransportPolicy, dispatchRecordingToggle, dispatchTransportSpace, retryPendingRecordingCleanup } from './recording-dispatch'
-import { createMidiTrackRecordingController } from '../lib/midi/midi-recording-controller'
+import { createMidiTrackRecordingController } from '~/lib/midi-recording-controller'
 import { useMidiTrackRecording } from './useMidiTrackRecording'
 import { createMidiRecordingCheckpointController } from '../lib/midi/recording-checkpoint'
 import { TransportBar } from '../components/timeline/TransportControls'
@@ -2287,7 +2287,7 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
       .replaceAll("'./useTimelinePlayback'", `'${import.meta.dir}/useTimelinePlayback.ts'`)
       .replaceAll("'./recording-dispatch'", `'${import.meta.dir}/recording-dispatch.ts'`)
       .replaceAll("'./useMidiTrackRecording'", `'${import.meta.dir}/useMidiTrackRecording.ts'`)
-      .replaceAll("'../lib/midi/midi-recording-controller'", `'${import.meta.dir}/../lib/midi/midi-recording-controller.ts'`)
+      .replaceAll("'../lib/midi-recording-controller'", `'${import.meta.dir}/../lib/midi-recording-controller.ts'`)
       .replaceAll("'../lib/midi/recording-checkpoint'", `'${import.meta.dir}/../lib/midi/recording-checkpoint.ts'`)
       .replaceAll("'../lib/track-recording-target'", `'${import.meta.dir}/../lib/track-recording-target.ts'`)
       .replaceAll("'../components/timeline/TransportControls'", `'${import.meta.dir}/../components/timeline/TransportControls.tsx'`)

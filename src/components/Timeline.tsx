@@ -1128,6 +1128,7 @@ const Timeline: Component<TimelineProps> = (props) => {
     activeRecordingTargetId: activeMidiRecordingTargetId,
     nativeLiveMidi,
     portableLiveMidi,
+    effectsPanelOpen: () => bottomPanel.open() && bottomPanel.mode() === "effects",
     dockedMidiClipId: () =>
       bottomPanel.open() && bottomPanel.mode() === "clip-detail"
         ? (sampleDetail.selectedMidiClip()?.id ?? null)

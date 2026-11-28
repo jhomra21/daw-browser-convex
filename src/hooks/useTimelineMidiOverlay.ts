@@ -38,7 +38,9 @@ type UseTimelineMidiOverlayOptions = {
     stop: (handle: NativeLiveMidiNoteHandle, force?: boolean) => void
     subscribeReset?: (listener: () => void) => () => boolean
   }
+  effectsPanelOpen: Accessor<boolean>
   portableLiveMidi?: {
+    prepare: () => void
     start: (note: { trackId: string; pitch: number; velocity: number }) => PortableLiveNoteHandle | undefined
     stop: (handle: PortableLiveNoteHandle, force?: boolean) => void
   }
@@ -189,14 +191,15 @@ export function useTimelineMidiOverlay(
     }
   }
 
+  const usesNativeLiveMidi = (native: UseTimelineMidiOverlayOptions['nativeLiveMidi']): native is NonNullable<typeof native> =>
+    native !== undefined
+    && !midiSuspended
+    && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(native)))
+
   // Every note, played or arpeggiated, goes to the native host or to the portable session; neither is timed from here.
   const liveNoteBackend = {
     start: (note: { trackId: string; pitch: number; velocity: number }): LiveBackendHandle | undefined => {
-      if (
-        options.nativeLiveMidi
-        && !midiSuspended
-        && (requiresNativeAudio || (nativeMidiReady && shouldUseNativeLiveMidi(options.nativeLiveMidi)))
-      ) {
+      if (usesNativeLiveMidi(options.nativeLiveMidi)) {
         const handle = options.nativeLiveMidi.start(note)
 
         if (handle) return handle
@@ -313,6 +316,25 @@ export function useTimelineMidiOverlay(
     () => ({ scope: midiKeyboardStorageScope(), enabled: midiKeyboardEnabled() }),
     ({ scope, enabled }) => {
       storedMidiKeyboardEnabled.write(scope, enabled)
+    },
+  )
+
+  // The browser's paused session is prepared where a note is about to be played: MIDI input is on, or the effects
+  // panel shows the selected MIDI track's instrument. Preparing is a no-op once a session exists.
+  createEffect(
+    () => {
+      if (requiresNativeAudio || !options.portableLiveMidi) return undefined
+      const panelTrack = options.effectsPanelOpen() ? trackIndex().trackById.get(options.selection.selectedFXTarget()) : undefined
+
+      return (midiKeyboardEnabled() && midiKeyboardCanPlay()) || isPlayableMidiTrack(panelTrack)
+        ? midiKeyboardTarget()?.id ?? panelTrack?.id
+        : undefined
+    },
+    (trackId) => {
+      if (trackId === undefined || usesNativeLiveMidi(options.nativeLiveMidi)) return
+      // The session needs the audio context, which the first note would otherwise be the one to create.
+      options.audioEngine.ensureAudio()
+      options.portableLiveMidi?.prepare()
     },
   )
 

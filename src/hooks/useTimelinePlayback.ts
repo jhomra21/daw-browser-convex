@@ -123,6 +123,12 @@ export function useTimelinePlayback(
     return { enabled, start, end, length, isActive }
   }
 
+  const pausedLiveTransport = () => {
+    const { isActive, start, end } = getLoopParams()
+
+    return { state: "paused" as const, playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end }
+  }
+
   const cancelRaf = () => {
     if (rafId !== null) {
       cancelAnimationFrame(rafId)
@@ -2300,16 +2306,20 @@ export function useTimelinePlayback(
       subscribeReset: nativePlayback.subscribeNativeLiveMidiReset,
     },
     portableLiveMidi: {
-      // The transport prepares the paused session at the playhead when no session exists yet; the note waits for it.
+      // The paused session is prepared at the playhead when an instrument panel opens or MIDI input starts; a note
+      // that still finds none carries the same transport and waits for the preparation.
+      prepare: () => {
+        if (requiresNativeAudio || !portableBrowserOptions) return
+        portableBrowserPlayback.prepareLiveNotes(pausedLiveTransport())
+      },
       start: (note: { trackId: string; pitch: number; velocity: number }) => {
         if (requiresNativeAudio || !portableBrowserOptions) return undefined
-        const { isActive, start, end } = getLoopParams()
 
         return portableBrowserPlayback.startLiveNote({
           trackId: note.trackId,
           pitch: note.pitch,
           velocity: note.velocity,
-          transport: { state: "paused", playheadSec: lastPublishedPlayheadSec, loopEnabled: isActive, loopStartSec: start, loopEndSec: end },
+          transport: pausedLiveTransport(),
         })
       },
       stop: portableBrowserPlayback.releaseLiveNote,

@@ -2210,6 +2210,12 @@ export const createPortableBrowserPlaybackController = (input: {
       frameOffset: 0, type, channel: 0, note: handle.pitch, value,
     }])
 
+  // Readies the paused session ahead of the first note; a session or a start in flight already is that.
+  const prepareLiveNotes = (transport: LivePlaybackTransport) => {
+    if (active || pendingStart) return
+    void ensurePrepared(transport).catch(() => undefined)
+  }
+
   // `transport` prepares the paused session when none exists; with a session or a start in flight it is not used.
   const startLiveNote = (note: { trackId: string; pitch: number; velocity: number; transport?: LivePlaybackTransport }): PortableLiveNoteHandle | undefined => {
     if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127 || !(note.velocity >= 0 && note.velocity <= 1)) return undefined
@@ -2261,6 +2267,7 @@ export const createPortableBrowserPlaybackController = (input: {
   return {
     start,
     pause,
+    prepareLiveNotes,
     startLiveNote,
     releaseLiveNote,
     dispose,

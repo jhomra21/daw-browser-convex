@@ -67,11 +67,14 @@ type PortableCall = { kind: 'start' | 'stop'; trackId: string; pitch: number; ve
 const createPortable = () => {
   const calls: PortableCall[] = []
   let nextNoteId = 1
+  let prepares = 0
 
   return {
     calls,
+    prepares: () => prepares,
     starts: () => calls.flatMap((call) => call.kind === 'start' ? [call.pitch] : []),
     port: {
+      prepare: () => { prepares += 1 },
       start: (note: { trackId: string; pitch: number; velocity: number }): PortableLiveNoteHandle => {
         calls.push({ kind: 'start', trackId: note.trackId, pitch: note.pitch, velocity: note.velocity })
 
@@ -95,6 +98,7 @@ const mountOverlay = (config: {
   const portable = createPortable()
 
   const [bpm, setBpm] = createSignal(120)
+  const [panelOpen, setPanelOpen] = createSignal(false)
   const [docked, setDocked] = createSignal<string | null>(config.dockedClipId ?? null)
   const host = document.createElement('div')
   document.body.append(host)
@@ -117,6 +121,7 @@ const mountOverlay = (config: {
             playheadSec: () => 0,
             selection,
             dockedMidiClipId: docked,
+            effectsPanelOpen: panelOpen,
             nativeLiveMidi: config.native?.port,
             portableLiveMidi: portable.port,
           })
@@ -140,6 +145,7 @@ const mountOverlay = (config: {
     portable,
     setBpm,
     setDocked,
+    setPanelOpen,
     unmount: () => { dispose(); host.remove() },
   }
 }
@@ -224,6 +230,26 @@ const runMidiScenarios = async () => {
     const forced = mounted.portable.calls.at(-1)
     scenarios['browser-audition-unmount-force-releases-the-portable-note'] =
       forced?.kind === 'stop' && forced.pitch === 65 && forced.force === true
+  }
+
+  {
+    const mounted = mountOverlay({ tracks: instrument, dockedClipId: 'clip:a' })
+    scenarios['midi-input-prepares-the-portable-session'] = mounted.portable.prepares() === 1
+    mounted.overlay.midiKeyboard.toggle()
+    flush()
+    mounted.selection.selectTrackTarget('a')
+    mounted.setPanelOpen(true)
+    flush()
+    scenarios['opening-the-instrument-panel-prepares-the-portable-session'] = mounted.portable.prepares() === 2
+    mounted.unmount()
+  }
+
+  {
+    const mounted = mountOverlay({ tracks: instrument, requiresNativeAudio: true, native: createNative({ available: true }), dockedClipId: 'clip:a' })
+    mounted.setPanelOpen(true)
+    flush()
+    scenarios['native-required-never-prepares-the-portable-session'] = mounted.portable.prepares() === 0
+    mounted.unmount()
   }
 
   {

@@ -23,79 +23,73 @@ const readTrackMixWriteResult = (value: JsonValue): TrackMixWriteResult => {
   return { status: 'applied' }
 }
 
-export const createTimelineTrackWriteAdapter = (context: TrackWriteContext) => {
-  const updateLocalOrCloudTrack = async (
-    localInput: UpdateTrackInput,
-    writeCloud: (userId: string) => Promise<JsonValue>,
-  ) => {
-    if (isLocalId('project', context.projectId)) {
-      return await context.writeLocalTrack(localInput)
-    }
+type TrackWrites = {
+  setRouting: (trackId: string, routing: TrackRouting) => Promise<void | JsonValue>
+  setVolume: (trackId: string, volume: number) => Promise<void | JsonValue>
+  setMix: (trackId: string, patch: { muted?: boolean; soloed?: boolean }) => Promise<TrackMixWriteResult | undefined>
+}
 
-    if (!context.userId) return
+// Local writes are handed to the caller's local write queue (batched and flushed with the project's pending writes).
+const createLocalTrackWrites = (writeLocalTrack: TrackWriteContext['writeLocalTrack']): TrackWrites => ({
+  setRouting: (trackId, routing) => writeLocalTrack({
+    trackId,
+    outputTargetId: routing.outputTargetId ?? null,
+    sends: routing.sends ?? [],
+  }),
+  setVolume: (trackId, volume) => writeLocalTrack({ trackId, volume }),
+  setMix: async (trackId, patch) => {
+    await writeLocalTrack({ trackId, muted: patch.muted, soloed: patch.soloed })
 
-    return await writeCloud(context.userId)
-  }
+    return { status: 'applied' }
+  },
+})
+
+// A signed-out user on a cloud project drops the write.
+const signedOutTrackWrites: TrackWrites = {
+  setRouting: async () => undefined,
+  setVolume: async () => undefined,
+  setMix: async () => undefined,
+}
+
+// Cloud writes are durable shared-outbox operations, replayed until the server accepts them.
+const createCloudTrackWrites = (projectId: string, userId: string): TrackWrites => {
+  const publish = async (operation: Parameters<typeof publishDurableSharedTimelineOperation>[0]['operation']) =>
+    z.json().parse(await publishDurableSharedTimelineOperation({
+      projectId,
+      userId,
+      operation,
+      queuedResult: { status: 'applied' },
+    }))
 
   return {
-    setRouting: async (trackId: string, routing: TrackRouting) => await updateLocalOrCloudTrack(
-      {
+    setRouting: (trackId, routing) => publish({
+      kind: 'tracks.setRouting',
+      payload: {
         trackId,
-        outputTargetId: routing.outputTargetId ?? null,
-        sends: routing.sends ?? [],
+        routing: {
+          sends: routing.sends ?? [],
+          outputTargetId: routing.outputTargetId,
+        },
       },
-      async (userId) => z.json().parse(await publishDurableSharedTimelineOperation({
-        projectId: context.projectId,
-        userId,
-        operation: {
-          kind: 'tracks.setRouting',
-          payload: {
-            trackId,
-            routing: {
-              sends: routing.sends ?? [],
-              outputTargetId: routing.outputTargetId,
-            },
-          },
-        },
-        queuedResult: { status: 'applied' },
-      })),
-    ),
-    setVolume: async (trackId: string, volume: number) => await updateLocalOrCloudTrack(
-      { trackId, volume },
-      async (userId) => z.json().parse(await publishDurableSharedTimelineOperation({
-        projectId: context.projectId,
-        userId,
-        operation: { kind: 'tracks.setVolume', payload: { trackId, volume } },
-        queuedResult: { status: 'applied' },
-      })),
-    ),
-    setMix: async (trackId: string, patch: { muted?: boolean; soloed?: boolean }): Promise<TrackMixWriteResult | undefined> => {
-      if (patch.muted === undefined && patch.soloed === undefined) return undefined
+    }),
+    setVolume: (trackId, volume) => publish({ kind: 'tracks.setVolume', payload: { trackId, volume } }),
+    setMix: async (trackId, patch) => readTrackMixWriteResult(await publish({
+      kind: 'tracks.setMix',
+      payload: { trackId, muted: patch.muted, soloed: patch.soloed },
+    })),
+  }
+}
 
-      if (isLocalId('project', context.projectId)) {
-        await context.writeLocalTrack({ trackId, muted: patch.muted, soloed: patch.soloed })
+// The backend is chosen once here; the no-op mix patch check is shared.
+export const createTimelineTrackWriteAdapter = (context: TrackWriteContext): TrackWrites => {
+  const writes = isLocalId('project', context.projectId)
+    ? createLocalTrackWrites(context.writeLocalTrack)
+    : context.userId ? createCloudTrackWrites(context.projectId, context.userId) : signedOutTrackWrites
 
-        return { status: 'applied' }
-      }
-
-      if (!context.userId) return undefined
-      const userId = context.userId
-
-      const result = z.json().parse(await publishDurableSharedTimelineOperation({
-        projectId: context.projectId,
-        userId,
-        operation: {
-          kind: 'tracks.setMix',
-          payload: {
-            trackId,
-            muted: patch.muted,
-            soloed: patch.soloed,
-          },
-        },
-        queuedResult: { status: 'applied' },
-      }))
-
-      return readTrackMixWriteResult(result)
-    },
+  return {
+    ...writes,
+    setMix: async (trackId, patch) => patch.muted === undefined && patch.soloed === undefined
+      ? undefined
+      : await writes.setMix(trackId, patch),
   }
 }

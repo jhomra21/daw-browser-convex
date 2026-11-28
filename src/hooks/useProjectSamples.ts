@@ -328,7 +328,7 @@ export function useProjectAssetFolders(options: UseProjectAssetFoldersArgs): Use
       if (enabled && !enabled()) return null
       const rid = projectId()
 
-      if (rid && isLocalId('project', rid)) return null
+      if (isLocalProject()) return null
       const uid = userId ? userId() : ''
 
       return rid && uid ? ({ projectId: rid }) : null
@@ -343,7 +343,7 @@ export function useProjectAssetFolders(options: UseProjectAssetFoldersArgs): Use
       refreshKey: refreshKey(),
     }),
     ({ projectId: rid, enabled: isEnabled }) => {
-      if (!rid || !isLocalId('project', rid)) {
+      if (!rid || !isLocalProject()) {
         setLocalFolders([])
         setLocalFoldersProjectId('')
 
@@ -399,7 +399,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       if (enabled && !enabled()) return null
       const rid = projectId()
 
-      if (rid && isLocalId('project', rid)) return null
+      if (isLocalProject()) return null
       const uid = userId ? userId() : ''
       const limit = sampleLimit ? sampleLimit() : undefined
 
@@ -416,7 +416,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
       if (includeUsage && !includeUsage()) return null
       const rid = projectId()
 
-      if (rid && isLocalId('project', rid)) return null
+      if (isLocalProject()) return null
       const uid = userId ? userId() : ''
 
       return rid && uid ? ({ projectId: rid }) : null
@@ -462,7 +462,7 @@ export function useProjectSamples(options: UseProjectSamplesArgs): UseProjectSam
   createEffect(on(
     () => [projectId(), enabled ? enabled() : true, includeFilePath ? includeFilePath() : false, includeUsage ? includeUsage() : true, sampleLimit ? sampleLimit() : undefined, refreshKey()] as const,
     ([rid, isEnabled, shouldIncludeFilePath, shouldIncludeUsage, maxSamples]) => {
-      if (!rid || !isLocalId('project', rid)) {
+      if (!rid || !isLocalProject()) {
         setLocalSamples([])
         setLocalSamplesProjectId('')
 

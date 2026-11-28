@@ -231,7 +231,7 @@ type NativeTransactionReply = { ok: true; transactionToken: string } | { ok: fal
 
 const nativeTransactionToken = 'native-playback-transaction-token-000000000'
 
-// D2 failure inventory: identifying a never-written history reservation must
+// Identifying a never-written history reservation must
 // not replace latest desired content, invalidate preview, or compile a schedule.
 for (const transport of ["playing", "paused"]) {
   test(`STEP5 D2 ${transport} cancelled reservation guard`, async () => {
@@ -1253,7 +1253,7 @@ for (const scenario of ["delete", "move-trim", "add", "tempo", "burst", "rejecti
           }
 
           if (scenario === "stop" || scenario === "project" || scenario === "seek") {
-            // UD 7 (D7): after a Stop the kept paused preview adopts the edit the stopped session never published.
+            // UD 7: after a Stop the kept paused preview adopts the edit the stopped session never published.
             expect(published).toHaveLength(scenario === "seek" || scenario === "stop" ? 1 : 0)
             expect(playback.isPlaying()).toBe(scenario === "seek")
 
@@ -1895,7 +1895,7 @@ for (const [resume, replaces] of [[false, false], [true, false], [false, true], 
 
         if (resume) {
           expect(playback.isPlaying()).toBe(true)
-          // UD 7 (D7): the paused edit and the Play both run on the session the pause kept. The edit is compiled for its
+          // UD 7: the paused edit and the Play both run on the session the pause kept. The edit is compiled for its
           // adoption and again for the resume, so a compile count says nothing; a second session would.
           expect(captures.slice(before).some(capture => capture.state === "playing" && capture.starts.includes(0.75))).toBe(true)
 
@@ -1994,7 +1994,7 @@ test("B6d2 a paused structural change requested while the pause is pending is no
       const paused = { begins: begins(), calls: [...fixture.calls], prepared: playback.isNativePlaybackPrepared() }
 
       try {
-        // UD 7 (D7): the paused preview adopts the edit in place (a compile of the edited project, no new session), and
+        // UD 7: the paused preview adopts the edit in place (a compile of the edited project, no new session), and
         // the next play resumes it instead of preparing again.
         expect(paused).toMatchObject({ prepared: true, begins: before })
         expect(captures.at(-1)).toEqual([0.25])
@@ -10191,7 +10191,7 @@ test('C0G a clip waveform key or key order change while playing is neither adopt
   }, nativeEnabled)
 })
 
-// AE-08 phase 8 step 8 (UD 7, D7): a paused native preview adopts an edit through its own session. The hook neither
+// AE-08 phase 8 step 8 (UD 7): a paused native preview adopts an edit through its own session. The hook neither
 // disposes the preview nor restarts the host, and the controller publishes with seam 0.
 test('UD7n W-UD7n-5 a paused native edit is adopted in place: no dispose, no host restart', async () => {
   const previousWindow = globalThis.window

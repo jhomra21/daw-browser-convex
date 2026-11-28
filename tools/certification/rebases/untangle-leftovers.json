@@ -1,0 +1,93 @@
+{
+ "name": "untangle-leftovers",
+ "sequence": 114,
+ "createdAt": "2026-11-22T05:26:51.395Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "packages/audio-engine/src/portable-wasm-host.test.ts",
+   "from": "5453ce12c7fd184f2105d16f136dca731d92051694b17d5168a40de99750ba75",
+   "to": "fb3c877bff77988ab1a6823107e83d26c9b24198b559664dc96d047b1443800b"
+  },
+  {
+   "file": "src/hooks/useTimelinePlayback.test.ts",
+   "from": "725b22bb44ba0788a27f52215af158b35c21d0ece64455ae3b9a1ed2d96c886f",
+   "to": "9186193d81314f4347bd4ef6edb62815bc4b196310291c44fd10249081015c28"
+  },
+  {
+   "file": "src/lib/desktop/native-playback-controller.test.ts",
+   "from": "e1c7232e432825d165dfa1a9b6e5e25c72ac7677b627feaf26b6c9661a88a95c",
+   "to": "3f0bdeb3be2b1d066df98f753b370261d645261519e09b8297040a7f11cfefc7"
+  },
+  {
+   "file": "src/lib/instrument-buffer-sync.test.ts",
+   "from": "f836bf6844691545b29b530869eb8c5c255f1c1c47a6cfab161c25e84b392e8e",
+   "to": "17aeed4e6a336d93272308fcf49f22f11efa48ca8ab6d00da153acaa337586ef"
+  },
+  {
+   "file": "src/lib/portable-browser-playback-controller.test.ts",
+   "from": "237aa50b8adb07e5cf8f18ab10ce9d85648b48d9939cf5f1db67aea7f78c2b02",
+   "to": "a87d91e459b09aa0230fc9167caaca447a179e8c55eef0a4b2f038217715c443"
+  },
+  {
+   "file": "tools/acceptance/ae-08-processor-state-fuzz.ts",
+   "from": "105259a4376c43aaeb62f7184a22cceec5866be779a06b9ae07741836ba077fb",
+   "to": "a0217cc00514cc97c3c528aec199dbef1bb9c12d52956e65d0140f0f9e6e93d6"
+  },
+  {
+   "file": "tools/acceptance/device-control-cost.browser.test.ts",
+   "from": "c5389cd660075728a0cc8b524a4ef18566e860e59118e1f7a63ed8f903f9e6b3",
+   "to": "b0157aa0300671b73cc7951eade89667872e0737f83098969a74f467476e0808"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "9455484c820863623a5c2c30d0c899790722cfe42e18f876fbe198cf90e886a5",
+   "new": "804697678477eeaf8ef47340dd076d6ad2e7af8d929c94ac3332a832f12f3e51"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "74847ecfe44ce9b3da5eafef51445c4aac974c4d95fc31a25d1be9989fb52c22",
+   "new": "b58efb821058860d5cb636efd912df8c81d7dd4cd7ad8b4d4339a8f8ea71732f"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "7af973ee8be9171d0edb4e162f34c3cebdce1b90",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "e1041431a4784bb78311e67f15caacb66fb3a4a83649edaf48b76b843650c82b",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "e1041431a4784bb78311e67f15caacb66fb3a4a83649edaf48b76b843650c82b",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/b18-bless/live",
+   "resultSha256": "de9fb74794fe537753bcb580b5fa95ad87e7d482e7330f98f5043bd3a6b92737",
+   "seconds": 1254.676710291,
+   "observations": 3084
+  },
+  "unreachedByOverlay": []
+ }
+}

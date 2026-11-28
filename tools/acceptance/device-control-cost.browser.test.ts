@@ -794,7 +794,7 @@ for (const spec of step5StructuralSpecs) {
         const counts = f.counts(before);
         console.log("STEP5 structural guard", JSON.stringify({ id: spec.id, transport, counts, faults: f.faults }));
         expect(f.faults).toEqual([]);
-        // A paused structural edit is adopted in place exactly like a playing one (D7): one schedule compile and one
+        // A paused structural edit is adopted in place exactly like a playing one (UD 7): one schedule compile and one
         // publication on the kept session, no preview compile, dispose, teardown, or host restart.
         expect(counts.scheduleCompiles).toBe(1);
         expect(counts.publishes).toBe(1);
@@ -1020,8 +1020,8 @@ for (const field of ["meter", "masterVolume", "automation", "sidechain"]) {
         await f.playback.awaitPlaybackPreparation();
         const counts = f.counts(before);
         console.log("STEP5 compiler field guard", JSON.stringify({ field, transport, counts, faults: f.faults }));
-        // Playing and paused edits are adopted on the kept session alike (D7). A sidechain edit is an accepted native
-        // limitation (E6/D8): no fault, nothing prepared or retried, the graph and host stay as they were.
+        // Playing and paused edits are adopted on the kept session alike (UD 7). A sidechain edit is an accepted native
+        // limitation: no fault, nothing prepared or retried, the graph and host stay as they were.
         expect(f.faults).toEqual([]);
         expect(f.typedFaults).toEqual([]);
         expect(counts.scheduleCompiles).toBe(1);

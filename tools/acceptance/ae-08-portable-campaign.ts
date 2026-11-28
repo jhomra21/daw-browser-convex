@@ -409,7 +409,7 @@ const campaign = async (out: string, rowNames: readonly string[], edits: number)
   }
 }
 
-// D3: the core's maximum graph plays a carrier while it adopts; the page returns how the render thread's blocks and the carrier's phase held up.
+// The core's maximum graph plays a carrier while it adopts; the page returns how the render thread's blocks and the carrier's phase held up.
 const stallPhaseSchema = z.object({ phase: z.string(), driftMsPerSec: z.number(), blocks: z.number(), phaseStepMaxRad: z.number().optional(), phaseStepOver: z.number(), waitP99Ms: z.number(), waitMaxMs: z.number(), latenessResidualMinMs: z.number(), latenessResidualMaxMs: z.number(), latenessResidualRangeMs: z.number() })
 const renderStallSchema = z.object({ faults: z.array(z.string()), adoptMs: z.array(z.number()), gaps: z.array(z.object({ block: z.number(), phase: z.string(), frames: z.number() })), nonFinite: z.number(), silentRuns: z.number(), driftMsPerSec: z.number(), phases: z.array(stallPhaseSchema) })
 

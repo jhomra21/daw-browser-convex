@@ -86,20 +86,6 @@ export function readTrackMeterFrame(data: JsonValue): TrackMeterFrame | null {
   return { frameCount: data.frameCount, channels: [left, right], correlation: data.correlation }
 }
 
-export function readTrackStereoLevels(data: JsonValue): TrackStereoLevels | null {
-  if (!isJsonObject(data)) return null
-
-  if (!('type' in data) || data.type !== 'levels') return null
-
-  if (!('left' in data) || !isJsonNumber(data.left) || !Number.isFinite(data.left)) return null
-
-  if (!('right' in data) || !isJsonNumber(data.right) || !Number.isFinite(data.right)) return null
-
-  if (data.left < 0 || data.left > 1 || data.right < 0 || data.right > 1) return null
-
-  return { left: data.left, right: data.right }
-}
-
 export function createMeteringRuntime(options: {
   getFaultGeneration?: () => number
   onWorkletFault?: (generation: number, trackId: string) => void

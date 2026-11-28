@@ -1,4 +1,5 @@
-#include "audio-host-internal.h"
+#include "audio-host-bytes.h"
+#include "daw/audio_host_macos.h"
 
 namespace daw::audio_host_macos {
 

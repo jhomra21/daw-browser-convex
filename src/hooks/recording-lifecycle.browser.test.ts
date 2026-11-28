@@ -11,6 +11,7 @@ import { createComponent, createEffect, createRoot, createSignal, flush, onClean
 import { render } from '@solidjs/web'
 import { useTrackRecording } from './useTrackRecording'
 import { useTimelinePlayback } from './useTimelinePlayback'
+import { compileLivePlaybackSnapshot } from '~/lib/live-playback-snapshot'
 import { createRecordingTransportPolicy, dispatchRecordingToggle, dispatchTransportSpace, retryPendingRecordingCleanup } from './recording-dispatch'
 import { createMidiTrackRecordingController } from '~/lib/midi-recording-controller'
 import { useMidiTrackRecording } from './useMidiTrackRecording'
@@ -20,6 +21,8 @@ import * as recordingTarget from '../lib/track-recording-target'
 import TrackLane from '../components/timeline/TrackLane'
 import TrackSidebarRow from '../components/timeline/TrackSidebarRow'
 import '~/index.css'
+
+const pageFetch = window.fetch
 
 // Effects first run at the next flush; a 1.x root ran them as it was created.
 const createFlushedRoot = (setup) => {
@@ -773,6 +776,9 @@ window.recordingScenarios = async () => {
 }
 
 window.playScenarios = async () => {
+  // The recording scenarios stub the project API; the portable session still loads its WASM core through the page's own fetch.
+  const apiFetch = window.fetch
+  window.fetch = (url, init) => init?.body ? apiFetch(url, init) : pageFetch(url)
   const results = {}
   const playCalls = []
   const track = { id: 'track-play', kind: 'audio', name: 'Play', volume: 1, clips: [] }
@@ -877,20 +883,29 @@ window.playScenarios = async () => {
   const preflightEntered = deferred()
   let preflightCount = 0
   let gate = deferred()
+  let transportStarted = deferred()
+  // Play runs on the portable session only: a real AudioContext and the WASM core stand behind the engine stub.
+  let audioContext
+  const portable = {
+    reportFault: () => {},
+    compileSnapshot: async (transport) => compileLivePlaybackSnapshot({
+      revision: 1, bpm: 120, transport, tracks: [track], sidechainRoutes: [],
+      renderState: { fx: { masterVolume: 1, masterFxInstances: [], trackFx: {} }, automationEnvelopes: [] },
+    }),
+  }
   const engine = {
     currentTimelineSec: 0,
-    ensureAudio: () => {},
-    resume: () => { playCalls.push('start'); return gate.promise },
+    ensureAudio: () => { audioContext ??= new AudioContext() },
+    getAudioContext: () => audioContext ?? null,
+    resume: () => { playCalls.push('resume'); return gate.promise },
     onTransportPause: () => playCalls.push('pause'),
     onTransportSeek: () => {},
-    onTransportStart: () => {},
+    onTransportStart: () => { playCalls.push('start'); transportStarted.resolve() },
     onTransportStop: () => { window.transportOrdering?.push('transport-stop'); playCalls.push('stop') },
     applyAutomationAtTimelineSec: () => {},
     cancelAutomationSchedules: () => {},
-    scheduleAllClipsFromPlayhead: () => ({ deferredStretchWindows: [] }),
     scheduleAutomationFromPlayhead: () => {},
     stopAllSources: () => playCalls.push('stop-sources'),
-    subscribeStretchRenderState: () => () => {},
   }
   const button = document.createElement('button')
   button.setAttribute('aria-label', 'Play')
@@ -906,7 +921,7 @@ window.playScenarios = async () => {
         preflightEntered.resolve()
         return preflightGate.promise
       },
-    })
+    }, undefined, portable)
     createEffect(() => ({ playing: controller.isPlaying(), pending: controller.isPlayPending() }), ({ playing, pending }) => {
       setLabel(playing ? 'Pause' : 'Play')
       button.setAttribute('aria-label', untrack(label))
@@ -937,8 +952,9 @@ window.playScenarios = async () => {
   results['play-start-coalesced'] = preflightCount === 1 && playCalls.filter(call => call === 'start').length === 0
   preflightGate.resolve(true)
   await settle()
-  results['preflight-success-starts-play'] = playCalls.filter(call => call === 'start').length === 1
+  results['preflight-success-starts-play'] = playCalls.filter(call => call === 'resume').length === 1
   gate.resolve()
+  await transportStarted.promise
   await settle()
   results['play-success-label'] = button.getAttribute('aria-label') === 'Pause'
   results['play-success-busy-cleared'] = button.getAttribute('aria-busy') === 'false'
@@ -952,7 +968,7 @@ window.playScenarios = async () => {
       cancelledPreflightEntered.resolve()
       return cancelledPreflight.promise
     },
-  })
+  }, undefined, portable)
   const pendingPreflight = cancellation.handlePlay([track])
   await cancelledPreflightEntered.promise
   results['preflight-pending-exposed'] = cancellation.isPlayPending()
@@ -970,7 +986,7 @@ window.playScenarios = async () => {
       invalidatedPreflightEntered.resolve()
       return invalidatedPreflight.promise
     },
-  })
+  }, undefined, portable)
   const invalidatedPlay = invalidatedPlayback.handlePlay([track])
   await invalidatedPreflightEntered.promise
   await invalidatedPlayback.handlePause()
@@ -983,6 +999,7 @@ window.playScenarios = async () => {
     && !invalidatedPlayback.isPlayPending()
     && playCalls.filter(call => call === 'start').length === 1
 
+  const startsBeforeRetries = playCalls.filter(call => call === 'resume').length
   gate = deferred()
   gate.reject(new Error('playback startup rejected'))
   const rejected = playback.handlePlay([track]).catch(() => {})
@@ -996,7 +1013,7 @@ window.playScenarios = async () => {
   gate.resolve()
   await retry
   results['pause-cancels-late-play'] = !playback.isPlaying() && !playback.isPlayPending()
-  results['play-retry-count'] = playCalls.filter(call => call === 'start').length === 3
+  results['play-retry-count'] = playCalls.filter(call => call === 'resume').length - startsBeforeRetries === 2
   const unmountedStarts = playCalls.filter(call => call === 'start').length
   const unmountedGate = deferred()
   const unmountedEntered = deferred()
@@ -1007,7 +1024,7 @@ window.playScenarios = async () => {
         unmountedEntered.resolve()
         return unmountedGate.promise
       },
-    })
+    }, undefined, undefined, portable)
     return { controller, dispose: cleanup }
   })
   const unmountedPending = unmounted.controller.handlePlay([track])
@@ -1028,12 +1045,11 @@ window.playScenarios = async () => {
     return useTimelinePlayback({
       ...engine,
       onTransportStart: () => { rebuildStarts.push('start') },
-      getAudioContext: () => ({ sampleRate: 48000, currentTime: 0 }),
     }, undefined, undefined, {
-      compileSnapshot: async () => {
+      compileSnapshot: async (transport) => {
         rebuildEntered.resolve()
         await rebuildGate.promise
-        return { supported: false, reasons: ['fixture'] }
+        return portable.compileSnapshot(transport)
       },
     })
   })
@@ -1069,12 +1085,11 @@ window.playScenarios = async () => {
     return useTimelinePlayback({
       ...engine,
       onTransportStart: () => { stopRebuildStarts.push('start') },
-      getAudioContext: () => ({ sampleRate: 48000, currentTime: 0 }),
     }, undefined, undefined, {
-      compileSnapshot: async () => {
+      compileSnapshot: async (transport) => {
         stopRebuildEntered.resolve()
         await stopRebuildGate.promise
-        return { supported: false, reasons: ['fixture'] }
+        return portable.compileSnapshot(transport)
       },
     })
   })
@@ -1099,7 +1114,9 @@ window.playScenarios = async () => {
   stopRebuildDispose()
   await cancellation.handleStop()
 
+  transportStarted = deferred()
   clickTransport('Play')
+  await transportStarted.promise
   await settle()
   results['transport-play-uses-live-playback-controller'] = livePlayback.isPlaying()
   clickTransport('Pause')
@@ -1319,6 +1336,7 @@ window.playScenarios = async () => {
   let deletionFails = true
   let policyDeleteCount = 0
   window.fetch = async (_url, init) => {
+    if (!init?.body) return pageFetch(_url)
     const body = JSON.parse(init.body)
     if (body.kind === 'clips.create') {
       cancelledCreateEntered.resolve()
@@ -1463,7 +1481,8 @@ window.playScenarios = async () => {
   let stoppedSecondDone = false
   const pausedSecond = policy.pause().then(() => { pausedSecondDone = true })
   const stoppedSecond = policy.stop().then(() => { stoppedSecondDone = true })
-  await settle()
+  // The portable session tears down asynchronously: wait for them while the delete is still held. A hang here fails the scenario.
+  await Promise.all([pausedSecond, stoppedSecond])
   results['policy-concurrent-second-pause-resolves-while-delete-held'] = pausedSecondDone
   results['policy-concurrent-second-stop-resolves-while-delete-held'] = stoppedSecondDone
   const recordedThird = policy.record()
@@ -1504,7 +1523,7 @@ window.playScenarios = async () => {
   await recordHold.entered.promise
   let stoppedAfterRecordDone = false
   const stoppedAfterRecord = policy.stop().then(() => { stoppedAfterRecordDone = true })
-  await settle()
+  await stoppedAfterRecord
   results['policy-record-then-stop-resolves-while-delete-held'] = stoppedAfterRecordDone
   recordHold.gate.resolve()
   const recordedFirstOutcome = await recordedFirst
@@ -1523,7 +1542,7 @@ window.playScenarios = async () => {
   await stopHold.entered.promise
   let pausedAfterStopDone = false
   const pausedAfterStop = policy.pause().then(() => { pausedAfterStopDone = true })
-  await settle()
+  await pausedAfterStop
   results['policy-stop-then-pause-resolves-while-delete-held'] = pausedAfterStopDone
   stopHold.gate.resolve()
   await Promise.all([stoppedFirst, pausedAfterStop])
@@ -1544,7 +1563,9 @@ window.playScenarios = async () => {
   await retainCancelledClip()
   await livePlayback.handleStop()
   const startsBeforeSpace = playCalls.filter(call => call === 'start').length
+  transportStarted = deferred()
   policy.space()
+  await transportStarted.promise
   await settle()
   results['space-stopped-with-retained-cleanup-plays'] = livePlayback.isPlaying()
     && playCalls.filter(call => call === 'start').length === startsBeforeSpace + 1
@@ -1685,6 +1706,7 @@ window.playScenarios = async () => {
   const policyFetch = window.fetch
   // A plain-object reply settles in microtasks, so one macrotask observes the rejection.
   window.fetch = async (url, init) => {
+    if (!init?.body) return pageFetch(url)
     if (JSON.parse(init.body).kind !== 'clips.removeMany') return policyFetch(url, init)
     hookEntered.resolve()
     await hookGate.promise
@@ -2274,7 +2296,9 @@ test('recording startup joins duplicate requests and stop cancels setup immediat
   const directory = `/tmp/daw-recording-lifecycle-${crypto.randomUUID()}`
   const session = `daw-recording-${crypto.randomUUID()}`
 
-  const browser = agentBrowser(session)
+  // The context starts without a gesture, as in the live-notes fixture.
+  const browser = agentBrowser(session, { env: { AGENT_BROWSER_ARGS: '--autoplay-policy=no-user-gesture-required' } })
+  let server: ReturnType<typeof Bun.serve> | undefined
 
   await mkdir(directory, { recursive: true })
 
@@ -2350,7 +2374,21 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
 
     if (stylesheet?.type === 'asset') await Bun.write(`${directory}/style.css`, stylesheet.source)
     await Bun.write(`${directory}/index.html`, `<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="style.css"><body><script>window.addEventListener('error', event => document.body.dataset.error = event.message)</script><script>window.unhandledRejectionCount = 0; window.addEventListener('unhandledrejection', () => { window.unhandledRejectionCount += 1 })</script><script>${bundle.code}</script>`)
-    await browser('open', `file://${directory}/index.html`)
+    const repositoryRoot = new URL('../../', import.meta.url).pathname
+    const page = await Bun.file(`${directory}/index.html`).text()
+    const stylesheetText = await Bun.file(`${directory}/style.css`).exists() ? await Bun.file(`${directory}/style.css`).text() : ''
+
+    server = Bun.serve({ port: 0, hostname: '127.0.0.1', fetch: (request) => {
+      const path = new URL(request.url).pathname
+
+      if (path === '/') return new Response(page.replace('<link rel="stylesheet" href="style.css">', `<style>${stylesheetText}</style>`), { headers: { 'content-type': 'text/html' } })
+
+      if (path.startsWith('/audio-worklets/') || path.startsWith('/audio-core/')) return new Response(Bun.file(`${repositoryRoot}public${path}`))
+
+      return new Response('not found', { status: 404 })
+    } })
+
+    await browser('open', `http://127.0.0.1:${server.port}/`)
     await browser('wait', '--fn', '!!window.recordingScenarios')
     const results = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.recordingScenarios()')))
     const playResults = z.record(z.string(), z.boolean()).parse(JSON.parse(await browser('eval', 'window.playScenarios()')))
@@ -2404,6 +2442,7 @@ export const createRecordingTempStorage = () => ({ cleanupStale: async () => {},
     expect(Object.entries(results).filter(([, passed]) => !passed)).toEqual([])
     await browser('eval', 'window.transportBarUnmount()')
   } finally {
+    await server?.stop(true)
     await browser('close').catch(() => undefined)
     await rm(`${directory}/index.html`, { force: true })
   }

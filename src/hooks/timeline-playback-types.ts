@@ -12,7 +12,6 @@ export type LoopOptions = {
   loopStartSec?: Accessor<number>
   loopEndSec?: Accessor<number>
   getTracks?: Accessor<Track[]>
-  hydrateLegacyAudio?: () => Promise<void>
   preflightPlayback?: () => Promise<boolean>
 }
 
@@ -63,7 +62,7 @@ export type TimelineScheduleOptions =
   | (TimelineEditIntent & { rebuildBackend?: false })
   | (TimelineEditIntent & Partial<TimelinePlaybackRebuildIntent> & Pick<TimelinePlaybackRebuildIntent, "resumePlayback"> & { rebuildBackend: true })
 
-export type ActiveAudioBackend = 'idle' | 'legacy' | 'portable-browser' | 'native'
+export type ActiveAudioBackend = 'idle' | 'portable-browser' | 'native'
 
 export type TimelinePlaybackAudioEngine = Pick<
   AudioEngine,
@@ -76,11 +75,8 @@ export type TimelinePlaybackAudioEngine = Pick<
   | 'onTransportStart'
   | 'onTransportStop'
   | 'resume'
-  | 'rescheduleClipsAtPlayhead'
-  | 'scheduleAllClipsFromPlayhead'
   | 'scheduleAutomationFromPlayhead'
   | 'stopAllSources'
-  | 'subscribeStretchRenderState'
 > & {
   getAudioContext?: () => AudioContext | null
   getTrackSpectrum?: AudioEngine['getTrackSpectrum']

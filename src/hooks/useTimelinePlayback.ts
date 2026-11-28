@@ -1,6 +1,6 @@
 import { createEffect, createSignal, onCleanup, untrack, createTrackedEffect } from 'solid-js'
 
-import { LIVE_SCHEDULE_HORIZON_SEC, type AudioEngine, type SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
+import type { AudioEngine, SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 import type { SpectrumSettings } from '@daw-browser/shared'
 import type { Track } from '@daw-browser/timeline-core/types'
 import { nativeControllerObserver } from '~/lib/desktop/acceptance-observer'
@@ -8,7 +8,6 @@ import { createNativePlaybackController, nativePlaybackFaultText } from '~/lib/d
 import { createPortableBrowserPlaybackController } from '~/lib/portable-browser-playback-controller'
 import type { LivePlaybackCompileContext, LivePlaybackTransport } from '~/lib/live-playback-snapshot'
 import { createAudioLifecycle } from './playback-audio-lifecycle'
-import { createDeferredStretch } from './deferred-stretch'
 import { createScheduleReconciliation } from './playback-session-reconciliation'
 import { createSpectrumFrameDelivery } from './spectrum-frame-delivery'
 import { rejectedLiveProcessorControl } from '~/lib/live-processor-control'
@@ -32,19 +31,16 @@ const PLAYHEAD_UI_UPDATE_INTERVAL_MS = 1000 / 30
 
 // A playhead jump this large is published at once instead of waiting for the next UI interval.
 const PLAYHEAD_PUBLISH_JUMP_SEC = 0.25
-const LIVE_SCHEDULE_REFRESH_MARGIN_SEC = 5
 
 // Schedule a little ahead to avoid past-time starts under scheduling jitter.
 // This keeps metronome ticks and clip audio locked to the same transport timestamp.
-// Unrelated to the engine's LIVE_SCHEDULE_HORIZON_SEC (30 s of live-schedule lookahead, not a transport start offset).
 const SCHED_AHEAD_SEC = 0.02
 
 const audioBackendRolloutPolicy = {
   version: 2,
   browserDefaultBackend: 'portable-browser',
-  browserCompatibilityBackend: 'legacy',
   selection: 'startup-only',
-  preActivationFailure: 'compatibility-fallback',
+  preActivationFailure: 'blocking-message',
   runtimeFailure: 'stop-and-mute',
   portableBrowserRequiresOptIn: false,
   nativeRequiresOptIn: true,
@@ -110,7 +106,6 @@ export function useTimelinePlayback(
   let lastTracks: Track[] = []
   let lastPlayheadUiUpdateMs = 0
   let lastPublishedPlayheadSec = 0
-  let scheduledUntilSec = 0
 
   // Centralize loop state (start/end/active) so timing logic stays in sync across handlers
   const getLoopParams = () => {
@@ -378,9 +373,11 @@ export function useTimelinePlayback(
       audioEngine.onTransportPause()
       setActiveBackend('idle')
 
-      if (!playing) return
-      setIsPlaying(false)
-      cancelRaf()
+      if (playing) {
+        setIsPlaying(false)
+        cancelRaf()
+      }
+
       portableBrowserOptions?.reportFault?.(message)
     },
   })
@@ -444,80 +441,10 @@ export function useTimelinePlayback(
     })
   }
 
-  const resolveTracks = () => {
-    const fromAccessor = loopOptions?.getTracks?.()
-
-    if (Array.isArray(fromAccessor)) {
-      lastTracks = fromAccessor
-
-      return fromAccessor
-    }
-
-    return lastTracks
-  }
-
-  const { deferredStretchQueue, scheduleAndTrackDeferred, rescheduleAndTrackDeferred, retryDeferredStretchWindows } = createDeferredStretch(audioEngine, resolveTracks)
-
-  const applyLoopIfNeeded = (candidateSec: number) => {
-    const { isActive, start, end } = getLoopParams()
-
-    if (!isActive) return { sec: candidateSec, looped: false }
-
-    if (candidateSec < start) return { sec: candidateSec, looped: false }
-
-    if (candidateSec < end - LOOP_EPS) return { sec: candidateSec, looped: false }
-
-    const wrapped = start
-    const tracks = resolveTracks()
-    audioEngine.stopAllSources()
-    deferredStretchQueue.clear()
-    audioEngine.cancelAutomationSchedules()
-    audioEngine.onTransportSeek(wrapped, SCHED_AHEAD_SEC)
-    scheduledUntilSec = getScheduleHorizonEnd(wrapped, isActive ? end : undefined)
-    scheduleAndTrackDeferred(tracks, wrapped, { endLimitSec: scheduledUntilSec })
-    audioEngine.scheduleAutomationFromPlayhead(wrapped, {
-      horizonSec: scheduledUntilSec - wrapped,
-      tracks,
-    })
-
-    return { sec: wrapped, looped: true }
-  }
-
-  const resolveCurrentPlayhead = () => {
-    return applyLoopIfNeeded(audioEngine.currentTimelineSec)
-  }
-
   const publishPlayhead = (sec: number) => {
     lastPublishedPlayheadSec = sec
     lastPlayheadUiUpdateMs = readNowMs()
     setPlayheadSec(sec)
-  }
-
-  const getScheduleHorizonEnd = (sec: number, endLimitSec?: number) => Math.min(
-    sec + LIVE_SCHEDULE_HORIZON_SEC,
-    endLimitSec ?? Number.POSITIVE_INFINITY,
-  )
-
-  const refreshScheduleHorizon = (sec: number) => {
-    const tracks = resolveTracks()
-
-    if (tracks.length === 0) return
-    const { isActive, end } = getLoopParams()
-    const nextEnd = getScheduleHorizonEnd(sec, isActive ? end : undefined)
-
-    if (nextEnd <= scheduledUntilSec) return
-
-    if (scheduledUntilSec - sec > LIVE_SCHEDULE_REFRESH_MARGIN_SEC) return
-    scheduleAndTrackDeferred(tracks, sec, {
-      preserveExisting: true,
-      startLimitSec: scheduledUntilSec,
-      endLimitSec: nextEnd,
-    })
-    audioEngine.scheduleAutomationFromPlayhead(scheduledUntilSec, {
-      horizonSec: nextEnd - scheduledUntilSec,
-      tracks,
-    })
-    scheduledUntilSec = nextEnd
   }
 
   const tick = () => {
@@ -540,30 +467,12 @@ export function useTimelinePlayback(
       return
     }
 
-    if (requiresNativeAudio) {
-      setIsPlaying(false)
-      cancelRaf()
-      setActiveBackend("idle")
-      reportNativeStopped("Native audio playback stopped because the native graph is no longer active.")
+    // No session is left to play: a portable fault has already stopped the transport and said why.
+    setIsPlaying(false)
+    cancelRaf()
+    setActiveBackend("idle")
 
-      return
-    }
-
-    const { sec, looped } = resolveCurrentPlayhead()
-
-    if (!looped) refreshScheduleHorizon(sec)
-    retryDeferredStretchWindows(sec)
-    const nowMs = readNowMs()
-
-    if (
-      looped ||
-      nowMs - lastPlayheadUiUpdateMs >= PLAYHEAD_UI_UPDATE_INTERVAL_MS ||
-      Math.abs(sec - lastPublishedPlayheadSec) >= PLAYHEAD_PUBLISH_JUMP_SEC
-    ) {
-      publishPlayhead(sec)
-    }
-
-    requestTick()
+    if (requiresNativeAudio) reportNativeStopped("Native audio playback stopped because the native graph is no longer active.")
   }
 
   const reportNativePlaySkip = (reason: string) => {
@@ -962,43 +871,9 @@ export function useTimelinePlayback(
       }
 
       if (!isCurrentPlayAttempt(token)) return
-      playAttemptPhase = { token, backend: 'fallback', state: 'startup' }
-      audioEngine.ensureAudio({ applyCachedTrackGains: false })
-      await audioEngine.resume()
 
-      if (!isCurrentPlayAttempt(token)) {
-        await disposePreparedBackends(undefined, "play-attempt-superseded")
-        audioEngine.stopAllSources()
-
-        return
-      }
-
-      await loopOptions?.hydrateLegacyAudio?.()
-
-      if (!isCurrentPlayAttempt(token)) {
-        await disposePreparedBackends(undefined, "play-attempt-superseded")
-        audioEngine.stopAllSources()
-
-        return
-      }
-
-      const readyTracks = loopOptions?.getTracks?.() ?? tracks
-      backendOwnerToken += 1
-      setActiveBackend('legacy')
-      setIsPlaying(true)
-      lastPlayheadUiUpdateMs = 0
-      lastTracks = tracks
-      deferredStretchQueue.clear()
-      audioEngine.onTransportStart(lastPublishedPlayheadSec)
-      audioEngine.onTransportSeek(lastPublishedPlayheadSec, SCHED_AHEAD_SEC)
-      scheduledUntilSec = getScheduleHorizonEnd(lastPublishedPlayheadSec, isActive ? end : undefined)
-      scheduleAndTrackDeferred(readyTracks, lastPublishedPlayheadSec, { endLimitSec: scheduledUntilSec })
-      audioEngine.scheduleAutomationFromPlayhead(lastPublishedPlayheadSec, {
-        horizonSec: scheduledUntilSec - lastPublishedPlayheadSec,
-        tracks: readyTracks,
-      })
-      requestTick()
-      playAttemptPhase = { token, backend: 'fallback', state: 'active' }
+      // A portable start that failed has already said why. With none configured, nothing can play this project.
+      if (!portableBrowserOptions) reportNativeStopped("Playback is unavailable: no audio engine is configured to play this project.")
     })()
 
     playAttempt = { token, promise: attempt, ...attemptState }
@@ -1150,21 +1025,7 @@ export function useTimelinePlayback(
       return
     }
 
-    if (requiresNativeAudio) {
-      setIsPlaying(false)
-      cancelRaf()
-      setActiveBackend('idle')
-
-      return
-    }
-
-    const { sec } = resolveCurrentPlayhead()
-    publishPlayhead(sec)
     setIsPlaying(false)
-    audioEngine.stopAllSources()
-    audioEngine.cancelAutomationSchedules()
-    deferredStretchQueue.clear()
-    audioEngine.onTransportPause()
     cancelRaf()
     setActiveBackend('idle')
   }
@@ -1275,13 +1136,6 @@ export function useTimelinePlayback(
 
     if (pendingPause) await pendingPause.promise.catch(() => undefined)
     await awaitPendingStop()
-  }
-
-  const prepareLegacyPaused = () => {
-    audioEngine.stopAllSources()
-    audioEngine.cancelAutomationSchedules()
-    deferredStretchQueue.clear()
-    setActiveBackend("idle")
   }
 
   const setPlayhead = (sec: number, tracks: Track[]) => {
@@ -1410,21 +1264,7 @@ export function useTimelinePlayback(
       void disposePreparedBackends(undefined, "playhead-changed").catch(reportNativeStateCaptureFailure)
       disposePortableBrowserPlayback()
       setActiveBackend('idle')
-
-      return
     }
-
-    // IMPORTANT: Update transport epoch BEFORE scheduling, so MIDI events use the correct mapping
-    audioEngine.cancelAutomationSchedules()
-    audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
-    deferredStretchQueue.clear()
-    const { isActive, end } = getLoopParams()
-    scheduledUntilSec = getScheduleHorizonEnd(sec, isActive ? end : undefined)
-    scheduleAndTrackDeferred(tracks, sec, { endLimitSec: scheduledUntilSec })
-    audioEngine.scheduleAutomationFromPlayhead(sec, {
-      horizonSec: scheduledUntilSec - sec,
-      tracks,
-    })
   }
 
   const disposePreparedBackends = async (
@@ -1488,7 +1328,6 @@ export function useTimelinePlayback(
     audioEngine,
     nativePlayback,
     portableBrowserPlayback,
-    deferredStretchQueue,
     isPlaying: () => playing,
     setIsPlaying,
     isRebuildingPlayback: () => rebuilding,
@@ -1505,7 +1344,6 @@ export function useTimelinePlayback(
       clearRebuildHostLoss,
       invalidatePlayAttempt,
       publishPlayhead,
-      prepareLegacyPaused,
       reportNativeStopped,
       reportNativeStateCaptureFailure,
       disposePreparedBackends,
@@ -1585,20 +1423,6 @@ export function useTimelinePlayback(
 
     // A playing native or portable session is never replaced by an edit. An edit the session cannot adopt, such as one for a
     // stale project, is dropped.
-    if (!playing || requiresNativeAudio || nativePlayback.isActive() || portableBrowserPlayback.isActive()) return
-    lastTracks = tracks
-    const sec = audioEngine.currentTimelineSec
-    audioEngine.stopAllSources()
-    audioEngine.cancelAutomationSchedules()
-    deferredStretchQueue.clear()
-    audioEngine.onTransportSeek(sec, SCHED_AHEAD_SEC)
-    const { isActive, end } = getLoopParams()
-    scheduledUntilSec = getScheduleHorizonEnd(sec, isActive ? end : undefined)
-    scheduleAndTrackDeferred(tracks, sec, { endLimitSec: scheduledUntilSec })
-    audioEngine.scheduleAutomationFromPlayhead(sec, {
-      horizonSec: scheduledUntilSec - sec,
-      tracks,
-    })
   }
 
   const rebuildTimelineBackend = async (
@@ -1828,7 +1652,7 @@ export function useTimelinePlayback(
         }
       }
 
-      prepareLegacyPaused()
+      setActiveBackend("idle")
     }
 
     const nativeDispose = pendingNativeDispose
@@ -1936,14 +1760,6 @@ export function useTimelinePlayback(
       else setActiveBackend("portable-browser")
     }
   }
-
-  const unsubscribeStretchRenderState = requiresNativeAudio
-    ? () => undefined
-    : audioEngine.subscribeStretchRenderState(() => {
-      untrack(() => {
-        if (playing) retryDeferredStretchWindows(audioEngine.currentTimelineSec, { includeNonImminent: true })
-      })
-    })
 
   let mountedProjectGeneration = nativeOptions?.projectGeneration?.()
     ?? portableBrowserOptions?.projectGeneration?.()
@@ -2191,7 +2007,6 @@ export function useTimelinePlayback(
     nativeLifecycleToken += 1
     invalidatePlayAttempt()
     releaseLifecycle()
-    unsubscribeStretchRenderState()
     removeAudioLifecycle?.()
     clearRebuildHostLoss()
     cancelRaf()
@@ -2334,7 +2149,6 @@ export function useTimelinePlayback(
     reserveStop,
     updateNativeLoop,
     setPlayhead,
-    rescheduleChangedClips: rescheduleAndTrackDeferred,
     restartTimelineSchedule,
     disposePreparedBackends,
   }

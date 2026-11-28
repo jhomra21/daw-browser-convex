@@ -277,10 +277,8 @@ export const mountStep5Playback = async <Inputs extends {
     applyAutomationAtTimelineSec: () => undefined, cancelAutomationSchedules: () => undefined,
     onTransportPause: () => undefined, onTransportSeek: () => undefined,
     onTransportStart: () => undefined, onTransportStop: () => undefined,
-    resume: async () => undefined, rescheduleClipsAtPlayhead: () => ({ deferredStretchWindows: [] }),
-    scheduleAllClipsFromPlayhead: () => ({ deferredStretchWindows: [] }),
+    resume: async () => undefined,
     scheduleAutomationFromPlayhead: () => undefined, stopAllSources: () => undefined,
-    subscribeStretchRenderState: () => () => true,
   } satisfies Parameters<typeof useTimelinePlayback>[0];
 
   const playback = createRoot(cleanup => {

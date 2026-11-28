@@ -59,6 +59,15 @@ export type PortableAdoptionResult = "adopted" | "unchanged" | "failed" | "unava
 type PortableAdoptionAttemptResult = PortableAdoptionResult | "unsupported"
 
 
+export type PortableLiveNoteHandle = {
+  backend: "portable"
+  trackId: string
+  pitch: number
+  noteId: number
+}
+
+type PortableLiveNoteState = { cancelled: boolean; released: boolean; sent?: { session: PortableSession; epoch: number } }
+
 type PortableScheduleRange = Extract<PreparedPortableSession, { supported: true }>["scheduleRange"]
 
 
@@ -274,6 +283,14 @@ export const createPortableBrowserPlaybackController = (input: {
   let startupAbortController: AbortController | undefined
   const stretchRepository = input.createPreparedStretchRepository?.() ?? createPreparedStretchArtifactRepository()
   let repositoryDisposed = false
+  // Live notes keep the order they were played in through one tail, so a note started during preparation is still sent
+  // before its release. `sent` records where the note-on went: a locate changes the transport epoch, the core releases every
+  // voice with it, and the host faults the session on an event for any epoch but the current one.
+  const liveNotes = new Map<PortableLiveNoteHandle, PortableLiveNoteState>()
+  let liveNoteTail: Promise<unknown> = Promise.resolve()
+  let nextLiveNoteId = 1
+  // Apart from the schedule's and the parameter events' sequences.
+  let nextLiveNoteSequence = 1_000_000
 
   const releasePreparedStretchAssets = async (assets: readonly PortablePreparedStretch[]) => {
     const leases = new Set(assets.flatMap((asset) => isPagedStretchAsset(asset) ? [asset.lease] : []))
@@ -443,6 +460,9 @@ export const createPortableBrowserPlaybackController = (input: {
   }
 
   const teardownSession = () => {
+    // The session's voices go with it; a note still waiting for its turn must not start on the next session.
+    for (const note of liveNotes.values()) note.cancelled = true
+    liveNotes.clear()
     unsubscribeFault?.()
     unsubscribeFault = undefined
     const session = active
@@ -2168,9 +2188,81 @@ export const createPortableBrowserPlaybackController = (input: {
     return liveProcessorControl.reenableAutomation(instanceId, parameterIds, activeRevision, epoch)
   }
 
+  const isInstrument = (trackId: string) => activeGraph?.nodes.some((node) => node.id === trackId && node.kind === "instrument") === true
+
+  // A locate in flight has posted its epoch to the host before `epoch` follows; events wait for it.
+  const settledSeeks = async () => {
+    let tail: Promise<unknown>
+
+    do {
+      tail = seekTail
+      await tail
+    } while (tail !== seekTail)
+  }
+
+  const enqueueLiveNote = (work: () => Promise<void>) => {
+    liveNoteTail = liveNoteTail.then(work).catch(() => undefined)
+  }
+
+  const postLiveNoteEvent = (session: PortableSession, handle: PortableLiveNoteHandle, type: "note-on" | "note-off", value: number) =>
+    session.queueInstrumentEvents?.(epoch, [{
+      nodeId: handle.trackId, noteId: handle.noteId, sequence: nextLiveNoteSequence++,
+      frameOffset: 0, type, channel: 0, note: handle.pitch, value,
+    }])
+
+  // `transport` prepares the paused session when none exists; with a session or a start in flight it is not used.
+  const startLiveNote = (note: { trackId: string; pitch: number; velocity: number; transport?: LivePlaybackTransport }): PortableLiveNoteHandle | undefined => {
+    if (!Number.isInteger(note.pitch) || note.pitch < 0 || note.pitch > 127 || !(note.velocity >= 0 && note.velocity <= 1)) return undefined
+
+    if (!active && !pendingStart && !note.transport) return undefined
+
+    if (activeGraph && !isInstrument(note.trackId)) return undefined
+    const handle: PortableLiveNoteHandle = { backend: "portable", trackId: note.trackId, pitch: note.pitch, noteId: nextLiveNoteId++ }
+    const state: PortableLiveNoteState = { cancelled: false, released: false }
+    liveNotes.set(handle, state)
+
+    enqueueLiveNote(async () => {
+      if (!active) await (pendingStart ?? (note.transport ? ensurePrepared(note.transport) : undefined))
+      await settledSeeks()
+      const session = active
+
+      if (state.cancelled || !session || !isInstrument(note.trackId)) {
+        liveNotes.delete(handle)
+
+        return
+      }
+
+      const sentEpoch = epoch
+      await postLiveNoteEvent(session, handle, "note-on", note.velocity)
+      state.sent = { session, epoch: sentEpoch }
+    })
+
+    return handle
+  }
+
+  // `force` drops a note whose note-on has not been sent yet instead of sending it and releasing it at once.
+  const releaseLiveNote = (handle: PortableLiveNoteHandle, force = false) => {
+    const state = liveNotes.get(handle)
+
+    if (!state || state.released) return
+    state.released = true
+
+    if (force) state.cancelled = true
+
+    enqueueLiveNote(async () => {
+      liveNotes.delete(handle)
+      await settledSeeks()
+      const sent = state.sent
+
+      if (sent && active === sent.session && epoch === sent.epoch) await postLiveNoteEvent(sent.session, handle, "note-off", 0)
+    })
+  }
+
   return {
     start,
     pause,
+    startLiveNote,
+    releaseLiveNote,
     dispose,
     startRecording,
     stopRecording,

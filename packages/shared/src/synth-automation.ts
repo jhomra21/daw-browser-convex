@@ -71,7 +71,7 @@ export type SynthAutomationKey = {
   parameterId: SynthAutomationParameterId
 }
 
-export const isSynthAutomationParameterId = (value: string): value is SynthAutomationParameterId => (
+const isSynthAutomationParameterId = (value: string): value is SynthAutomationParameterId => (
   Object.hasOwn(SYNTH_AUTOMATION_DESCRIPTORS, value)
 )
 

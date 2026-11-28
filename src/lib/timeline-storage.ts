@@ -7,8 +7,6 @@ import { isJsonBoolean, isJsonNumber, isJsonObject } from '@daw-browser/shared'
 const MIX_KEY_PREFIX = 'mb:mix:'
 const MIX_SYNC_KEY_PREFIX = 'mb:mix-sync:'
 const GRID_KEY_PREFIX = 'mb:grid:'
-const BPM_KEY_PREFIX = 'mb:bpm:'
-const LOOP_KEY_PREFIX = 'mb:loop:'
 const TIMELINE_SCALE_KEY_PREFIX = 'mb:timeline-scale:'
 const HISTORY_KEY_PREFIX = 'mb:history:'
 
@@ -150,93 +148,6 @@ export const saveGridSettings = (rid: string | undefined, enabled: boolean, deno
 
   try {
     localStorage.setItem(`${GRID_KEY_PREFIX}${rid}`, JSON.stringify({ enabled, denominator }))
-  } catch {}
-}
-
-export const loadBpm = (rid?: string): number => {
-  const DEFAULT = 120
-
-  if (!rid) return DEFAULT
-
-  if (!canUseLocalStorage()) return DEFAULT
-
-  try {
-    const raw = localStorage.getItem(`${BPM_KEY_PREFIX}${rid}`)
-    const n = Number(raw)
-
-    if (!Number.isFinite(n)) return DEFAULT
-    const clamped = Math.min(300, Math.max(30, Math.round(n)))
-
-    return clamped
-  } catch {
-    return DEFAULT
-  }
-}
-
-export const saveBpm = (rid: string | undefined, value: number) => {
-  if (!rid) return
-
-  if (!canUseLocalStorage()) return
-  const DEFAULT = 120
-  const safeValue = Number.isFinite(value) ? value : DEFAULT
-  const clamped = Math.min(300, Math.max(30, Math.round(safeValue)))
-
-  try {
-    localStorage.setItem(`${BPM_KEY_PREFIX}${rid}`, String(clamped))
-  } catch {}
-}
-
-type LoopSettings = {
-  enabled: boolean
-  startSec: number
-  endSec: number
-}
-
-const DEFAULT_LOOP: LoopSettings = { enabled: false, startSec: 0, endSec: 8 }
-const cloneLoop = (src: LoopSettings): LoopSettings => ({ enabled: !!src.enabled, startSec: src.startSec, endSec: src.endSec })
-
-export const loadLoopSettings = (rid?: string): LoopSettings => {
-  if (!rid) return cloneLoop(DEFAULT_LOOP)
-
-  if (!canUseLocalStorage()) return cloneLoop(DEFAULT_LOOP)
-
-  try {
-    const raw = localStorage.getItem(`${LOOP_KEY_PREFIX}${rid}`)
-
-    if (!raw) return cloneLoop(DEFAULT_LOOP)
-    const parsed = JSON.parse(raw)
-    const start = Number(parsed?.startSec)
-    const end = Number(parsed?.endSec)
-    const safeStart = Number.isFinite(start) && start >= 0 ? start : DEFAULT_LOOP.startSec
-    const minEnd = safeStart + 0.1
-    const safeEnd = Number.isFinite(end) && end > safeStart ? end : Math.max(DEFAULT_LOOP.endSec, minEnd)
-
-    return cloneLoop({
-      enabled: Boolean(parsed?.enabled),
-      startSec: safeStart,
-      endSec: safeEnd,
-    })
-  } catch {
-    return cloneLoop(DEFAULT_LOOP)
-  }
-}
-
-export const saveLoopSettings = (rid: string | undefined, value: LoopSettings) => {
-  if (!rid) return
-
-  if (!canUseLocalStorage()) return
-  const start = Number.isFinite(value.startSec) && value.startSec >= 0 ? value.startSec : DEFAULT_LOOP.startSec
-  const minEnd = start + 0.1
-  const end = Number.isFinite(value.endSec) && value.endSec > start ? value.endSec : Math.max(DEFAULT_LOOP.endSec, minEnd)
-
-  const payload: LoopSettings = {
-    enabled: !!value.enabled,
-    startSec: start,
-    endSec: end,
-  }
-
-  try {
-    localStorage.setItem(`${LOOP_KEY_PREFIX}${rid}`, JSON.stringify(payload))
   } catch {}
 }
 

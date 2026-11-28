@@ -1,6 +1,6 @@
 import { onCleanup } from "solid-js";
 
-export type TimelineVerticalScrollElement = {
+type TimelineVerticalScrollElement = {
   scrollTop: number;
   addEventListener: (
     type: "scroll",

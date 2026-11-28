@@ -8,7 +8,7 @@ type SampleLoadState =
 
 type SampleFetch = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
 
-export type SampleBufferLoaderOptions = {
+type SampleBufferLoaderOptions = {
   fetchImpl?: SampleFetch
   resolveUrl?: (url: string) => string | null
   projectId?: () => string | undefined
@@ -16,7 +16,7 @@ export type SampleBufferLoaderOptions = {
   cacheDecodedBuffers?: boolean
 }
 
-export type SampleDecodeOptions = {
+type SampleDecodeOptions = {
   targetSampleRate?: number
 }
 

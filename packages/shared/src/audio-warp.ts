@@ -22,7 +22,7 @@ const MAX_WARP_BPM = 300
 const MIN_SOURCE_BEAT_OFFSET = -16
 const MAX_SOURCE_BEAT_OFFSET = 16
 const SOURCE_BEAT_OFFSET_PRECISION = 1_000
-export const MAX_AUDIO_WARP_MARKERS = 1_000
+const MAX_AUDIO_WARP_MARKERS = 1_000
 
 const normalizeWarpBpm = (value: JsonValue | undefined) => (
   isJsonNumber(value) && Number.isFinite(value)

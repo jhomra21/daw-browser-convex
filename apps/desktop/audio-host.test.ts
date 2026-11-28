@@ -20,7 +20,6 @@ import {
   renderNativeOffline,
   createNativeOfflineFrameMailbox,
   createNativeOfflineStdoutPump,
-  runAudioHostDiagnostic,
   isNativeOfflineTelemetryFrame,
   type NativeAudioHostSupervisorOptions,
   type ResolvedVst3Attachment,
@@ -1300,13 +1299,6 @@ const vstAttachment = (instanceId: string): ResolvedVst3Attachment => ({
 test("uses an explicit development path and a fixed packaged CoreAudio host name", () => {
   expect(packagedAudioHostPath("/Resources", false, "/tmp/audio-host")).toBe("/tmp/audio-host")
   expect(packagedAudioHostPath("/Resources", true, "/tmp/audio-host")).toBe("/Resources/daw-audio-host-macos")
-})
-
-test("reports an unavailable CoreAudio host without launching a device", async () => {
-  await expect(runAudioHostDiagnostic("/not/a/daw-audio-host-macos")).resolves.toEqual({
-    ok: false,
-    error: "The native audio host is unavailable.",
-  })
 })
 
 test("planned suspend invalidates the handshake without reporting host loss", async () => {

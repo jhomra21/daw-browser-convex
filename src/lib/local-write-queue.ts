@@ -20,7 +20,7 @@ type ScheduledIdleFlush = {
   cancel: () => void
 }
 
-export type LocalEntityWriteStatus = 'saved' | 'saving' | 'failed'
+type LocalEntityWriteStatus = 'saved' | 'saving' | 'failed'
 
 const queuesByProject = new Map<string, LocalEntityWriteQueue>()
 
@@ -54,7 +54,7 @@ const scheduleIdleFlush = (callback: () => void, delayMs: number): ScheduledIdle
   return { cancel: () => globalThis.clearTimeout(handle) }
 }
 
-export class LocalEntityWriteQueue {
+class LocalEntityWriteQueue {
   private puts = new Map<string, QueuedEntityWrite>()
   private deletes = new Map<string, QueuedEntityDelete>()
   private scheduledFlush: ScheduledIdleFlush | null = null

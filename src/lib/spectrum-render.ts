@@ -1,14 +1,14 @@
 import type { SpectrumFrame } from '@daw-browser/audio-engine/audio-engine'
 
-export const SPECTRUM_MIN_HZ = 20
-export const SPECTRUM_MAX_HZ = 20000
+const SPECTRUM_MIN_HZ = 20
+const SPECTRUM_MAX_HZ = 20000
 const HISTORY_COLUMNS = 320
 const HISTORY_ROWS = 128
 
 // Frame levels are already normalised to 0..1 across the analyser's dB range; this resamples
 // them onto `count` log-spaced bands between 20 Hz and 20 kHz, taking the peak when a band
 // spans several bins and interpolating when it falls between two.
-export const logBandLevels = (frame: SpectrumFrame, count: number, out: Float32Array = new Float32Array(count)) => {
+const logBandLevels = (frame: SpectrumFrame, count: number, out: Float32Array = new Float32Array(count)) => {
   const bins = frame.data.length
   const nyquist = frame.sampleRate / 2
   const ratio = SPECTRUM_MAX_HZ / SPECTRUM_MIN_HZ

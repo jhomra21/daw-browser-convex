@@ -27,7 +27,7 @@ export { desktopDiagnosticsSchemaV2 } from "./diagnostics-v2"
 
 export const desktopProtocolVersion = "v1" as const
 export const desktopProtocolVersionV2 = "v2" as const
-export const desktopProtocolVersions = [desktopProtocolVersion, desktopProtocolVersionV2] as const
+const desktopProtocolVersions = [desktopProtocolVersion, desktopProtocolVersionV2] as const
 
 export type DesktopProtocolVersion = typeof desktopProtocolVersions[number]
 
@@ -37,7 +37,7 @@ export const maxDesktopReplyBytes = 64 * 1024 * 1024
 export const maxDesktopReplyPayloadBytes = 380 * 1024
 export const maxDesktopReplyPayloadBase64Characters = 4 * Math.ceil(maxDesktopReplyPayloadBytes / 3)
 export const maxDesktopReplyChunks = Math.ceil(maxDesktopReplyBytes / maxDesktopReplyPayloadBytes)
-export const maxCorrelationIdLength = 96
+const maxCorrelationIdLength = 96
 export const maxDeadlineMs = 60_000
 export const desktopCapabilityMaximumChunkBytes = 1024 * 1024
 export const recordingSpoolBlockHeaderBytes = 4
@@ -92,7 +92,7 @@ export const desktopEmptyInputSchemaV1 = z.object({}).strict()
 const finiteSeconds = z.number().finite().min(0).max(86_400)
 export const desktopSeekInputSchemaV1 = z.object({ seconds: finiteSeconds }).strict()
 
-export const desktopHostVstCursorSchemaV1 = z.string().min(1).max(String(0xffff_ffff).length).regex(/^(0|[1-9][0-9]*)$/)
+const desktopHostVstCursorSchemaV1 = z.string().min(1).max(String(0xffff_ffff).length).regex(/^(0|[1-9][0-9]*)$/)
   .refine((value) => Number(value) <= 0xffff_ffff)
 
 export const desktopOperationSchemaV1 = z.enum([
@@ -123,7 +123,7 @@ export const desktopOperationSchemaV1 = z.enum([
 
 export type DesktopOperationV1 = z.infer<typeof desktopOperationSchemaV1>
 
-export const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
+const desktopHostOperationSchemaV1 = desktopOperationSchemaV1.exclude([
   "control.capabilities",
   "control.snapshot",
   "control.preview",
@@ -438,7 +438,7 @@ export const desktopHostExportStatusSchemaV1 = z.object({
   }).strict().optional(),
 }).strict()
 
-export const desktopHostVstIdentitySchemaV1 = z.object({
+const desktopHostVstIdentitySchemaV1 = z.object({
   format: z.literal("vst3"),
   classId: z.string().min(1).max(128),
   vendor: z.string().min(1).max(256),
@@ -447,7 +447,7 @@ export const desktopHostVstIdentitySchemaV1 = z.object({
   architecture: z.literal("arm64"),
 }).strict()
 
-export const desktopHostVstParameterSchemaV1 = z.object({
+const desktopHostVstParameterSchemaV1 = z.object({
   id: z.number().int().nonnegative().max(0xffff_ffff),
   title: z.string().min(1).max(256),
   unit: z.string().max(64),
@@ -503,7 +503,7 @@ export type DesktopHostOperationDescriptorV1<Operation extends DesktopHostOperat
   readonly effect: "read" | "write" | "runtime"
 }
 
-export const desktopHostOperationCatalog = {
+const desktopHostOperationCatalog = {
   "host.status": {
     id: "host.status",
     input: desktopEmptyInputSchemaV1,
@@ -605,10 +605,6 @@ export const desktopHostOperationCatalog = {
 export const desktopHostOperationIds = Object.freeze(
   Object.keys(desktopHostOperationCatalog).map((operation) => desktopHostOperationSchemaV1.parse(operation)),
 )
-
-export const isDesktopHostOperation = (
-  operation: DesktopOperationV1,
-): operation is DesktopHostOperationV1 => Object.hasOwn(desktopHostOperationCatalog, operation)
 
 export const getDesktopHostOperationDescriptor = (
   operation: DesktopHostOperationV1,
@@ -743,7 +739,7 @@ const desktopReplyChunkFieldsV1 = {
 }
 
 export const desktopReplyChunkSchemaV1 = z.object(desktopReplyChunkFieldsV1).strict().refine((value) => value.index < value.total)
-export const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
+const desktopProgressSchemaV1 = z.object({ version, type: z.literal("progress"), id: correlationId, message: z.string().max(256) }).strict()
 
 export const desktopExportTerminalSchemaV1 = z.object({
   version,
@@ -760,7 +756,7 @@ export const desktopImportTerminalSchemaV1 = z.object({
 
 export const desktopHelloSchemaV1 = z.object({ version, type: z.literal("hello"), secret: z.string().regex(/^[a-f0-9]{64}$/), client: z.string().min(1).max(128), actorId: z.string().regex(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/) }).strict()
 export const desktopHelloAckSchemaV1 = z.object({ version, type: z.literal("helloAck"), sessionId: z.string().min(16).max(128), capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length) }).strict()
-export const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
+const desktopLifecycleSchemaV1 = z.object({ version, type: z.literal("lifecycle"), event: z.enum(["renderer-lost", "closing"]) }).strict()
 export const desktopFrameSchemaV1 = z.discriminatedUnion("type", [desktopRequestSchemaV1, desktopReplySchemaV1, desktopReplyChunkSchemaV1, desktopCancelSchemaV1, desktopProgressSchemaV1, desktopExportTerminalSchemaV1, desktopImportTerminalSchemaV1, desktopHelloSchemaV1, desktopHelloAckSchemaV1, desktopLifecycleSchemaV1])
 
 export type DesktopFrameV1 = z.infer<typeof desktopFrameSchemaV1>
@@ -811,15 +807,15 @@ export const desktopReplySchemaV2 = z.object({
   if ((value.result === undefined) === (value.error === undefined)) context.addIssue({ code: "custom", message: "Reply requires exactly one result or error." })
 })
 
-export const desktopCancelSchemaV2 = z.object({ version: versionV2, type: z.literal("cancel"), id: correlationId }).strict()
+const desktopCancelSchemaV2 = z.object({ version: versionV2, type: z.literal("cancel"), id: correlationId }).strict()
 
 export const desktopReplyChunkSchemaV2 = z.object({
   ...desktopReplyChunkFieldsV1,
   version: versionV2,
 }).strict().refine((value) => value.index < value.total)
 
-export const desktopProgressSchemaV2 = desktopProgressSchemaV1.extend({ version: versionV2 })
-export const desktopExportTerminalSchemaV2 = desktopExportTerminalSchemaV1.extend({ version: versionV2 })
+const desktopProgressSchemaV2 = desktopProgressSchemaV1.extend({ version: versionV2 })
+const desktopExportTerminalSchemaV2 = desktopExportTerminalSchemaV1.extend({ version: versionV2 })
 
 export const desktopHelloSchemaV2 = z.object({
   version: versionV2,
@@ -838,10 +834,10 @@ export const desktopHelloAckSchemaV2 = z.object({
   capabilities: z.array(desktopOperationSchemaV1).max(desktopOperationSchemaV1.options.length),
 }).strict()
 
-export const desktopLifecycleSchemaV2 = desktopLifecycleSchemaV1.extend({ version: versionV2 })
-export const desktopImportTerminalSchemaV2 = desktopImportTerminalSchemaV1.extend({ version: versionV2 })
+const desktopLifecycleSchemaV2 = desktopLifecycleSchemaV1.extend({ version: versionV2 })
+const desktopImportTerminalSchemaV2 = desktopImportTerminalSchemaV1.extend({ version: versionV2 })
 
-export const desktopFrameSchemaV2 = z.discriminatedUnion("type", [
+const desktopFrameSchemaV2 = z.discriminatedUnion("type", [
   desktopRequestSchemaV2, desktopReplySchemaV2, desktopReplyChunkSchemaV2,
   desktopCancelSchemaV2, desktopProgressSchemaV2, desktopExportTerminalSchemaV2, desktopImportTerminalSchemaV2,
   desktopHelloSchemaV2, desktopHelloAckSchemaV2, desktopLifecycleSchemaV2,

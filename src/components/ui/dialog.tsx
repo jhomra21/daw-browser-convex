@@ -7,7 +7,6 @@ import type { PolymorphicProps } from "@kobalte/core/polymorphic"
 import { cn } from "~/lib/utils"
 
 const Dialog = DialogPrimitive.Root
-const DialogTrigger = DialogPrimitive.Trigger
 
 const DialogPortal: Component<DialogPrimitive.DialogPortalProps> = (props) => {
   const [, rest] = splitProps(props, ["children"])
@@ -154,7 +153,6 @@ function DialogDescription(
 
 export {
   Dialog,
-  DialogTrigger,
   DialogContent,
   DialogHeader,
   DialogFooter,

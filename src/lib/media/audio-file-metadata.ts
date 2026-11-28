@@ -6,7 +6,7 @@ const metadataReadCacheBytes = 8 * 1024 * 1024
 const maximumSampleRate = 384_000
 const maximumChannelCount = 64
 
-export class AudioFileMetadataError extends Error {
+class AudioFileMetadataError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'AudioFileMetadataError'

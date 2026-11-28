@@ -1,5 +1,5 @@
-export const pointStartPixelsPerSample = 4
-export const pointFullPixelsPerSample = 6
+const pointStartPixelsPerSample = 4
+const pointFullPixelsPerSample = 6
 export const waveformTierSelectionThreshold = 0.125
 
 export type WaveformTier = {

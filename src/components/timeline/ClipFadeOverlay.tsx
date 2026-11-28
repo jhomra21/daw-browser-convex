@@ -12,7 +12,7 @@ import {
   updateFadeDraftForKeyboard,
 } from './clip-fade-interaction'
 
-export type ClipFadeOverlayClip = {
+type ClipFadeOverlayClip = {
   duration: number
   fades?: ClipFades
   midi?: unknown
@@ -58,7 +58,7 @@ export const createFadeOverlayInput = (clip: ClipFadeOverlayClip): FadeOverlayIn
   }
 }
 
-export const fadeOverlayInputsEqual = (
+const fadeOverlayInputsEqual = (
   previous: FadeOverlayInput,
   next: FadeOverlayInput,
 ) => previous.duration === next.duration
@@ -72,7 +72,7 @@ export const stabilizeFadeOverlayInput = (
   next: FadeOverlayInput,
 ) => fadeOverlayInputsEqual(previous, next) ? previous : next
 
-export const createFadeOverlayPaths = (input: {
+const createFadeOverlayPaths = (input: {
   fades: NormalizedClipFades
   duration: number
   sliceStartSec: number

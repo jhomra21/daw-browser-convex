@@ -40,7 +40,7 @@ type MixerChannelStateOverrides = Partial<Omit<MixerChannelState, "sends">> & {
 
 type MixerReadCtx = { db: DatabaseReader };
 
-export const STALE_LOCK_MS = 60_000;
+const STALE_LOCK_MS = 60_000;
 
 export function isMixerLockStale(
   lockedBy: string | undefined,

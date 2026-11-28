@@ -260,15 +260,6 @@ export const writeLocalAssetFileUnlocked = async (
   await writeFile(root, path, file, signal)
 }
 
-export const writeLocalAssetFile = async (
-  projectId: string,
-  path: string,
-  file: File,
-  signal?: AbortSignal,
-): Promise<void> => {
-  await withLocalProjectAssetLock(projectId, () => writeLocalAssetFileUnlocked(projectId, path, file, signal))
-}
-
 const createLocalAssetUnlocked = async (input: CreateLocalAssetInput): Promise<LocalProjectAssetRow> => {
   const root = await getWritableProjectRoot(input.projectId)
 

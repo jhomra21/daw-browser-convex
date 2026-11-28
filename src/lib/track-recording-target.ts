@@ -24,7 +24,7 @@ export const RECORDING_TARGET_LOCKED_BADGE = 'Recording target locked'
 export const RECORDING_TARGET_FINISHING = 'Finishing recording…'
 export const RECORDING_TARGET_LOCKED_REASON = 'Finish recording to delete this track or change its routing.'
 
-export type RecordingTargetLockState = 'starting' | 'recording' | 'finishing' | 'released'
+type RecordingTargetLockState = 'starting' | 'recording' | 'finishing' | 'released'
 
 // What a take is bound to: the target, its group and output chain, and the destinations of its sends.
 // A missing track is part of the key, so a delete changes it like a reroute does.

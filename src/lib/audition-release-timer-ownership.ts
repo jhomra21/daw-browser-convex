@@ -1,4 +1,4 @@
-export type AuditionReleaseTimerScheduler = {
+type AuditionReleaseTimerScheduler = {
   schedule: (callback: () => void, delayMs: number) => number
   clear: (timer: number) => void
 }

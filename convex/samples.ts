@@ -2,7 +2,7 @@ import { query } from "./_generated/server";
 import { v } from "convex/values";
 import { requireAuthenticatedUserId, requireProjectAccess } from "./projectAccess";
 
-export { deleteAsset as removeFromRoom, moveAssetToFolder as moveToFolder } from "./assets";
+export { moveAssetToFolder as moveToFolder } from "./assets";
 
 export const listByRoom = query({
   args: { projectId: v.string(), limit: v.optional(v.number()) },

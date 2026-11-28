@@ -1,7 +1,7 @@
 import type { SamplerZone } from './sampler-params'
 import { isJsonBoolean, isJsonNumber, isJsonObject, isJsonString, type JsonValue } from './json-value'
 
-export const GRANULAR_STATE_VERSION = 1
+const GRANULAR_STATE_VERSION = 1
 export const GRANULAR_MAX_GRAINS = 128
 
 export type GranularWindowKind = 'hann' | 'tukey' | 'gaussian'

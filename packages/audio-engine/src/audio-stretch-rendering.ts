@@ -86,7 +86,7 @@ const createForwardingTransaction = (
   }
 }
 
-export const renderStretchedAudioToPcmSource = async (input: {
+const renderStretchedAudioToPcmSource = async (input: {
   clip: AudioStretchRuntimeClip
   source: AudioPcmSourceDescriptor
   projectBpm: number

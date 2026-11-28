@@ -15,7 +15,7 @@ import {
 } from '~/lib/retained-waveform'
 import { requestWaveformData } from '~/lib/waveform-scheduler-request'
 
-export type OverviewRenderSegment = {
+type OverviewRenderSegment = {
   drawStartPx: number
   drawCols: number
   sourceStartFrame: number

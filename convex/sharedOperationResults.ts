@@ -1,7 +1,7 @@
 import type { MutationCtx } from "./_generated/server";
 import { parseJsonValue, type JsonValueInput } from "@daw-browser/shared";
 
-export const readSharedOperationResult = async (
+const readSharedOperationResult = async (
   ctx: MutationCtx,
   input: { projectId: string; userId: string; operationId?: string },
 ) => {
@@ -17,7 +17,7 @@ export const readSharedOperationResult = async (
     .first();
 };
 
-export const writeSharedOperationResult = async (
+const writeSharedOperationResult = async (
   ctx: MutationCtx,
   input: { projectId: string; userId: string; operationId?: string; result: unknown },
 ) => {

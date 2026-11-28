@@ -29,7 +29,7 @@ export type WaveformRequestPlans = {
   readonly segments: readonly WaveformSegmentPlan[]
 }
 
-export const waveformDataEndFrame = (data: WaveformSourceData) => (
+const waveformDataEndFrame = (data: WaveformSourceData) => (
   data.firstFrame + (
     data.kind === 'samples'
       ? data.channels[0]?.length ?? 0
@@ -420,4 +420,3 @@ export const projectRetainedWaveformData = (input: {
   return projected
 }
 
-export type { WaveformSourceData }

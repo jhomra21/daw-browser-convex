@@ -1,5 +1,4 @@
 import {
-  compilePortableSessionInput,
   compilePreparedPortableSession,
   type PortableAssetRegistryInput,
 } from '@daw-browser/audio-engine/portable-session-compiler'
@@ -12,18 +11,7 @@ import {
 } from '~/lib/portable-frame-schedule'
 import type { LoopTransport } from '@daw-browser/audio-engine/loop-frame-schedule'
 
-/**
- * App boundary only: the engine receives portable data and never imports the
- * browser's AudioBuffer-bearing playback snapshot.
- */
-export const compilePortableLiveSession = (snapshot: LivePlaybackSnapshot) =>
-  compilePortableSessionInput({
-    mixer: snapshot.mixer.graph,
-    fx: snapshot.mixer.fx,
-    automationEnvelopes: snapshot.mixer.automationEnvelopes,
-  })
-
-export const compilePortableLiveFrameSchedule = (
+const compilePortableLiveFrameSchedule = (
   snapshot: LivePlaybackSnapshot,
   input: Omit<PortableFrameScheduleAdapterInput, 'revision' | 'bpm' | 'tracks' | 'automationEnvelopes' | 'arpeggiators'>,
 ) => compilePortableFrameSchedule({

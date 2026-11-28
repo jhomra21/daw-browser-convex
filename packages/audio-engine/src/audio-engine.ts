@@ -280,11 +280,6 @@ export class AudioEngine {
     return () => this.runtimeListeners.delete(listener)
   }
 
-  reportInferredApplicationStall() {
-    this.inferredApplicationStallCount += 1
-    this.publishRuntimeSnapshot()
-  }
-
   private publishRuntimeSnapshot() {
     for (const listener of this.runtimeListeners) listener()
   }
@@ -363,10 +358,6 @@ export class AudioEngine {
 
   cancelRecordingCapture() {
     this.recording.cancel()
-  }
-
-  getRecordingStatus(): RecordingRuntimeStatus {
-    return this.recording.getStatus()
   }
 
   subscribeRecordingStatus(listener: (status: RecordingRuntimeStatus) => void) {
@@ -776,10 +767,6 @@ export class AudioEngine {
 
   getBpm() {
     return this.clock.getBpm()
-  }
-
-  clearTrackSynth(trackId: string) {
-    this.instrumentRuntime.clearTrackSynth(trackId)
   }
 
   clearTrackDrumRack(trackId: string) {

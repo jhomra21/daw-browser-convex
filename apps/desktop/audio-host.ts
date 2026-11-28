@@ -1281,52 +1281,6 @@ export const packagedAudioHostPath = (resourcesPath: string, isPackaged: boolean
   isPackaged ? path.join(resourcesPath, "daw-audio-host-macos") : explicitPath
 )
 
-export const runAudioHostDiagnostic = async (hostPath: string): Promise<{ ok: true; hello: AudioHostHello } | { ok: false; error: string }> => {
-  try {
-    await access(hostPath)
-  } catch {
-    return { ok: false, error: "The native audio host is unavailable." }
-  }
-
-  const request = encodeNativeAudioHostControlFrame(hostHelloType)
-
-  if (!request) return { ok: false, error: "The native audio host protocol is unavailable." }
-
-  return new Promise((resolve) => {
-    const child = spawn(hostPath, [], { env: { PATH: "/usr/bin:/bin" }, stdio: ["pipe", "pipe", "ignore"] })
-    const chunks: Buffer[] = []
-    let size = 0
-    let settled = false
-
-    const finish = (result: { ok: true; hello: AudioHostHello } | { ok: false; error: string }) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timer)
-      resolve(result)
-    }
-
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL")
-      finish({ ok: false, error: "The native audio host diagnostic timed out." })
-    }, 2_000)
-
-    child.stdout.on("data", (chunk: Buffer) => {
-      size += chunk.byteLength
-
-      if (size > headerBytes + maximumPayloadBytes) child.kill("SIGKILL")
-      else chunks.push(chunk)
-    })
-    child.once("error", () => finish({ ok: false, error: "The native audio host could not start." }))
-    child.once("close", () => {
-      const hello = readResponse(Buffer.concat(chunks))
-      finish(hello && isCompatibleAudioHostHello(hello)
-      ? { ok: true, hello }
-      : { ok: false, error: "The native audio host returned an incompatible protocol response." })
-    })
-    child.stdin.end(request)
-  })
-}
-
 const patchRefusals: readonly (NativeProcessorPatchRefusal | undefined)[] = [
   undefined, "unavailable", "preparing", "claim-pending", "invalid",
   "stale-revision", "stage-failed", "not-claimed", "apply-failed",

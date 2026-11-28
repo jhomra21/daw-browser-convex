@@ -160,16 +160,16 @@ const isBoundedId = (value: unknown): value is string =>
 const isBoundedText = (value: unknown, max: number): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= max
 
-export const isExtensionId = (value: unknown): value is ExtensionId =>
+const isExtensionId = (value: unknown): value is ExtensionId =>
   isBoundedId(value)
 
-export const isContributionId = (value: unknown): value is ContributionId =>
+const isContributionId = (value: unknown): value is ContributionId =>
   isBoundedId(value)
 
-export const isCommandId = (value: unknown): value is CommandId =>
+const isCommandId = (value: unknown): value is CommandId =>
   isBoundedId(value)
 
-export const isShortcutId = (value: unknown): value is ShortcutId =>
+const isShortcutId = (value: unknown): value is ShortcutId =>
   isBoundedId(value)
 
 export const normalizeShortcutChord = (

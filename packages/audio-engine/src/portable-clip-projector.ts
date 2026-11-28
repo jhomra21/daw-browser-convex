@@ -236,7 +236,7 @@ const projectClip = (
   }
 }
 
-export const stableSourceIdentity = (trackId: string, clipId: string) =>
+const stableSourceIdentity = (trackId: string, clipId: string) =>
   `source:${trackId.length}:${trackId}:${clipId.length}:${clipId}`
 
 export const projectPortableClipEvents = (input: PortableClipProject): PortableClipProjection => {

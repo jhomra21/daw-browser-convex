@@ -30,7 +30,7 @@ type ClipWaveformViewModelOptions = {
   readonly backingPixelsPerCssPixel?: Accessor<number>
 }
 
-export type ClipWaveformSegment = {
+type ClipWaveformSegment = {
   readonly startPx: number
   readonly endPx: number
   readonly canvasStartSec: number

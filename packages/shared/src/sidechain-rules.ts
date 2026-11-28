@@ -1,6 +1,6 @@
-export const SIDECHAIN_EFFECT_KINDS = ['compressor', 'gate', 'spectral'] as const
+const SIDECHAIN_EFFECT_KINDS = ['compressor', 'gate', 'spectral'] as const
 
-export const isSidechainEffectKind = (kind: string) =>
+const isSidechainEffectKind = (kind: string) =>
   SIDECHAIN_EFFECT_KINDS.some((candidate) => candidate === kind)
 
 export const sidechainEligibilityError = (input: {

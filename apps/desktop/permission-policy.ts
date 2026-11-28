@@ -1,6 +1,6 @@
 const packagedDesktopRendererOrigin = "daw://app"
 
-export type DesktopOriginPolicy = (url: string) => boolean
+type DesktopOriginPolicy = (url: string) => boolean
 
 const parsedTrustedOrigin = (value: string): string | undefined => {
   try {

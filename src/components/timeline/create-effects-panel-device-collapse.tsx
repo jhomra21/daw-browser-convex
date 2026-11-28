@@ -1,9 +1,9 @@
 import { createContext, createEffect, createSignal, useContext, type Accessor, type ParentComponent } from "solid-js";
 import { REORDER_ACTIVATION_THRESHOLD_PX } from "~/components/timeline/device-interaction";
 
-export const DEVICE_COLLAPSE_STORAGE_KEY = "timeline:device-collapse";
-export const DEVICE_DOUBLE_TAP_MS = 700;
-export const DEVICE_DOUBLE_TAP_DISTANCE_PX = 8;
+const DEVICE_COLLAPSE_STORAGE_KEY = "timeline:device-collapse";
+const DEVICE_DOUBLE_TAP_MS = 700;
+const DEVICE_DOUBLE_TAP_DISTANCE_PX = 8;
 
 export type DeviceCollapseIdentity =
   | `arp:${string}`
@@ -46,7 +46,7 @@ export const serializeCollapsedDeviceIdentities = (identities: ReadonlySet<strin
   JSON.stringify(Array.from(identities).sort())
 );
 
-export const deviceCollapseStorageKey = (projectId: string) => `${DEVICE_COLLAPSE_STORAGE_KEY}:${projectId}`;
+const deviceCollapseStorageKey = (projectId: string) => `${DEVICE_COLLAPSE_STORAGE_KEY}:${projectId}`;
 
 export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | undefined>) {
   const [collapsedIdentities, setCollapsedIdentities] = createSignal<Set<string>>(new Set());
@@ -98,7 +98,7 @@ export function createEffectsPanelDeviceCollapse(projectId: Accessor<string | un
   };
 }
 
-export type DeviceCollapseContextValue = {
+type DeviceCollapseContextValue = {
   collapsed: Accessor<boolean>;
   toggle: () => void;
   contentId: Accessor<string>;
@@ -143,7 +143,7 @@ export type DeviceCollapseGesture =
   }
   | undefined;
 
-export type DeviceCollapseGestureResult = {
+type DeviceCollapseGestureResult = {
   next: DeviceCollapseGesture;
   recognized: boolean;
 };

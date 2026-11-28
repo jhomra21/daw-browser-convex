@@ -10,8 +10,8 @@ const midiWaveSchema = z.enum(['sine', 'square', 'sawtooth', 'triangle'])
 const legacyMidiWaveSchema = z.string()
 
 export const MAX_MIDI_PERFORMANCE_EVENTS = 500
-export const MAX_MIDI_EVENTS_PER_ARRAY = 500
-export const MAX_MIDI_MAPPINGS = 64
+const MAX_MIDI_EVENTS_PER_ARRAY = 500
+const MAX_MIDI_MAPPINGS = 64
 
 export const midiNoteSchema = z.object({
   id: identifierSchema.optional(),

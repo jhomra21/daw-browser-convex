@@ -53,7 +53,6 @@ import type { ImportProjectBinding, ImportSummary } from "~/hooks/useTimelineCli
 export type {
   DesktopPluginCatalog,
   DesktopPluginCatalogEntry,
-  DesktopPluginCatalogReply,
 } from "~/types/desktop-bridge"
 
 import { createDesktopCapabilityExportOutputTargetFactory, desktopExportResourceLimits } from "~/lib/desktop/capability-export-output-targets"

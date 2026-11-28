@@ -224,8 +224,8 @@ export type AudioCoreGraphNodeKind = 'source' | 'instrument' | 'mixer' | 'return
 
 export type AudioCoreGraphTap = 'pre-fx' | 'pre-fader' | 'post-fader'
 
-export const audioCoreMaxInstrumentVoices = 32
-export const audioCoreMaxInstrumentParameterTargets = 16
+const audioCoreMaxInstrumentVoices = 32
+const audioCoreMaxInstrumentParameterTargets = 16
 
 /**
  * Stable per-node mixer targets. A parameter event at frame N applies before
@@ -329,8 +329,8 @@ export type AudioCoreGranularState = {
   stereoSpread: number
 }
 
-export const audioCoreMaxGranularGrains = 128
-export const audioCoreMaxSampleZones = 32
+const audioCoreMaxGranularGrains = 128
+const audioCoreMaxSampleZones = 32
 
 export type AudioCoreSampleZone = {
   assetId: string
@@ -699,9 +699,9 @@ export type AudioCoreProcessorParameterTarget = {
 
 export const audioCoreMaxProcessorsPerNode = 32
 export const audioCoreMaxGraphProcessors = 512
-export const audioCoreMaxProcessorStateBytes = 256
+const audioCoreMaxProcessorStateBytes = 256
 export const audioCoreMaxProcessorParameterTargets = 24
-export const audioCoreProcessorStateEnvelopeBytes = 40
+const audioCoreProcessorStateEnvelopeBytes = 40
 
 export type AudioCoreProcessorStateEnvelope = {
   kindId: number
@@ -1206,12 +1206,6 @@ export const isUtilityProcessorContract = (value: JsonValue): value is UtilityPr
   && value.kind === 'utility'
   && isUtilityState(value.state)
 
-export const parseUtilityProcessorContract = (value: JsonValue): UtilityProcessorContract => {
-  if (!isUtilityProcessorContract(value)) throw new Error('Invalid audio-core utility processor contract.')
-
-  return value
-}
-
 export const isAudioCoreGraphProcessor = <Value>(value: Value): value is Value & AudioCoreGraphProcessorDto => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['id', 'kind', 'kindId', 'instanceId', 'stateVersion', 'state', 'parameterTargets', 'latencyFrames', 'tailFrames', 'tailKind', 'bypassed'])) return false
   const registryEntry = processorRegistry.find((entry) => entry.name === value.kind && entry.id === value.kindId)
@@ -1246,7 +1240,7 @@ export const isAudioCoreGraphProcessor = <Value>(value: Value): value is Value &
     && isJsonBoolean(value.bypassed)
 }
 
-export const isAudioCoreProcessorStateEnvelope = <Value>(
+const isAudioCoreProcessorStateEnvelope = <Value>(
   value: Value,
 ): value is Value & AudioCoreProcessorStateEnvelope =>
   isRecord(value)

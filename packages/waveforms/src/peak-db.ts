@@ -9,7 +9,7 @@ import {
 } from './types'
 
 const DB_NAME = 'audio-peaks-db'
-export const PEAK_DB_VERSION = 5
+const PEAK_DB_VERSION = 5
 const META_STORE = 'asset-meta'
 const CHUNK_STORE = 'asset-chunks'
 

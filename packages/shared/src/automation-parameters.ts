@@ -96,7 +96,7 @@ export type AutomationTargetParameterOption = AutomationParameterOption & Automa
 
 const clamp = (value: number, min: number, max: number) => Math.min(max, Math.max(min, value))
 
-export const normalizeAutomationValue = (
+const normalizeAutomationValue = (
   value: number,
   descriptor: AutomationParameterDescriptor,
 ) => {

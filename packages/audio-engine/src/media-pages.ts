@@ -19,7 +19,7 @@ export { defaultDecodedAudioPageFrames }
 export { getAudioBufferSessionIdentity }
 
 /** Per-range deadline for remote requests, including stalled headers or bodies. */
-export const defaultRemoteMediaRequestTimeoutMs = 120_000
+const defaultRemoteMediaRequestTimeoutMs = 120_000
 
 /** Total deadline shared by all range requests for one decode operation. */
 export const defaultRemoteMediaOperationDeadlineMs = 120_000

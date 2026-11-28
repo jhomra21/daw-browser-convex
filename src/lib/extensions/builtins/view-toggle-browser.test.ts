@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import type { AppExtensionDefinition } from "../index";
+import type { AppExtensionDefinition } from "../extension-kernel";
 import {
   builtinViewToggleBrowserCommand,
   builtinViewToggleBrowserShortcut,
   createBuiltinViewToggleBrowser,
 } from "./view-toggle-browser";
-import { createExtensionKernel } from "../index";
+import { createExtensionKernel } from "../extension-kernel";
 
 test("declares the stable browser toggle command and shortcut", () => {
   expect(builtinViewToggleBrowserCommand).toEqual({

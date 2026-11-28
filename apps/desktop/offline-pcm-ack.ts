@@ -12,7 +12,7 @@ type PendingOfflinePcmAck = OfflinePcmAckExpectation & {
   reject: (error: Error) => void
 }
 
-export type OfflinePcmAckTracker = {
+type OfflinePcmAckTracker = {
   begin(expected: OfflinePcmAckExpectation): Promise<void>
   acknowledge(value: OfflinePcmAck): boolean
   cancel(error: Error): void

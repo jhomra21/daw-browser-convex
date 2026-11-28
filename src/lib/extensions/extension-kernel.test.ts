@@ -5,7 +5,7 @@ import {
   createExtensionKernel,
   normalizeShortcutChord,
   type AppExtensionDefinition,
-} from './index'
+} from './extension-kernel'
 import { createBuiltinExtensionManager } from './builtin-manager'
 
 const definition = (

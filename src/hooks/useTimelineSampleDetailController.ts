@@ -31,7 +31,7 @@ type Options = {
   pushHistory: (entry: HistoryEntry, key?: string, debounceMs?: number) => void;
 };
 
-export const isTimelineAudioClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => {
+const isTimelineAudioClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => {
   if (!clip || clip.midi) return false;
 
   return Boolean(
@@ -42,7 +42,7 @@ export const isTimelineAudioClipDetailClip = (clip: Clip<AudioBuffer> | undefine
   );
 };
 
-export const isTimelineMidiClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => Boolean(clip?.midi);
+const isTimelineMidiClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => Boolean(clip?.midi);
 
 const isTimelineClipDetailClip = (clip: Clip<AudioBuffer> | undefined) => (
   isTimelineAudioClipDetailClip(clip) || isTimelineMidiClipDetailClip(clip)

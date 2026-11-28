@@ -53,7 +53,7 @@ export type InstrumentAutomationKey = {
   parameterId: SamplerAutomationParameterId
 }
 
-export const isSamplerAutomationParameterId = (value: string): value is SamplerAutomationParameterId => (
+const isSamplerAutomationParameterId = (value: string): value is SamplerAutomationParameterId => (
   Object.hasOwn(SAMPLER_AUTOMATION_DESCRIPTORS, value)
 )
 

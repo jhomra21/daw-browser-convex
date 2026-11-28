@@ -50,7 +50,7 @@ export const getExportAudioCodec = (format: ExportAudioFormat): AudioCodec => {
   return exportAudioEncodingDescriptors[format].codec
 }
 
-export const getExportAudioDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
+const getExportAudioDefaultBitrate = (format: ExportAudioFormat): number | undefined => {
   return getExportAudioBitrate(format)
 }
 

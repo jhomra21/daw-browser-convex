@@ -347,7 +347,7 @@ export class LocalProjectCatalogVersionError extends Error {
   }
 }
 
-export class LocalProjectCatalogBlockedError extends Error {
+class LocalProjectCatalogBlockedError extends Error {
   constructor() {
     super('Local projects could not be loaded. Close or reload other tabs using this app, then retry.')
     this.name = 'LocalProjectCatalogBlockedError'

@@ -1,4 +1,4 @@
-export type EqFrameScheduler = {
+type EqFrameScheduler = {
   request: (callback: (time: number) => void) => number
   cancel: (id: number) => void
 }

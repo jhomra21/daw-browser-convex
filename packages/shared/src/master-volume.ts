@@ -1,7 +1,7 @@
 export const DEFAULT_MIXER_VOLUME = 1
-export const MAX_MIXER_VOLUME = 2
-export const MIXER_VOLUME_MIN_DB = -60
-export const MIXER_VOLUME_MAX_DB = 6
+const MAX_MIXER_VOLUME = 2
+const MIXER_VOLUME_MIN_DB = -60
+const MIXER_VOLUME_MAX_DB = 6
 export const MIXER_VOLUME_SLIDER_STEP = 0.001
 
 import { linearFromDb } from './decibels'

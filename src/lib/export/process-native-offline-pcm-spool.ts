@@ -11,7 +11,7 @@ import { dbFromLinear, linearFromDb } from '@daw-browser/shared'
 import type { ExportRenderSettings } from '~/lib/export/export-settings'
 import type { NativeOfflinePcmSpoolSession } from '~/lib/export/native-offline-pcm-spool'
 
-export type ProcessedNativeOfflinePcmSpool = {
+type ProcessedNativeOfflinePcmSpool = {
   endFrame: number
   analysis: ExportAnalysisReport
   replay: () => AsyncGenerator<AudioBuffer>

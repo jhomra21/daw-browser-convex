@@ -771,8 +771,7 @@ export function useTimelinePlayback(
           backend: 'fallback',
           state: 'prepared',
         }
-        // Creating/resuming the browser context emits no legacy sources. It is
-        // required before a portable AudioWorklet can be selected and prepared.
+        // Create/resume the browser context before selecting and preparing a portable AudioWorklet.
         audioEngine.ensureAudio({ applyCachedTrackGains: false })
         await audioEngine.resume()
 

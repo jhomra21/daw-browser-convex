@@ -32,9 +32,10 @@ const reverb = z.object({
   enabled: z.boolean(), wet: finiteNumber, decaySec: finiteNumber, preDelayMs: finiteNumber,
   reflections: finiteNumber, reflectionSpin: z.boolean(), reflectionModAmountMs: finiteNumber,
   reflectionModRateHz: finiteNumber, 'reflectionShape': finiteNumber, diffuse: finiteNumber,
-  size: finiteNumber, diffusion: finiteNumber, density: finiteNumber, lowCutHz: finiteNumber,
-  highCutHz: finiteNumber, diffusionLowCutHz: finiteNumber, diffusionHighCutHz: finiteNumber,
-  stereoWidth: finiteNumber,
+  size: finiteNumber, diffusion: finiteNumber, density: z.enum(['sparse', 'low', 'mid', 'high']), lowCutHz: finiteNumber,
+  highCutHz: finiteNumber, lowCutOn: z.boolean(), highCutOn: z.boolean(), lowShelfHz: finiteNumber, highShelfHz: finiteNumber, lowShelfOn: z.boolean(), highShelfOn: z.boolean(),
+  lowShelfDb: finiteNumber, highShelfDb: finiteNumber, stereoWidth: finiteNumber, smooth: z.enum(['none', 'slow', 'fast']),
+  freeze: z.boolean(), flat: z.boolean(), cut: z.boolean(), chorus: z.boolean(), chorusAmountMs: finiteNumber, chorusRateHz: finiteNumber,
 }).strict()
 
 const saturator = z.object({

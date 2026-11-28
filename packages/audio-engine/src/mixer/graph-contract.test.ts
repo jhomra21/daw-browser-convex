@@ -514,7 +514,7 @@ describe('mixer routing plan', () => {
         { id: 'delay.lowCutHz', target: 8 },
         { id: 'delay.highCutHz', target: 9 },
       ]],
-      ['reverb', 14, 72, 0, [
+      ['reverb', 14, 124, 0, [
         { id: 'reverb.wet', target: 10 },
         { id: 'reverb.preDelayMs', target: 11 },
         { id: 'reverb.lowCutHz', target: 12 },
@@ -528,13 +528,16 @@ describe('mixer routing plan', () => {
         { id: 'reverb.diffuse', target: 137 },
         { id: 'reverb.size', target: 138 },
         { id: 'reverb.diffusion', target: 139 },
-        { id: 'reverb.density', target: 140 },
-        { id: 'reverb.diffusionLowCutHz', target: 141 },
-        { id: 'reverb.diffusionHighCutHz', target: 142 },
+        { id: 'reverb.lowShelfHz', target: 141 },
+        { id: 'reverb.highShelfHz', target: 142 },
+        { id: 'reverb.chorusAmountMs', target: 173 },
+        { id: 'reverb.chorusRateHz', target: 174 },
+        { id: 'reverb.lowShelfDb', target: 175 },
+        { id: 'reverb.highShelfDb', target: 176 },
       ]],
     ])
     expect(processors?.[0]?.tailFrames).toBe(24_000 * 14)
-    expect(processors?.[1]?.tailFrames).toBe(48_000 * 2.02)
+    expect(processors?.[1]?.tailFrames).toBe(Math.ceil(48_000 * 2.17))
   })
 
   test('projects exact AutoFilter and LoFi target arrays', () => {

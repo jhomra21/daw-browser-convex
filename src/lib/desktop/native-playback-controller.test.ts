@@ -12704,7 +12704,7 @@ test("refreshes native built-in tail metadata when reverb state changes", async 
   expect(patch).toBeDefined()
 
   if (!patch) return
-  expect(new DataView(patch.buffer).getUint32(52, true)).toBe(96_960)
+  expect(new DataView(patch.buffer).getUint32(52, true)).toBe(104_160)
   await controller.dispose()
 })
 
@@ -12760,7 +12760,7 @@ test("sends the tail of the newest content a queued patch is built from", async 
   const patch = fixture.statePatchPayloads.at(-1)
 
   if (!patch) throw new Error("Missing materialized patch")
-  expect(new DataView(patch.buffer).getUint32(52, true)).toBe(384_960)
+  expect(new DataView(patch.buffer).getUint32(52, true)).toBe(392_160)
   expect(Array.from(patch.slice(56, 56 + (newest.edit.content.state?.byteLength ?? 0)))).toEqual(Array.from(newest.edit.content.state ?? []))
   await controller.dispose()
 })
@@ -14720,7 +14720,7 @@ test("allows native reverb alongside a native VST attachment", async () => {
   const nodeBytes = view.getUint32(12, true) === 4 ? 136 : 132
   const processorOffset = 12 + 24 + 2 * nodeBytes + 48
   expect(view.getUint32(processorOffset + 8, true)).toBe(14)
-  expect(view.getUint32(processorOffset + 16, true)).toBe(72)
+  expect(view.getUint32(processorOffset + 16, true)).toBe(124)
   expect(view.getUint32(processorOffset + 48, true)).toBe(1)
   await controller.dispose()
 })

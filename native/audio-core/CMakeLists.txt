@@ -157,6 +157,22 @@ if(BUILD_TESTING)
   add_executable(daw-audio-core-graph-fixture tests/graph_fixture_cli.cpp tests/graph_fixture.cpp)
   target_compile_features(daw-audio-core-graph-fixture PRIVATE cxx_std_20)
   target_link_libraries(daw-audio-core-graph-fixture PRIVATE daw-audio-core)
+  # Reverb kernel (src/reverb_kernel.h). One ctest per measurement group; the executable prints each value.
+  add_executable(daw-reverb-test tests/reverb_test.cpp)
+  target_compile_features(daw-reverb-test PRIVATE cxx_std_20)
+  if(MSVC)
+    target_compile_options(daw-reverb-test PRIVATE /W4 /WX /EHs-c- /GR-)
+  else()
+    target_compile_options(daw-reverb-test PRIVATE -Wall -Wextra -Werror -fno-exceptions -fno-rtti)
+  endif()
+  foreach(group decay shelves freeze stereo guards rates)
+    add_test(NAME daw-reverb-${group} COMMAND daw-reverb-test ${group})
+  endforeach()
+
+  # Not a test: prints the cost of one Reverb per frame from graph fixtures (tools/reverb-bench-fixtures.ts).
+  add_executable(daw-reverb-bench tools/reverb_bench.cpp tests/graph_fixture.cpp)
+  target_compile_features(daw-reverb-bench PRIVATE cxx_std_20)
+  target_link_libraries(daw-reverb-bench PRIVATE daw-audio-core)
 endif()
 
 if(DAW_AUDIO_CORE_BUILD_WASM OR DAW_AUDIO_CORE_BUILD_WASM_HARNESS)

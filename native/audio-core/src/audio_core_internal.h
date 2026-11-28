@@ -28,6 +28,7 @@
 #include <tuple>
 
 #include "autofilter_kernel.h"
+#include "reverb_kernel.h"
 #include "compressor_kernel.h"
 #include "gate_kernel.h"
 #include "limiter_kernel.h"
@@ -102,15 +103,6 @@ constexpr uint32_t kSpectralInputFrames = 16384;
 constexpr float kSampleTerminationFadeMilliseconds = 6.0F;
 // One extra frame lets a 96 kHz processor read the full 3,000 ms contract maximum.
 constexpr uint32_t kMaximumTimeEffectDelayFrames = 288001;
-// Reverb uses this fixed ring for pre-delay and its early-reflection taps.
-constexpr uint32_t kMaximumReverbDelayFrames = 24001;
-// The late network is eight feedback lines and two input diffusion chains, sized for
-// 192 kHz (100 ms of line plus modulation). A higher rate clamps its delays to the
-// buffers instead of running past them.
-constexpr uint32_t kReverbLineCount = 8;
-constexpr uint32_t kReverbLineFrames = 20480;
-constexpr uint32_t kReverbDiffusionStages = 3;
-constexpr uint32_t kReverbDiffusionFrames = 2560;
 static_assert(sizeof(uintptr_t) <= sizeof(daw_audio_core_handle));
 static_assert(DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION == 1u);
 
@@ -581,10 +573,9 @@ struct ModulationHistory {
   float bypass = 0.0F;
 };
 
-template <size_t DelayFrames>
-struct TimeEffectHistory {
-  std::array<float, DelayFrames> left{};
-  std::array<float, DelayFrames> right{};
+struct DelayHistory {
+  std::array<float, kMaximumTimeEffectDelayFrames> left{};
+  std::array<float, kMaximumTimeEffectDelayFrames> right{};
   uint32_t write = 0;
   BiquadHistory highpass_left{};
   BiquadHistory highpass_right{};
@@ -594,28 +585,13 @@ struct TimeEffectHistory {
   float bypass = 0.0F;
 };
 
-// The reverb's late tail. The line lengths and gains depend only on decay, size and rate,
-// so they are derived again only when one of those moves.
-struct ReverbNetwork {
-  std::array<std::array<float, kReverbLineFrames>, kReverbLineCount> lines{};
-  std::array<std::array<float, kReverbDiffusionFrames>, 2 * kReverbDiffusionStages> diffusion{};
-  uint32_t line_write = 0;
-  uint32_t diffusion_write = 0;
-  std::array<float, kReverbLineCount> low{};
-  std::array<float, kReverbLineCount> high_input{};
-  std::array<float, kReverbLineCount> high{};
-  std::array<float, kReverbLineCount> line_frames{};
-  std::array<float, kReverbLineCount> line_gain{};
-  float decay_key = -1.0F;
-  float size_key = -1.0F;
-  uint32_t rate_key = 0;
+// The kernel owns its delay memory, sized for the core's sample rate and the Density when the history is built.
+struct ReverbHistory {
+  daw::audio_core::ReverbKernel kernel;
+  daw::audio_core::ReverbValues values;
+  daw::audio_core::ReverbConfig config;
+  float bypass = 0.0F;
 };
-
-struct ReverbHistory : TimeEffectHistory<kMaximumReverbDelayFrames> {
-  ReverbNetwork network;
-};
-
-using DelayHistory = TimeEffectHistory<kMaximumTimeEffectDelayFrames>;
 
 struct SpectralTransferMap {
   struct Band {
@@ -1194,9 +1170,9 @@ void render_lofi_processor(
 void render_modulation_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float, float, float *output_left, float *output_right);
-bool render_reverb_sample(
-  Core &core, GraphRevision::Processor &processor, uint32_t frame, ReverbHistory &history,
-  float dry_left, float dry_right, float *left, float *right);
+void render_reverb_processor(
+  Core &core, GraphRevision::Processor &processor, uint32_t frame,
+  float input_left, float input_right, float, float, float *output_left, float *output_right);
 void render_time_effect_processor(
   Core &core, GraphRevision::Processor &processor, uint32_t frame,
   float input_left, float input_right, float sidechain_left, float sidechain_right,

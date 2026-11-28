@@ -128,7 +128,7 @@ export const BUILTIN_AUDIO_EFFECT_CHAIN_PRESETS: readonly AudioEffectChainPreset
     folderName: "Space",
     effects: [
       delay({ syncDivision: "1/8", feedback: 0.38, dryWet: 0.28, pingPong: true, filterEnabled: true, lowCutHz: 180, highCutHz: 6500 }),
-      reverb({ wet: 0.22, decaySec: 2.8, preDelayMs: 24, size: 0.72, diffusion: 0.78, density: 0.82, highCutHz: 9000 }),
+      reverb({ wet: 0.22, decaySec: 2.8, preDelayMs: 24, size: 0.72, diffusion: 0.78, highCutHz: 9000, highCutOn: true }),
     ],
   },
 ];

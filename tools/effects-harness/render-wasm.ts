@@ -60,7 +60,7 @@ const keyEdge: AudioCoreGraphEdgeDto = {
   version: audioCoreContractVersion, id: 'key', fromNodeId: 'k', toNodeId: 's', targetProcessorId: 'p', gain: 1, kind: 'output', tap: 'post-fader', sidechain: true, pdcDelayFrames: 0,
 }
 
-const snapshot = (spec: EffectSpec | null, rate: number, targets: readonly number[], keyed: boolean, revision: number): AudioCoreGraphSnapshot => ({
+export const graphSnapshot = (spec: EffectSpec | null, rate: number, targets: readonly number[], keyed: boolean, revision: number): AudioCoreGraphSnapshot => ({
   version: audioCoreContractVersion,
   revision,
   contractHash: processorContractHash,
@@ -127,7 +127,7 @@ export const renderWasm = async (spec: EffectSpec | null, rate: number, options:
   if (exports.initialize(rate, blockFrames, buses, 2, 1) !== 0) throw new Error('audio-core initialize failed')
 
   const publishGraph = (current: EffectSpec | null, revision: number) => {
-    const graph = graphEnvelope(snapshot(current, rate, targets, key !== undefined, revision))
+    const graph = graphEnvelope(graphSnapshot(current, rate, targets, key !== undefined, revision))
     const graphView = new DataView(graph.buffer, graph.byteOffset, graph.byteLength)
 
     graphView.setUint32(sourceBusOffset, 0, true)

@@ -1753,12 +1753,25 @@ const reverbState: ReverbProcessorState = {
   diffuse: 1,
   size: 0,
   diffusion: 0.75,
-  density: 0.8,
+  density: 'sparse',
   lowCutHz: 20,
   highCutHz: 20_000,
-  diffusionLowCutHz: 20,
-  diffusionHighCutHz: 20_000,
-  stereoWidth: 1,
+  lowShelfHz: 200,
+  highShelfHz: 5_000,
+  stereoWidth: 100,
+  smooth: 'fast',
+  freeze: false,
+  flat: false,
+  cut: false,
+  chorus: true,
+  chorusAmountMs: 0.3,
+  chorusRateHz: 0.4,
+  lowShelfOn: true,
+  highShelfOn: true,
+  lowShelfDb: 0,
+  highShelfDb: 0,
+  lowCutOn: false,
+  highCutOn: false,
 }
 
 const timeEffectTailFrames = (
@@ -1775,7 +1788,7 @@ const timeEffectTailFrames = (
 
   if (kind === 'reverb' && 'decaySec' in state) {
     return Math.ceil(state.enabled
-      ? (state.preDelayMs / 1_000 + state.decaySec) * sampleRateHz
+      ? (state.preDelayMs / 1_000 + 0.15 + state.decaySec) * sampleRateHz
       : 0)
   }
 
@@ -1813,7 +1826,7 @@ const timeEffectFixture = (
         : encodeReverbProcessorState(processorState),
       parameterTargets: kind === 'delay'
         ? [5, 6, 7, 8, 9]
-        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
+        : [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 141, 142, 173, 174, 175, 176],
       latencyFrames: 0,
       tailFrames: timeEffectTailFrames(kind, state, sampleRateHz),
       bypassed,
@@ -1896,8 +1909,8 @@ const reverbSpinPair = (reflectionSpin: boolean): PortableGraphParityFixture => 
 
     return finite(output)
       && onset !== null
-      && onset >= 1_840
-      && onset <= 2_040
+      && onset >= 1_480
+      && onset <= 1_680
       && rightEnergy > 1e-8
   }
 
@@ -1923,7 +1936,7 @@ const reverbCapacityFixture = (processorCount: number): PortableGraphParityFixtu
       instanceId: index + 11,
       kindId: 14,
       state: encodeReverbProcessorState(reverbState),
-      parameterTargets: [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142],
+      parameterTargets: [10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 141, 142, 173, 174, 175, 176],
     })),
   ),
   frames: 4,
@@ -2179,7 +2192,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
           ...reverbState,
           wet: 1,
           size: 1,
-          density: 0,
+          diffuse: 0,
           diffusion: 0,
         },
         maxFramesPerBlock: 2_048,
@@ -2196,9 +2209,9 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
         && onset >= 880
         && onset <= 1_080
         && decay !== null
-        // Only the early-reflection taps remain without late texture: the last is 47.5 ms
-        // (2,280 frames) after the first at this size.
-        && decay <= onset + 2_300
+        // Only the early-reflection cascade remains without late texture: its longest path is 81.7 ms
+        // (3,922 frames) after the first echo at this size.
+        && decay <= onset + 4_000
     }
 
     return fixture
@@ -2292,7 +2305,7 @@ const timeEffectFixtures: readonly PortableGraphParityFixture[] = [
     )
 
     fixture.assertOutput = (output) => finite(output)
-      && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => closeTo(sample, 0)))
+      && output.every((plane) => closeTo(plane[0] ?? 0, 1) && plane.slice(1).every((sample) => sample > 0.99 && sample <= 1 + 1e-6))
 
     return fixture
   })(),

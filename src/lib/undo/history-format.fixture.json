@@ -5,7 +5,7 @@
     "compressor": 2,
     "saturator": 1,
     "delay": 1,
-    "reverb": 1,
+    "reverb": 2,
     "autofilter": 2,
     "gate": 2,
     "limiter": 2,

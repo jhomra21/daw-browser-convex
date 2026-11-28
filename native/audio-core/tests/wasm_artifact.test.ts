@@ -82,6 +82,13 @@ type LegacyReverbProcessorConstructor = new (
   options?: { processorOptions?: JsonValue },
 ) => LegacyReverbProcessor
 
+// The native parameter target of every automatable Reverb control, which the worklet reads as the AudioParam of the same name.
+const reverbParameterTargets = [
+  ['wet', 10], ['preDelayMs', 11], ['lowCutHz', 12], ['highCutHz', 13], ['stereoWidth', 14], ['decaySec', 132], ['reflections', 133],
+  ['reflectionModAmountMs', 134], ['reflectionModRateHz', 135], ['reflectionShape', 136], ['diffuse', 137], ['size', 138], ['diffusion', 139],
+  ['lowShelfHz', 141], ['highShelfHz', 142], ['chorusAmountMs', 173], ['chorusRateHz', 174], ['lowShelfDb', 175], ['highShelfDb', 176],
+] as const
+
 const renderLegacyReverbFixture = async (
   fixture: PortableGraphParityFixture,
   reverb: { state: ReverbProcessorState },
@@ -156,14 +163,10 @@ const renderLegacyReverbFixture = async (
       output[1].subarray(offset, offset + blockFrames),
     ]
 
-    processor.process([blockInput], [blockOutput], {
-      // The graph fixture ABI defaults an unbound wet target to 0.5.
-      'reverb.wet': parameterBlock(10, 0.5, offset, blockFrames),
-      'reverb.preDelayMs': parameterBlock(11, reverb.state.preDelayMs, offset, blockFrames),
-      'reverb.lowCutHz': parameterBlock(12, reverb.state.lowCutHz, offset, blockFrames),
-      'reverb.highCutHz': parameterBlock(13, reverb.state.highCutHz, offset, blockFrames),
-      'reverb.stereoWidth': parameterBlock(14, reverb.state.stereoWidth, offset, blockFrames),
-    })
+    // The graph fixture ABI defaults an unbound wet target to 0.5.
+    processor.process([blockInput], [blockOutput], Object.fromEntries(
+      reverbParameterTargets.map(([field, target]) => [`reverb.${field}`, parameterBlock(target, field === 'wet' ? 0.5 : reverb.state[field], offset, blockFrames)]),
+    ))
     offset += blockFrames
   }
 

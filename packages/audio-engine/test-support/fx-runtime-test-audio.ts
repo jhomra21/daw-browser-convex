@@ -115,7 +115,7 @@ const createBiquad = () => Object.assign(createNode(), {
 
 const WORKLET_PARAMETER_IDS = [
   'gate.thresholdDb', 'gate.ratio',
-  'reverb.wet', 'reverb.preDelayMs', 'reverb.lowCutHz', 'reverb.highCutHz', 'reverb.stereoWidth',
+  ...['wet', 'decaySec', 'preDelayMs', 'reflections', 'reflectionModAmountMs', 'reflectionModRateHz', 'reflectionShape', 'diffuse', 'size', 'diffusion', 'lowCutHz', 'highCutHz', 'lowShelfHz', 'highShelfHz', 'lowShelfDb', 'highShelfDb', 'chorusAmountMs', 'chorusRateHz', 'stereoWidth'].map((id) => `reverb.${id}`),
 ]
 
 class FakeWorkletNode {

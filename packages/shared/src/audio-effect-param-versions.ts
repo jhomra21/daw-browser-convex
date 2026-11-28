@@ -1,6 +1,7 @@
 import { migrateCompressorParamsV1 } from './compressor-params-migration'
 import { migrateGateParamsV1 } from './gate-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
+import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
 import { isAudioEffectKind, type AudioEffectKind } from './audio-effect-registry'
@@ -13,7 +14,7 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   compressor: 2,
   saturator: 1,
   delay: 1,
-  reverb: 1,
+  reverb: 2,
   autofilter: 2,
   gate: 2,
   limiter: 2,
@@ -63,8 +64,11 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     gate: { 1: migrateGateParamsV1 },
     // Limiter: Gain 0 dB, Auto off, lookahead snapped to the nearest 1.5/3/6 ms step.
     limiter: { 1: migrateLimiterParamsV1 },
+    // Reverb: Density Sparse (the old 8 lines), the old in-loop cuts as shelves, Width as the Stereo angle, Chorus on, Smooth Fast.
+    reverb: { 1: migrateReverbParamsV1 },
   },
   parameterValues: {
+    reverb: { 1: { 'reverb.stereoWidth': migrateReverbStereoWidthV1 } },
     autofilter: {
       1: {
         'autofilter.resonance': migrateAutoFilterResonanceV1,

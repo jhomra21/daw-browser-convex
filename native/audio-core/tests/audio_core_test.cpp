@@ -8,6 +8,7 @@
 #include "../src/compressor_kernel.h"
 #include "../src/gate_kernel.h"
 #include "../src/limiter_kernel.h"
+#include "../src/reverb_kernel.h"
 #if defined(DAW_AUDIO_CORE_TEST_SPECTRAL_INTERNALS)
 
 // The one contract that reads private voice state; see the CMake target that builds this variant.
@@ -133,7 +134,8 @@ uint32_t schema_version_of(uint32_t kind) {
   return kind == DAW_AUDIO_PROCESSOR_KIND_EQ ? DAW_AUDIO_CORE_PROCESSOR_EQ_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_GATE ? DAW_AUDIO_CORE_PROCESSOR_GATE_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_REVERB ? DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -2699,14 +2701,14 @@ void test_portable_delay_and_reverb_characterization() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 72> &bytes, uint32_t offset, uint32_t value) {
+  const auto write_u32 = [](std::array<uint8_t, 124> &bytes, uint32_t offset, uint32_t value) {
     bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
     bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
   };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 72> &bytes, uint32_t offset, float value) {
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 124> &bytes, uint32_t offset, float value) {
     uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
   };
-  std::array<uint8_t, 72> state{};
+  std::array<uint8_t, 124> state{};
   write_u32(state, 0, 1); write_f32(state, 4, 10.0F); write_f32(state, 8, 0.5F); write_f32(state, 12, 1.0F);
   write_u32(state, 16, 1); write_u32(state, 20, 1); write_f32(state, 24, 120.0F); write_f32(state, 28, 8000.0F);
   daw_audio_processor_descriptor delay{
@@ -2737,10 +2739,13 @@ void test_portable_delay_and_reverb_characterization() {
   write_u32(state, 0, 1); write_f32(state, 4, 1.0F); write_f32(state, 8, 1.0F); write_f32(state, 12, 20.0F);
   write_f32(state, 16, 0.5F); write_u32(state, 20, 1); write_f32(state, 24, 5.0F); write_f32(state, 28, 0.3F);
   write_f32(state, 32, 0.5F); write_f32(state, 36, 1.0F); write_f32(state, 40, 0.65F); write_f32(state, 44, 0.75F);
-  write_f32(state, 48, 0.8F); write_f32(state, 52, 20.0F); write_f32(state, 56, 20000.0F);
-  write_f32(state, 60, 20.0F); write_f32(state, 64, 20000.0F); write_f32(state, 68, 1.0F);
+  write_u32(state, 48, DAW_AUDIO_REVERB_DENSITY_HIGH); write_f32(state, 52, 20.0F); write_f32(state, 56, 20000.0F);
+  write_f32(state, 60, 200.0F); write_f32(state, 64, 5000.0F); write_f32(state, 68, 100.0F);
+  write_u32(state, 72, DAW_AUDIO_REVERB_SMOOTH_FAST); write_u32(state, 88, 1); write_f32(state, 92, 0.3F); write_f32(state, 96, 0.4F);
+  write_u32(state, 100, 1); write_u32(state, 104, 1);
   daw_audio_processor_descriptor reverb = delay;
-  reverb.instance_id = 14; reverb.kind = DAW_AUDIO_PROCESSOR_KIND_REVERB; reverb.state_size = 72; reverb.tail_frames = 106560;
+  reverb.instance_id = 14; reverb.kind = DAW_AUDIO_PROCESSOR_KIND_REVERB; reverb.state_version = DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION;
+  reverb.state_size = 124; reverb.tail_frames = 106560;
   core = create_core(512, 2, 1);
   prepare.graph_revision = 1; prepare.processors = &reverb;
   expect(daw_audio_core_prepare_graph(core, &prepare), DAW_AUDIO_CORE_OK);
@@ -2996,7 +3001,7 @@ void test_live_delay_and_reverb_retirement_materialization() {
   run_delay(DAW_AUDIO_PROCESSOR_PARAMETER_DELAY_DRY_WET, 0.0F, false);
 
   const auto run_reverb = [&](uint32_t live_target, float live_value, bool expect_late_tail) {
-    std::array<uint8_t, 72> state{};
+    std::array<uint8_t, 124> state{};
     write_u32(state.data(), 0, 1);
     write_f32(state.data(), 4, 1.0F);
     write_f32(state.data(), 8, 0.2F);
@@ -3009,18 +3014,24 @@ void test_live_delay_and_reverb_retirement_materialization() {
     write_f32(state.data(), 36, 1.0F);
     write_f32(state.data(), 40, 0.5F);
     write_f32(state.data(), 44, 0.75F);
-    write_f32(state.data(), 48, 0.8F);
+    write_u32(state.data(), 48, DAW_AUDIO_REVERB_DENSITY_HIGH);
     write_f32(state.data(), 52, 20.0F);
     write_f32(state.data(), 56, 20'000.0F);
-    write_f32(state.data(), 60, 20.0F);
-    write_f32(state.data(), 64, 20'000.0F);
-    write_f32(state.data(), 68, 1.0F);
-    const std::array<uint32_t, 16> targets{
-      10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 140, 141, 142,
+    write_f32(state.data(), 60, 200.0F);
+    write_f32(state.data(), 64, 5000.0F);
+    write_f32(state.data(), 68, 100.0F);
+    write_u32(state.data(), 72, DAW_AUDIO_REVERB_SMOOTH_FAST);
+    write_u32(state.data(), 88, 1);
+    write_f32(state.data(), 92, 0.3F);
+    write_f32(state.data(), 96, 0.4F);
+    write_u32(state.data(), 100, 1);
+    write_u32(state.data(), 104, 1);
+    const std::array<uint32_t, 19> targets{
+      10, 11, 12, 13, 14, 132, 133, 134, 135, 136, 137, 138, 139, 141, 142, 173, 174, 175, 176,
     };
     daw_audio_processor_descriptor processor{
       .node_id = 2, .instance_id = 502, .kind = DAW_AUDIO_PROCESSOR_KIND_REVERB,
-      .state_version = 1, .state_size = 72, .bypassed = 0,
+      .state_version = DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION, .state_size = 124, .bypassed = 0,
       .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
       .latency_frames = 0, .tail_frames = 1, .parameter_count = static_cast<uint32_t>(targets.size()),
       .parameter_targets = targets.data(), .state = state.data(),
@@ -5309,7 +5320,7 @@ void test_synth_saw_and_square_are_band_limited() {
   }
 }
 
-static_assert(sizeof(daw_audio_reverb_state) == 72);
+static_assert(sizeof(daw_audio_reverb_state) == 124);
 
 struct ReverbRender {
   std::vector<float> left, right;
@@ -5319,8 +5330,10 @@ daw_audio_reverb_state quality_reverb_state() {
   return {
     .enabled = 1, .wet = 1.0F, .decay_sec = 2.0F, .pre_delay_ms = 0.0F, .reflections = 0.5F, .reflection_spin = 0,
     .reflection_mod_amount_ms = 0.0F, .reflection_mod_rate_hz = 1.0F, .reflection_shape = 0.5F, .diffuse = 1.0F,
-    .size = 0.5F, .diffusion = 1.0F, .density = 1.0F, .low_cut_hz = 20.0F, .high_cut_hz = 20000.0F,
-    .diffusion_low_cut_hz = 20.0F, .diffusion_high_cut_hz = 20000.0F, .stereo_width = 1.0F,
+    .size = 0.5F, .diffusion = 1.0F, .density = DAW_AUDIO_REVERB_DENSITY_HIGH, .low_cut_hz = 20.0F, .high_cut_hz = 20000.0F,
+    .low_shelf_hz = 200.0F, .high_shelf_hz = 5000.0F, .stereo_width = 100.0F, .smooth = DAW_AUDIO_REVERB_SMOOTH_FAST,
+    .freeze = 0, .flat = 0, .cut = 0, .chorus = 1, .chorus_amount_ms = 0.3F, .chorus_rate_hz = 0.4F,
+    .low_shelf_on = 1, .high_shelf_on = 1, .low_shelf_db = 0.0F, .high_shelf_db = 0.0F, .low_cut_on = 0, .high_cut_on = 0,
   };
 }
 
@@ -5338,7 +5351,7 @@ ReverbRender render_reverb(
   }};
   daw_audio_reverb_state wire = state;
   daw_audio_processor_descriptor reverb{
-    .node_id = 2, .instance_id = 14, .kind = DAW_AUDIO_PROCESSOR_KIND_REVERB, .state_version = 1, .state_size = sizeof(wire),
+    .node_id = 2, .instance_id = 14, .kind = DAW_AUDIO_PROCESSOR_KIND_REVERB, .state_version = DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION, .state_size = sizeof(wire),
     .bypassed = 0, .input_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO, .output_layout = DAW_AUDIO_GRAPH_LAYOUT_STEREO,
     .latency_frames = 0, .tail_frames = total_frames, .parameter_count = 0, .parameter_targets = nullptr,
     .state = reinterpret_cast<const uint8_t *>(&wire),
@@ -5436,17 +5449,39 @@ double correlation(const std::vector<float> &a, const std::vector<float> &b, siz
   return ab / std::sqrt(aa * bb);
 }
 
+// An input cut that is off is pass-through whatever its frequency is, and the same frequency with the cut on filters the tail.
+void test_reverb_input_cuts_pass_through_when_off() {
+  constexpr uint32_t kFrames = 48000;
+  const daw_audio_reverb_state open = quality_reverb_state();
+  daw_audio_reverb_state parked = open;
+  parked.low_cut_hz = 1000.0F; parked.high_cut_hz = 4000.0F;
+  const ReverbRender reference = render_reverb_impulse(open, kFrames);
+  const ReverbRender off = render_reverb_impulse(parked, kFrames);
+  for (uint32_t i = 0; i < kFrames; ++i) assert(off.left[i] == reference.left[i] && off.right[i] == reference.right[i]);
+  for (const uint32_t which : {0u, 1u}) {
+    daw_audio_reverb_state one = parked;
+    (which == 0 ? one.low_cut_on : one.high_cut_on) = 1;
+    const ReverbRender on = render_reverb_impulse(one, kFrames);
+    float difference = 0.0F;
+    for (uint32_t i = 0; i < kFrames; ++i) difference = std::max(difference, std::fabs(on.left[i] - reference.left[i]));
+    assert(difference > 1e-4F);
+  }
+}
+
 void test_reverb_tail_is_diffuse() {
   constexpr uint32_t kRate = 48000;
   const auto ms = [](double value) { return static_cast<size_t>(value * kRate / 1000.0); };
   const daw_audio_reverb_state base = quality_reverb_state();
   const ReverbRender impulse = render_reverb_impulse(base, kRate * 2);
+  // Early on, the diffuser has to have filled the tail in: the old window of 80 to 250 ms is the one the research gates on.
+  const double early_density = mean_normalized_echo_density(impulse.left, ms(30), ms(80), ms(20));
+  assert(early_density >= 0.7);
   const double density = mean_normalized_echo_density(impulse.left, ms(80), ms(250), ms(20));
   const double periodicity = max_abs_autocorrelation(impulse.left, ms(150), ms(500), ms(20), ms(100));
   const double stereo = correlation(impulse.left, impulse.right, ms(100), ms(1000));
   std::fprintf(stderr, "reverb density=%.3f periodicity=%.3f lr_correlation=%.3f\n", density, periodicity, stereo);
-  assert(density >= 0.6);
-  assert(periodicity <= 0.25);
+  assert(density >= 0.9);
+  assert(periodicity <= 0.2);
   assert(std::fabs(stereo) < 0.5);
 
   for (const float decay : {1.0F, 3.0F}) {
@@ -5472,10 +5507,11 @@ void test_reverb_tail_is_diffuse() {
   assert(after_tail / peak < std::pow(10.0F, -45.0F / 20.0F));
   assert(before_pre_delay < 1e-6F);
 
-  // Late texture stays off when diffuse, density or diffusion is zero; only early reflections remain.
-  for (int knob = 0; knob < 3; ++knob) {
+  // Late texture stays off when Diffuse is zero; only early reflections remain. Diffusion no longer mutes the tail: it
+  // only sets how much of the input goes through the diffuser before it enters the loop.
+  for (int knob = 0; knob < 1; ++knob) {
     daw_audio_reverb_state off = base;
-    (knob == 0 ? off.diffuse : knob == 1 ? off.density : off.diffusion) = 0.0F;
+    off.diffuse = 0.0F;
     const ReverbRender dry_tail = render_reverb_impulse(off, kRate);
     float late = 0.0F;
     for (size_t i = ms(150); i < dry_tail.left.size(); ++i) late = std::max(late, std::fabs(dry_tail.left[i]));
@@ -5776,7 +5812,7 @@ struct Phase3Fixture {
   }};
   daw_audio_utility_state utility = utility_state();
   daw_audio_utility_state neutral_utility = utility_state();
-  std::array<uint8_t, 72> reverb{};
+  std::array<uint8_t, 124> reverb{};
   std::array<daw_audio_processor_descriptor, 2> processors{};
 
   explicit Phase3Fixture(uint32_t sample_rate = 48000)
@@ -5810,9 +5846,11 @@ struct Phase3Fixture {
     u32(0, 1); f32(4, 1.0F); f32(8, 12.0F); f32(12, 20.0F);
     f32(16, 0.5F); u32(20, 1); f32(24, 5.0F); f32(28, 0.3F);
     f32(32, 0.5F); f32(36, 1.0F); f32(40, 0.65F); f32(44, 0.75F);
-    f32(48, 0.8F); f32(52, 20.0F); f32(56, 20000.0F);
-    f32(60, 20.0F); f32(64, 20000.0F); f32(68, 1.0F);
+    u32(48, DAW_AUDIO_REVERB_DENSITY_HIGH); f32(52, 20.0F); f32(56, 20000.0F);
+    f32(60, 200.0F); f32(64, 5000.0F); f32(68, 100.0F);
+    u32(72, DAW_AUDIO_REVERB_SMOOTH_FAST); u32(88, 1); f32(92, 0.3F); f32(96, 0.4F); u32(100, 1); u32(104, 1);
     processors[0].kind = DAW_AUDIO_PROCESSOR_KIND_REVERB;
+    processors[0].state_version = DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION;
     processors[0].state_size = static_cast<uint32_t>(reverb.size());
     processors[0].state = reverb.data();
     processors[0].tail_frames = 48000 * 13;
@@ -8838,7 +8876,7 @@ void test_phase3_reused_node_slot_has_no_dip() {
 
 // Raw ABI state for the kinds the rig has no typed helper for.
 struct Phase3RawState {
-  std::array<uint8_t, 80> bytes{};
+  std::array<uint8_t, 128> bytes{};
   uint32_t size = 0;
   void u32(uint32_t offset, uint32_t value) {
     for (uint32_t byte = 0; byte < 4; ++byte) bytes[offset + byte] = static_cast<uint8_t>(value >> (byte * 8));
@@ -8869,12 +8907,14 @@ Phase3RawState phase3_lofi_state() {
 
 Phase3RawState phase3_reverb_state() {
   Phase3RawState state;
-  state.size = 72;
+  state.size = 124;
   state.u32(0, 1); state.f32(4, 1.0F); state.f32(8, 12.0F); state.f32(12, 20.0F);
   state.f32(16, 0.5F); state.u32(20, 1); state.f32(24, 5.0F); state.f32(28, 0.3F);
   state.f32(32, 0.5F); state.f32(36, 1.0F); state.f32(40, 0.65F); state.f32(44, 0.75F);
-  state.f32(48, 0.8F); state.f32(52, 20.0F); state.f32(56, 20000.0F);
-  state.f32(60, 20.0F); state.f32(64, 20000.0F); state.f32(68, 1.0F);
+  state.u32(48, DAW_AUDIO_REVERB_DENSITY_HIGH); state.f32(52, 20.0F); state.f32(56, 20000.0F);
+  state.f32(60, 200.0F); state.f32(64, 5000.0F); state.f32(68, 100.0F);
+  state.u32(72, DAW_AUDIO_REVERB_SMOOTH_FAST); state.u32(88, 1); state.f32(92, 0.3F); state.f32(96, 0.4F);
+  state.u32(100, 1); state.u32(104, 1);
   return state;
 }
 
@@ -11569,6 +11609,7 @@ int main(int argc, char **argv) {
   test_instrument_synthesis_lifecycle_determinism_and_boundaries();
   test_synth_filter_modes_and_partition_invariance();
   test_synth_saw_and_square_are_band_limited();
+  test_reverb_input_cuts_pass_through_when_off();
   test_reverb_tail_is_diffuse();
   test_sampler_and_drum_rack_asset_voices();
   test_granular_asset_seed_freeze_and_note_ownership();

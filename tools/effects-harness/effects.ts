@@ -118,7 +118,7 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   reverb: {
     wet: 10, preDelayMs: 11, lowCutHz: 12, highCutHz: 13, stereoWidth: 14, decaySec: 132, reflections: 133,
     reflectionModAmountMs: 134, reflectionModRateHz: 135, reflectionShape: 136, diffuse: 137, size: 138, diffusion: 139,
-    density: 140, diffusionLowCutHz: 141, diffusionHighCutHz: 142,
+    lowShelfHz: 141, highShelfHz: 142, chorusAmountMs: 173, chorusRateHz: 174, lowShelfDb: 175, highShelfDb: 176,
   },
   spectral: range(15, ['freeze', 'gateThresholdDb', 'gateAttackMs', 'gateReleaseMs', 'morph', 'binShift', 'blur', 'harmonicPercussiveBalance', 'noiseReduction', 'profileLearn', 'mix']),
   autofilter: {
@@ -199,9 +199,11 @@ export const fx = {
   reverb: (state: Partial<ReverbProcessorState> = {}): EffectSpec => ({
     kind: 'reverb',
     state: {
-      enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0, reflectionSpin: true, reflectionModAmountMs: 17.5,
-      reflectionModRateHz: 0.3, reflectionShape: 0.5, diffuse: 1, size: 0.65, diffusion: 0.75, density: 0.8, lowCutHz: 20,
-      highCutHz: 20000, diffusionLowCutHz: 20, diffusionHighCutHz: 20000, stereoWidth: 1, ...state,
+      enabled: true, wet: 0.25, decaySec: 2.2, preDelayMs: 20, reflections: 0.25, reflectionSpin: true, reflectionModAmountMs: 17.5,
+      reflectionModRateHz: 0.3, reflectionShape: 0.5, diffuse: 0.7, size: 0.65, diffusion: 0.75, density: 'high', lowCutHz: 20,
+      highCutHz: 20000, lowShelfHz: 200, highShelfHz: 5000, stereoWidth: 100, smooth: 'fast', freeze: false, flat: false,
+      cut: false, chorus: true, chorusAmountMs: 0.6, chorusRateHz: 0.6, lowShelfOn: true, highShelfOn: true, lowShelfDb: 0,
+      highShelfDb: 0, lowCutOn: false, highCutOn: false, ...state,
     },
   }),
   spectral: (state: Partial<SpectralProcessorState> = {}): EffectSpec => ({

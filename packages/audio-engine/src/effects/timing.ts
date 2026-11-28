@@ -28,6 +28,9 @@ export type EffectTimingInput =
   | { kind: 'delay'; params: DelayParamsLite }
   | { kind: 'reverb'; params: ReverbParamsLite }
 
+// The longest the Reverb holds a signal before its decay starts: the Shape onset (24 ms) plus the four diffuser steps (120 ms).
+const REVERB_NETWORK_DELAY_SEC = 0.15
+
 const finite = (frames: number): EffectTiming['tail'] => ({
   kind: 'finite',
   frames: Math.max(0, Math.ceil(frames)),
@@ -105,9 +108,11 @@ export const getEffectTiming = (
 
     if (!normalized.enabled || normalized.wet === 0) return { latencyFrames: 0, tail: finite(0) }
 
+    if (normalized.freeze) return { latencyFrames: 0, tail: { kind: 'unbounded' } }
+
     return {
       latencyFrames: 0,
-      tail: finite((normalized.preDelayMs / 1000 + normalized.decaySec) * rate),
+      tail: finite((normalized.preDelayMs / 1000 + REVERB_NETWORK_DELAY_SEC + normalized.decaySec) * rate),
     }
   }
 

@@ -97,5 +97,9 @@ test('removes disabled or dry-only Reverb tails while retaining wet decay timing
   expect(getEffectTiming(
     { kind: 'reverb', params },
     48_000,
-  ).tail).toEqual({ kind: 'finite', frames: 106_561 })
+  ).tail).toEqual({ kind: 'finite', frames: Math.ceil((0.02 + 0.15 + 2.2) * 48_000) })
+  expect(getEffectTiming(
+    { kind: 'reverb', params: { ...params, freeze: true } },
+    48_000,
+  ).tail).toEqual({ kind: 'unbounded' })
 })

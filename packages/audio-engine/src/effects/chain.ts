@@ -231,9 +231,23 @@ export function applyReverbNodeChainParams(
 
   for (const [parameterId, value] of [
     ['reverb.wet', normalized.wet],
+    ['reverb.decaySec', normalized.decaySec],
     ['reverb.preDelayMs', normalized.preDelayMs],
+    ['reverb.reflections', normalized.reflections],
+    ['reverb.reflectionModAmountMs', normalized.reflectionModAmountMs],
+    ['reverb.reflectionModRateHz', normalized.reflectionModRateHz],
+    ['reverb.reflectionShape', normalized.reflectionShape],
+    ['reverb.diffuse', normalized.diffuse],
+    ['reverb.size', normalized.size],
+    ['reverb.diffusion', normalized.diffusion],
     ['reverb.lowCutHz', normalized.lowCutHz],
     ['reverb.highCutHz', normalized.highCutHz],
+    ['reverb.lowShelfHz', normalized.lowShelfHz],
+    ['reverb.highShelfHz', normalized.highShelfHz],
+    ['reverb.lowShelfDb', normalized.lowShelfDb],
+    ['reverb.highShelfDb', normalized.highShelfDb],
+    ['reverb.chorusAmountMs', normalized.chorusAmountMs],
+    ['reverb.chorusRateHz', normalized.chorusRateHz],
     ['reverb.stereoWidth', normalized.stereoWidth],
   ] as const) {
     const parameter = chain.workletNode.parameters.get(parameterId)

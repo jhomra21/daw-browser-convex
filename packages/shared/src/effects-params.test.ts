@@ -385,11 +385,20 @@ describe('Modulation effect contracts', () => {
         feedback: 0,
         stereoPhase: 0.25,
         mix: 0.35,
+        mode: 'chorus',
+        waveform: 'sine',
+        safeBass: false,
+        safeBassHz: 100,
+        width: 1,
+        outputDb: 0,
       },
     })
     expect(AUDIO_EFFECT_CONTRACTS.phaser.normalizeParams({ version: 1, state: { stages: 5, centerHz: 1 } }).state)
       .toMatchObject({ stages: 6, centerHz: 100 })
-    expect(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ waveform: 'square' }).state.waveform).toBe('sine')
+    // 'square' became a real Tremolo waveform in v2; only names outside the list fall back to sine.
+    expect(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ waveform: 'square' }).state.waveform).toBe('square')
+    expect(AUDIO_EFFECT_CONTRACTS.tremolo.normalizeParams({ waveform: 'zigzag' }).state.waveform).toBe('sine')
+    expect(AUDIO_EFFECT_CONTRACTS.flanger.normalizeParams({ mode: 'vibrato' }).state.mode).toBe('flanger')
     expect(AUDIO_EFFECT_CONTRACTS.ensemble.normalizeParams({ voices: 9 }).state.voices).toBe(3)
   })
 

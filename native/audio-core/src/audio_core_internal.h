@@ -27,7 +27,11 @@
 #include <type_traits>
 #include <tuple>
 
+#include "amplitude_modulation_kernel.h"
 #include "autofilter_kernel.h"
+#include "chorus_kernel.h"
+#include "ensemble_kernel.h"
+#include "phaser_kernel.h"
 #include "reverb_kernel.h"
 #include "delay_kernel.h"
 #include "compressor_kernel.h"
@@ -65,7 +69,6 @@ constexpr uint32_t kMaximumGraphEdges = kMaximumLiveEdges + kMaximumGhostEdges;
 constexpr uint64_t kTransitionNodeId = 1ULL << 63;
 constexpr uint32_t kMaximumGraphProcessors = kMaximumLiveProcessors + kMaximumGhostProcessors;
 constexpr uint32_t kMaximumInstrumentVoices = DAW_AUDIO_CORE_MAX_INSTRUMENT_VOICES;
-constexpr uint32_t kMaximumModulationDelayFrames = 4132;
 constexpr uint32_t kMaximumDelayProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumReverbProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
 constexpr uint32_t kMaximumLimiterProcessors = DAW_AUDIO_CORE_MAX_PROCESSORS_PER_NODE;
@@ -558,19 +561,18 @@ struct InstrumentNodeState {
   float granular_frozen_position = -1.0F;
 };
 
+// One slot holds every modulation kernel; only the processor's own kind is prepared (control thread, at publication),
+// so a slot costs the delay lines of that one kernel.
 struct ModulationHistory {
-  std::array<float, kMaximumModulationDelayFrames> delay_left{};
-  std::array<float, kMaximumModulationDelayFrames> delay_right{};
-  std::array<float, 12> allpass_x_left{};
-  std::array<float, 12> allpass_x_right{};
-  std::array<float, 12> allpass_y_left{};
-  std::array<float, 12> allpass_y_right{};
-  uint32_t write = 0;
-  float feedback_left = 0.0F;
-  float feedback_right = 0.0F;
-  double phase = 0.0;
+  daw::audio_core::ChorusKernel chorus;
+  daw::audio_core::EnsembleKernel ensemble;
+  daw::audio_core::PhaserKernel phaser;
+  daw::audio_core::AmplitudeModulationKernel amplitude;
   float bypass = 0.0F;
 };
+
+bool is_modulation_kind(uint32_t kind);
+void prepare_modulation_history(ModulationHistory &history, uint32_t kind, uint32_t sample_rate_hz);
 
 // The kernel owns its lines, sized for the core's sample rate when the history is built.
 struct DelayHistory {

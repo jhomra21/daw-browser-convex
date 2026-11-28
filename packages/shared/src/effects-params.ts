@@ -1235,21 +1235,88 @@ export const normalizeAutoFilterParamsEnvelope = (value: JsonValue): AutoFilterP
   }
 }
 
-export type ModulationWaveform = 'sine' | 'triangle'
+export const MODULATION_WAVEFORMS = ['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold', 'wander'] as const
+
+export type ModulationWaveform = (typeof MODULATION_WAVEFORMS)[number]
 
 export type PhaserStages = 4 | 6 | 8 | 12
 
-export type ChorusParams = { enabled: boolean; delayMs: number; depthMs: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+export const CHORUS_MODES = ['chorus', 'vibrato', 'vintage'] as const
 
-export type FlangerParams = ChorusParams
+export const FLANGER_MODES = ['flanger', 'throughZero'] as const
 
-export type PhaserParams = { enabled: boolean; stages: PhaserStages; centerHz: number; depthOctaves: number; rateHz: number; feedback: number; stereoPhase: number; mix: number }
+export type ChorusMode = (typeof CHORUS_MODES)[number]
 
-export type TremoloParams = { enabled: boolean; waveform: ModulationWaveform; rateHz: number; depth: number; 'shape': number; phase: number }
+export type FlangerMode = (typeof FLANGER_MODES)[number]
+
+type DelayModulationParams<Mode extends string> = {
+  enabled: boolean
+  mode: Mode
+  waveform: ModulationWaveform
+  safeBass: boolean
+  delayMs: number
+  depthMs: number
+  rateHz: number
+  feedback: number
+  stereoPhase: number
+  mix: number
+  safeBassHz: number
+  width: number
+  outputDb: number
+}
+
+export type ChorusParams = DelayModulationParams<ChorusMode>
+
+export type FlangerParams = DelayModulationParams<FlangerMode>
+
+export type PhaserParams = {
+  enabled: boolean
+  stages: PhaserStages
+  waveform: ModulationWaveform
+  safeBass: boolean
+  centerHz: number
+  depthOctaves: number
+  rateHz: number
+  feedback: number
+  stereoPhase: number
+  mix: number
+  spreadOctaves: number
+  blend: number
+  safeBassHz: number
+  outputDb: number
+}
+
+export type TremoloParams = {
+  enabled: boolean
+  waveform: ModulationWaveform
+  sync: boolean
+  division: number
+  invert: boolean
+  rateHz: number
+  depth: number
+  'shape': number
+  phase: number
+  stereoPhase: number
+}
 
 export type AutoPanParams = TremoloParams
 
-export type EnsembleParams = { enabled: boolean; voices: 3; delayMs: number; depthMs: number; rateHz: number; spread: number; mix: number }
+export type EnsembleParams = {
+  enabled: boolean
+  voices: 3
+  waveform: ModulationWaveform
+  safeBass: boolean
+  delayMs: number
+  depthMs: number
+  rateHz: number
+  spread: number
+  mix: number
+  fastDepthMs: number
+  fastRateHz: number
+  safeBassHz: number
+  width: number
+  outputDb: number
+}
 
 export type ChorusParamsEnvelope = ProcessorStateEnvelope<ChorusParams>
 
@@ -1271,39 +1338,43 @@ const normalizeModulationEnvelope = <T>(value: JsonValue, normalize: (state: Jso
   return { version: 1, state: normalize(readObject(envelope.version === 1 ? envelope.state : value)) }
 }
 
-export const createDefaultChorusParams = (): ChorusParams => ({ enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 })
-export const createDefaultFlangerParams = (): FlangerParams => ({ enabled: true, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5 })
-export const createDefaultPhaserParams = (): PhaserParams => ({ enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 })
-export const createDefaultTremoloParams = (): TremoloParams => ({ enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0 })
-export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', rateHz: 1, depth: 1, 'shape': 0.5, phase: 0 })
-export const createDefaultEnsembleParams = (): EnsembleParams => ({ enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 })
+const normalizeWaveform = (value: JsonValue, fallback: ModulationWaveform): ModulationWaveform => MODULATION_WAVEFORMS.find((waveform) => waveform === value) ?? fallback
+
+const normalizeChoice = <const Choices extends readonly string[]>(choices: Choices, value: JsonValue, fallback: Choices[number]): Choices[number] => choices.find((choice) => choice === value) ?? fallback
+
+export const createDefaultChorusParams = (): ChorusParams => ({ enabled: true, mode: 'chorus', waveform: 'sine', safeBass: false, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35, safeBassHz: 100, width: 1, outputDb: 0 })
+export const createDefaultFlangerParams = (): FlangerParams => ({ enabled: true, mode: 'flanger', waveform: 'sine', safeBass: false, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, safeBassHz: 100, width: 1, outputDb: 0 })
+export const createDefaultPhaserParams = (): PhaserParams => ({ enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5, spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0 })
+export const createDefaultTremoloParams = (): TremoloParams => ({ enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0, stereoPhase: 0 })
+export const createDefaultAutoPanParams = (): AutoPanParams => ({ enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 1, depth: 1, 'shape': 0.5, phase: 0, stereoPhase: 0.5 })
+export const createDefaultEnsembleParams = (): EnsembleParams => ({ enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5, fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0 })
 
 export const normalizeChorusParamsEnvelope = (value: JsonValue): ChorusParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultChorusParams()
 
-  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 5, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 10), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, 0, 0.5), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, mode: normalizeChoice(CHORUS_MODES, state.mode, defaults.mode), waveform: normalizeWaveform(state.waveform, defaults.waveform), safeBass: isJsonBoolean(state.safeBass) ? state.safeBass : defaults.safeBass, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 5, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 10), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, 0, 0.5), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1), safeBassHz: normalizeNumber(state.safeBassHz, defaults.safeBassHz, 20, 1000), width: normalizeNumber(state.width, defaults.width, 0, 2), outputDb: normalizeNumber(state.outputDb, defaults.outputDb, -24, 12) }
 })
 
 export const normalizeFlangerParamsEnvelope = (value: JsonValue): FlangerParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultFlangerParams()
 
-  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 0.1, 10), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, mode: normalizeChoice(FLANGER_MODES, state.mode, defaults.mode), waveform: normalizeWaveform(state.waveform, defaults.waveform), safeBass: isJsonBoolean(state.safeBass) ? state.safeBass : defaults.safeBass, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 0.1, 10), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1), safeBassHz: normalizeNumber(state.safeBassHz, defaults.safeBassHz, 20, 1000), width: normalizeNumber(state.width, defaults.width, 0, 2), outputDb: normalizeNumber(state.outputDb, defaults.outputDb, -24, 12) }
 })
 
 export const normalizePhaserParamsEnvelope = (value: JsonValue): PhaserParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultPhaserParams()
 
-  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, stages: state.stages === 4 || state.stages === 6 || state.stages === 8 || state.stages === 12 ? state.stages : defaults.stages, centerHz: normalizeNumber(state.centerHz, defaults.centerHz, 100, 8000), depthOctaves: normalizeNumber(state.depthOctaves, defaults.depthOctaves, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, stages: state.stages === 4 || state.stages === 6 || state.stages === 8 || state.stages === 12 ? state.stages : defaults.stages, waveform: normalizeWaveform(state.waveform, defaults.waveform), safeBass: isJsonBoolean(state.safeBass) ? state.safeBass : defaults.safeBass, centerHz: normalizeNumber(state.centerHz, defaults.centerHz, 100, 8000), depthOctaves: normalizeNumber(state.depthOctaves, defaults.depthOctaves, 0, 5), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), feedback: normalizeNumber(state.feedback, defaults.feedback, -0.95, 0.95), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5), mix: normalizeNumber(state.mix, defaults.mix, 0, 1), spreadOctaves: normalizeNumber(state.spreadOctaves, defaults.spreadOctaves, 0, 4), blend: normalizeNumber(state.blend, defaults.blend, 0, 1), safeBassHz: normalizeNumber(state.safeBassHz, defaults.safeBassHz, 20, 1000), outputDb: normalizeNumber(state.outputDb, defaults.outputDb, -24, 12) }
 })
 
-const normalizeAmplitudeModulation = (value: JsonValue, defaults: TremoloParams): TremoloParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({ enabled: isJsonBoolean(state.enabled) ? state.enabled : true, waveform: state.waveform === 'triangle' ? 'triangle' : 'sine', rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), depth: normalizeNumber(state.depth, defaults.depth, 0, 1), 'shape': normalizeNumber(state['shape'], defaults['shape'], 0, 1), phase: normalizeNumber(state.phase, defaults.phase, 0, 1) }))
+const normalizeAmplitudeModulation = (value: JsonValue, defaults: TremoloParams): TremoloParamsEnvelope => normalizeModulationEnvelope(value, (state) => ({ enabled: isJsonBoolean(state.enabled) ? state.enabled : true, waveform: normalizeWaveform(state.waveform, defaults.waveform), sync: isJsonBoolean(state.sync) ? state.sync : defaults.sync, division: Math.round(normalizeNumber(state.division, defaults.division, 0, AUTO_FILTER_LFO_DIVISIONS.length - 1)), invert: isJsonBoolean(state.invert) ? state.invert : defaults.invert, rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.01, 20), depth: normalizeNumber(state.depth, defaults.depth, 0, 1), 'shape': normalizeNumber(state['shape'], defaults['shape'], 0, 1), phase: normalizeNumber(state.phase, defaults.phase, 0, 1), stereoPhase: normalizeNumber(state.stereoPhase, defaults.stereoPhase, -0.5, 0.5) }))
 export const normalizeTremoloParamsEnvelope = (value: JsonValue): TremoloParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultTremoloParams())
 export const normalizeAutoPanParamsEnvelope = (value: JsonValue): AutoPanParamsEnvelope => normalizeAmplitudeModulation(value, createDefaultAutoPanParams())
 
 export const normalizeEnsembleParamsEnvelope = (value: JsonValue): EnsembleParamsEnvelope => normalizeModulationEnvelope(value, (state) => {
   const defaults = createDefaultEnsembleParams()
 
-  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, voices: 3, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 10, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 1, 12), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.05, 5), spread: normalizeNumber(state.spread, defaults.spread, 0, 1), mix: normalizeNumber(state.mix, defaults.mix, 0, 1) }
+  return { enabled: isJsonBoolean(state.enabled) ? state.enabled : true, voices: 3, waveform: normalizeWaveform(state.waveform, defaults.waveform), safeBass: isJsonBoolean(state.safeBass) ? state.safeBass : defaults.safeBass, delayMs: normalizeNumber(state.delayMs, defaults.delayMs, 10, 30), depthMs: normalizeNumber(state.depthMs, defaults.depthMs, 1, 12), rateHz: normalizeNumber(state.rateHz, defaults.rateHz, 0.05, 5), spread: normalizeNumber(state.spread, defaults.spread, 0, 1), mix: normalizeNumber(state.mix, defaults.mix, 0, 1), fastDepthMs: normalizeNumber(state.fastDepthMs, defaults.fastDepthMs, 0, 4), fastRateHz: normalizeNumber(state.fastRateHz, defaults.fastRateHz, 0.5, 12), safeBassHz: normalizeNumber(state.safeBassHz, defaults.safeBassHz, 20, 1000), width: normalizeNumber(state.width, defaults.width, 0, 2), outputDb: normalizeNumber(state.outputDb, defaults.outputDb, -24, 12) }
 })
 
 export type LoFiQuantization = 'round' | 'floor' | 'truncate'

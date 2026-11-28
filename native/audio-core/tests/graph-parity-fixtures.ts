@@ -1031,55 +1031,105 @@ type ModulationFixtureDefinition = {
   legacy: PortableLegacyModulationFixture
 }
 
+const chorusState: DelayModulationProcessorState = {
+  enabled: true, mode: 'chorus', waveform: 'sine', safeBass: false, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35,
+  safeBassHz: 100, width: 1, outputDb: 0,
+}
+
+const flangerState: DelayModulationProcessorState = {
+  enabled: true, mode: 'flanger', waveform: 'sine', safeBass: false, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5,
+  safeBassHz: 100, width: 1, outputDb: 0,
+}
+
+const phaserState: PhaserProcessorState = {
+  enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1_000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5,
+  spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0,
+}
+
+const tremoloState: AmplitudeModulationProcessorState = {
+  enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0, stereoPhase: 0,
+}
+
+const autoPanState: AmplitudeModulationProcessorState = {
+  enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 1, depth: 1, 'shape': 0.5, phase: 0, stereoPhase: 0.5,
+}
+
+const ensembleState: EnsembleProcessorState = {
+  enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5,
+  fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0,
+}
+
 const modulationDefinitions: readonly ModulationFixtureDefinition[] = [
-  {
-    kind: 'chorus',
-    kindId: 4,
-    legacy: {
-      kind: 'chorus',
-      state: { enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 },
-    },
-  },
-  {
-    kind: 'flanger',
-    kindId: 5,
-    legacy: {
-      kind: 'flanger',
-      state: { enabled: true, delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5 },
-    },
-  },
-  {
-    kind: 'phaser',
-    kindId: 6,
-    legacy: {
-      kind: 'phaser',
-      state: { enabled: true, stages: 6, centerHz: 1_000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 },
-    },
-  },
-  {
-    kind: 'tremolo',
-    kindId: 7,
-    legacy: {
-      kind: 'tremolo',
-      state: { enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, 'shape': 0.5, phase: 0 },
-    },
-  },
-  {
-    kind: 'autopan',
-    kindId: 8,
-    legacy: {
-      kind: 'autopan',
-      state: { enabled: true, waveform: 'sine', rateHz: 1, depth: 1, 'shape': 0.5, phase: 0 },
-    },
-  },
-  {
-    kind: 'ensemble',
-    kindId: 9,
-    legacy: {
-      kind: 'ensemble',
-      state: { enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 },
-    },
-  },
+  { kind: 'chorus', kindId: 4, legacy: { kind: 'chorus', state: chorusState } },
+  { kind: 'flanger', kindId: 5, legacy: { kind: 'flanger', state: flangerState } },
+  { kind: 'phaser', kindId: 6, legacy: { kind: 'phaser', state: phaserState } },
+  { kind: 'tremolo', kindId: 7, legacy: { kind: 'tremolo', state: tremoloState } },
+  { kind: 'autopan', kindId: 8, legacy: { kind: 'autopan', state: autoPanState } },
+  { kind: 'ensemble', kindId: 9, legacy: { kind: 'ensemble', state: ensembleState } },
+]
+
+// Several parameter sets per effect, so the worklet is held to the core on every mode, waveform and control extreme the
+// effects have, not just their defaults. Each runs about 85 ms of low-pitched sweeps in uneven blocks: the delay reads of the native
+// and the Wasm core differ by float contraction, and a high-pitched input would measure that, not the worklet.
+type ModulationVariant = { name: string; sampleRateHz?: number; legacy: PortableLegacyModulationFixture; tolerance?: number }
+
+const chorusVariant = (name: string, state: Partial<DelayModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
+  ({ name, sampleRateHz, legacy: { kind: 'chorus', state: { ...chorusState, ...state } } })
+
+const flangerVariant = (name: string, state: Partial<DelayModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
+  ({ name, sampleRateHz, legacy: { kind: 'flanger', state: { ...flangerState, ...state } } })
+
+const phaserVariant = (name: string, state: Partial<PhaserProcessorState>, sampleRateHz?: number, tolerance?: number): ModulationVariant =>
+  ({ name, sampleRateHz, tolerance, legacy: { kind: 'phaser', state: { ...phaserState, ...state } } })
+
+const tremoloVariant = (name: string, state: Partial<AmplitudeModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
+  ({ name, sampleRateHz, legacy: { kind: 'tremolo', state: { ...tremoloState, ...state } } })
+
+const autoPanVariant = (name: string, state: Partial<AmplitudeModulationProcessorState>, sampleRateHz?: number): ModulationVariant =>
+  ({ name, sampleRateHz, legacy: { kind: 'autopan', state: { ...autoPanState, ...state } } })
+
+const ensembleVariant = (name: string, state: Partial<EnsembleProcessorState>, sampleRateHz?: number): ModulationVariant =>
+  ({ name, sampleRateHz, legacy: { kind: 'ensemble', state: { ...ensembleState, ...state } } })
+
+const modulationVariants: readonly ModulationVariant[] = [
+  chorusVariant('vibrato', { mode: 'vibrato', depthMs: 3, rateHz: 5, feedback: 0.4 }),
+  chorusVariant('vintage', { mode: 'vintage', delayMs: 8, depthMs: 3, rateHz: 3, feedback: 0.4, safeBass: true, safeBassHz: 250, width: 0.5, outputDb: 3 }, 44_100),
+  chorusVariant('vintage-96000', { mode: 'vintage', delayMs: 30, depthMs: 10, rateHz: 7, feedback: 0.5, mix: 1 }, 96_000),
+  chorusVariant('triangle-negative-stereo', { waveform: 'triangle', feedback: 0.5, stereoPhase: -0.5, rateHz: 6 }),
+  chorusVariant('sample-hold', { waveform: 'sampleHold', rateHz: 20, mix: 1 }),
+  chorusVariant('wander-depth-over-delay', { waveform: 'wander', rateHz: 9, delayMs: 5, depthMs: 10, mix: 1 }),
+  flangerVariant('through-zero', { mode: 'throughZero', delayMs: 1.5, depthMs: 3, feedback: -0.7, rateHz: 6 }),
+  flangerVariant('through-zero-44100', { mode: 'throughZero', delayMs: 0.1, depthMs: 5, rateHz: 15, mix: 1 }, 44_100),
+  flangerVariant('max-feedback-short', { delayMs: 0.1, depthMs: 0.05, feedback: 0.95, rateHz: 4, mix: 1 }),
+  flangerVariant('negative-feedback-saw', { waveform: 'sawUp', feedback: -0.95, delayMs: 3, depthMs: 2, rateHz: 8 }, 96_000),
+  flangerVariant('square', { waveform: 'square', rateHz: 11, safeBass: true, width: 2, outputDb: -6 }),
+  ensembleVariant('fast-modulation', { fastDepthMs: 3, fastRateHz: 8, rateHz: 3, depthMs: 8 }),
+  ensembleVariant('safe-bass-width', { safeBass: true, safeBassHz: 400, width: 0, outputDb: -6, rateHz: 5 }),
+  ensembleVariant('triangle-no-spread', { waveform: 'triangle', spread: 0, rateHz: 5, delayMs: 10, depthMs: 12 }, 44_100),
+  ensembleVariant('sample-hold-96000', { waveform: 'sampleHold', rateHz: 5, fastDepthMs: 4, fastRateHz: 12, width: 2 }, 96_000),
+  phaserVariant('four-stages-negative-feedback', { stages: 4, feedback: -0.95, rateHz: 6 }),
+  phaserVariant('twelve-stages-max-feedback', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 3, rateHz: 8 }),
+  phaserVariant('twelve-stages-negative-feedback-wide-sweep', { stages: 12, feedback: -0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, 96_000),
+  // 12 stages at feedback +0.95 with the sweep reaching both ends of the range: the loop gain 1 / (1 - fb G) is about 5 there, so the
+  // native and the Wasm core (same source, different libm and float contraction) drift apart more than anywhere else. Each row states
+  // its own tolerance, set above the largest difference measured (native vs Wasm, worklet vs Wasm): 5.4e-6 and 4.7e-6 at 48 kHz, which
+  // keeps the 1e-5 bar; 1.27e-5 and 1.04e-5 at 96 kHz, where the loop runs twice as many samples per second, so 2e-5.
+  phaserVariant('twelve-stages-max-feedback-wide-sweep', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, undefined, 1e-5),
+  phaserVariant('twelve-stages-max-feedback-wide-sweep-96000', { stages: 12, feedback: 0.95, centerHz: 1_000, depthOctaves: 5, rateHz: 8 }, 96_000, 2e-5),
+  phaserVariant('spread-blend', { stages: 8, spreadOctaves: 2, blend: 0.5, rateHz: 7 }),
+  phaserVariant('spread-only-44100', { stages: 6, spreadOctaves: 4, blend: 0, rateHz: 7, feedback: 0.6 }, 44_100),
+  phaserVariant('square-safe-bass', { waveform: 'square', rateHz: 15, safeBass: true, safeBassHz: 300, outputDb: -3, mix: 1 }),
+  tremoloVariant('triangle-inverted-shape', { waveform: 'triangle', depth: 1, 'shape': 0.2, invert: true, rateHz: 8 }),
+  tremoloVariant('synced-saw', { waveform: 'sawDown', sync: true, division: 3, depth: 0.8, stereoPhase: 0.25 }),
+  tremoloVariant('square-antiphase', { waveform: 'square', rateHz: 10, depth: 0.8, stereoPhase: 0.5 }, 44_100),
+  tremoloVariant('sample-hold', { waveform: 'sampleHold', rateHz: 14, depth: 1, 'shape': 0.8 }),
+  tremoloVariant('wander-offset', { waveform: 'wander', rateHz: 9, depth: 1, phase: 0.3, stereoPhase: -0.3 }, 96_000),
+  tremoloVariant('sine-shaped', { depth: 1, 'shape': 0.9, rateHz: 6, phase: 0.6 }),
+  autoPanVariant('triangle-in-phase', { waveform: 'triangle', stereoPhase: 0, rateHz: 6 }),
+  autoPanVariant('square-synced-inverted', { waveform: 'square', sync: true, division: 8, invert: true }),
+  autoPanVariant('sample-hold-shaped', { waveform: 'sampleHold', rateHz: 12, 'shape': 0.1, stereoPhase: -0.25 }, 44_100),
+  autoPanVariant('wander-half-depth', { waveform: 'wander', rateHz: 9, depth: 0.5, 'shape': 0.9, phase: 0.4 }, 96_000),
+  autoPanVariant('saw-quarter-phase', { waveform: 'sawUp', rateHz: 5, stereoPhase: 0.25 }),
 ]
 
 const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
@@ -1097,17 +1147,17 @@ const encodeModulationState = (fixture: PortableLegacyModulationFixture) => {
 }
 
 const modulationParameterTargets = (kind: PortableModulationKind): readonly number[] => {
-  if (kind === 'chorus') return [74, 75, 76, 77, 78, 79]
+  if (kind === 'chorus') return [74, 75, 76, 77, 78, 79, 177, 178, 179]
 
-  if (kind === 'flanger') return [80, 81, 82, 83, 84, 85]
+  if (kind === 'flanger') return [80, 81, 82, 83, 84, 85, 180, 181, 182]
 
-  if (kind === 'phaser') return [86, 87, 88, 89, 90, 91]
+  if (kind === 'phaser') return [86, 87, 88, 89, 90, 91, 183, 184, 185, 186]
 
-  if (kind === 'tremolo') return [92, 93, 94, 95]
+  if (kind === 'tremolo') return [92, 93, 94, 95, 187]
 
-  if (kind === 'autopan') return [96, 97, 98, 99]
+  if (kind === 'autopan') return [96, 97, 98, 99, 188]
 
-  return [100, 101, 102, 103, 104]
+  return [100, 101, 102, 103, 104, 189, 190, 191, 192, 193]
 }
 
 const modulationStateWith = (
@@ -1148,10 +1198,13 @@ const modulationFixture = (
     blockPartitions?: readonly number[]
     assertReset?: boolean
     bypassed?: boolean
+    tolerance?: number
   } = {},
 ): PortableGraphParityFixture => {
   const legacy = options.legacy ?? definition.legacy
   const frames = input.length / 2
+  // Through-zero delays its dry path by 5 ms and declares that as the processor's latency.
+  const latencyFrames = legacy.kind === 'flanger' && legacy.state.mode === 'throughZero' ? Math.ceil(5 * sampleRateHz / 1_000) : 0
 
   return {
     name: `${definition.kind}-${name}`,
@@ -1168,17 +1221,36 @@ const modulationFixture = (
       state: encodeModulationState(legacy),
       parameterTargets: modulationParameterTargets(definition.kind),
       bypassed: options.bypassed,
+      latencyFrames,
     }),
     frames,
     blockPartitions: options.blockPartitions,
     input,
     assertReset: options.assertReset,
-    nativeWasmTolerance: 1e-5,
+    expectedLatencyFrames: latencyFrames,
+    nativeWasmTolerance: options.tolerance ?? 1e-5,
     legacyModulation: legacy,
-    legacyTolerance: 5e-5,
+    legacyTolerance: options.tolerance ?? 1e-5,
     assertOutput: (output) => finite(output) && changedFromInput(output, input, 1e-5),
   }
 }
+
+const modulationVariantFixtures = modulationVariants.map((variant): PortableGraphParityFixture => {
+  const definition = modulationDefinitions.find((candidate) => candidate.kind === variant.legacy.kind)
+
+  if (!definition) throw new Error(`No modulation fixture definition for ${variant.legacy.kind}.`)
+  const frames = 4_096
+  const rate = variant.sampleRateHz ?? 48_000
+
+  return modulationFixture(
+    definition,
+    `variant-${variant.name}`,
+    'chains',
+    rate,
+    stereo(sweep(frames, 80, 1_500, rate), sweep(frames, 120, 1_200, rate, 0.4)),
+    { legacy: variant.legacy, tolerance: variant.tolerance, maxFramesPerBlock: 480, blockPartitions: [31, 449, ...Array.from({ length: 7 }, () => 480), 256] },
+  )
+})
 
 const modulationFixtures = modulationDefinitions.flatMap((definition): PortableGraphParityFixture[] => {
   const impulseFrames = 2_048
@@ -3168,6 +3240,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     assertOutput: () => false,
   },
   ...modulationFixtures,
+  ...modulationVariantFixtures,
   ...dynamicsFixtures,
   ...dynamicsSidechainFixtures,
   ...timeEffectFixtures,

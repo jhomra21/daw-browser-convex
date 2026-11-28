@@ -108,25 +108,37 @@ const autoFilter = envelope(z.object({
   }).strict(),
 }).strict())
 
+const modulationWaveform = z.enum(['sine', 'triangle', 'sawDown', 'sawUp', 'square', 'sampleHold', 'wander'])
+
 const chorus = envelope(z.object({
-  enabled: z.boolean(), delayMs: finiteNumber, depthMs: finiteNumber, rateHz: finiteNumber,
-  feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
+  enabled: z.boolean(), mode: z.enum(['chorus', 'vibrato', 'vintage']), waveform: modulationWaveform, safeBass: z.boolean(),
+  delayMs: finiteNumber, depthMs: finiteNumber, rateHz: finiteNumber, feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
+  safeBassHz: finiteNumber, width: finiteNumber, outputDb: finiteNumber,
+}).strict())
+
+const flanger = envelope(z.object({
+  enabled: z.boolean(), mode: z.enum(['flanger', 'throughZero']), waveform: modulationWaveform, safeBass: z.boolean(),
+  delayMs: finiteNumber, depthMs: finiteNumber, rateHz: finiteNumber, feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
+  safeBassHz: finiteNumber, width: finiteNumber, outputDb: finiteNumber,
 }).strict())
 
 const phaser = envelope(z.object({
   enabled: z.boolean(), stages: z.union([z.literal(4), z.literal(6), z.literal(8), z.literal(12)]),
+  waveform: modulationWaveform, safeBass: z.boolean(),
   centerHz: finiteNumber, depthOctaves: finiteNumber, rateHz: finiteNumber,
   feedback: finiteNumber, stereoPhase: finiteNumber, mix: finiteNumber,
+  spreadOctaves: finiteNumber, blend: finiteNumber, safeBassHz: finiteNumber, outputDb: finiteNumber,
 }).strict())
 
 const tremolo = envelope(z.object({
-  enabled: z.boolean(), waveform: z.enum(['sine', 'triangle']), rateHz: finiteNumber,
-  depth: finiteNumber, 'shape': finiteNumber, phase: finiteNumber,
+  enabled: z.boolean(), waveform: modulationWaveform, sync: z.boolean(), division: finiteNumber, invert: z.boolean(),
+  rateHz: finiteNumber, depth: finiteNumber, 'shape': finiteNumber, phase: finiteNumber, stereoPhase: finiteNumber,
 }).strict())
 
 const ensemble = envelope(z.object({
-  enabled: z.boolean(), voices: z.literal(3), delayMs: finiteNumber, depthMs: finiteNumber,
-  rateHz: finiteNumber, spread: finiteNumber, mix: finiteNumber,
+  enabled: z.boolean(), voices: z.literal(3), waveform: modulationWaveform, safeBass: z.boolean(),
+  delayMs: finiteNumber, depthMs: finiteNumber, rateHz: finiteNumber, spread: finiteNumber, mix: finiteNumber,
+  fastDepthMs: finiteNumber, fastRateHz: finiteNumber, safeBassHz: finiteNumber, width: finiteNumber, outputDb: finiteNumber,
 }).strict())
 
 const spectrum = envelope(z.object({ enabled: z.boolean(), view: z.enum(['spectrum', 'spectrogram', 'both']) }).strict())
@@ -240,7 +252,7 @@ export const audioEffectAddPayloadSchema = z.discriminatedUnion('effectKind', [
   z.object({ effectKind: z.literal('limiter'), params: limiter.optional() }).strict(),
   z.object({ effectKind: z.literal('lofi'), params: lofi.optional() }).strict(),
   z.object({ effectKind: z.literal('chorus'), params: chorus.optional() }).strict(),
-  z.object({ effectKind: z.literal('flanger'), params: chorus.optional() }).strict(),
+  z.object({ effectKind: z.literal('flanger'), params: flanger.optional() }).strict(),
   z.object({ effectKind: z.literal('phaser'), params: phaser.optional() }).strict(),
   z.object({ effectKind: z.literal('tremolo'), params: tremolo.optional() }).strict(),
   z.object({ effectKind: z.literal('autopan'), params: tremolo.optional() }).strict(),
@@ -268,7 +280,7 @@ export const persistedProcessorSnapshotSchema = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('limiter'), params: limiter }).strict(),
   z.object({ kind: z.literal('lofi'), params: lofi }).strict(),
   z.object({ kind: z.literal('chorus'), params: chorus }).strict(),
-  z.object({ kind: z.literal('flanger'), params: chorus }).strict(),
+  z.object({ kind: z.literal('flanger'), params: flanger }).strict(),
   z.object({ kind: z.literal('phaser'), params: phaser }).strict(),
   z.object({ kind: z.literal('tremolo'), params: tremolo }).strict(),
   z.object({ kind: z.literal('autopan'), params: tremolo }).strict(),

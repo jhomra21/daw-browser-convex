@@ -49,7 +49,7 @@ void render_autofilter_processor(
   };
   advance_bypass(core, history.bypass, processor.bypassed != 0 || state.enabled == 0);
   // The wrapped project frame keeps a looped song's LFO on its bar; the block's start is where a mid-block loop wrap is ignored.
-  const daw::audio_core::AutoFilterTransport transport{
+  const daw::audio_core::dsp::LfoTransport transport{
     .tempo_bpm = core.transport.tempo_bpm,
     .frame = project_time_frame(core) + static_cast<int64_t>(frame),
     .running = core.transport.running != 0,

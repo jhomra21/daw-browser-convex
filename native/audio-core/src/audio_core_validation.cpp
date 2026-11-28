@@ -184,6 +184,10 @@ bool valid_eq_state(const daw_audio_eq_state &state) {
 
 bool valid_delay_modulation_state(const daw_audio_delay_modulation_state &state, bool chorus) {
   return (state.enabled == 0 || state.enabled == 1)
+    && state.mode <= (chorus ? 2u : 1u) && state.waveform < daw::audio_core::dsp::kLfoWaveformCount && state.safe_bass <= 1
+    && std::isfinite(state.safe_bass_hz) && state.safe_bass_hz >= 20.0F && state.safe_bass_hz <= 1000.0F
+    && std::isfinite(state.width) && state.width >= 0.0F && state.width <= 2.0F
+    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
     && std::isfinite(state.delay_ms) && state.delay_ms >= (chorus ? 5.0F : 0.1F) && state.delay_ms <= (chorus ? 30.0F : 10.0F)
     && std::isfinite(state.depth_ms) && state.depth_ms >= 0.0F && state.depth_ms <= (chorus ? 10.0F : 5.0F)
     && std::isfinite(state.rate_hz) && state.rate_hz >= 0.01F && state.rate_hz <= 20.0F
@@ -194,6 +198,11 @@ bool valid_delay_modulation_state(const daw_audio_delay_modulation_state &state,
 
 bool valid_phaser_state(const daw_audio_phaser_state &state) {
   return (state.enabled == 0 || state.enabled == 1)
+    && state.waveform < daw::audio_core::dsp::kLfoWaveformCount && state.safe_bass <= 1
+    && std::isfinite(state.spread_octaves) && state.spread_octaves >= 0.0F && state.spread_octaves <= 4.0F
+    && std::isfinite(state.blend) && state.blend >= 0.0F && state.blend <= 1.0F
+    && std::isfinite(state.safe_bass_hz) && state.safe_bass_hz >= 20.0F && state.safe_bass_hz <= 1000.0F
+    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
     && (state.stages == 4 || state.stages == 6 || state.stages == 8 || state.stages == 12)
     && std::isfinite(state.center_hz) && state.center_hz >= 100.0F && state.center_hz <= 8000.0F
     && std::isfinite(state.depth_octaves) && state.depth_octaves >= 0.0F && state.depth_octaves <= 5.0F
@@ -204,7 +213,9 @@ bool valid_phaser_state(const daw_audio_phaser_state &state) {
 }
 
 bool valid_amplitude_modulation_state(const daw_audio_amplitude_modulation_state &state) {
-  return (state.enabled == 0 || state.enabled == 1) && state.waveform <= 1
+  return (state.enabled == 0 || state.enabled == 1) && state.waveform < daw::audio_core::dsp::kLfoWaveformCount
+    && state.sync <= 1 && state.invert <= 1 && state.division < daw::audio_core::dsp::kLfoDivisionCount
+    && std::isfinite(state.stereo_phase) && state.stereo_phase >= -0.5F && state.stereo_phase <= 0.5F
     && std::isfinite(state.rate_hz) && state.rate_hz >= 0.01F && state.rate_hz <= 20.0F
     && std::isfinite(state.depth) && state.depth >= 0.0F && state.depth <= 1.0F
     && std::isfinite(state.shape) && state.shape >= 0.0F && state.shape <= 1.0F
@@ -213,6 +224,12 @@ bool valid_amplitude_modulation_state(const daw_audio_amplitude_modulation_state
 
 bool valid_ensemble_state(const daw_audio_ensemble_state &state) {
   return (state.enabled == 0 || state.enabled == 1) && state.voices == 3
+    && state.waveform < daw::audio_core::dsp::kLfoWaveformCount && state.safe_bass <= 1
+    && std::isfinite(state.fast_depth_ms) && state.fast_depth_ms >= 0.0F && state.fast_depth_ms <= 4.0F
+    && std::isfinite(state.fast_rate_hz) && state.fast_rate_hz >= 0.5F && state.fast_rate_hz <= 12.0F
+    && std::isfinite(state.safe_bass_hz) && state.safe_bass_hz >= 20.0F && state.safe_bass_hz <= 1000.0F
+    && std::isfinite(state.width) && state.width >= 0.0F && state.width <= 2.0F
+    && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 12.0F
     && std::isfinite(state.delay_ms) && state.delay_ms >= 10.0F && state.delay_ms <= 30.0F
     && std::isfinite(state.depth_ms) && state.depth_ms >= 1.0F && state.depth_ms <= 12.0F
     && std::isfinite(state.rate_hz) && state.rate_hz >= 0.05F && state.rate_hz <= 5.0F
@@ -325,7 +342,7 @@ bool valid_spectral_state(const daw_audio_spectral_state &state) {
 bool valid_autofilter_state(const daw_audio_autofilter_state &state) {
   return state.enabled <= 1 && state.mode <= DAW_AUDIO_AUTOFILTER_MODE_PEAK && state.hi_quality <= 1
     && state.slope <= 1 && state.clip <= 1 && state.envelope_hold <= 1 && state.envelope_link <= 1 && state.lfo_sync <= 1
-    && state.lfo_division < daw::audio_core::AutoFilterKernel::kDivisionCount && state.lfo_stereo_mode <= 1
+    && state.lfo_division < daw::audio_core::dsp::kLfoDivisionCount && state.lfo_stereo_mode <= 1
     && std::isfinite(state.output_db) && state.output_db >= -24.0F && state.output_db <= 24.0F
     && std::isfinite(state.frequency_hz) && state.frequency_hz >= 20.0F && state.frequency_hz <= 20000.0F
     && std::isfinite(state.resonance) && state.resonance >= 0.0F && state.resonance <= 1.0F
@@ -388,42 +405,59 @@ bool decode_processor_state(
     out_processor->saturator = state;
     return true;
   }
-  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER) && descriptor.state_size == 28) {
-    const daw_audio_delay_modulation_state state{
-      .enabled = read_u32_le(descriptor.state), .delay_ms = read_f32_le(descriptor.state + 4),
+  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER) && descriptor.state_size == 52) {
+    const bool chorus = descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS;
+    daw_audio_delay_modulation_state state{
+      .enabled = read_u32_le(descriptor.state), .mode = read_u32_le(descriptor.state + 28),
+      .waveform = read_u32_le(descriptor.state + 32), .safe_bass = read_u32_le(descriptor.state + 36),
+      .delay_ms = read_f32_le(descriptor.state + 4),
       .depth_ms = read_f32_le(descriptor.state + 8), .rate_hz = read_f32_le(descriptor.state + 12),
       .feedback = read_f32_le(descriptor.state + 16), .stereo_phase = read_f32_le(descriptor.state + 20), .mix = read_f32_le(descriptor.state + 24),
+      .safe_bass_hz = read_f32_le(descriptor.state + 40), .width = read_f32_le(descriptor.state + 44),
+      .output_db = read_f32_le(descriptor.state + 48),
     };
-    if (!valid_delay_modulation_state(state, descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS)) return false;
+    if (!valid_delay_modulation_state(state, chorus)) return false;
+    // A Flanger's modes are 0 Flanger and 1 Through-zero; the kernel numbers them after the Chorus modes.
+    if (!chorus) state.mode += static_cast<uint32_t>(daw::audio_core::ChorusMode::Flanger);
+    if (descriptor.latency_frames != daw::audio_core::ChorusKernel::latency_frames(static_cast<daw::audio_core::ChorusMode>(state.mode), rate)) return false;
     out_processor->delay_modulation = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER && descriptor.state_size == 32) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_PHASER && descriptor.state_size == 56) {
     const daw_audio_phaser_state state{
       .enabled = read_u32_le(descriptor.state), .stages = read_u32_le(descriptor.state + 4),
+      .waveform = read_u32_le(descriptor.state + 32), .safe_bass = read_u32_le(descriptor.state + 36),
       .center_hz = read_f32_le(descriptor.state + 8), .depth_octaves = read_f32_le(descriptor.state + 12),
       .rate_hz = read_f32_le(descriptor.state + 16), .feedback = read_f32_le(descriptor.state + 20),
       .stereo_phase = read_f32_le(descriptor.state + 24), .mix = read_f32_le(descriptor.state + 28),
+      .spread_octaves = read_f32_le(descriptor.state + 40), .blend = read_f32_le(descriptor.state + 44),
+      .safe_bass_hz = read_f32_le(descriptor.state + 48), .output_db = read_f32_le(descriptor.state + 52),
     };
     if (!valid_phaser_state(state)) return false;
     out_processor->phaser = state;
     return true;
   }
-  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN) && descriptor.state_size == 24) {
+  if ((descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO || descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN) && descriptor.state_size == 40) {
     const daw_audio_amplitude_modulation_state state{
       .enabled = read_u32_le(descriptor.state), .waveform = read_u32_le(descriptor.state + 4),
+      .sync = read_u32_le(descriptor.state + 24), .division = read_u32_le(descriptor.state + 28), .invert = read_u32_le(descriptor.state + 32),
       .rate_hz = read_f32_le(descriptor.state + 8), .depth = read_f32_le(descriptor.state + 12),
       .shape = read_f32_le(descriptor.state + 16), .phase = read_f32_le(descriptor.state + 20),
+      .stereo_phase = read_f32_le(descriptor.state + 36),
     };
     if (!valid_amplitude_modulation_state(state)) return false;
     out_processor->amplitude_modulation = state;
     return true;
   }
-  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE && descriptor.state_size == 28) {
+  if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE && descriptor.state_size == 56) {
     const daw_audio_ensemble_state state{
       .enabled = read_u32_le(descriptor.state), .voices = read_u32_le(descriptor.state + 4),
+      .waveform = read_u32_le(descriptor.state + 28), .safe_bass = read_u32_le(descriptor.state + 32),
       .delay_ms = read_f32_le(descriptor.state + 8), .depth_ms = read_f32_le(descriptor.state + 12),
       .rate_hz = read_f32_le(descriptor.state + 16), .spread = read_f32_le(descriptor.state + 20), .mix = read_f32_le(descriptor.state + 24),
+      .fast_depth_ms = read_f32_le(descriptor.state + 36), .fast_rate_hz = read_f32_le(descriptor.state + 40),
+      .safe_bass_hz = read_f32_le(descriptor.state + 44), .width = read_f32_le(descriptor.state + 48),
+      .output_db = read_f32_le(descriptor.state + 52),
     };
     if (!valid_ensemble_state(state)) return false;
     out_processor->ensemble = state;
@@ -603,23 +637,23 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
         || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE
           && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_CHORUS:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_MIX;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_MIX)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_SAFE_BASS_HZ && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_FLANGER:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_DELAY_MS
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_MIX;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_DELAY_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_MIX)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_SAFE_BASS_HZ && target <= DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_PHASER:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_CENTER_HZ
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_MIX;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_CENTER_HZ && target <= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_MIX)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_SPREAD_OCTAVES && target <= DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_TREMOLO:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_RATE_HZ
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_PHASE;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_RATE_HZ && target <= DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_PHASE)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_STEREO_PHASE;
     case DAW_AUDIO_PROCESSOR_KIND_AUTOPAN:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_RATE_HZ
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_PHASE;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_RATE_HZ && target <= DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_PHASE)
+        || target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_STEREO_PHASE;
     case DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_DELAY_MS
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_MIX;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_DELAY_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_MIX)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_FAST_DEPTH_MS && target <= DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_GATE:
       return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_THRESHOLD_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_GATE_RANGE_DB)
@@ -760,6 +794,23 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
     if (target == DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_STEREO_PHASE) return value >= DAW_AUDIO_CORE_FLANGER_STEREO_PHASE_MIN && value <= DAW_AUDIO_CORE_FLANGER_STEREO_PHASE_MAX;
     return value >= DAW_AUDIO_CORE_FLANGER_MIX_MIN && value <= DAW_AUDIO_CORE_FLANGER_MIX_MAX;
   }
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_SAFE_BASS_HZ) return value >= DAW_AUDIO_CORE_CHORUS_SAFE_BASS_HZ_MIN && value <= DAW_AUDIO_CORE_CHORUS_SAFE_BASS_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_WIDTH) return value >= DAW_AUDIO_CORE_CHORUS_WIDTH_MIN && value <= DAW_AUDIO_CORE_CHORUS_WIDTH_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_OUTPUT_DB) return value >= DAW_AUDIO_CORE_CHORUS_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_CHORUS_OUTPUT_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_SAFE_BASS_HZ) return value >= DAW_AUDIO_CORE_FLANGER_SAFE_BASS_HZ_MIN && value <= DAW_AUDIO_CORE_FLANGER_SAFE_BASS_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_WIDTH) return value >= DAW_AUDIO_CORE_FLANGER_WIDTH_MIN && value <= DAW_AUDIO_CORE_FLANGER_WIDTH_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_FLANGER_OUTPUT_DB) return value >= DAW_AUDIO_CORE_FLANGER_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_FLANGER_OUTPUT_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_SPREAD_OCTAVES) return value >= DAW_AUDIO_CORE_PHASER_SPREAD_OCTAVES_MIN && value <= DAW_AUDIO_CORE_PHASER_SPREAD_OCTAVES_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_BLEND) return value >= DAW_AUDIO_CORE_PHASER_BLEND_MIN && value <= DAW_AUDIO_CORE_PHASER_BLEND_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_SAFE_BASS_HZ) return value >= DAW_AUDIO_CORE_PHASER_SAFE_BASS_HZ_MIN && value <= DAW_AUDIO_CORE_PHASER_SAFE_BASS_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_OUTPUT_DB) return value >= DAW_AUDIO_CORE_PHASER_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_PHASER_OUTPUT_DB_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_TREMOLO_STEREO_PHASE) return value >= DAW_AUDIO_CORE_TREMOLO_STEREO_PHASE_MIN && value <= DAW_AUDIO_CORE_TREMOLO_STEREO_PHASE_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_AUTOPAN_STEREO_PHASE) return value >= DAW_AUDIO_CORE_AUTOPAN_STEREO_PHASE_MIN && value <= DAW_AUDIO_CORE_AUTOPAN_STEREO_PHASE_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_FAST_DEPTH_MS) return value >= DAW_AUDIO_CORE_ENSEMBLE_FAST_DEPTH_MS_MIN && value <= DAW_AUDIO_CORE_ENSEMBLE_FAST_DEPTH_MS_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_FAST_RATE_HZ) return value >= DAW_AUDIO_CORE_ENSEMBLE_FAST_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_ENSEMBLE_FAST_RATE_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_SAFE_BASS_HZ) return value >= DAW_AUDIO_CORE_ENSEMBLE_SAFE_BASS_HZ_MIN && value <= DAW_AUDIO_CORE_ENSEMBLE_SAFE_BASS_HZ_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_WIDTH) return value >= DAW_AUDIO_CORE_ENSEMBLE_WIDTH_MIN && value <= DAW_AUDIO_CORE_ENSEMBLE_WIDTH_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_ENSEMBLE_OUTPUT_DB) return value >= DAW_AUDIO_CORE_ENSEMBLE_OUTPUT_DB_MIN && value <= DAW_AUDIO_CORE_ENSEMBLE_OUTPUT_DB_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_CENTER_HZ) return value >= DAW_AUDIO_CORE_PHASER_CENTER_HZ_MIN && value <= DAW_AUDIO_CORE_PHASER_CENTER_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_DEPTH_OCTAVES) return value >= DAW_AUDIO_CORE_PHASER_DEPTH_OCTAVES_MIN && value <= DAW_AUDIO_CORE_PHASER_DEPTH_OCTAVES_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_PHASER_RATE_HZ) return value >= DAW_AUDIO_CORE_PHASER_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_PHASER_RATE_HZ_MAX;

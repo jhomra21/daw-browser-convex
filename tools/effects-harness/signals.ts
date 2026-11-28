@@ -26,6 +26,13 @@ export const noise = (frames: number, amplitude: number, seed = 1) => {
   return Float32Array.from({ length: frames }, () => amplitude * (2 * random() - 1))
 }
 
+/** Gaussian white noise with standard deviation `sigma` (Box-Muller on the seeded generator). */
+export const gaussianNoise = (frames: number, sigma: number, seed = 1) => {
+  const random = seededRandom(seed)
+
+  return Float32Array.from({ length: frames }, () => sigma * Math.sqrt(-2 * Math.log(1 - random())) * Math.cos(2 * Math.PI * random()))
+}
+
 export const impulse = (frames: number, amplitude = 1, at = 0) => {
   const signal = new Float32Array(frames)
   signal[at] = amplitude

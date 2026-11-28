@@ -7,6 +7,7 @@
 // drive, filter and clip at twice the rate between a half-band pair and delays the dry path by that pair's latency.
 #include "dsp/adaa.h"
 #include "dsp/half_band_oversampler.h"
+#include "dsp/lfo.h"
 #include "dsp/numeric_safety.h"
 #include "dsp/parameter_smoother.h"
 
@@ -30,15 +31,6 @@ struct AutoFilterConfig {
   bool sync = false;          // LFO rate follows the tempo
 };
 
-// Where the song is at the current frame. With Sync on and the transport running, the LFO phase is a function of this
-// position, so the same bar always sweeps the same way whatever frame rendering started from. A stopped transport keeps
-// the LFO free-running at the tempo, so live input still moves.
-struct AutoFilterTransport {
-  double tempo_bpm = 0.0;  // 0 when the host has not sent a tempo yet: kDefaultTempoBpm is used
-  int64_t frame = 0;       // song position in sample frames
-  bool running = false;
-};
-
 struct AutoFilterValues {
   float frequency_hz = 1000.0F;
   float resonance = 0.0F;
@@ -58,8 +50,6 @@ class AutoFilterKernel {
  public:
   static constexpr float kMinimumQ = 0.70710678F;
   static constexpr float kMaximumQ = 8.0F;
-  static constexpr uint32_t kDivisionCount = 16;
-  static constexpr double kDefaultTempoBpm = 120.0;
   static constexpr uint32_t kHistoryFrames = 64;  // power of two above the oversampler latency
 
   void prepare(double sampleRate) {
@@ -79,14 +69,14 @@ class AutoFilterKernel {
   }
 
   // Discrete settings may change at any frame; filter type and slope crossfade, quality resets the oversampler.
-  void process(const AutoFilterValues &values, const AutoFilterConfig &config, const AutoFilterTransport &transport, float bypass,
+  void process(const AutoFilterValues &values, const AutoFilterConfig &config, const dsp::LfoTransport &transport, float bypass,
     float inLeft, float inRight, float &outLeft, float &outRight) {
     if (!initialized_) initialize(values, config);
     apply_config(config);
     smooth(values);
     const float input[2] = {std::isfinite(inLeft) ? inLeft : 0.0F, std::isfinite(inRight) ? inRight : 0.0F};
     update_envelope(values, config, input);
-    const double base = config.sync ? sync_rate_hz(config.division, transport.tempo_bpm) : values.lfo_rate_hz;
+    const double base = config.sync ? dsp::lfoSyncRateHz(config.division, transport.tempo_bpm) : values.lfo_rate_hz;
     const bool locked = config.sync && transport.running;
     const double cycles = locked ? static_cast<double>(transport.frame) / sampleRate_ * base : 0.0;
     float output[2] = {0.0F, 0.0F};
@@ -105,33 +95,6 @@ class AutoFilterKernel {
 
   static float q_from_resonance(float resonance) {
     return kMinimumQ * std::pow(kMaximumQ / kMinimumQ, std::clamp(resonance, 0.0F, 1.0F));
-  }
-
-  // LFO cycle length in quarter-note beats: 2 bars, 1 bar, then straight, dotted and triplet values down to 1/32.
-  static float sync_rate_hz(uint32_t division, double tempoBpm) {
-    static constexpr std::array<float, kDivisionCount> kBeats{8.0F, 4.0F, 3.0F, 2.0F, 1.5F, 1.0F, 2.0F / 3.0F, 0.75F,
-      0.5F, 1.0F / 3.0F, 0.375F, 0.25F, 1.0F / 6.0F, 0.1875F, 0.125F, 1.0F / 12.0F};
-    const double bpm = tempoBpm > 0.0 ? tempoBpm : kDefaultTempoBpm;
-    return static_cast<float>(bpm / 60.0 / kBeats[std::min(division, kDivisionCount - 1)]);
-  }
-
-  // Bipolar shape for one point of a cycle. `cycle` seeds sample and hold so left and right share one sequence.
-  static float lfo_shape(uint32_t waveform, double fraction, uint32_t cycle) {
-    const float f = static_cast<float>(fraction);
-    switch (waveform) {
-      case 1: return 1.0F - 4.0F * std::fabs(f - 0.5F);
-      case 2: return 1.0F - 2.0F * f;
-      case 3: return 2.0F * f - 1.0F;
-      case 4: return f < 0.5F ? 1.0F : -1.0F;
-      case 5: {
-        uint32_t x = cycle * 2654435761U;
-        x ^= x >> 16;
-        x *= 0x45D9F3BU;
-        x ^= x >> 16;
-        return static_cast<float>(x) * (2.0F / 4294967295.0F) - 1.0F;
-      }
-      default: return std::sin(6.2831853071795864769F * f);
-    }
   }
 
  private:
@@ -351,7 +314,7 @@ class AutoFilterKernel {
       cycle = channel.cycle;
     }
     const double whole = std::floor(phase);
-    const float lfo = lfo_shape(config.waveform, phase - whole, cycle + static_cast<uint32_t>(static_cast<int64_t>(whole)));
+    const float lfo = dsp::lfoShape(config.waveform, phase - whole, cycle + static_cast<uint32_t>(static_cast<int64_t>(whole)));
     if (!locked) {
       channel.phase += rate / sampleRate_;
       if (channel.phase >= 1.0) {

@@ -41,6 +41,14 @@ class DelayRing {
     return ((c3 * w.t + c2) * w.t + c1) * w.t + w.p[1];
   }
 
+  // Hermite from one frame behind the newest sample and up, linear between the newest sample (delay 0) and the one
+  // before it: a tap can sweep through zero delay without a stencil that needs samples that are not written yet.
+  T readHermiteOrLinear(float delay) const {
+    if (!(delay < 1.0F)) return readHermite(delay);
+    const T fraction = static_cast<T>(std::max(delay, 0.0F));
+    return read(0) + (read(1) - read(0)) * fraction;
+  }
+
   // 4-point Lagrange: flatter passband than Hermite at low frequencies, same cost.
   T readLagrange3(float delay) const {
     const Taps w = taps(delay);

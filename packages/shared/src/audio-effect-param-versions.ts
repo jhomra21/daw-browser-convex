@@ -2,6 +2,7 @@ import { migrateCompressorParamsV1 } from './compressor-params-migration'
 import { migrateDelayParamsV1 } from './delay-params-migration'
 import { migrateGateParamsV1 } from './gate-params-migration'
 import { migrateLimiterParamsV1 } from './limiter-params-migration'
+import { migrateAutoPanParamsV1, migrateChorusParamsV1, migrateEnsembleParamsV1, migrateFlangerParamsV1, migratePhaserParamsV1, migrateTremoloParamsV1 } from './modulation-params-migration'
 import { migrateReverbParamsV1, migrateReverbStereoWidthV1 } from './reverb-params-migration'
 import { migrateAutoFilterEnvelopeAmountV1, migrateAutoFilterParamsV1, migrateAutoFilterResonanceV1 } from './auto-filter-params-migration'
 import { getAutomationParameterDescriptor } from './automation-parameters'
@@ -20,12 +21,12 @@ export const AUDIO_EFFECT_PARAMS_VERSION: Readonly<Record<AudioEffectKind, numbe
   gate: 2,
   limiter: 2,
   lofi: 1,
-  chorus: 1,
-  flanger: 1,
-  phaser: 1,
-  tremolo: 1,
-  autopan: 1,
-  ensemble: 1,
+  chorus: 2,
+  flanger: 2,
+  phaser: 2,
+  tremolo: 2,
+  autopan: 2,
+  ensemble: 2,
   spectral: 1,
   utility: 1,
   spectrum: 1,
@@ -70,6 +71,13 @@ export const AUDIO_EFFECT_PARAMS_VERSIONING: AudioEffectParamsVersioning = {
     delay: { 1: migrateDelayParamsV1 },
     // Reverb: Density Sparse (the old 8 lines), the old in-loop cuts as shelves, Width as the Stereo angle, Chorus on, Smooth Fast.
     reverb: { 1: migrateReverbParamsV1 },
+    // Chorus, Flanger, Ensemble, Phaser, Tremolo, Auto Pan: each added control starts at the value that keeps the old setting (modulation-params-migration.ts).
+    chorus: { 1: migrateChorusParamsV1 },
+    flanger: { 1: migrateFlangerParamsV1 },
+    phaser: { 1: migratePhaserParamsV1 },
+    tremolo: { 1: migrateTremoloParamsV1 },
+    autopan: { 1: migrateAutoPanParamsV1 },
+    ensemble: { 1: migrateEnsembleParamsV1 },
   },
   parameterValues: {
     reverb: { 1: { 'reverb.stereoWidth': migrateReverbStereoWidthV1 } },

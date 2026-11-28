@@ -159,18 +159,24 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 4 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "id": { "const": 4 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 52 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
+              "required": ["enabled", "mode", "waveform", "safeBass", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix", "safeBassHz", "width", "outputDb"],
               "properties": {
                 "enabled": { "type": "boolean" },
+                "mode": { "enum": ["chorus", "vibrato", "vintage"] },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "safeBass": { "type": "boolean" },
                 "delayMs": { "type": "number", "default": 12, "minimum": 5, "maximum": 30, "portableParameter": true},
                 "depthMs": { "type": "number", "default": 4, "minimum": 0, "maximum": 10, "portableParameter": true},
                 "rateHz": { "type": "number", "default": 0.8, "minimum": 0.01, "maximum": 20, "portableParameter": true},
                 "feedback": { "type": "number", "default": 0, "minimum": 0, "maximum": 0.5, "portableParameter": true},
                 "stereoPhase": { "type": "number", "default": 0.25, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
-                "mix": { "type": "number", "default": 0.35, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "mix": { "type": "number", "default": 0.35, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "safeBassHz": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true},
+                "width": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true}
               }
             }
           }
@@ -179,18 +185,24 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 5 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "id": { "const": 5 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 52 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix"],
+              "required": ["enabled", "mode", "waveform", "safeBass", "delayMs", "depthMs", "rateHz", "feedback", "stereoPhase", "mix", "safeBassHz", "width", "outputDb"],
               "properties": {
                 "enabled": { "type": "boolean" },
+                "mode": { "enum": ["flanger", "throughZero"] },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "safeBass": { "type": "boolean" },
                 "delayMs": { "type": "number", "default": 1.5, "minimum": 0.1, "maximum": 10, "portableParameter": true},
                 "depthMs": { "type": "number", "default": 1, "minimum": 0, "maximum": 5, "portableParameter": true},
                 "rateHz": { "type": "number", "default": 0.2, "minimum": 0.01, "maximum": 20, "portableParameter": true},
                 "feedback": { "type": "number", "default": 0.35, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
                 "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "safeBassHz": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true},
+                "width": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true}
               }
             }
           }
@@ -199,18 +211,25 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 6 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 32 }, "tombstone": { "const": false },
+            "id": { "const": 6 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 56 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "stages", "centerHz", "depthOctaves", "rateHz", "feedback", "stereoPhase", "mix"],
+              "required": ["enabled", "stages", "waveform", "safeBass", "centerHz", "depthOctaves", "rateHz", "feedback", "stereoPhase", "mix", "spreadOctaves", "blend", "safeBassHz", "outputDb"],
               "properties": {
-                "enabled": { "type": "boolean" }, "stages": { "enum": [4, 6, 8, 12] },
+                "enabled": { "type": "boolean" },
+                "stages": { "enum": [4, 6, 8, 12] },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "safeBass": { "type": "boolean" },
                 "centerHz": { "type": "number", "default": 1000, "minimum": 100, "maximum": 8000, "portableParameter": true},
                 "depthOctaves": { "type": "number", "default": 3, "minimum": 0, "maximum": 5, "portableParameter": true},
                 "rateHz": { "type": "number", "default": 0.3, "minimum": 0.01, "maximum": 20, "portableParameter": true},
                 "feedback": { "type": "number", "default": 0.3, "minimum": -0.95, "maximum": 0.95, "portableParameter": true},
                 "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true},
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "spreadOctaves": { "type": "number", "default": 0, "minimum": 0, "maximum": 4, "portableParameter": true},
+                "blend": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "safeBassHz": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true}
               }
             }
           }
@@ -219,16 +238,21 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 7 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
+            "id": { "const": 7 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 40 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
+              "required": ["enabled", "waveform", "sync", "division", "invert", "rateHz", "depth", "shape", "phase", "stereoPhase"],
               "properties": {
-                "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
+                "enabled": { "type": "boolean" },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "sync": { "type": "boolean" },
+                "division": { "type": "integer", "minimum": 0, "maximum": 15 },
+                "invert": { "type": "boolean" },
                 "rateHz": { "type": "number", "default": 4, "minimum": 0.01, "maximum": 20, "portableParameter": true},
                 "depth": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
                 "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
-                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0, "minimum": -0.5, "maximum": 0.5, "portableParameter": true}
               }
             }
           }
@@ -237,16 +261,21 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 8 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 24 }, "tombstone": { "const": false },
+            "id": { "const": 8 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 40 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "waveform", "rateHz", "depth", "shape", "phase"],
+              "required": ["enabled", "waveform", "sync", "division", "invert", "rateHz", "depth", "shape", "phase", "stereoPhase"],
               "properties": {
-                "enabled": { "type": "boolean" }, "waveform": { "enum": ["sine", "triangle"] },
+                "enabled": { "type": "boolean" },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "sync": { "type": "boolean" },
+                "division": { "type": "integer", "minimum": 0, "maximum": 15 },
+                "invert": { "type": "boolean" },
                 "rateHz": { "type": "number", "default": 1, "minimum": 0.01, "maximum": 20, "portableParameter": true},
                 "depth": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
                 "shape": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
-                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "phase": { "type": "number", "default": 0, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "stereoPhase": { "type": "number", "default": 0.5, "minimum": -0.5, "maximum": 0.5, "portableParameter": true}
               }
             }
           }
@@ -255,17 +284,25 @@
           "type": "object", "additionalProperties": false,
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
-            "id": { "const": 9 }, "schemaVersion": { "const": 1 }, "stateBytes": { "const": 28 }, "tombstone": { "const": false },
+            "id": { "const": 9 }, "schemaVersion": { "const": 2 }, "stateBytes": { "const": 56 }, "tombstone": { "const": false },
             "state": {
               "type": "object", "additionalProperties": false,
-              "required": ["enabled", "voices", "delayMs", "depthMs", "rateHz", "spread", "mix"],
+              "required": ["enabled", "voices", "waveform", "safeBass", "delayMs", "depthMs", "rateHz", "spread", "mix", "fastDepthMs", "fastRateHz", "safeBassHz", "width", "outputDb"],
               "properties": {
-                "enabled": { "type": "boolean" }, "voices": { "const": 3 },
+                "enabled": { "type": "boolean" },
+                "voices": { "const": 3 },
+                "waveform": { "enum": ["sine", "triangle", "sawDown", "sawUp", "square", "sampleHold", "wander"] },
+                "safeBass": { "type": "boolean" },
                 "delayMs": { "type": "number", "default": 18, "minimum": 10, "maximum": 30, "portableParameter": true},
                 "depthMs": { "type": "number", "default": 6, "minimum": 1, "maximum": 12, "portableParameter": true},
                 "rateHz": { "type": "number", "default": 0.6, "minimum": 0.05, "maximum": 5, "portableParameter": true},
                 "spread": { "type": "number", "default": 1, "minimum": 0, "maximum": 1, "portableParameter": true},
-                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true}
+                "mix": { "type": "number", "default": 0.5, "minimum": 0, "maximum": 1, "portableParameter": true},
+                "fastDepthMs": { "type": "number", "default": 0, "minimum": 0, "maximum": 4, "portableParameter": true},
+                "fastRateHz": { "type": "number", "default": 6, "minimum": 0.5, "maximum": 12, "portableParameter": true},
+                "safeBassHz": { "type": "number", "default": 100, "minimum": 20, "maximum": 1000, "portableParameter": true},
+                "width": { "type": "number", "default": 1, "minimum": 0, "maximum": 2, "portableParameter": true},
+                "outputDb": { "type": "number", "default": 0, "minimum": -24, "maximum": 12, "portableParameter": true}
               }
             }
           }

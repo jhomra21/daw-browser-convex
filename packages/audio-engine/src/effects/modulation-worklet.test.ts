@@ -135,10 +135,12 @@ describe('modulation static worklet', () => {
     const tremoloZero = await render(48_000, 'tremolo', { ...createDefaultTremoloParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.75 }, 2)
     expect(Math.abs(tremoloZero.output[0][1])).toBeLessThanOrEqual(1e-5)
 
-    const panLeft = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.75 }, 2)
-    expect(Math.abs(panLeft.output[1][1])).toBeLessThanOrEqual(1e-5)
-    const panRight = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.25 }, 2)
+    // Each channel follows its own LFO and Auto Pan's default Stereo Phase is 180 degrees: when the left LFO is at its
+    // trough the left channel is silent and the right one is at full level, and the other way round half a cycle later.
+    const panRight = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.75 }, 2)
     expect(Math.abs(panRight.output[0][1])).toBeLessThanOrEqual(1e-5)
+    const panLeft = await render(48_000, 'autopan', { ...createDefaultAutoPanParams(), rateHz: 1, depth: 1, ['shape']: 0.5, phase: 0.25 }, 2)
+    expect(Math.abs(panLeft.output[1][1])).toBeLessThanOrEqual(1e-5)
   })
 
   test('phaser response stays finite and stereo state is isolated', async () => {

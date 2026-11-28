@@ -53,6 +53,11 @@ export const limiterLatencyFrames = (lookaheadMs: number, rate: number) =>
 export const gateCompressorLatencyFrames = (lookaheadMs: number, rate: number) =>
   Math.min(lookaheadFrames(lookaheadMs, rate), KERNEL_DELAY_CAPACITY_FRAMES - 1)
 
+/** The Through-zero Flanger holds its dry path back by the kernel's fixed 5 ms (ChorusKernel::kThroughZeroDryMs), whatever the other controls say. */
+const THROUGH_ZERO_DRY_MS = 5
+
+export const throughZeroLatencyFrames = (rate: number) => lookaheadFrames(THROUGH_ZERO_DRY_MS, rate)
+
 export const getEffectTiming = (
   input: EffectTimingInput,
   sampleRate: number,
@@ -117,19 +122,21 @@ export const getEffectTiming = (
   }
 
   if (input.kind === 'chorus' || input.kind === 'flanger') {
-    if (!input.params.state.enabled || input.params.state.mix === 0) return { latencyFrames: 0, tail: finite(0) }
+    const latencyFrames = input.kind === 'flanger' && input.params.state.mode === 'throughZero' ? throughZeroLatencyFrames(rate) : 0
+
+    if (!input.params.state.enabled || input.params.state.mix === 0) return { latencyFrames, tail: finite(0) }
     const delayFrames = (input.params.state.delayMs + input.params.state.depthMs) * rate / 1000
     const feedback = Math.abs(input.params.state.feedback)
     const repeats = feedback > 0 ? Math.max(1, Math.ceil(Math.log(1e-4) / Math.log(feedback))) : 1
 
-    return { latencyFrames: 0, tail: finite(delayFrames * repeats) }
+    return { latencyFrames, tail: finite(delayFrames * repeats) }
   }
 
   if (input.kind === 'ensemble') {
     return {
       latencyFrames: 0,
       tail: finite(input.params.state.enabled && input.params.state.mix > 0
-        ? (input.params.state.delayMs + input.params.state.depthMs) * rate / 1000
+        ? (input.params.state.delayMs + input.params.state.depthMs + input.params.state.fastDepthMs) * rate / 1000
         : 0),
     }
   }

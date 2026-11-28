@@ -7,7 +7,7 @@ import {
   encodeReverbProcessorState, encodeSaturatorProcessorState, encodeSpectralProcessorState, encodeTremoloProcessorState,
   encodeUtilityProcessorState,
 } from '../../packages/audio-core-contract/src'
-import { gateCompressorLatencyFrames, limiterLatencyFrames } from '../../packages/audio-engine/src/effects/timing'
+import { gateCompressorLatencyFrames, limiterLatencyFrames, throughZeroLatencyFrames } from '../../packages/audio-engine/src/effects/timing'
 import type {
   AmplitudeModulationProcessorState, AutoFilterProcessorState, CompressorProcessorState, DelayModulationProcessorState,
   DelayProcessorState, EnsembleProcessorState, EqProcessorBandState, EqProcessorState, GateProcessorState,
@@ -74,6 +74,7 @@ export const declaredLatencyFrames = (spec: EffectSpec, rate: number): number =>
     case 'gate':
     case 'compressor': return gateCompressorLatencyFrames(spec.state.lookaheadMs, rate)
     case 'limiter': return limiterLatencyFrames(spec.state.lookaheadMs, rate)
+    case 'flanger': return spec.state.mode === 'throughZero' ? throughZeroLatencyFrames(rate) : 0
     default: return 0
   }
 }
@@ -100,12 +101,12 @@ export const parameterTargets: Record<EffectKind, Record<string, number>> = {
   utility: range(1, ['gainDb', 'pan', 'balance', 'width']),
   saturator: range(69, ['driveDb', 'colorFrequencyHz', 'colorAmount', 'outputDb', 'dryWet']),
   eq: eqTargets,
-  chorus: range(74, modulationKeys),
-  flanger: range(80, modulationKeys),
-  phaser: range(86, ['centerHz', 'depthOctaves', 'rateHz', 'feedback', 'stereoPhase', 'mix']),
-  tremolo: range(92, amplitudeKeys),
-  autopan: range(96, amplitudeKeys),
-  ensemble: range(100, ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix']),
+  chorus: { ...range(74, modulationKeys), ...range(177, ['safeBassHz', 'width', 'outputDb']) },
+  flanger: { ...range(80, modulationKeys), ...range(180, ['safeBassHz', 'width', 'outputDb']) },
+  phaser: { ...range(86, ['centerHz', 'depthOctaves', 'rateHz', 'feedback', 'stereoPhase', 'mix']), ...range(183, ['spreadOctaves', 'blend', 'safeBassHz', 'outputDb']) },
+  tremolo: { ...range(92, amplitudeKeys), stereoPhase: 187 },
+  autopan: { ...range(96, amplitudeKeys), stereoPhase: 188 },
+  ensemble: { ...range(100, ['delayMs', 'depthMs', 'rateHz', 'spread', 'mix']), ...range(189, ['fastDepthMs', 'fastRateHz', 'safeBassHz', 'width', 'outputDb']) },
   // 112 was the lookahead target; the lookahead is a 0/1/10 ms chooser held in the state now.
   gate: { ...range(105, ['thresholdDb', 'ratio', 'attackMs', 'holdMs', 'releaseMs', 'hysteresisDb', 'rangeDb']), ...range(113, ['link', 'sidechain.frequencyHz', 'sidechain.q']), 'sidechain.gainDb': 171, 'sidechain.mix': 172 },
   // 124 was the lookahead target; the lookahead is a 0/1/10 ms chooser held in the state now.
@@ -140,11 +141,12 @@ export const eqWith = (band: Partial<EqProcessorBandState>, extra: Partial<EqPro
 })
 
 const modulation = (state: Partial<DelayModulationProcessorState>): DelayModulationProcessorState => ({
-  enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35, ...state,
+  enabled: true, mode: 'chorus', waveform: 'sine', safeBass: false, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35,
+  safeBassHz: 100, width: 1, outputDb: 0, ...state,
 })
 
 const amplitude = (state: Partial<AmplitudeModulationProcessorState>): AmplitudeModulationProcessorState => ({
-  enabled: true, waveform: 'sine', rateHz: 4, depth: 0.5, shape: 0.5, phase: 0, ...state,
+  enabled: true, waveform: 'sine', sync: false, division: 5, invert: false, rateHz: 4, depth: 0.5, shape: 0.5, phase: 0, stereoPhase: 0, ...state,
 })
 
 /** Product-default states with per-scenario overrides; nested groups are replaced whole. */
@@ -163,16 +165,22 @@ export const fx = {
   }),
   chorus: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({ kind: 'chorus', state: modulation(state) }),
   flanger: (state: Partial<DelayModulationProcessorState> = {}): EffectSpec => ({
-    kind: 'flanger', state: modulation({ delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, ...state }),
+    kind: 'flanger', state: modulation({ mode: 'flanger', delayMs: 1.5, depthMs: 1, rateHz: 0.2, feedback: 0.35, stereoPhase: 0.5, mix: 0.5, ...state }),
   }),
   phaser: (state: Partial<PhaserProcessorState> = {}): EffectSpec => ({
     kind: 'phaser',
-    state: { enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5, ...state },
+    state: {
+      enabled: true, stages: 6, waveform: 'sine', safeBass: false, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5,
+      spreadOctaves: 0, blend: 0, safeBassHz: 100, outputDb: 0, ...state,
+    },
   }),
   tremolo: (state: Partial<AmplitudeModulationProcessorState> = {}): EffectSpec => ({ kind: 'tremolo', state: amplitude(state) }),
-  autopan: (state: Partial<AmplitudeModulationProcessorState> = {}): EffectSpec => ({ kind: 'autopan', state: amplitude({ rateHz: 1, depth: 1, ...state }) }),
+  autopan: (state: Partial<AmplitudeModulationProcessorState> = {}): EffectSpec => ({ kind: 'autopan', state: amplitude({ rateHz: 1, depth: 1, stereoPhase: 0.5, ...state }) }),
   ensemble: (state: Partial<EnsembleProcessorState> = {}): EffectSpec => ({
-    kind: 'ensemble', state: { enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5, ...state },
+    kind: 'ensemble', state: {
+      enabled: true, voices: 3, waveform: 'sine', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5,
+      fastDepthMs: 0, fastRateHz: 6, safeBassHz: 100, width: 1, outputDb: 0, ...state,
+    },
   }),
   gate: (state: Partial<GateProcessorState> = {}): EffectSpec => ({
     kind: 'gate',

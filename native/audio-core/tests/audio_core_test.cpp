@@ -136,7 +136,13 @@ uint32_t schema_version_of(uint32_t kind) {
     : kind == DAW_AUDIO_PROCESSOR_KIND_COMPRESSOR ? DAW_AUDIO_CORE_PROCESSOR_COMPRESSOR_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_LIMITER ? DAW_AUDIO_CORE_PROCESSOR_LIMITER_SCHEMA_VERSION
     : kind == DAW_AUDIO_PROCESSOR_KIND_DELAY ? DAW_AUDIO_CORE_PROCESSOR_DELAY_SCHEMA_VERSION
-    : kind == DAW_AUDIO_PROCESSOR_KIND_REVERB ? DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION : 1u;
+    : kind == DAW_AUDIO_PROCESSOR_KIND_REVERB ? DAW_AUDIO_CORE_PROCESSOR_REVERB_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_CHORUS ? DAW_AUDIO_CORE_PROCESSOR_CHORUS_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_FLANGER ? DAW_AUDIO_CORE_PROCESSOR_FLANGER_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_PHASER ? DAW_AUDIO_CORE_PROCESSOR_PHASER_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_TREMOLO ? DAW_AUDIO_CORE_PROCESSOR_TREMOLO_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_AUTOPAN ? DAW_AUDIO_CORE_PROCESSOR_AUTOPAN_SCHEMA_VERSION
+    : kind == DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE ? DAW_AUDIO_CORE_PROCESSOR_ENSEMBLE_SCHEMA_VERSION : 1u;
 }
 
 void expect(daw_audio_core_result actual, daw_audio_core_result expected, int line = __builtin_LINE()) {
@@ -2445,14 +2451,14 @@ void test_portable_modulation_processor_characterization() {
   const std::array<daw_audio_graph_edge_descriptor, 1> edges{{
     {.id = 1, .from_node_id = 1, .to_node_id = 2, .gain = 1.0F, .tap = DAW_AUDIO_GRAPH_EDGE_POST_FADER, .sidechain = 0, .pdc_delay_frames = 0},
   }};
-  const auto write_u32 = [](std::array<uint8_t, 32> &bytes, uint32_t offset, uint32_t value) {
+  const auto write_u32 = [](std::array<uint8_t, 64> &bytes, uint32_t offset, uint32_t value) {
     bytes[offset] = static_cast<uint8_t>(value); bytes[offset + 1] = static_cast<uint8_t>(value >> 8u);
     bytes[offset + 2] = static_cast<uint8_t>(value >> 16u); bytes[offset + 3] = static_cast<uint8_t>(value >> 24u);
   };
-  const auto write_f32 = [&write_u32](std::array<uint8_t, 32> &bytes, uint32_t offset, float value) {
+  const auto write_f32 = [&write_u32](std::array<uint8_t, 64> &bytes, uint32_t offset, float value) {
     uint32_t bits = 0; std::memcpy(&bits, &value, sizeof(bits)); write_u32(bytes, offset, bits);
   };
-  const auto render = [&](uint32_t kind, uint32_t state_size, const std::array<uint8_t, 32> &state) {
+  const auto render = [&](uint32_t kind, uint32_t state_size, const std::array<uint8_t, 64> &state) {
     daw_audio_core_handle core = create_core(4096, 2, 1);
     const daw_audio_processor_descriptor processor{
       .node_id = 2, .instance_id = 100 + kind, .kind = kind, .state_version = schema_version_of(kind), .state_size = state_size,
@@ -2477,21 +2483,24 @@ void test_portable_modulation_processor_characterization() {
     }
     daw_audio_core_destroy(core);
   };
-  std::array<uint8_t, 32> state{};
+  // Byte layout: the pre-v2 fields keep their offsets and the v2 fields follow them (see decode_processor in audio_core_validation.cpp).
+  std::array<uint8_t, 64> state{};
   write_u32(state, 0, 1); write_f32(state, 4, 12.0F); write_f32(state, 8, 4.0F); write_f32(state, 12, 0.8F);
   write_f32(state, 16, 0.0F); write_f32(state, 20, 0.25F); write_f32(state, 24, 0.35F);
-  render(DAW_AUDIO_PROCESSOR_KIND_CHORUS, 28, state);
+  write_f32(state, 40, 100.0F); write_f32(state, 44, 1.0F);
+  render(DAW_AUDIO_PROCESSOR_KIND_CHORUS, 52, state);
   write_f32(state, 4, 1.5F); write_f32(state, 8, 1.0F); write_f32(state, 12, 0.2F); write_f32(state, 16, 0.35F); write_f32(state, 20, 0.5F); write_f32(state, 24, 0.5F);
-  render(DAW_AUDIO_PROCESSOR_KIND_FLANGER, 28, state);
+  render(DAW_AUDIO_PROCESSOR_KIND_FLANGER, 52, state);
   state.fill(0); write_u32(state, 0, 1); write_u32(state, 4, 6); write_f32(state, 8, 1000.0F); write_f32(state, 12, 3.0F);
-  write_f32(state, 16, 0.3F); write_f32(state, 20, 0.3F); write_f32(state, 24, 0.5F); write_f32(state, 28, 0.5F);
-  render(DAW_AUDIO_PROCESSOR_KIND_PHASER, 32, state);
+  write_f32(state, 16, 0.3F); write_f32(state, 20, 0.3F); write_f32(state, 24, 0.5F); write_f32(state, 28, 0.5F); write_f32(state, 48, 100.0F);
+  render(DAW_AUDIO_PROCESSOR_KIND_PHASER, 56, state);
   state.fill(0); write_u32(state, 0, 1); write_u32(state, 4, 0); write_f32(state, 8, 4.0F); write_f32(state, 12, 0.5F); write_f32(state, 16, 0.5F); write_f32(state, 20, 0.0F);
-  render(DAW_AUDIO_PROCESSOR_KIND_TREMOLO, 24, state);
+  render(DAW_AUDIO_PROCESSOR_KIND_TREMOLO, 40, state);
   write_f32(state, 8, 1.0F); write_f32(state, 12, 1.0F);
-  render(DAW_AUDIO_PROCESSOR_KIND_AUTOPAN, 24, state);
+  render(DAW_AUDIO_PROCESSOR_KIND_AUTOPAN, 40, state);
   state.fill(0); write_u32(state, 0, 1); write_u32(state, 4, 3); write_f32(state, 8, 18.0F); write_f32(state, 12, 6.0F); write_f32(state, 16, 0.6F); write_f32(state, 20, 1.0F); write_f32(state, 24, 0.5F);
-  render(DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE, 28, state);
+  write_f32(state, 40, 6.0F); write_f32(state, 44, 100.0F); write_f32(state, 48, 1.0F);
+  render(DAW_AUDIO_PROCESSOR_KIND_ENSEMBLE, 56, state);
 }
 
 void test_portable_dynamics_processor_characterization() {
@@ -8877,9 +8886,10 @@ struct Phase3RawState {
 
 Phase3RawState phase3_chorus_state() {
   Phase3RawState state;
-  state.size = 28;
+  state.size = 52;
   state.u32(0, 1); state.f32(4, 12.0F); state.f32(8, 4.0F); state.f32(12, 0.8F);
   state.f32(16, 0.0F); state.f32(20, 0.25F); state.f32(24, 0.35F);
+  state.f32(40, 100.0F); state.f32(44, 1.0F);
   return state;
 }
 

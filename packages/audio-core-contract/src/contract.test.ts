@@ -12,6 +12,7 @@ import {
   encodeCompressorProcessorState,
   encodeDelayProcessorState,
   encodeEnsembleProcessorState,
+  encodeFlangerProcessorState,
   encodeGateProcessorState,
   encodeLimiterProcessorState,
   encodeLoFiProcessorState,
@@ -24,6 +25,7 @@ import {
   encodeAudioCoreInstrumentState,
   type AudioAssetRef,
   type AudioCoreProcessorStateEnvelope,
+  type DelayModulationProcessorState,
   isAudioAssetRef,
   isPlanarPcmForAsset,
   isAudioCoreGranularState,
@@ -292,12 +294,12 @@ test('processor registry preserves stable portable processor ids', () => {
     expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 1, stateBytes: 40, tombstone: false }),
     expect.objectContaining({ name: 'saturator', id: 2, schemaVersion: 1, stateBytes: 32, tombstone: false }),
     expect.objectContaining({ name: 'eq', id: 3, schemaVersion: 2, stateBytes: 408, tombstone: false }),
-    expect.objectContaining({ name: 'chorus', id: 4, stateBytes: 28 }),
-    expect.objectContaining({ name: 'flanger', id: 5, stateBytes: 28 }),
-    expect.objectContaining({ name: 'phaser', id: 6, stateBytes: 32 }),
-    expect.objectContaining({ name: 'tremolo', id: 7, stateBytes: 24 }),
-    expect.objectContaining({ name: 'autopan', id: 8, stateBytes: 24 }),
-    expect.objectContaining({ name: 'ensemble', id: 9, stateBytes: 28 }),
+    expect.objectContaining({ name: 'chorus', id: 4, schemaVersion: 2, stateBytes: 52 }),
+    expect.objectContaining({ name: 'flanger', id: 5, schemaVersion: 2, stateBytes: 52 }),
+    expect.objectContaining({ name: 'phaser', id: 6, schemaVersion: 2, stateBytes: 56 }),
+    expect.objectContaining({ name: 'tremolo', id: 7, schemaVersion: 2, stateBytes: 40 }),
+    expect.objectContaining({ name: 'autopan', id: 8, schemaVersion: 2, stateBytes: 40 }),
+    expect.objectContaining({ name: 'ensemble', id: 9, schemaVersion: 2, stateBytes: 56 }),
     expect.objectContaining({ name: 'gate', id: 10, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'compressor', id: 11, schemaVersion: 2, stateBytes: 76 }),
     expect.objectContaining({ name: 'limiter', id: 12, schemaVersion: 2, stateBytes: 28 }),
@@ -339,14 +341,50 @@ test('dynamics codecs preserve portable little-endian state layouts', () => {
 })
 
 test('modulation codecs preserve the native little-endian state layouts', () => {
-  const chorus = encodeChorusProcessorState({ enabled: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0, stereoPhase: 0.25, mix: 0.35 })
-  expect(chorus.byteLength).toBe(28)
-  expect(new DataView(chorus.buffer).getFloat32(4, true)).toBeCloseTo(12)
-  const phaser = encodePhaserProcessorState({ enabled: true, stages: 6, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5, mix: 0.5 })
-  expect(phaser.byteLength).toBe(32)
-  expect(new DataView(phaser.buffer).getUint32(4, true)).toBe(6)
-  expect(encodeTremoloProcessorState({ enabled: true, waveform: 'triangle', rateHz: 4, depth: 0.5, ['shape']: 0.5, phase: 0 }).byteLength).toBe(24)
-  expect(encodeEnsembleProcessorState({ enabled: true, voices: 3, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5 }).byteLength).toBe(28)
+  const delayModulation = {
+    enabled: true, mode: 'vintage', waveform: 'wander', safeBass: true, delayMs: 12, depthMs: 4, rateHz: 0.8, feedback: 0.1, stereoPhase: 0.25,
+    mix: 0.35, safeBassHz: 150, width: 1.5, outputDb: -3,
+  } satisfies DelayModulationProcessorState
+
+  const chorus = new DataView(encodeChorusProcessorState(delayModulation).buffer)
+
+  expect(chorus.byteLength).toBe(52)
+  expect(chorus.getFloat32(4, true)).toBeCloseTo(12)
+  expect(chorus.getFloat32(24, true)).toBeCloseTo(0.35)
+  expect([chorus.getUint32(28, true), chorus.getUint32(32, true), chorus.getUint32(36, true)]).toEqual([2, 6, 1])
+  expect([chorus.getFloat32(40, true), chorus.getFloat32(44, true), chorus.getFloat32(48, true)]).toEqual([150, 1.5, -3])
+  // Flanger modes number from 0 (the kernel offsets them past the Chorus modes).
+  expect(new DataView(encodeFlangerProcessorState({ ...delayModulation, mode: 'throughZero' }).buffer).getUint32(28, true)).toBe(1)
+  expect(new DataView(encodeFlangerProcessorState({ ...delayModulation, mode: 'flanger' }).buffer).getUint32(28, true)).toBe(0)
+
+  const phaser = new DataView(encodePhaserProcessorState({
+    enabled: true, stages: 6, waveform: 'square', safeBass: true, centerHz: 1000, depthOctaves: 3, rateHz: 0.3, feedback: 0.3, stereoPhase: 0.5,
+    mix: 0.5, spreadOctaves: 2, blend: 0.4, safeBassHz: 120, outputDb: 2,
+  }).buffer)
+
+  expect(phaser.byteLength).toBe(56)
+  expect(phaser.getUint32(4, true)).toBe(6)
+  expect([phaser.getUint32(32, true), phaser.getUint32(36, true)]).toEqual([4, 1])
+  expect([phaser.getFloat32(40, true), phaser.getFloat32(44, true), phaser.getFloat32(48, true), phaser.getFloat32(52, true)])
+    .toEqual([2, expect.closeTo(0.4, 5), 120, 2])
+
+  const tremolo = new DataView(encodeTremoloProcessorState({
+    enabled: true, waveform: 'sawUp', sync: true, division: 7, invert: true, rateHz: 4, depth: 0.5, ['shape']: 0.5, phase: 0.25, stereoPhase: -0.25,
+  }).buffer)
+
+  expect(tremolo.byteLength).toBe(40)
+  expect([tremolo.getUint32(4, true), tremolo.getUint32(24, true), tremolo.getUint32(28, true), tremolo.getUint32(32, true)]).toEqual([3, 1, 7, 1])
+  expect([tremolo.getFloat32(20, true), tremolo.getFloat32(36, true)]).toEqual([0.25, -0.25])
+
+  const ensemble = new DataView(encodeEnsembleProcessorState({
+    enabled: true, voices: 3, waveform: 'triangle', safeBass: false, delayMs: 18, depthMs: 6, rateHz: 0.6, spread: 1, mix: 0.5,
+    fastDepthMs: 1, fastRateHz: 7, safeBassHz: 100, width: 1, outputDb: 0,
+  }).buffer)
+
+  expect(ensemble.byteLength).toBe(56)
+  expect([ensemble.getUint32(28, true), ensemble.getUint32(32, true)]).toEqual([1, 0])
+  expect([ensemble.getFloat32(36, true), ensemble.getFloat32(40, true), ensemble.getFloat32(44, true), ensemble.getFloat32(48, true), ensemble.getFloat32(52, true)])
+    .toEqual([1, 7, 100, 1, 0])
 })
 
 test('delay and reverb codecs preserve portable state without claiming browser convolution parity', () => {

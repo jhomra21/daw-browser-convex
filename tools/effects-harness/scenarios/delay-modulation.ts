@@ -3,7 +3,7 @@ import { correlation, peakAbs, peakFrame } from '../dsp'
 import { fx } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
-import { constant, impulse, linearToDb, noise, sine } from '../signals'
+import { constant, gaussianNoise, impulse, linearToDb, noise, sine } from '../signals'
 import { parityScenario, robustnessScenarios } from './shared'
 
 const aligned = (frame: number) => Math.floor(frame / 128) * 128
@@ -42,9 +42,14 @@ const phaserFeedback: Scenario = {
   name: 'ph1-feedback-level',
   rates: [48000],
   run: async (h) => {
-    const input = noise(4 * h.rate, 0.25, 11)
-    const { output } = await h.render(fx.phaser({ feedback: 0.95, mix: 1 }), { input: [input] })
-    h.atMost('output peak over input peak, feedback 0.95', linearToDb(peakAbs(output[0]) / peakAbs(input)), 12, 'dB', 'PH-1')
+    // Gaussian noise at the rms of the uniform noise it replaces (sigma 0.144 = uniform amplitude 0.25). Uniform noise has a low crest factor, and
+    // the all-pass chain turns it into Gaussian-like noise: its peak rises by about 7.5 dB with no added level, so the old uniform row measured
+    // the crest factor as much as the loop. The 12-stage judged row is in the modulation family.
+    const uniform = noise(4 * h.rate, 0.25, 11)
+    const gaussian = gaussianNoise(4 * h.rate, 0.144, 11)
+    const peakOver = async (input: Float32Array) => linearToDb(peakAbs((await h.render(fx.phaser({ feedback: 0.95, mix: 1 }), { input: [input] })).output[0]) / peakAbs(input))
+    h.atMost('output peak over input peak, Gaussian noise, feedback 0.95', await peakOver(gaussian), 12, 'dB', 'PH-1')
+    h.info('output peak over input peak, uniform noise, feedback 0.95', await peakOver(uniform), 'dB', 'PH-1: the former judged row')
   },
 }
 
@@ -59,7 +64,10 @@ const autopanPhase: Scenario = {
     const left = centre(output[0])
     const right = centre(output[1])
     const [ml, mr] = [mean(left), mean(right)]
-    h.atMost('L/R gain-envelope correlation of the autopan', correlation(left.map((v) => v - ml), right.map((v) => v - mr)), -0.99, '', 'TR-1')
+    // Auto Pan now follows Live: two LFOs a half cycle apart (the default Stereo Phase) drive equal-power gains, sine against cosine of a
+    // quarter-cycle angle, whose envelopes correlate at about -0.92, not -1. The linear antiphase check (-0.99) moved to the Tremolo
+    // row of the modulation family; the equal-power law has its own row there.
+    h.atMost('L/R gain-envelope correlation of the autopan', correlation(left.map((v) => v - ml), right.map((v) => v - mr)), -0.9, '', 'TR-1')
   },
 }
 
@@ -78,7 +86,7 @@ export const delayModulation: Family = {
     ...robustnessScenarios('ensemble', fx.ensemble(), null),
   ],
   notEncoded: [
-    'TR-1 stereoPhase 0.5 on the tremolo: the amplitude-modulation state has no stereoPhase; the autopan envelopes are measured instead.',
+    'TR-1 on the tremolo (Stereo Phase 0.5 antiphase) and the Auto Pan equal-power law: judged in the modulation family.',
     'Ensemble sideband and per-voice tests, chorus stereo-width tests: need a voice-level tap the core does not expose.',
   ],
 }

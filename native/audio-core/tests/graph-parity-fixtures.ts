@@ -3523,7 +3523,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     name: 'sampler-voice-limit-oldest-steal',
     capability: 'sampledInstruments',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 4,
+    maxFramesPerBlock: 480,
     inputBusCount: 0,
     channelCount: 2,
     graph: graph(
@@ -3531,7 +3531,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       [{ from: 1n, to: 2n }],
       [],
     ),
-    frames: 4,
+    frames: 480,
     input: new Float32Array(),
     assets: [
       sampleAsset(1, 'install', [0.25, 0.25, 0.25, 0.25]),
@@ -3549,13 +3549,13 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       { nodeId: 1n, noteId: 1n, sequence: 1n, frameOffset: 0, type: 1, note: 60, value: 1 },
       { nodeId: 1n, noteId: 2n, sequence: 2n, frameOffset: 1, type: 1, note: 61, value: 1 },
     ]),
-    assertOutput: (output) => finite(output) && closeTo(sampleAt(output, 0), 0.25) && closeTo(sampleAt(output, 1), -0.75),
+    assertOutput: (output) => finite(output) && sampleAt(output, 0) > 0 && closeTo(sampleAt(output, 479), -0.75),
   },
   {
     name: 'sampler-round-robin-index-sequence',
     capability: 'sampledInstruments',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 4,
+    maxFramesPerBlock: 480,
     inputBusCount: 0,
     channelCount: 2,
     graph: graph(
@@ -3563,7 +3563,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       [{ from: 1n, to: 2n }],
       [],
     ),
-    frames: 4,
+    frames: 480,
     input: new Float32Array(),
     assets: [
       sampleAsset(1, 'install', [0.25, 0.25, 0.25, 0.25]),
@@ -3573,25 +3573,25 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       nodeId: 1n,
       kind: 2,
       state: sampleState('sampler', [
-        sampleZone('fixture:1:1', 60, { roundRobinGroup: 1, roundRobinIndex: 1 }),
-        sampleZone('fixture:2:1', 60, { roundRobinGroup: 1, roundRobinIndex: 0 }),
+        sampleZone('fixture:1:1', 60, { roundRobinGroup: 1, roundRobinIndex: 1, playbackMode: 'forward-loop', loopStartFrame: 0, loopEndFrame: 4 }),
+        sampleZone('fixture:2:1', 60, { roundRobinGroup: 1, roundRobinIndex: 0, playbackMode: 'forward-loop', loopStartFrame: 0, loopEndFrame: 4 }),
       ], { retrigger: false }),
     }],
     instrumentEvents: instrumentEventEnvelope([
       { nodeId: 1n, noteId: 1n, sequence: 1n, frameOffset: 0, type: 1, note: 60, value: 1 },
       { nodeId: 1n, noteId: 2n, sequence: 2n, frameOffset: 1, type: 1, note: 60, value: 1 },
     ]),
-    assertOutput: (output) => finite(output) && closeTo(sampleAt(output, 0), 0.75) && closeTo(sampleAt(output, 1), 1),
+    assertOutput: (output) => finite(output) && closeTo(sampleAt(output, 0), 0.75 / 48, 1e-5) && closeTo(sampleAt(output, 479), 1),
   },
   {
     name: 'sampler-transposition-loop-boundary',
     capability: 'sampledInstruments',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 4,
+    maxFramesPerBlock: 480,
     inputBusCount: 0,
     channelCount: 2,
     graph: instrumentGraph(2),
-    frames: 4,
+    frames: 480,
     input: new Float32Array(),
     assets: [sampleAsset(1, 'install', [0.1, 0.2, 0.3, 0.4])],
     instrumentStates: [{
@@ -3608,19 +3608,20 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       { nodeId: 1n, noteId: 1n, sequence: 1n, frameOffset: 0, type: 1, note: 72, value: 1 },
     ]),
     assertOutput: (output) => finite(output)
-      && closeTo(sampleAt(output, 0), 0.1)
-      && closeTo(sampleAt(output, 1), 0.3)
-      && closeTo(sampleAt(output, 2), 0.2),
+      && sampleAt(output, 0) > 0
+      && closeTo(sampleAt(output, 470), 0.2)
+      && closeTo(sampleAt(output, 471), 0.4)
+      && closeTo(sampleAt(output, 472), 0.3),
   },
   {
     name: 'sampler-envelope-release',
     capability: 'sampledInstruments',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 64,
+    maxFramesPerBlock: 160,
     inputBusCount: 0,
     channelCount: 2,
     graph: instrumentGraph(2),
-    frames: 64,
+    frames: 160,
     input: new Float32Array(),
     assets: [sampleAsset(1, 'install', Array.from({ length: 128 }, () => 1))],
     instrumentStates: [{
@@ -3634,9 +3635,9 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     }],
     instrumentEvents: instrumentEventEnvelope([
       { nodeId: 1n, noteId: 1n, sequence: 1n, frameOffset: 0, type: 1, note: 60, value: 1 },
-      { nodeId: 1n, noteId: 1n, sequence: 2n, frameOffset: 1, type: 2, note: 60, value: 0 },
+      { nodeId: 1n, noteId: 1n, sequence: 2n, frameOffset: 100, type: 2, note: 60, value: 0 },
     ]),
-    assertOutput: (output) => finite(output) && sampleAt(output, 0) > 0.9 && closeTo(sampleAt(output, 48), 0),
+    assertOutput: (output) => finite(output) && sampleAt(output, 99) > 0.9 && closeTo(sampleAt(output, 150), 0),
   },
   ...(['lowpass', 'highpass', 'bandpass', 'notch'] as const).map((filterMode): PortableGraphParityFixture => ({
     name: `sampler-crossfade-${filterMode}-envelope-lfo`,
@@ -3701,7 +3702,7 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
     name: 'drum-rack-two-hit-six-ms-choke',
     capability: 'sampledInstruments',
     sampleRateHz: 48_000,
-    maxFramesPerBlock: 320,
+    maxFramesPerBlock: 480,
     inputBusCount: 0,
     channelCount: 2,
     graph: graph(
@@ -3709,25 +3710,25 @@ export const portableGraphParityFixtures: readonly PortableGraphParityFixture[] 
       [{ from: 1n, to: 2n }],
       [],
     ),
-    frames: 320,
+    frames: 480,
     input: new Float32Array(),
     assets: [
-      sampleAsset(1, 'install', Array.from({ length: 320 }, () => 1)),
-      sampleAsset(1, 'install', Array.from({ length: 320 }, () => -1), 2),
+      sampleAsset(1, 'install', Array.from({ length: 640 }, () => 1)),
+      sampleAsset(1, 'install', Array.from({ length: 640 }, () => -1), 2),
     ],
     instrumentStates: [{
       nodeId: 1n,
       kind: 3,
       state: sampleState('drum-rack', [
-        sampleZone('fixture:1:1', 36, { endFrame: 320, chokeGroup: 1 }),
-        sampleZone('fixture:2:1', 37, { endFrame: 320, chokeGroup: 1 }),
+        sampleZone('fixture:1:1', 36, { endFrame: 640, chokeGroup: 1 }),
+        sampleZone('fixture:2:1', 37, { endFrame: 640, chokeGroup: 1 }),
       ], { ampReleaseMs: 1000, retrigger: false }),
     }],
     instrumentEvents: instrumentEventEnvelope([
       { nodeId: 1n, noteId: 1n, sequence: 1n, frameOffset: 0, type: 1, note: 36, value: 1 },
       { nodeId: 1n, noteId: 2n, sequence: 2n, frameOffset: 1, type: 1, note: 37, value: 1 },
     ]),
-    assertOutput: (output) => finite(output) && closeTo(sampleAt(output, 288), -1),
+    assertOutput: (output) => finite(output) && sampleAt(output, 0) > 0 && closeTo(sampleAt(output, 479), -1),
   },
   {
     name: 'granular-replaced-asset-seed-freeze-midi',

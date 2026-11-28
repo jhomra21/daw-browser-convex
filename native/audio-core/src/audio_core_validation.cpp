@@ -165,14 +165,17 @@ bool valid_saturator_state(const daw_audio_saturator_state &state) {
 
 bool valid_eq_band(const daw_audio_eq_band_state &band) {
   return (band.enabled == 0 || band.enabled == 1)
-    && band.type <= DAW_AUDIO_EQ_BAND_ALLPASS
+    && band.type <= DAW_AUDIO_EQ_BAND_HIGHPASS_48
     && std::isfinite(band.frequency_hz) && band.frequency_hz >= 20.0F && band.frequency_hz <= 20000.0F
     && std::isfinite(band.gain_db) && band.gain_db >= -24.0F && band.gain_db <= 24.0F
     && std::isfinite(band.q) && band.q >= 0.2F && band.q <= 18.0F;
 }
 
 bool valid_eq_state(const daw_audio_eq_state &state) {
-  if ((state.enabled != 0 && state.enabled != 1) || state.mono > 1) return false;
+  if ((state.enabled != 0 && state.enabled != 1) || state.mode > DAW_AUDIO_EQ_MODE_MID_SIDE
+    || state.adaptive_q > 1 || state.high_quality > 1
+    || !std::isfinite(state.scale) || state.scale < 0.0F || state.scale > DAW_AUDIO_CORE_EQ_SCALE_MAX
+    || !std::isfinite(state.output_db) || std::fabs(state.output_db) > DAW_AUDIO_CORE_EQ_OUTPUT_DB_MAX) return false;
   for (const daw_audio_eq_band_state &band : state.bands) {
     if (!valid_eq_band(band)) return false;
   }
@@ -340,7 +343,8 @@ namespace daw::audio_core_internal {
 bool decode_processor_state(
   const daw_audio_processor_descriptor &descriptor,
   GraphRevision::Processor *out_processor) {
-  if (descriptor.state_version != DAW_AUDIO_CORE_PROCESSOR_CONTRACT_VERSION
+  const ProcessorContract *contract = find_processor_contract(descriptor.kind);
+  if (contract == nullptr || descriptor.state_version != contract->schema_version
     || descriptor.state == nullptr
     || !valid_processor_parameter_targets(descriptor)) return false;
   if (descriptor.kind == DAW_AUDIO_PROCESSOR_KIND_UTILITY && descriptor.state_size == 40) {
@@ -524,22 +528,26 @@ bool decode_processor_state(
     out_processor->lofi = state;
     return true;
   }
-  if (descriptor.kind != DAW_AUDIO_PROCESSOR_KIND_EQ || descriptor.state_size != 200) return false;
+  if (descriptor.kind != DAW_AUDIO_PROCESSOR_KIND_EQ || descriptor.state_size != DAW_AUDIO_CORE_PROCESSOR_EQ_STATE_BYTES) return false;
   daw_audio_eq_state state{
     .enabled = read_u32_le(descriptor.state),
-    .mono = read_u32_le(descriptor.state + 4),
+    .mode = read_u32_le(descriptor.state + 4),
+    .adaptive_q = read_u32_le(descriptor.state + 8),
+    .high_quality = read_u32_le(descriptor.state + 12),
+    .scale = read_f32_le(descriptor.state + 16),
+    .output_db = read_f32_le(descriptor.state + 20),
     .bands = {},
   };
-  for (uint32_t index = 0; index < 8; ++index) {
-    const uint32_t offset = 8 + index * 24;
+  for (uint32_t index = 0; index < DAW_AUDIO_CORE_EQ_BAND_COUNT; ++index) {
+    const uint32_t offset = 24 + index * 24;
     state.bands[index] = {
       .enabled = read_u32_le(descriptor.state + offset), .type = read_u32_le(descriptor.state + offset + 4),
       .frequency_hz = read_f32_le(descriptor.state + offset + 8), .gain_db = read_f32_le(descriptor.state + offset + 12),
       .q = read_f32_le(descriptor.state + offset + 16), .reserved = 0,
     };
   }
-  if (!valid_eq_state(state) || descriptor.latency_frames != 0
-    || descriptor.tail_frames != 0) return false;
+  if (!valid_eq_state(state) || descriptor.tail_frames != 0
+    || descriptor.latency_frames != (state.high_quality != 0 ? DAW_AUDIO_CORE_EQ_HIGH_QUALITY_LATENCY_FRAMES : 0u)) return false;
   out_processor->eq = state;
   return true;
 }
@@ -553,8 +561,10 @@ bool valid_processor_parameter_target(uint32_t kind, uint32_t target) {
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRIVE_DB
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_SATURATOR_DRY_WET;
     case DAW_AUDIO_PROCESSOR_KIND_EQ:
-      return target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
-        && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST;
+      return (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
+          && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST)
+        || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE
+          && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB);
     case DAW_AUDIO_PROCESSOR_KIND_CHORUS:
       return target >= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_DELAY_MS
         && target <= DAW_AUDIO_PROCESSOR_PARAMETER_CHORUS_MIX;
@@ -751,9 +761,14 @@ bool valid_processor_parameter_value(uint32_t target, float value) {
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_REFLECTION_MOD_RATE_HZ) return value >= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_RATE_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_REFLECTION_MOD_RATE_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_LOW_CUT_HZ) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSION_LOW_CUT_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSION_LOW_CUT_HZ_MAX;
   if (target == DAW_AUDIO_PROCESSOR_PARAMETER_REVERB_DIFFUSION_HIGH_CUT_HZ) return value >= DAW_AUDIO_CORE_REVERB_DIFFUSION_HIGH_CUT_HZ_MIN && value <= DAW_AUDIO_CORE_REVERB_DIFFUSION_HIGH_CUT_HZ_MAX;
-  if (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE
-    && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST) {
-    switch ((target - DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE) % DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE) {
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SCALE) return value >= 0.0F && value <= DAW_AUDIO_CORE_EQ_SCALE_MAX;
+  if (target == DAW_AUDIO_PROCESSOR_PARAMETER_EQ_OUTPUT_DB) return std::fabs(value) <= DAW_AUDIO_CORE_EQ_OUTPUT_DB_MAX;
+  if ((target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_LAST)
+    || (target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE
+      && target <= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_LAST)) {
+    const uint32_t base = target >= DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE
+      ? DAW_AUDIO_PROCESSOR_PARAMETER_EQ_SECOND_BAND_TARGET_BASE : DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_BASE;
+    switch ((target - base) % DAW_AUDIO_PROCESSOR_PARAMETER_EQ_BAND_TARGET_STRIDE) {
       case 0: return value >= 20.0F && value <= 20000.0F;
       case 1: return value >= -24.0F && value <= 24.0F;
       default: return value >= 0.2F && value <= 18.0F;

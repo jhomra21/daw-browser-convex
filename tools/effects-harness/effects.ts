@@ -64,14 +64,19 @@ export const encodeSpec = (spec: EffectSpec): Uint8Array => {
 
 /** Latency the graph validator requires a descriptor to declare (audio_core_validation.cpp); zero for everything else. */
 export const declaredLatencyFrames = (spec: EffectSpec): number =>
-  spec.kind === 'autofilter' ? (spec.state.hiQuality ? 63 : 0) : spec.kind === 'spectral' ? spec.state.fftSize : 0
+  spec.kind === 'autofilter' ? (spec.state.hiQuality ? 63 : 0) : spec.kind === 'eq' ? (spec.state.highQuality ? 3 : 0) : spec.kind === 'spectral' ? spec.state.fftSize : 0
 
 const range = (first: number, keys: readonly string[]): Record<string, number> =>
   Object.fromEntries(keys.map((key, index) => [key, first + index]))
 
-const eqTargets = Object.fromEntries(Array.from({ length: 8 }, (_, band) => [
-  [`bands.${band}.frequency`, 45 + band * 3], [`bands.${band}.gainDb`, 46 + band * 3], [`bands.${band}.q`, 47 + band * 3],
-]).flat())
+const eqBandTarget = (band: number) => (band < 8 ? 45 + band * 3 : 144 + (band - 8) * 3)
+
+const eqTargets = Object.fromEntries([
+  ...Array.from({ length: 16 }, (_, band) => [
+    [`bands.${band}.frequency`, eqBandTarget(band)], [`bands.${band}.gainDb`, eqBandTarget(band) + 1], [`bands.${band}.q`, eqBandTarget(band) + 2],
+  ]).flat(),
+  ['scale', 168], ['outputDb', 169],
+])
 
 const modulationKeys = ['delayMs', 'depthMs', 'rateHz', 'feedback', 'stereoPhase', 'mix']
 const amplitudeKeys = ['rateHz', 'depth', 'shape', 'phase']
@@ -111,7 +116,10 @@ const idleBand: EqProcessorBandState = { enabled: false, type: 'peaking', freque
 /** One enabled band on an otherwise idle EQ. */
 export const eqWith = (band: Partial<EqProcessorBandState>, extra: Partial<EqProcessorState> = {}): EffectSpec => ({
   kind: 'eq',
-  state: { enabled: true, channelMode: 'stereo', bands: [{ ...idleBand, enabled: true, ...band }, ...Array.from({ length: 7 }, () => idleBand)], ...extra },
+  state: {
+    enabled: true, channelMode: 'stereo', adaptiveQ: false, highQuality: false, scale: 1, outputDb: 0,
+    bands: [{ ...idleBand, enabled: true, ...band }, ...Array.from({ length: 15 }, () => idleBand)], ...extra,
+  },
 })
 
 const modulation = (state: Partial<DelayModulationProcessorState>): DelayModulationProcessorState => ({

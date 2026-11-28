@@ -746,11 +746,15 @@ test('transports registered Saturator and EQ envelopes without utility parsing',
 
   const eqEnvelope = encodeAudioCoreProcessorStateEnvelope({
     kindId: 3,
-    schemaVersion: 1,
+    schemaVersion: 2,
     state: encodeEqProcessorState({
       enabled: true,
       channelMode: 'stereo',
-      bands: Array.from({ length: 8 }, () => ({ enabled: true, type: 'peaking', frequency: 1000, gainDb: 0, q: 1 })),
+      adaptiveQ: false,
+      highQuality: false,
+      scale: 1,
+      outputDb: 0,
+      bands: Array.from({ length: 16 }, () => ({ enabled: true, type: 'peaking', frequency: 1000, gainDb: 0, q: 1 })),
     }),
     instanceId: 10,
     bypassed: false,

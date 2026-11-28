@@ -58,7 +58,8 @@ const eq = (enabled: boolean): Instance => {
 
   return {
     id: 'subject', kind: 'eq',
-    params: { ...params, enabled, bands: [{ ...first, type: 'lowshelf', frequency: 200, gainDb: 12, q: 0.7, enabled: true }, ...rest] },
+    // Hi-Quality adds latency, and the transition matrix only holds latency-neutral edits.
+    params: { ...params, enabled, highQuality: false, bands: [{ ...first, type: 'lowshelf', frequency: 200, gainDb: 12, q: 0.7, enabled: true }, ...rest] },
   }
 }
 

@@ -14,10 +14,19 @@ const eqBand = z.object({
   gainDb: finiteNumber,
   q: finiteNumber,
   enabled: z.boolean(),
-  type: z.enum(['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass']),
+  type: z.enum(['lowpass', 'highpass', 'bandpass', 'lowshelf', 'highshelf', 'peaking', 'notch', 'allpass', 'lowpass48', 'highpass48']),
 }).strict()
 
-const eq = z.object({ bands: z.array(eqBand), enabled: z.boolean(), channelMode: z.enum(['stereo', 'mono']) }).strict()
+// EQ Eight: bands holds two curves of eight; the device-level fields a caller leaves out keep their defaults.
+const eq = z.object({
+  bands: z.array(eqBand),
+  enabled: z.boolean(),
+  channelMode: z.enum(['stereo', 'mono', 'leftRight', 'midSide']),
+  adaptiveQ: z.boolean().optional(),
+  scale: finiteNumber.min(0).max(2).optional(),
+  outputDb: finiteNumber.min(-12).max(12).optional(),
+  highQuality: z.boolean().optional(),
+}).strict()
 
 const reverb = z.object({
   enabled: z.boolean(), wet: finiteNumber, decaySec: finiteNumber, preDelayMs: finiteNumber,

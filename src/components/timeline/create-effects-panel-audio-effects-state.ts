@@ -26,7 +26,6 @@ import {
   type ChorusParamsEnvelope,
   type CompressorParams,
   type DelayParams,
-  type EqChannelMode,
   type EqParams,
   type ReverbParams,
   type SaturatorParams,
@@ -148,7 +147,6 @@ type EffectsPanelAudioDevice = {
     add: () => void;
     changeInstance: (instanceId: string, updates: (params: EqParams) => EqParams) => void;
     changeBand: (bandId: string, updates: Partial<EqParams["bands"][number]>) => void;
-    changeChannelMode: (mode: EqChannelMode) => void;
     reset: () => void;
     toggleBand: (bandId: string) => void;
     toggleEnabled: (enabled: boolean) => void;
@@ -1318,9 +1316,6 @@ export function createEffectsPanelAudioDevice(
         ...prev,
         bands: prev.bands.map((band) => band.id === bandId ? { ...band, ...updates } : band),
       })),
-      changeChannelMode: (channelMode) => updateEq((prev) => (
-        prev.channelMode === channelMode ? prev : normalizeEqParams({ ...prev, channelMode })
-      )),
       reset: () => updateEq(() => AUDIO_EFFECT_CONTRACTS.eq.createDefaultParams()),
       toggleBand: (bandId) => updateEq((prev) => ({
         ...prev,

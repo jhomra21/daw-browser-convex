@@ -102,7 +102,7 @@ const readProcessorRegistry = (schema: JsonValue): ProcessorMetadata[] => {
 
     if (!isNumber(id) || !Number.isSafeInteger(id) || id <= 0
       || !isNumber(schemaVersion) || !Number.isSafeInteger(schemaVersion) || schemaVersion <= 0
-      || !isNumber(stateBytes) || !Number.isSafeInteger(stateBytes) || stateBytes < 0 || stateBytes > 256 || !isBoolean(tombstone)) {
+      || !isNumber(stateBytes) || !Number.isSafeInteger(stateBytes) || stateBytes < 0 || stateBytes > 512 || !isBoolean(tombstone)) {
       throw new Error(`Processor declaration ${name} has invalid stable metadata.`)
     }
 

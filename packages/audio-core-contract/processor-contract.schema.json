@@ -120,27 +120,31 @@
           "required": ["id", "schemaVersion", "stateBytes", "tombstone", "state"],
           "properties": {
             "id": { "const": 3 },
-            "schemaVersion": { "const": 1 },
-            "stateBytes": { "const": 200 },
+            "schemaVersion": { "const": 2 },
+            "stateBytes": { "const": 408 },
             "tombstone": { "const": false },
             "state": {
               "type": "object",
               "additionalProperties": false,
-              "required": ["enabled", "channelMode", "bands"],
+              "required": ["enabled", "channelMode", "adaptiveQ", "highQuality", "scale", "outputDb", "bands"],
               "properties": {
                 "enabled": { "type": "boolean" },
-                "channelMode": { "enum": ["stereo", "mono"] },
+                "channelMode": { "enum": ["stereo", "mono", "leftRight", "midSide"] },
+                "adaptiveQ": { "type": "boolean" },
+                "highQuality": { "type": "boolean" },
+                "scale": { "type": "number", "minimum": 0, "maximum": 2 },
+                "outputDb": { "type": "number", "minimum": -12, "maximum": 12 },
                 "bands": {
                   "type": "array",
-                  "minItems": 8,
-                  "maxItems": 8,
+                  "minItems": 16,
+                  "maxItems": 16,
                   "items": {
                     "type": "object",
                     "additionalProperties": false,
                     "required": ["enabled", "type", "frequency", "gainDb", "q"],
                     "properties": {
                       "enabled": { "type": "boolean" },
-                      "type": { "enum": ["lowpass", "highpass", "bandpass", "lowshelf", "highshelf", "peaking", "notch", "allpass"] },
+                      "type": { "enum": ["lowpass", "highpass", "bandpass", "lowshelf", "highshelf", "peaking", "notch", "allpass", "lowpass48", "highpass48"] },
                       "frequency": { "type": "number", "minimum": 20, "maximum": 20000 },
                       "gainDb": { "type": "number", "minimum": -24, "maximum": 24 },
                       "q": { "type": "number", "minimum": 0.2, "maximum": 18 }

@@ -8,6 +8,11 @@
 #include <string_view>
 #endif
 
+#include "dsp/biquad.h"
+#include "dsp/eq_band.h"
+#include "dsp/parameter_smoother.h"
+#include "dsp/polyphase_iir_half_band.h"
+
 #include <algorithm>
 #include <array>
 #include <bit>
@@ -30,6 +35,8 @@ extern "C" bool daw_audio_core_test_reject_instrument_event(uint32_t index);
 
 
 namespace daw::audio_core_internal {
+
+namespace dsp = ::daw::audio_core::dsp;
 
 constexpr uint32_t kMaximumFramesPerBlock = 8192;
 constexpr uint32_t kMaximumChannels = 64;
@@ -397,11 +404,31 @@ struct SaturatorHistory {
   float bypass = 0.0F;
 };
 
+// Everything the EQ carries between samples. The smoothers and the designed sections cover both curves (16 bands);
+// the filter state is per channel and per band of the curve the channel runs.
 struct EqHistory {
-  std::array<std::array<BiquadHistory, 2>, 8> bands{};
+  static constexpr uint32_t kDryDelay = DAW_AUDIO_CORE_EQ_HIGH_QUALITY_LATENCY_FRAMES;
+
+  bool initialized = false;
+  std::array<dsp::ParameterSmoother<dsp::SmoothDomain::Log>, DAW_AUDIO_CORE_EQ_BAND_COUNT> frequency{};
+  std::array<dsp::ParameterSmoother<>, DAW_AUDIO_CORE_EQ_BAND_COUNT> gain_db{};
+  std::array<dsp::ParameterSmoother<>, DAW_AUDIO_CORE_EQ_BAND_COUNT> q{};
+  dsp::ParameterSmoother<> scale{};
+  dsp::ParameterSmoother<> output_db{};
+  std::array<dsp::EqBandSections, DAW_AUDIO_CORE_EQ_BAND_COUNT> sections{};
+  // The (frequency, gain, Q) the sections were designed from, so settled bands cost nothing.
+  std::array<std::array<float, 3>, DAW_AUDIO_CORE_EQ_BAND_COUNT> designed{};
+  // Counts processed samples so each band redesigns on its own slot of the control interval.
+  uint32_t design_phase = 0;
+  float output_gain = 1.0F;
+  float output_gain_db = 0.0F;
+  std::array<std::array<std::array<dsp::Biquad<double>, dsp::kEqMaxSections>, DAW_AUDIO_CORE_EQ_BANDS_PER_CURVE>, 2> filters{};
+  std::array<dsp::PolyphaseIirHalfBand2x, 2> oversamplers{};
+  // Dry signal delayed by the Hi-Quality latency so bypass crossfades between aligned paths.
+  std::array<std::array<float, kDryDelay>, 2> dry{};
+  uint32_t dry_index = 0;
   float bypass = 0.0F;
 };
-
 // Monotonic-deque sliding minimum of the limiter's recent gain targets, so the gain
 // stays down until the peak that caused it has left the lookahead delay line.
 struct LimiterTargetWindow {

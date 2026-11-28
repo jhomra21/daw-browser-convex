@@ -799,7 +799,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     processor.tailFrames,
   ])).toEqual([
     ['saturator', 0, 0],
-    ['eq', 0, 0],
+    ['eq', 3, 0], // Hi-Quality is on for a new EQ
     ['chorus', 0, 768],
     ['flanger', 0, 1_080],
     ['phaser', 0, 48],
@@ -810,7 +810,7 @@ test('projects fixture-proven processors for offline export while rejecting unsu
     ['compressor', 480, 0],
     ['limiter', 240, 0],
   ])
-  expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder[1]?.parameterTargets).toHaveLength(24)
+  expect(result.graph.nodes.find((node) => node.id === 'track-1')?.processorOrder[1]?.parameterTargets).toHaveLength(50)
 
   const unsupported = compilePortableExportSnapshot({
     tracks: [source],

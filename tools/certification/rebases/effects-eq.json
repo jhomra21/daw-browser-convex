@@ -1,0 +1,193 @@
+{
+ "name": "effects-eq",
+ "sequence": 125,
+ "createdAt": "2026-11-24T20:20:57.176Z",
+ "revert": [],
+ "watched": [
+  {
+   "file": "native/audio-core/include/daw/audio_core.h",
+   "from": "60d1b964b46a00d4f8b59147a412490253a35c09b8fdc8e7f6f2d935aa9d9f3e",
+   "to": "a4d34c9194560c56d5a8cdbfc9c6b65e98ca22bca12d5df6a8d2a0d7086d354f"
+  },
+  {
+   "file": "native/audio-core/tests/audio_core_test.cpp",
+   "from": "746f8643a5f27bb58ea6fd941671a12acfee3c31dc29054aa0f4ea25f739acd0",
+   "to": "200fd6771c97e49e8cdb3e4fa946cf00aa324369e3f55ac9dcbabf00ebd24591"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-host.test.ts",
+   "from": "fb3c877bff77988ab1a6823107e83d26c9b24198b559664dc96d047b1443800b",
+   "to": "66d759d9e3666692ca9e4ee0fe5372c37519283d01542c0e7e4eb736ba8d55ca"
+  },
+  {
+   "file": "packages/audio-engine/src/portable-wasm-protocol.test.ts",
+   "from": "9998fa922f095ea35aefc936c2f625f8415429f56b6091a39e24dfd7cd5b6183",
+   "to": "f9037f067e208a1252b07ecc16cd1eb8f52d5c0df82fef29c83b203c89377cbe"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.manifest.json",
+   "from": "81e9a86ee254ced39a3316ec126d663a5f8f3f5a1b06a1f33c9d8eed0536ff70",
+   "to": "6350fb31fbaae1792f09280ff8e76acf49f095947259c554061aaf60eab3cbe5"
+  },
+  {
+   "file": "public/audio-core/daw-audio-core.wasm",
+   "from": "48e702468a347c213da285a88b47565e49fe5b75a19b44ef146a56b7cdd58347",
+   "to": "842700b2154db6d21c12fe3af97338402f27fa13af0982228d583af475ac0e99"
+  },
+  {
+   "file": "public/audio-worklets/daw-portable-audio-core-host-v2.js",
+   "from": "69cc2407f39f06d21457a3230d9890250237f30e30a816d78f92e96bb2e6faaa",
+   "to": "122eec400ee20d0adbfddca21ff349457c22e8ea6b0b3114ca782502f710539b"
+  },
+  {
+   "file": "src/components/timeline/create-effects-panel-audio-effects-state.ts",
+   "from": "e597d99243fdf4e8564b01d2de17212619bb13d7823bcb2692740ea050607d76",
+   "to": "1032cb289fb1f86b41bc3f808748702dc22d80760026130432bdf969cd616f39"
+  },
+  {
+   "file": "src/hooks/pointer-gesture-ownership.browser.test.ts",
+   "from": "0f21dd1b705357af71f098e18c98562c1d7c8c998c730a927a81bec01574cd60",
+   "to": "4e473d3867bdc28c32a2d50c47d817035788ff891b99a157f5ea9c13dd51b692"
+  },
+  {
+   "file": "src/lib/desktop/native-built-in-parameter-mapper.ts",
+   "from": "f13cbad6db4fba0ad0c82929da3f3d8a07e821e6a433d3f1e09052e9aa15354c",
+   "to": "fd94596c605aaf1818351d124a67bbb30cfd20dad77302e2d347d84d01041a02"
+  }
+ ],
+ "changes": [
+  {
+   "path": [
+    "traces",
+    "controller",
+    "treeSha256"
+   ],
+   "old": "62400a82a8123e0ba689b9958710ac4efbdf29c6a383de3ed97bfae36a71b8a1",
+   "new": "cb4980ca1d5698570923fe9f46a5b30c112b6a4ab7ae3f85bdb8f730506cb8f7"
+  },
+  {
+   "path": [
+    "traces",
+    "hook",
+    "treeSha256"
+   ],
+   "old": "c359095f08c4c0cdc04587cfa4d22af9c9220b2145b024eb04096e79c0359544",
+   "new": "c78b79590c05257ed3eee3e5be37eab51664f1ceda9cdac1fa0fc96c9cfcacc4"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "value"
+   ],
+   "old": "1979b486a0b87031c46bed007cbae7354bee8c16d50816dab86918a807552b75",
+   "new": "de25a8e6d337c9d56deb6544782b33fc2bd5ec3a80596f8000e6f65f574c8ba0"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.wasm"
+   ],
+   "old": "48e702468a347c213da285a88b47565e49fe5b75a19b44ef146a56b7cdd58347",
+   "new": "842700b2154db6d21c12fe3af97338402f27fa13af0982228d583af475ac0e99"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "native/build/audio-core-wasm/audio-core/daw-audio-core-wasm.wasm"
+   ],
+   "old": "48e702468a347c213da285a88b47565e49fe5b75a19b44ef146a56b7cdd58347",
+   "new": "842700b2154db6d21c12fe3af97338402f27fa13af0982228d583af475ac0e99"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-source-hash",
+    "judge",
+    "files",
+    "public/audio-core/daw-audio-core.manifest.json"
+   ],
+   "old": "81e9a86ee254ced39a3316ec126d663a5f8f3f5a1b06a1f33c9d8eed0536ff70",
+   "new": "6350fb31fbaae1792f09280ff8e76acf49f095947259c554061aaf60eab3cbe5"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-wasm-contract-hash",
+    "judge",
+    "value"
+   ],
+   "old": "f6a61db21f5f65494bdf04603438fda80c754de000714d96add84660ab2f19ae",
+   "new": "6fc2f6f377631a6940c2812fa769b5f7c3550459adad2b14bf20d07285f1c3c0"
+  },
+  {
+   "path": [
+    "gates",
+    "name=x-test-native",
+    "judge",
+    "total"
+   ],
+   "old": 33,
+   "new": 36
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "2528e81173dbcbe04d13bdf3293292854c92b74c71e78f9bbd8a090a840e371b",
+   "new": "2467d18370effabdd5aa39c26ff42637eeacbd6a10f97d525144bc7a2f3fbb9a"
+  },
+  {
+   "path": [
+    "gates",
+    "name=dp-repeat",
+    "judge",
+    "files",
+    "results.json"
+   ],
+   "old": "2528e81173dbcbe04d13bdf3293292854c92b74c71e78f9bbd8a090a840e371b",
+   "new": "2467d18370effabdd5aa39c26ff42637eeacbd6a10f97d525144bc7a2f3fbb9a"
+  }
+ ],
+ "seedRecordChanges": [],
+ "evidence": {
+  "mode": "bless",
+  "allowedRejections": [],
+  "rejectionRuling": null,
+  "allowedUnexercised": [],
+  "unexercisedRuling": null,
+  "allowedNowPassing": [],
+  "nowPassingRuling": null,
+  "allowedRemovals": null,
+  "scope": "--full",
+  "provenance": {
+   "scope": [
+    "--full"
+   ],
+   "head": "cf690f1d0eb9da4c29744f59f5413b381edaa089",
+   "gitStatusSha256": "b4470cae410f125989c0dc21ac687db88f6c114e9e450b00da40743247af2a31",
+   "expectationsSha256": "f734fa061f78209e7cf763618e028c92467662635ba0c14b778f7c774b2944c8",
+   "overlaySha256": null
+  },
+  "expectationsSha256": "f734fa061f78209e7cf763618e028c92467662635ba0c14b778f7c774b2944c8",
+  "revertRun": null,
+  "liveRun": {
+   "dir": "/tmp/fast-cert/eq-bless/live",
+   "resultSha256": "61e133f3cfb6e416178d7a8bfc84f7a80c15cf1afbb1c04ce568e40b8a69f878",
+   "seconds": 2195.255692959,
+   "observations": 3081
+  },
+  "unreachedByOverlay": []
+ }
+}

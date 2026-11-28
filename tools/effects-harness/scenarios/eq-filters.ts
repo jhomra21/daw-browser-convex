@@ -1,12 +1,13 @@
 // Acceptance tests from eq-filters.md section 3: E1/E3 (response vs analog), E2 (precision, NaN, denormals), E4 (click),
 // E5 (slopes), A1 (drive), A2 (parity, latency), A3 (resonance level).
-import { analogBandDb, audibleAliasDb, biquad, countNonFinite, logFrequencies, maxAbsDiff, peakAbs, peakDb, responseDb, rbjCoefficients, rms, toneFit } from '../dsp'
+import { analogBandDb, audibleAliasDb, biquad, countNonFinite, logFrequencies, maxAbsDiff, peakAbs, peakDb, responseDb, rms, toneFit } from '../dsp'
 import { measureAliasingEnergyDb, measureThdPlusNoise } from '../../../packages/audio-engine/src/dsp-characterization'
 import { autofilterLfo, eqWith, fx } from '../effects'
 import type { EffectSpec } from '../effects'
 import type { Family } from './index'
 import type { Scenario } from '../harness'
 import { coherentFrequency, concat, impulse, linearToDb, noise, seededRandom, sine, sineWithPeakAt, silence } from '../signals'
+import { createDefaultEqParams, designEqBand, eqCurveResponseDb } from '../../../packages/shared/src'
 import { parityFixtures, parityScenario, robustnessScenarios } from './shared'
 
 const bandTypes = ['peaking', 'lowshelf', 'highshelf', 'lowpass', 'highpass'] as const
@@ -23,15 +24,18 @@ const randomBands = (rate: number, count: number) => {
   }))
 }
 
+// 2^18 frames: a Q 18 band at 20 Hz rings for about 0.3 s, and a shorter impulse truncates that ringing into dB of error.
 const impulseResponse = async (h: Parameters<Scenario['run']>[0], spec: EffectSpec) => {
-  const { output } = await h.render(spec, { input: [impulse(32768)] }, { parity: false })
+  const { output } = await h.render(spec, { input: [impulse(2 ** 18)] }, { parity: false })
 
   return output[0]
 }
 
-const bandResponseScenario: Scenario = {
+const hiQuality = { highQuality: true }
+
+const bandResponseFor = (name: string, extra: { highQuality: boolean }, limit: (rate: number) => number): Scenario => ({
   effect: 'eq',
-  name: 'band-response-vs-analog',
+  name,
   run: async (h) => {
     const frequencies = logFrequencies(20, 0.45 * h.rate, 256)
     let worst = 0
@@ -39,7 +43,7 @@ const bandResponseScenario: Scenario = {
     const errors: number[] = []
 
     for (const band of randomBands(h.rate, 20)) {
-      const response = responseDb(await impulseResponse(h, eqWith({ type: band.type, frequency: band.frequency, q: band.q, gainDb: band.gainDb })), h.rate, frequencies)
+      const response = responseDb(await impulseResponse(h, eqWith({ type: band.type, frequency: band.frequency, q: band.q, gainDb: band.gainDb }, extra)), h.rate, frequencies)
 
       // Below -60 dB the float32 render floor and the bilinear zero at Nyquist dominate; those points do not describe the filter.
       const error = Math.max(...response.map((db, i) => {
@@ -56,14 +60,19 @@ const bandResponseScenario: Scenario = {
       }
     }
 
-    h.atMost('worst |digital - analog| over 20 random bands, 20 Hz to 0.45 fs (analog > -60 dB)', worst, h.rate >= 96000 ? 0.25 : 0.5, 'dB', worstBand)
+    h.atMost('worst |digital - analog| over 20 random bands, 20 Hz to 0.45 fs (analog > -60 dB)', worst, limit(h.rate), 'dB', worstBand)
     h.info('median band error', errors.toSorted((a, b) => a - b)[errors.length >> 1], 'dB')
   },
-}
+})
 
-const referenceBands: Scenario = {
+const bandResponseScenario = bandResponseFor('band-response-vs-analog', { highQuality: false }, (rate) => (rate >= 96000 ? 0.25 : 0.5))
+
+// The 4 dB gate below 96 kHz is for shelves: a shelf's analog response is not band-limited, so its error near Nyquist is reported, not gated tight.
+const bandResponseHq = bandResponseFor('band-response-vs-analog-hq', hiQuality, (rate) => (rate >= 96000 ? 0.25 : 4))
+
+const referenceBandsFor = (name: string, extra: { highQuality: boolean }): Scenario => ({
   effect: 'eq',
-  name: 'cramping-reference-bands',
+  name,
   run: async (h) => {
     const at = (spec: EffectSpec, type: string, f0: number, q: number, gainDb: number, probe: number, limit: number, label: string, note: string) =>
       impulseResponse(h, spec).then((ir) => {
@@ -71,12 +80,15 @@ const referenceBands: Scenario = {
         h.atMost(label, Math.abs(measured - analogBandDb(type, f0, q, gainDb, probe)), limit, 'dB', note)
       })
 
-    await at(eqWith({ type: 'peaking', frequency: 12000, gainDb: 12, q: 1 }), 'peaking', 12000, 1, 12, 20000, 0.5, '12 kHz +12 dB Q1 bell, error at 20 kHz', 'report: +1.15 dB vs analog +5.66 dB')
-    await at(eqWith({ type: 'lowpass', frequency: 16000, q: Math.SQRT1_2 }), 'lowpass', 16000, Math.SQRT1_2, 0, 20000, 1, '16 kHz low-pass, error at 20 kHz', 'report: -13.5 dB vs analog -5.4 dB')
+    await at(eqWith({ type: 'peaking', frequency: 12000, gainDb: 12, q: 1 }, extra), 'peaking', 12000, 1, 12, 20000, 0.5, '12 kHz +12 dB Q1 bell, error at 20 kHz', 'report: +1.15 dB vs analog +5.66 dB')
+    await at(eqWith({ type: 'lowpass', frequency: 16000, q: Math.SQRT1_2 }, extra), 'lowpass', 16000, Math.SQRT1_2, 0, 20000, 1, '16 kHz low-pass, error at 20 kHz', 'report: -13.5 dB vs analog -5.4 dB')
 
-    if (h.rate === 44100) await at(eqWith({ type: 'peaking', frequency: 18000, gainDb: 12, q: 1 }), 'peaking', 18000, 1, 12, 21000, 1, '18 kHz +12 dB Q1 bell, error at 21 kHz', 'E3: within 1 dB up to 21 kHz at 44.1 kHz')
+    if (h.rate === 44100) await at(eqWith({ type: 'peaking', frequency: 18000, gainDb: 12, q: 1 }, extra), 'peaking', 18000, 1, 12, 21000, 1, '18 kHz +12 dB Q1 bell, error at 21 kHz', 'E3: within 1 dB up to 21 kHz at 44.1 kHz')
   },
-}
+})
+
+const referenceBands = referenceBandsFor('cramping-reference-bands', { highQuality: false })
+const referenceBandsHq = referenceBandsFor('cramping-reference-bands-hq', hiQuality)
 
 const precision: Scenario = {
   effect: 'eq',
@@ -93,7 +105,7 @@ const precision: Scenario = {
 
     for (const band of settings) {
       const { output } = await h.render(eqWith(band), { input: [input] }, { parity: false })
-      const reference = biquad(input, rbjCoefficients(band.type, band.frequency, band.q, band.gainDb, h.rate))
+      const reference = designEqBand(band.type, band.frequency, h.rate, band.q, band.gainDb).reduce<ArrayLike<number>>((signal, section) => biquad(signal, section), input)
       const error = output[0].map((v, n) => v - reference[n])
       h.atLeast(`SNR vs float64 reference, ${band.type} ${band.frequency} Hz`, 20 * Math.log10(rms(reference, h.rate) / rms(error, h.rate)), 110, 'dB')
     }
@@ -128,8 +140,94 @@ const slopes: Scenario = {
       return linearToDb(rms(tail(input)) / rms(tail(output[0])))
     }
 
-    h.atLeast('high-pass 1 kHz: attenuation at 250 Hz', await attenuation(eqWith({ type: 'highpass', frequency: 1000, q: Math.SQRT1_2 }), 250), 44, 'dB', 'E5: 48 dB/oct cut; the core has 12 dB/oct')
-    h.atLeast('low-pass 1 kHz: attenuation at 4 kHz', await attenuation(eqWith({ type: 'lowpass', frequency: 1000, q: Math.SQRT1_2 }), 4000), 44, 'dB', 'E5: 48 dB/oct cut; the core has 12 dB/oct')
+    h.atLeast('high-pass 1 kHz: attenuation at 250 Hz', await attenuation(eqWith({ type: 'highpass48', frequency: 1000, q: Math.SQRT1_2 }), 250), 44, 'dB', 'E5: 48 dB/oct cut')
+    h.atLeast('low-pass 1 kHz: attenuation at 4 kHz', await attenuation(eqWith({ type: 'lowpass48', frequency: 1000, q: Math.SQRT1_2 }), 4000), 44, 'dB', 'E5: 48 dB/oct cut')
+  },
+}
+
+const slopes12: Scenario = {
+  effect: 'eq',
+  name: 'cut-slope-12',
+  rates: [48000],
+  run: async (h) => {
+    const frames = h.rate
+
+    const attenuation = async (spec: EffectSpec, frequency: number) => {
+      const input = sine(frames, coherentFrequency(frequency, frames / 2, h.rate), h.rate, 0.5)
+      const { output } = await h.render(spec, { input: [input] }, { parity: false })
+
+      return linearToDb(rms(input.subarray(h.rate / 2)) / rms(output[0].subarray(h.rate / 2)))
+    }
+
+    h.atLeast('12 dB high-pass 1 kHz: attenuation at 250 Hz', await attenuation(eqWith({ type: 'highpass', frequency: 1000, q: Math.SQRT1_2 }), 250), 22, 'dB', '12 dB/oct, two octaves')
+  },
+}
+
+const modes: Scenario = {
+  effect: 'eq',
+  name: 'channel-modes-and-globals',
+  rates: [48000],
+  run: async (h) => {
+    const input = sine(h.rate, coherentFrequency(1000, h.rate / 2, h.rate), h.rate, 0.25)
+
+    const gainOf = async (spec: EffectSpec, channels: Float32Array[]) => {
+      const { output } = await h.render(spec, { input: channels }, { parity: false })
+
+      return output.map((out, c) => linearToDb(rms(out.subarray(h.rate / 2)) / rms(channels[c].subarray(h.rate / 2))))
+    }
+
+    const bell = { type: 'peaking', frequency: 1000, gainDb: 12, q: 1 } as const
+
+    const stereo = await gainOf(eqWith(bell), [input, input])
+    h.within('stereo mode: left bell gain at its centre', stereo[0], 12, 0.3, 'dB')
+    h.within('stereo mode: right equals left', stereo[1], stereo[0], 0.01, 'dB')
+    const lr = await gainOf(eqWith(bell, { channelMode: 'leftRight' }), [input, input])
+    h.within('L/R mode: curve A shapes the left channel', lr[0], 12, 0.3, 'dB')
+    h.within('L/R mode: curve B (idle) leaves the right channel alone', lr[1], 0, 0.05, 'dB')
+    const scaled = await gainOf(eqWith(bell, { scale: 0.5 }), [input, input])
+    h.within('Scale 50 % halves the bell gain', scaled[0], 6, 0.3, 'dB')
+    const out = await gainOf(eqWith({ ...bell, enabled: false }, { outputDb: -6 }), [input, input])
+    h.within('Output -6 dB', out[0], -6, 0.05, 'dB')
+    const adaptive = await gainOf(eqWith(bell, { adaptiveQ: true }), [input, input])
+    h.within('Adaptive Q leaves the centre gain unchanged', adaptive[0], 12, 0.3, 'dB')
+    const ms = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, input])
+    h.within('M/S mode: curve A shapes the mid of a mono signal', ms[0], 12, 0.3, 'dB')
+    const side = await gainOf(eqWith(bell, { channelMode: 'midSide' }), [input, Float32Array.from(input, (v) => -v)])
+    h.within('M/S mode: curve A leaves a side-only signal alone', side[0], 0, 0.3, 'dB')
+  },
+}
+
+const graphMatchesRender: Scenario = {
+  effect: 'eq',
+  name: 'graph-curve-vs-render',
+  run: async (h) => {
+    const bands = [
+      { type: 'peaking', frequency: 3000, q: 2, gainDb: 9 },
+      { type: 'highshelf', frequency: 9000, q: 0.8, gainDb: -6 },
+      { type: 'lowpass48', frequency: 14000, q: 0.707, gainDb: 0 },
+    ] as const
+
+    for (const highQuality of [false, true]) {
+      const defaults = createDefaultEqParams()
+      const params = { ...defaults, highQuality, bands: defaults.bands.map((band, index) => (index < bands.length ? { ...band, ...bands[index], enabled: true } : { ...band, enabled: false })) }
+      const frequencies = logFrequencies(20, 0.45 * h.rate, 128)
+      const drawn = eqCurveResponseDb(params, 0, frequencies, h.rate)
+      const spec = eqWith({}, { highQuality, bands: params.bands.map((band) => ({ enabled: band.enabled, type: band.type, frequency: band.frequency, gainDb: band.gainDb, q: band.q })) })
+      const rendered = responseDb(await impulseResponse(h, spec), h.rate, frequencies)
+      const error = Math.max(...rendered.map((db, i) => (drawn[i] < -60 ? 0 : Math.abs(db - drawn[i]))))
+      h.atMost(`drawn graph curve vs wasm render, Hi-Quality ${highQuality ? 'on' : 'off'}`, error, 0.05, 'dB', 'E1')
+    }
+  },
+}
+
+const hqLatency: Scenario = {
+  effect: 'eq',
+  name: 'hq-latency-and-cpu',
+  run: async (h) => {
+    const spec = eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 }, hiQuality)
+    h.within('Hi-Quality impulse peak delay vs declared latency (3)', await h.latencyFrames(spec), 3, 1, 'frames')
+    h.info('CPU, Hi-Quality on', await h.cpuNsPerFrame(spec), 'ns/frame')
+    h.info('CPU, Hi-Quality off', await h.cpuNsPerFrame(eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 })), 'ns/frame')
   },
 }
 
@@ -307,7 +405,7 @@ const legacyFallbackComparison: Scenario = {
 
 export const eqFilters: Family = {
   scenarios: [
-    bandResponseScenario, referenceBands, precision, gainStepClick, slopes, nanInputGuard,
+    bandResponseScenario, bandResponseHq, referenceBands, referenceBandsHq, slopes12, modes, graphMatchesRender, hqLatency, precision, gainStepClick, slopes, nanInputGuard,
     autofilterDrive, resonanceLevel, lowpassSlope, sweepClick, hiQualityLatency, lfoWaveforms, tempoSync, envelopeLaw,
     parityScenario('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 })),
     ...robustnessScenarios('eq', eqWith({ type: 'peaking', frequency: 1000, gainDb: 6, q: 2 }), () => 0),

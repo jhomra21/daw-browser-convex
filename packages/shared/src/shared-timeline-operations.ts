@@ -426,7 +426,17 @@ const readEqParams = (value: JsonValue): EqParams | null => {
       : []
   })
 
-  return bands.length === value.bands.length ? normalizeEqParams({ enabled: value.enabled, channelMode: value.channelMode, bands }) : null
+  return bands.length === value.bands.length
+    ? normalizeEqParams({
+      enabled: value.enabled,
+      channelMode: value.channelMode,
+      adaptiveQ: isJsonBoolean(value.adaptiveQ) ? value.adaptiveQ : undefined,
+      scale: readOptionalNumber(value.scale),
+      outputDb: readOptionalNumber(value.outputDb),
+      highQuality: isJsonBoolean(value.highQuality) ? value.highQuality : undefined,
+      bands,
+    })
+    : null
 }
 
 const readReverbParams = (value: JsonValue): SharedReverbParams | null => {

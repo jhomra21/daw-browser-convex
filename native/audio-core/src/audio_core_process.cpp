@@ -78,6 +78,13 @@ bool bind_process_transport(Core &core, const daw_audio_core_process_block &bloc
     find_processor((*core.published_graph), previous_processor, &previous_index);
     core.event_ends[previous_index] = block.event_count;
   }
+  // The wasm scratch below is a stack array of every node's instrument state: building it for each block that carries
+  // automation, as the host sends, cost more than a whole EQ.
+  if (block.instrument_event_count == 0) {
+    for (auto &indices : core.instrument_event_indices) indices.fill(0);
+    core.rejected_instrument_event_index = UINT32_MAX;
+    return true;
+  }
   // Validation applies events to a scratch copy of only the nodes they touch.
 #if defined(DAW_AUDIO_CORE_USE_PERSISTENT_VALIDATION_SCRATCH)
   auto &proposed_instruments = core.proposed_instruments;

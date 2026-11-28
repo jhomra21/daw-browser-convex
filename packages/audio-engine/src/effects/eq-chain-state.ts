@@ -1,6 +1,6 @@
 import { normalizeEqParams, type EqParamsLite } from '@daw-browser/shared'
 import { disconnectAudioNodes } from './chain'
-import { applyEqNodeParams, createEqNodes, getEqTopologySignature } from './dsp'
+import { applyEqNodeParams, createEqNodes, getEqTopologySignature, getLegacyEqBands } from './dsp'
 
 export type EqChainState = {
   nodes: () => BiquadFilterNode[]
@@ -16,7 +16,7 @@ export function createEqChainState(ctx: BaseAudioContext, params: EqParamsLite, 
   const nodes = createEqNodes(ctx, normalized, channelCount)
   const topology = getEqTopologySignature(normalized)
 
-  const nodesByBand = new Map<string, BiquadFilterNode>(normalized.bands.filter((band) => band.enabled).flatMap((band, index) => {
+  const nodesByBand = new Map<string, BiquadFilterNode>(getLegacyEqBands(normalized).flatMap((band, index) => {
     const node = nodes[index]
 
     return node ? [[band.id, node]] : []

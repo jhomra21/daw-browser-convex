@@ -1,16 +1,43 @@
 import { DEFAULT_BPM } from '@daw-browser/timeline-core/project-defaults'
-import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, linearFromDb, normalizeSaturatorParams, normalizeDelayParams, supportsGain, type ArpParams, type DelayParamsLite, type EqBandParams, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
+import { DELAY_MAX_DELAY_TIME_SEC, arpeggiatorSequence, arpeggiatorStepBeats, evaluateSaturatorCurvePoint, linearFromDb, normalizeSaturatorParams, normalizeDelayParams, effectiveEqBand, EQ_BANDS_PER_CURVE, type ArpParams, type DelayParamsLite, type EqBandType, type EqChannelMode, type EqParamsLite, type SaturatorCurve, type SaturatorParamsLite } from '@daw-browser/shared'
 
 type MidiNote = { id?: string; beat: number; length: number; pitch: number; velocity?: number }
 
+
+// The Web Audio path predates EQ Eight and has no 48 dB slopes, second curve, Output gain or oversampling. It runs the first
+// curve as one BiquadFilterNode per enabled band with Scale and Adaptive Q applied, a 48 dB cut as its 12 dB cut, and L/R and
+// M/S as Stereo. The portable core is the product path and implements all of it.
+const LEGACY_BAND_TYPE: Record<EqBandType, BiquadFilterType> = {
+  lowpass: 'lowpass',
+  highpass: 'highpass',
+  bandpass: 'bandpass',
+  lowshelf: 'lowshelf',
+  highshelf: 'highshelf',
+  peaking: 'peaking',
+  notch: 'notch',
+  allpass: 'allpass',
+  lowpass48: 'lowpass',
+  highpass48: 'highpass',
+}
+
+export type LegacyEqBand = { id: string; type: BiquadFilterType; frequency: number; gainDb: number; q: number }
+
+export function getLegacyEqBands(params: EqParamsLite): LegacyEqBand[] {
+  if (!params.enabled) return []
+
+  return params.bands.slice(0, EQ_BANDS_PER_CURVE).filter((band) => band.enabled).map((band) => {
+    const { gainDb, q } = effectiveEqBand(band, params)
+
+    return { id: band.id, type: LEGACY_BAND_TYPE[band.type], frequency: band.frequency, gainDb, q }
+  })
+}
 
 export function createEqNodes(ctx: BaseAudioContext, params?: EqParamsLite, channels = 2): BiquadFilterNode[] {
   const nodes: BiquadFilterNode[] = []
 
   if (!params?.enabled) return nodes
 
-  for (const band of params.bands) {
-    if (!band.enabled) continue
+  for (const band of getLegacyEqBands(params)) {
     const filter = ctx.createBiquadFilter()
     configureEqNodeChannels(filter, params.channelMode, channels)
     applyEqBandParams(filter, band)
@@ -41,8 +68,7 @@ export function configureEqNodeChannels(node: ConfigurableEqNodeChannels, mode: 
 export function getEqTopologySignature(params?: EqParamsLite): string {
   if (!params?.enabled) return ''
 
-  const bandsSignature = params.bands
-    .filter((band) => band.enabled)
+  const bandsSignature = getLegacyEqBands(params)
     .map((band) => `${band.id}:${band.type}`)
     .join('|')
 
@@ -50,18 +76,18 @@ export function getEqTopologySignature(params?: EqParamsLite): string {
 }
 
 export function applyEqNodeParams(nodes: BiquadFilterNode[], params: EqParamsLite) {
-  const bands = params.enabled ? params.bands.filter((band) => band.enabled) : []
+  const bands = getLegacyEqBands(params)
 
   for (let index = 0; index < nodes.length; index++) {
     applyEqBandParams(nodes[index], bands[index])
   }
 }
 
-function applyEqBandParams(filter: BiquadFilterNode, band: EqBandParams) {
+function applyEqBandParams(filter: BiquadFilterNode, band: LegacyEqBand) {
   filter.type = band.type
   filter.frequency.value = band.frequency
   filter.Q.value = band.q
-  filter.gain.value = supportsGain(band.type) ? band.gainDb : 0
+  filter.gain.value = band.gainDb
 }
 
 export function createSaturatorCurve(curve: SaturatorCurve): Float32Array<ArrayBuffer> {

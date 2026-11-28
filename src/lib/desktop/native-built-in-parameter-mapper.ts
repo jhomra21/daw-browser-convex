@@ -488,8 +488,14 @@ const mapEq = (payload: EffectChange<'eq' | 'master-eq'>) => {
   const from: EqParams = payload.from
   const to: EqParams = payload.to
 
-  if (from.enabled !== to.enabled || from.channelMode !== to.channelMode || from.bands.length !== to.bands.length) return undefined
-  const values: ParameterField[] = []
+  // Mode, Adaptive Q and Hi-Quality (which changes the declared latency) are not automatable: they replace the state.
+  if (from.enabled !== to.enabled || from.channelMode !== to.channelMode || from.adaptiveQ !== to.adaptiveQ
+    || from.highQuality !== to.highQuality || from.bands.length !== to.bands.length) return undefined
+
+  const values: ParameterField[] = [
+    { parameterId: 'eq.scale', from: from.scale, to: to.scale },
+    { parameterId: 'eq.outputDb', from: from.outputDb, to: to.outputDb },
+  ]
 
   for (let index = 0; index < from.bands.length; index += 1) {
     const fromBand = from.bands[index]

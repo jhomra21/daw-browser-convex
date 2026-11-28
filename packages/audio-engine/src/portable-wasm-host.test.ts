@@ -236,7 +236,7 @@ test('the v2 host passes curved fade values and defaults to Wasm', async () => {
 
 test('the v2 host enforces the 24-parameter contract in every parameter validation path', async () => {
   const source = await Bun.file(hostV2Url).text()
-  expect(source).toContain('const MAX_PROCESSOR_PARAMETERS = 24')
+  expect(source).toContain('const MAX_PROCESSOR_PARAMETERS = 64')
   expect(source).toContain('block.parameterTargets.length <= MAX_PROCESSOR_PARAMETERS')
   expect(source).toContain('message.parameterTargets.length > MAX_PROCESSOR_PARAMETERS')
 })
@@ -2292,10 +2292,13 @@ const fxProcessor = (id: string, instanceId: number, kind: string, kindId: numbe
 const fxUtility = (id: string, instanceId: number, gainDb: number, latencyFrames = 0) =>
   fxProcessor(id, instanceId, 'utility', 1, encodeUtilityProcessorState({ ...createDefaultUtilityParams(), gainDb }), latencyFrames)
 
-const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'peaking') => fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
-  enabled: true, channelMode: 'stereo',
-  bands: Array.from({ length: 8 }, (_, index) => ({ enabled: index === 0, type, frequency: 1_000, gainDb: 12, q: 1 })),
-}))
+const fxEq = (id: string, instanceId: number, type: 'peaking' | 'highshelf' = 'peaking') => ({
+  ...fxProcessor(id, instanceId, 'eq', 3, encodeEqProcessorState({
+    enabled: true, channelMode: 'stereo', adaptiveQ: false, highQuality: false, scale: 1, outputDb: 0,
+    bands: Array.from({ length: 16 }, (_, index) => ({ enabled: index === 0, type, frequency: 1_000, gainDb: 12, q: 1 })),
+  })),
+  stateVersion: 2,
+})
 
 type FxProcessor = ReturnType<typeof fxUtility>
 

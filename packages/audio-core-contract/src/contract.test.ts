@@ -282,7 +282,7 @@ test('processor registry preserves stable portable processor ids', () => {
   expect(processorRegistry).toEqual([
     expect.objectContaining({ name: 'utility', id: 1, schemaVersion: 1, stateBytes: 40, tombstone: false }),
     expect.objectContaining({ name: 'saturator', id: 2, schemaVersion: 1, stateBytes: 32, tombstone: false }),
-    expect.objectContaining({ name: 'eq', id: 3, schemaVersion: 1, stateBytes: 200, tombstone: false }),
+    expect.objectContaining({ name: 'eq', id: 3, schemaVersion: 2, stateBytes: 408, tombstone: false }),
     expect.objectContaining({ name: 'chorus', id: 4, stateBytes: 28 }),
     expect.objectContaining({ name: 'flanger', id: 5, stateBytes: 28 }),
     expect.objectContaining({ name: 'phaser', id: 6, stateBytes: 32 }),
@@ -452,19 +452,31 @@ test('Saturator and eight-band EQ codecs preserve their portable state profiles'
 
   const eq = encodeEqProcessorState({
     enabled: true,
-    channelMode: 'stereo',
-    bands: Array.from({ length: 8 }, (_, index) => ({
+    channelMode: 'midSide',
+    adaptiveQ: true,
+    highQuality: true,
+    scale: 1.5,
+    outputDb: -3,
+    bands: Array.from({ length: 16 }, (_, index) => ({
       enabled: index === 0,
-      type: index === 0 ? 'lowshelf' : 'peaking',
+      type: index === 0 ? 'lowshelf' : index === 15 ? 'lowpass48' : 'peaking',
       frequency: 100 * (index + 1),
       gainDb: index,
       q: 1,
     })),
   })
 
-  expect(eq.byteLength).toBe(200)
-  expect(new DataView(eq.buffer).getFloat32(16, true)).toBe(100)
-  expect(() => encodeEqProcessorState({ enabled: true, channelMode: 'mono', bands: [] })).toThrow('exactly eight')
+  const eqView = new DataView(eq.buffer)
+
+  expect(eq.byteLength).toBe(408)
+  expect(eqView.getUint32(4, true)).toBe(3)
+  expect(eqView.getUint32(8, true)).toBe(1)
+  expect(eqView.getUint32(12, true)).toBe(1)
+  expect(eqView.getFloat32(16, true)).toBe(1.5)
+  expect(eqView.getFloat32(20, true)).toBe(-3)
+  expect(eqView.getFloat32(24 + 8, true)).toBe(100)
+  expect(eqView.getUint32(24 + 15 * 24 + 4, true)).toBe(8)
+  expect(() => encodeEqProcessorState({ enabled: true, channelMode: 'mono', adaptiveQ: false, highQuality: false, scale: 1, outputDb: 0, bands: [] })).toThrow('exactly sixteen')
 })
 
 test('wire envelopes are explicit, versioned, and length-checked', () => {

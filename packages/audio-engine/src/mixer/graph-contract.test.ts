@@ -306,7 +306,7 @@ describe('mixer routing plan', () => {
       .toEqual([['slow', 'post-fader', 0], ['fast', 'post-fader', lookahead]])
   })
 
-  test('projects portable Saturator and fixed eight-band EQ state without legacy fallback', () => {
+  test('projects portable Saturator and EQ Eight state without legacy fallback', () => {
     const graph = resolveMixerGraph({
       channels: createMixerChannels([
         {
@@ -326,15 +326,24 @@ describe('mixer routing plan', () => {
     const snapshot = createPortableGraphSnapshot({ graph, revision: 1, sampleRate: 48_000 })
     expect(snapshot.nodes[0]?.processorOrder.map((processor) => [processor.kind, processor.kindId, processor.state.byteLength])).toEqual([
       ['saturator', 2, 32],
-      ['eq', 3, 200],
+      ['eq', 3, 408],
     ])
-    expect(snapshot.nodes[0]?.processorOrder[1]?.parameterTargets).toEqual(
-      createDefaultEqParams().bands.flatMap((band, index) => [
-        { id: createEqBandParameterId(band.id, 'frequencyHz'), target: 45 + index * 3 },
-        { id: createEqBandParameterId(band.id, 'gainDb'), target: 46 + index * 3 },
-        { id: createEqBandParameterId(band.id, 'q'), target: 47 + index * 3 },
-      ]),
-    )
+    // Curve A keeps its targets 45-68; curve B (bands 9-16) sits at 144-167, then Scale and Output.
+    expect(snapshot.nodes[0]?.processorOrder[1]?.parameterTargets).toEqual([
+      ...createDefaultEqParams().bands.flatMap((band, index) => {
+        const base = index < 8 ? 45 + index * 3 : 144 + (index - 8) * 3
+
+        return [
+          { id: createEqBandParameterId(band.id, 'frequencyHz'), target: base },
+          { id: createEqBandParameterId(band.id, 'gainDb'), target: base + 1 },
+          { id: createEqBandParameterId(band.id, 'q'), target: base + 2 },
+        ]
+      }),
+      { id: 'eq.scale', target: 168 },
+      { id: 'eq.outputDb', target: 169 },
+    ])
+    expect(snapshot.nodes[0]?.processorOrder[1]?.latencyFrames).toBe(3)
+    expect(snapshot.nodes[0]?.processorOrder[1]?.stateVersion).toBe(2)
     expect(snapshot.nodes[0]?.processorOrder[0]?.parameterTargets).toEqual([
       { id: 'saturator.driveDb', target: 69 },
       { id: 'saturator.colorFrequencyHz', target: 70 },

@@ -2,6 +2,15 @@ import { processorRegistry } from './generated/processor-contract-metadata'
 
 export const audioCoreContractVersion = 1
 
+/** The schema version a processor kind's state is encoded with, from the generated registry. */
+export const processorSchemaVersion = (kind: string): number => {
+  const entry = processorRegistry.find((candidate) => candidate.name === kind)
+
+  if (entry === undefined) throw new Error(`Unknown processor kind ${kind}.`)
+
+  return entry.schemaVersion
+}
+
 export type UtilityProcessorState = {
   enabled: boolean
   gainDb: number
@@ -72,20 +81,24 @@ export type SaturatorProcessorState = {
 
 export type EqProcessorBandState = {
   enabled: boolean
-  type: 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass'
+  type: 'lowpass' | 'highpass' | 'bandpass' | 'lowshelf' | 'highshelf' | 'peaking' | 'notch' | 'allpass' | 'lowpass48' | 'highpass48'
   frequency: number
   gainDb: number
   q: number
 }
 
 /**
- * Portable EQ is a fixed eight-band RBJ cookbook biquad chain. It preserves
- * the legacy band's index, type, enabled state, frequency, gain, and Q, but
- * not browser-specific BiquadFilterNode coefficient or automation behavior.
+ * Portable EQ (EQ Eight): two curves of eight bands. Curve A (bands 0-7) is the only curve in stereo and mono and the
+ * left (mid) curve in leftRight (midSide); curve B (bands 8-15) is the right (side) curve. 'mono' sums to mono and is
+ * kept for devices saved before EQ Eight. With highQuality the bands run at twice the sample rate.
  */
 export type EqProcessorState = {
   enabled: boolean
-  channelMode: 'stereo' | 'mono'
+  channelMode: 'stereo' | 'mono' | 'leftRight' | 'midSide'
+  adaptiveQ: boolean
+  highQuality: boolean
+  scale: number
+  outputDb: number
   bands: readonly EqProcessorBandState[]
 }
 
@@ -695,7 +708,8 @@ export type AudioCoreGraphProcessorDto = {
   /** Stable generated numeric kind id consumed by native and Wasm ABIs. */
   kindId: number
   instanceId: number
-  stateVersion: typeof audioCoreContractVersion
+  /** The kind's schema version in the generated processor registry. */
+  stateVersion: number
   /** Bounded canonical state payload; no JSON is decoded on the render path. */
   state: Uint8Array
   parameterTargets: readonly AudioCoreProcessorParameterTarget[]
@@ -713,8 +727,8 @@ export type AudioCoreProcessorParameterTarget = {
 
 export const audioCoreMaxProcessorsPerNode = 32
 export const audioCoreMaxGraphProcessors = 512
-const audioCoreMaxProcessorStateBytes = 256
-export const audioCoreMaxProcessorParameterTargets = 24
+const audioCoreMaxProcessorStateBytes = 512
+export const audioCoreMaxProcessorParameterTargets = 64
 const audioCoreProcessorStateEnvelopeBytes = 40
 
 export type AudioCoreProcessorStateEnvelope = {
@@ -859,13 +873,17 @@ export const encodeSaturatorProcessorState = (state: SaturatorProcessorState): U
 }
 
 export const encodeEqProcessorState = (state: EqProcessorState): Uint8Array => {
-  if (state.bands.length !== 8) throw new Error('Portable EQ requires exactly eight bands.')
-  const output = new Uint8Array(200)
+  if (state.bands.length !== 16) throw new Error('Portable EQ requires exactly sixteen bands.')
+  const output = new Uint8Array(408)
   const view = new DataView(output.buffer)
   view.setUint32(0, state.enabled ? 1 : 0, true)
-  view.setUint32(4, state.channelMode === 'mono' ? 1 : 0, true)
+  view.setUint32(4, eqChannelModeId(state.channelMode), true)
+  view.setUint32(8, state.adaptiveQ ? 1 : 0, true)
+  view.setUint32(12, state.highQuality ? 1 : 0, true)
+  view.setFloat32(16, state.scale, true)
+  view.setFloat32(20, state.outputDb, true)
   state.bands.forEach((band, index) => {
-    const offset = 8 + index * 24
+    const offset = 24 + index * 24
     view.setUint32(offset, band.enabled ? 1 : 0, true)
     view.setUint32(offset + 4, eqBandTypeId(band.type), true)
     view.setFloat32(offset + 8, band.frequency, true)
@@ -1204,7 +1222,13 @@ const eqBandTypeId = (type: EqProcessorBandState['type']) =>
           : type === 'peaking' ? 5
             : type === 'notch' ? 6
               : type === 'allpass' ? 7
-                : 0
+                : type === 'lowpass48' ? 8
+                  : type === 'highpass48' ? 9
+                    : 0
+
+const eqChannelModeId = (mode: EqProcessorState['channelMode']) => (
+  mode === 'mono' ? 1 : mode === 'leftRight' ? 2 : mode === 'midSide' ? 3 : 0
+)
 
 const isUtilityState = (value: JsonValue): value is UtilityProcessorState => {
   if (!isRecord(value) || !hasOnlyKeys(value, ['enabled', 'gainDb', 'polarity', 'inputMode', 'pan', 'balance', 'width', 'matrix', 'swap', 'dcBlock'])) return false
@@ -1239,7 +1263,6 @@ export const isAudioCoreGraphProcessor = <Value>(value: Value): value is Value &
     && !registryEntry.tombstone
     && Number.isSafeInteger(value.kindId)
     && isPositiveSafeInteger(value.instanceId)
-    && value.stateVersion === audioCoreContractVersion
     && value.state instanceof Uint8Array
     && value.state.byteLength === registryEntry.stateBytes
     && value.stateVersion === registryEntry.schemaVersion

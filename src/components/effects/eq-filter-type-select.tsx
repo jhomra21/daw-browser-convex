@@ -12,21 +12,26 @@ type EqFilterTypeOption = {
   value: EqBandType
   label: string
   path: string
+  // Not an EQ Eight response: offered only to a band that already has it, so an older device keeps its sound.
+  legacy?: boolean
 }
 
+// EQ Eight's order and names: the cuts are named for what they remove, so a high-pass is a low cut.
 const EQ_FILTER_TYPE_OPTIONS: EqFilterTypeOption[] = [
-  { value: 'lowpass', label: 'Low Pass', path: 'M2 4 H17 C22 4 22 12 30 12' },
-  { value: 'highpass', label: 'High Pass', path: 'M2 12 C10 12 10 4 15 4 H30' },
-  { value: 'bandpass', label: 'Band Pass', path: 'M2 12 C8 12 9 4 16 4 C23 4 24 12 30 12' },
-  { value: 'notch', label: 'Notch', path: 'M2 4 H12 C14 4 14 12 16 12 C18 12 18 4 20 4 H30' },
+  { value: 'highpass48', label: 'Low Cut 48 dB', path: 'M2 12 H11 C13 12 13 4 15 4 H30' },
+  { value: 'highpass', label: 'Low Cut 12 dB', path: 'M2 12 C10 12 10 4 15 4 H30' },
   { value: 'lowshelf', label: 'Low Shelf', path: 'M2 10 H10 C15 10 15 5 20 5 H30' },
+  { value: 'peaking', label: 'Bell', path: 'M2 10 C8 10 10 5 16 5 C22 5 24 10 30 10' },
+  { value: 'notch', label: 'Notch', path: 'M2 4 H12 C14 4 14 12 16 12 C18 12 18 4 20 4 H30' },
   { value: 'highshelf', label: 'High Shelf', path: 'M2 5 H12 C17 5 17 10 22 10 H30' },
-  { value: 'peaking', label: 'Peaking', path: 'M2 10 C8 10 10 5 16 5 C22 5 24 10 30 10' },
-  { value: 'allpass', label: 'All Pass', path: 'M2 8 H30' },
+  { value: 'lowpass', label: 'High Cut 12 dB', path: 'M2 4 H17 C22 4 22 12 30 12' },
+  { value: 'lowpass48', label: 'High Cut 48 dB', path: 'M2 4 H17 C19 4 19 12 21 12 H30' },
+  { value: 'bandpass', label: 'Band Pass', path: 'M2 12 C8 12 9 4 16 4 C23 4 24 12 30 12', legacy: true },
+  { value: 'allpass', label: 'All Pass', path: 'M2 8 H30', legacy: true },
 ]
 
 const eqFilterTypeOption = (type: EqBandType) =>
-  EQ_FILTER_TYPE_OPTIONS.find((option) => option.value === type) ?? EQ_FILTER_TYPE_OPTIONS[6]
+  EQ_FILTER_TYPE_OPTIONS.find((option) => option.value === type) ?? EQ_FILTER_TYPE_OPTIONS[3]
 
 function EqFilterTypeIcon(props: { type: EqBandType; active: boolean; class?: string }) {
   return (
@@ -69,7 +74,7 @@ export default function EqFilterTypeSelect(props: EqFilterTypeSelectProps) {
         </svg>
       </DropdownMenuTrigger>
       <DropdownMenuContent class="w-max min-w-28 border-border bg-app-surface p-1">
-        <For each={EQ_FILTER_TYPE_OPTIONS}>
+        <For each={EQ_FILTER_TYPE_OPTIONS.filter((option) => !option.legacy || option.value === props.band.type)}>
           {(option) => (
             <DropdownMenuItem
               class={cn(

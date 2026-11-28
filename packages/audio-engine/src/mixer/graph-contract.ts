@@ -18,6 +18,7 @@ import {
   encodeSpectralProcessorState,
   encodeTremoloProcessorState,
   encodeUtilityProcessorState,
+  processorSchemaVersion,
   type AudioAssetRef,
   type AudioCoreGraphProcessorDto,
   type AudioCoreGraphSnapshot,
@@ -29,6 +30,7 @@ import {
 import { portableGraphContractHash, processorIds } from '../../../audio-core-contract/src/generated/processor-contract-metadata'
 import {
   createEqBandParameterId,
+  EQ_BANDS_PER_CURVE,
   normalizeDelayParams,
   normalizeLoFiParamsEnvelope,
   normalizeReverbParams,
@@ -110,8 +112,16 @@ const processorInstanceId = (id: string) => {
 const EQ_BAND_PARAMETER_TARGET_BASE = 45
 const EQ_BAND_PARAMETER_TARGET_STRIDE = 3
 
-const eqBandParameterTarget = (bandIndex: number, propertyOffset: number) =>
-  EQ_BAND_PARAMETER_TARGET_BASE + bandIndex * EQ_BAND_PARAMETER_TARGET_STRIDE + propertyOffset
+// Bands 8-15 (curve B) were added after the other processors' targets and sit past the rest of the target space.
+const EQ_SECOND_CURVE_PARAMETER_TARGET_BASE = 144
+const EQ_SCALE_PARAMETER_TARGET = 168
+const EQ_OUTPUT_DB_PARAMETER_TARGET = 169
+
+const eqBandParameterTarget = (bandIndex: number, propertyOffset: number) => (
+  bandIndex < EQ_BANDS_PER_CURVE
+    ? EQ_BAND_PARAMETER_TARGET_BASE + bandIndex * EQ_BAND_PARAMETER_TARGET_STRIDE + propertyOffset
+    : EQ_SECOND_CURVE_PARAMETER_TARGET_BASE + (bandIndex - EQ_BANDS_PER_CURVE) * EQ_BAND_PARAMETER_TARGET_STRIDE + propertyOffset
+)
 
 const toPortableMixerState = (
   id: string,
@@ -221,7 +231,7 @@ const toPortableProcessor = (
   const common: Pick<AudioCoreGraphProcessorDto, 'id' | 'instanceId' | 'stateVersion' | 'latencyFrames' | 'tailFrames' | 'tailKind'> = {
     id: instance.id,
     instanceId: processorInstanceId(instance.id),
-    stateVersion: audioCoreContractVersion,
+    stateVersion: processorSchemaVersion(instance.kind),
     latencyFrames: timing.latencyFrames,
     tailFrames: timing.tail.kind === 'finite' ? timing.tail.frames : 0,
     tailKind: timing.tail.kind === 'unbounded' ? 'unbounded' : undefined,
@@ -291,6 +301,10 @@ const toPortableProcessor = (
       state: encodeEqProcessorState({
         enabled: instance.params.enabled,
         channelMode: instance.params.channelMode,
+        adaptiveQ: instance.params.adaptiveQ,
+        highQuality: instance.params.highQuality,
+        scale: instance.params.scale,
+        outputDb: instance.params.outputDb,
         bands: instance.params.bands.map((band) => ({
           enabled: band.enabled,
           type: band.type,
@@ -299,11 +313,15 @@ const toPortableProcessor = (
           q: band.q,
         })),
       }),
-      parameterTargets: instance.params.bands.flatMap((band, index) => [
-        { id: createEqBandParameterId(band.id, 'frequencyHz'), target: eqBandParameterTarget(index, 0) },
-        { id: createEqBandParameterId(band.id, 'gainDb'), target: eqBandParameterTarget(index, 1) },
-        { id: createEqBandParameterId(band.id, 'q'), target: eqBandParameterTarget(index, 2) },
-      ]),
+      parameterTargets: [
+        ...instance.params.bands.flatMap((band, index) => [
+          { id: createEqBandParameterId(band.id, 'frequencyHz'), target: eqBandParameterTarget(index, 0) },
+          { id: createEqBandParameterId(band.id, 'gainDb'), target: eqBandParameterTarget(index, 1) },
+          { id: createEqBandParameterId(band.id, 'q'), target: eqBandParameterTarget(index, 2) },
+        ]),
+        { id: 'eq.scale', target: EQ_SCALE_PARAMETER_TARGET },
+        { id: 'eq.outputDb', target: EQ_OUTPUT_DB_PARAMETER_TARGET },
+      ],
       bypassed: !instance.params.enabled,
     }
   }

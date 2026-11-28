@@ -50,7 +50,6 @@ export const opaqueCursorSchema = z.string()
 
 export const stableIdSchemaV1 = stableIdSchema
 export const projectIdSchemaV1 = projectIdSchema
-export const clientRefSchemaV1 = clientRefValueSchema
 
 export const contextualRefSchemaV1 = z.discriminatedUnion('source', [
   z.object({

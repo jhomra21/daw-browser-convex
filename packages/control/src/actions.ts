@@ -804,13 +804,9 @@ export type ControlRecoveriesQueryV1 = z.infer<typeof controlRecoveriesQuerySche
 
 export type ControlRecoveriesResultV1 = z.infer<typeof controlRecoveriesResultSchemaV1>
 
-export const controlSnapshotQuerySchemaV2 = controlSnapshotQuerySchemaV1
-export const canonicalControlSnapshotQuerySchema = controlSnapshotQuerySchemaV2
-export const controlSnapshotQuerySchema = canonicalControlSnapshotQuerySchema
+export const canonicalControlSnapshotQuerySchema = controlSnapshotQuerySchemaV1
 
 export type CanonicalControlSnapshotQuery = ControlSnapshotQueryV1
-
-export type ControlSnapshotQuery = CanonicalControlSnapshotQuery
 
 export type ResolvedRefV1 = z.infer<typeof resolvedRefSchemaV1>
 

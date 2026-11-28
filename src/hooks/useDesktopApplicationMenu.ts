@@ -1,4 +1,5 @@
 import {
+  desktopApplicationMenuCommands,
   desktopApplicationMenuExtensionCommandSchema,
   type DesktopApplicationMenuExtensionContribution,
   type DesktopApplicationMenuMessage,
@@ -7,7 +8,7 @@ import {
 import { createEffect, createMemo, createSignal, onCleanup, type Accessor } from "solid-js";
 import { isLocalId } from "@daw-browser/shared";
 import type { TransportControlsProps } from "~/hooks/transport-types";
-import { keyboardTargetOwner } from "~/lib/keyboard-event-target";
+import { editableFocusOwner, focusedLocalKeyboardOwner, runUserCommand } from "~/hooks/user-commands";
 import { desktopBridge } from "~/lib/runtime";
 
 const gridDenominatorForState = (
@@ -18,51 +19,6 @@ const gridDenominatorForState = (
   }
 
   return 4;
-};
-
-// Walks open shadow roots so a text field inside one still counts as the focus owner.
-const focusedKeyboardPath = () => {
-  const path: Element[] = [];
-
-  for (let element = document.activeElement; element; element = element.shadowRoot?.activeElement ?? null) {
-    path.push(element);
-  }
-
-  return path;
-};
-
-const editableFocusOwner = () => keyboardTargetOwner(focusedKeyboardPath()) === "editable";
-
-const editableOrOverlayFocused = () => keyboardTargetOwner(focusedKeyboardPath()) !== null;
-
-const focusedLocalKeyboardOwner = () => {
-  const path = focusedKeyboardPath();
-  const focusedElement = path.find((element) => element.closest('[data-timeline-keyboard-local="true"]'));
-
-  return focusedElement?.closest('[data-timeline-keyboard-local="true"]') ?? null;
-};
-
-// Menu undo/redo arrive without a keyboard event: text fields use native undo/redo, local editors use timeline history,
-// overlays own their commands, and otherwise history belongs to the timeline.
-const runEditCommand = (command: "undo" | "redo" | "duplicate" | "delete", runTimeline: () => void) => {
-  const owner = keyboardTargetOwner(focusedKeyboardPath());
-
-  if (owner === "editable") {
-    if (command !== "duplicate") document.execCommand(command);
-
-    return;
-  }
-
-  const localOwner = focusedLocalKeyboardOwner();
-
-  if (localOwner) {
-    if (command === "duplicate") localOwner.dispatchEvent(new Event("timeline-local-duplicate"));
-    else if (command === "undo" || command === "redo") runTimeline();
-
-    return;
-  }
-
-  if (owner === null) runTimeline();
 };
 
 const dispatchApplicationMenuCommand = (
@@ -81,186 +37,9 @@ const dispatchApplicationMenuCommand = (
     return;
   }
 
-  const transport = transportProps();
+  const userCommand = desktopApplicationMenuCommands.find((candidate) => candidate === command);
 
-  switch (command) {
-    case "new-project":
-      void transport.projectMenu.onCreateProject();
-
-      return;
-    case "open-projects-dashboard":
-      transport.projectMenu.onOpenDashboard("projects");
-
-      return;
-    case "open-samples-dashboard":
-      transport.projectMenu.onOpenDashboard("samples");
-
-      return;
-    case "open-export-dashboard":
-      transport.projectMenu.onOpenDashboard("export");
-
-      return;
-    case "import-audio":
-      transport.onAddAudio();
-
-      return;
-    case "import-archive":
-      void transport.projectMenu.onImportArchive();
-
-      return;
-    case "export-archive":
-      void transport.projectMenu.onExportArchive();
-
-      return;
-    case "export-mixdown":
-      transport.projectMenu.onOpenExport();
-
-      return;
-    case "sign-in":
-      transport.projectMenu.onSignIn();
-
-      return;
-    case "open-account-dashboard":
-      transport.projectMenu.onOpenDashboard("account");
-
-      return;
-    case "logout":
-      void transport.projectMenu.onLogout();
-
-      return;
-    case "undo":
-      runEditCommand("undo", () => transport.onUndo());
-
-      return;
-    case "redo":
-      runEditCommand("redo", () => transport.onRedo());
-
-      return;
-    case "duplicate":
-      runEditCommand("duplicate", () => transport.onDuplicateSelection());
-
-      return;
-    // A focused field is handled by the menu click in the main process. This runs the timeline only when no field or overlay owns focus.
-    case "copy":
-      if (!editableOrOverlayFocused()) transport.onCopySelection();
-
-      return;
-    case "paste":
-      if (!editableOrOverlayFocused()) transport.onPasteSelection();
-
-      return;
-    case "select-all":
-      if (!editableOrOverlayFocused()) transport.onSelectAllClips();
-
-      return;
-    case "delete":
-      runEditCommand("delete", () => transport.onDeleteSelection());
-
-      return;
-    case "keyboard-shortcuts":
-      transport.projectMenu.onOpenDashboard("keyboard");
-
-      return;
-    case "open-assets-browser":
-      transport.browser.onSelectTab("assets");
-      transport.browser.onOpen();
-
-      return;
-    case "open-effects-browser":
-      transport.browser.onSelectTab("effects");
-      transport.browser.onOpen();
-
-      return;
-    case "open-midi-instruments-browser":
-      transport.browser.onSelectTab("midi-instruments");
-      transport.browser.onOpen();
-
-      return;
-    case "toggle-metronome":
-      transport.onToggleMetronome();
-
-      return;
-    case "toggle-loop":
-      transport.onToggleLoop();
-
-      return;
-    case "toggle-grid":
-      transport.onToggleGrid();
-
-      return;
-    case "toggle-follow":
-      transport.onToggleFollow();
-
-      return;
-    case "zoom-in":
-      transport.zoom.onIn();
-
-      return;
-    case "zoom-out":
-      transport.zoom.onOut();
-
-      return;
-    case "zoom-to-fit":
-      transport.zoom.onFit();
-
-      return;
-    case "set-grid-denominator-2":
-      transport.onChangeGridDenominator(2);
-
-      return;
-    case "set-grid-denominator-4":
-      transport.onChangeGridDenominator(4);
-
-      return;
-    case "set-grid-denominator-8":
-      transport.onChangeGridDenominator(8);
-
-      return;
-    case "set-grid-denominator-12":
-      transport.onChangeGridDenominator(12);
-
-      return;
-    case "set-grid-denominator-16":
-      transport.onChangeGridDenominator(16);
-
-      return;
-    case "open-general-settings":
-      transport.projectMenu.onOpenDashboard("general");
-
-      return;
-    case "open-timeline-settings":
-      transport.projectMenu.onOpenDashboard("timeline");
-
-      return;
-    case "open-audio-settings":
-      transport.projectMenu.onOpenDashboard("audio");
-
-      return;
-    case "about":
-      transport.projectMenu.onAbout();
-
-      return;
-    case "toggle-sync-mix":
-      transport.tracksMenu.onToggleSyncMix();
-
-      return;
-    case "add-audio-track":
-      void transport.tracksMenu.onAddTrack();
-
-      return;
-    case "add-return-track":
-      void transport.tracksMenu.onAddReturnTrack();
-
-      return;
-    case "add-group-track":
-      void transport.tracksMenu.onAddGroupTrack();
-
-      return;
-    case "add-instrument-track":
-      void transport.tracksMenu.onAddInstrumentTrack();
-
-      return;
-  }
+  if (userCommand) runUserCommand(userCommand, transportProps());
 };
 
 // transportProps rebuilds on every playhead publish, so the memo re-runs; equal state keeps the IPC send from following it.

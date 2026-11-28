@@ -170,10 +170,6 @@ export const parseControlSnapshotQueryV1 = <Input>(input: Input) => (
   controlSnapshotQuerySchemaV1.parse(input)
 )
 
-export const parseControlSnapshotQueryV2 = <Input>(input: Input) => (
-  controlSnapshotQuerySchemaV1.parse(input)
-)
-
 export const parseControlHistoryQueryV1 = <Input>(input: Input) => (
   controlHistoryQuerySchemaV1.parse(input)
 )
@@ -203,5 +199,3 @@ export const controlRequestDigestV1 = async (
 export const parseCanonicalControlSnapshotQuery = <Input>(input: Input): CanonicalControlSnapshotQuery => (
   canonicalControlSnapshotQuerySchema.parse(input)
 )
-
-export const parseControlSnapshotQuery = parseCanonicalControlSnapshotQuery

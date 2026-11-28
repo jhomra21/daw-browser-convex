@@ -10,12 +10,6 @@ export {
   canonicalControlCapabilities,
   canonicalLocalControlCapabilities,
   projectCanonicalControlCapabilitiesV1,
-  CONTROL_API_VERSION,
-  controlLimits,
-  controlCapabilitiesSchema,
-  controlCapabilitiesQuerySchema,
-  controlCapabilities,
-  localControlCapabilities,
   controlCapabilitiesSchemaV1,
   controlCapabilitiesSchemaV2,
   controlCapabilitiesQuerySchemaV1,
@@ -26,7 +20,7 @@ export {
   localControlCapabilitiesV2,
 } from './versions'
 
-export type { ControlCapabilitiesV1, ControlCapabilitiesV2, CanonicalControlCapabilities, ControlCapabilities } from './versions'
+export type { ControlCapabilitiesV1, ControlCapabilitiesV2 } from './versions'
 
 export { resumableUploadLimitsV1, resumableUploadMaximumBytes } from './resumable-upload-limits'
 
@@ -34,7 +28,6 @@ export {
   approvalTokenSchemaV1,
   stableIdSchemaV1,
   projectIdSchemaV1,
-  clientRefSchemaV1,
   contextualRefSchemaV1,
   trackRefSchemaV1,
   clipRefSchemaV1,
@@ -82,9 +75,7 @@ export {
   controlApprovalResultSchemaV1,
   controlCommitResultSchemaV1,
   controlSnapshotQuerySchemaV1,
-  controlSnapshotQuerySchemaV2,
   canonicalControlSnapshotQuerySchema,
-  controlSnapshotQuerySchema,
   controlHistoryQuerySchemaV1,
   controlHistoryEntrySchemaV1,
   controlHistoryResultSchemaV1,
@@ -108,7 +99,6 @@ export type {
   ControlRecoveriesQueryV1,
   ControlRecoveriesResultV1,
   CanonicalControlSnapshotQuery,
-  ControlSnapshotQuery,
   ResolvedRefV1,
   ControlWarningV1,
   ControlChangeSummaryV1,
@@ -125,14 +115,12 @@ export {
   canonicalProjectSnapshotSchema,
   projectCanonicalProjectSnapshotV1,
   projectCanonicalProjectSnapshotV2,
-  projectSnapshotSchema,
 } from './snapshots'
 
 export type {
   ProjectSnapshotV1,
   ProjectSnapshotV2,
   CanonicalProjectSnapshot,
-  ProjectSnapshot,
   AssetSnapshotV1,
   AssetSnapshotV2,
   AssetFolderV1,
@@ -152,9 +140,7 @@ export {
   parseControlPreviewRequestV1,
   parseControlApprovalRequestV1,
   parseControlSnapshotQueryV1,
-  parseControlSnapshotQueryV2,
   parseCanonicalControlSnapshotQuery,
-  parseControlSnapshotQuery,
   parseControlHistoryQueryV1,
   parseControlRecoveriesQueryV1,
   controlRequestDigestInputV1,
@@ -209,6 +195,8 @@ export {
   projectCurrentResultSchema,
   maxProjectDiscoveryResults,
   controlOperationCatalog,
+  controlSdkOperations,
+  controlCliOperations,
   controlOperationIdSchema,
   parseControlOperationId,
   listControlOperationDescriptors,
@@ -234,6 +222,8 @@ export type {
   ProjectCurrentInput,
   ProjectCurrentResult,
   ControlOperationDescriptor,
+  ControlOperationSurfaces,
+  ControlCliCommand,
   ControlOperationMap,
   ControlInput,
   ControlOutput,

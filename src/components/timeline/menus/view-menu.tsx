@@ -6,6 +6,7 @@ import { gridDenominators } from "../grid-options";
 import { NativeMenuTrigger } from "../toolbar-context";
 import type { TransportControlsProps } from "~/hooks/transport-types";
 import { MenuCheckMark } from "./menu-check-mark";
+import { runUserCommand } from "~/hooks/user-commands";
 import { nativeMenuItemClass } from "./menu-action-types";
 
 type ViewMenuProps = {
@@ -35,28 +36,28 @@ export const ViewMenu: Component<ViewMenuProps> = (props) => {
           )}
         </For>
         <MenubarSeparator />
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().onToggleMetronome}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-metronome", toolbar())}>
           <MenuCheckMark checked={toolbar().metronomeEnabled} />
           <span>Metronome</span>
         </MenubarItem>
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().onToggleLoop}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-loop", toolbar())}>
           <MenuCheckMark checked={toolbar().loopEnabled} />
           <span>Loop</span>
         </MenubarItem>
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().onToggleGrid}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("toggle-grid", toolbar())}>
           <MenuCheckMark checked={toolbar().gridEnabled} />
           <span>Grid</span>
         </MenubarItem>
         <MenubarSeparator />
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onIn}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("zoom-in", toolbar())}>
           <span class="w-4" />
           <span>Zoom In</span>
         </MenubarItem>
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onOut}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("zoom-out", toolbar())}>
           <span class="w-4" />
           <span>Zoom Out</span>
         </MenubarItem>
-        <MenubarItem class={viewMenuItemClass} onSelect={toolbar().zoom.onFit}>
+        <MenubarItem class={viewMenuItemClass} onSelect={() => runUserCommand("zoom-to-fit", toolbar())}>
           <span class="w-4" />
           <span>Zoom to Fit</span>
         </MenubarItem>

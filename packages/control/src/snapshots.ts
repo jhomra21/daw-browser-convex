@@ -210,7 +210,6 @@ export const projectSnapshotSchemaV2 = projectSnapshotSchemaV1.extend({
 }).strict()
 
 export const canonicalProjectSnapshotSchema = projectSnapshotSchemaV2
-export const projectSnapshotSchema = canonicalProjectSnapshotSchema
 
 export const projectCanonicalProjectSnapshotV1 = (
   snapshot: ProjectSnapshotV2,
@@ -252,5 +251,3 @@ export type AssetFolderV1 = z.infer<typeof assetFolderSchemaV1>
 export type AssetUploadResultV1 = z.infer<typeof assetUploadResultSchemaV1>
 
 export type CanonicalProjectSnapshot = ProjectSnapshotV2
-
-export type ProjectSnapshot = CanonicalProjectSnapshot
